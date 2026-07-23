@@ -1,0 +1,1082 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Outbound Sales OS · AI Gateway</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script defer src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+    <script defer type="module" src="/main.js"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">OS</div>
+          <div>
+            <strong>Outbound Sales OS</strong>
+            <span>AI Gateway</span>
+          </div>
+        </div>
+        <nav class="nav-list" aria-label="Workspace">
+          <button class="nav-item active" data-view="prospects"><i data-lucide="zap"></i><span>Machine</span></button>
+          <button class="nav-item" data-view="ai"><i data-lucide="bot"></i><span>AI</span></button>
+          <button class="nav-item" data-view="database"><i data-lucide="database"></i><span>Database</span></button>
+          <button class="nav-item" data-view="products"><i data-lucide="package-plus"></i><span>Products</span></button>
+          <button class="nav-item" data-view="integrations"><i data-lucide="plug"></i><span>Settings</span></button>
+        </nav>
+        <div class="sidebar-footer">
+          <span class="status-dot"></span>
+          <span id="providerStatus">Mock ready</span>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <h1 id="pageTitle">Outbound Machine</h1>
+            <p id="workspaceMeta">Paste lead · choose product · prepare next move</p>
+          </div>
+          <div class="topbar-actions">
+            <select id="productSelect" aria-label="Product for outreach"></select>
+            <button class="primary-button" id="quickPrepareBtn"><i data-lucide="wand-sparkles"></i><span>Research + Prepare</span></button>
+            <button class="utility-hidden" id="syncMcpBtn"><i data-lucide="database-zap"></i><span>Sync MCP</span></button>
+            <button class="icon-button utility-hidden" id="syncModelsBtn" title="Synchronize models" aria-label="Synchronize models">
+              <i data-lucide="refresh-cw"></i>
+            </button>
+            <button class="primary-button utility-hidden" id="runTaskBtn"><i data-lucide="play"></i><span>Run Task</span></button>
+          </div>
+        </header>
+
+        <section class="view active" id="view-prospects">
+          <div class="sales-layout">
+            <section class="panel product-panel">
+              <div class="panel-heading">
+                <div>
+                  <h2 id="activeProductName">Product Context</h2>
+                  <p id="activeProductPositioning">Used for messages, analysis, and next steps</p>
+                </div>
+                <span class="pill" id="mcpSyncState">synced</span>
+              </div>
+              <div class="product-context-grid">
+                <div>
+                  <span>Target personas</span>
+                  <strong id="productPersonas">-</strong>
+                </div>
+                <div>
+                  <span>Primary use case</span>
+                  <strong id="productUseCase">-</strong>
+                </div>
+                <div>
+                  <span>Proof point</span>
+                  <strong id="productProofPoint">-</strong>
+                </div>
+              </div>
+              <div class="mcp-source-list" id="mcpSourceList"></div>
+            </section>
+
+            <section class="panel target-panel">
+              <div class="panel-heading">
+                <div>
+                  <h2>2-Click Targeting</h2>
+                  <p>LinkedIn target to contact options and messages</p>
+                </div>
+              </div>
+              <form class="linkedin-target-form" id="linkedinTargetForm">
+                <div class="target-submit-row">
+                  <input id="linkedinTargetUrlInput" type="url" placeholder="https://www.linkedin.com/in/target-person" aria-label="LinkedIn profile URL" />
+                  <button class="primary-button" type="submit"><i data-lucide="send"></i><span>Add + Prepare</span></button>
+                </div>
+                <details class="optional-fields">
+                  <summary>Optional details</summary>
+                  <div class="target-inline-fields">
+                    <input id="linkedinTargetNameInput" type="text" placeholder="Name" aria-label="Target name" />
+                    <input id="linkedinTargetCompanyInput" type="text" placeholder="Company" aria-label="Target company" />
+                  </div>
+                </details>
+              </form>
+            </section>
+
+            <section class="panel import-panel">
+              <div class="panel-heading">
+                <div>
+                  <h2>Bulk Leads</h2>
+                  <p>Import a list when you need volume</p>
+                </div>
+                <button id="sampleProspectsBtn"><i data-lucide="sparkles"></i><span>Load Sample</span></button>
+              </div>
+              <div class="import-grid">
+                <label class="file-drop">
+                  <input id="profileFileInput" type="file" accept=".csv,.json,text/csv,application/json" />
+                  <i data-lucide="upload-cloud"></i>
+                  <strong>Upload profiles</strong>
+                  <span>name, title, company, location, website, linkedin, email, notes</span>
+                </label>
+                <form id="pasteProfilesForm" class="paste-form">
+                  <textarea id="profilesTextInput" rows="7" placeholder="name,title,company,location,website,notes&#10;Alex Rivera,VP Sales,Acme Robotics,Boston,acmerobotics.com,Scaling enterprise outbound"></textarea>
+                  <button class="primary-button" type="submit"><i data-lucide="import"></i><span>Import</span></button>
+                </form>
+              </div>
+            </section>
+
+            <section class="panel prospect-list-panel">
+              <div class="panel-heading">
+                <div>
+                  <h2>Prospects</h2>
+                  <p id="prospectCount">0 records</p>
+                </div>
+                <div class="filter-row">
+                  <input id="prospectSearch" type="search" placeholder="Search people" aria-label="Search people" />
+                  <select id="prospectStatusFilter" aria-label="Prospect status">
+                    <option value="all">All</option>
+                    <option value="new">New</option>
+                    <option value="enriched">Enriched</option>
+                    <option value="linkedin_ready">LinkedIn ready</option>
+                    <option value="outreach_ready">Ready</option>
+                    <option value="contacted">Contacted</option>
+                    <option value="engaged">Engaged</option>
+                    <option value="call_analyzed">Call analyzed</option>
+                    <option value="follow_up_due">Follow-up due</option>
+                    <option value="meeting_booked">Meeting booked</option>
+                    <option value="review">Review</option>
+                  </select>
+                </div>
+              </div>
+              <div class="prospect-list" id="prospectList"></div>
+            </section>
+
+            <section class="panel prospect-detail-panel">
+              <div class="panel-heading">
+                <div>
+                  <h2 id="selectedProspectName">Select a prospect</h2>
+                  <p id="selectedProspectMeta">Contact discovery and AI outreach</p>
+                </div>
+                <span class="pill" id="selectedProspectScore">0</span>
+              </div>
+
+              <div class="prospect-actions">
+                <button class="primary-button" id="prepareOutreachBtn"><i data-lucide="wand-sparkles"></i><span>Research + Prepare</span></button>
+                <button id="enrichProspectBtn"><i data-lucide="search"></i><span>Refresh Contacts</span></button>
+                <select id="outreachProfileSelect" aria-label="AI profile">
+                  <option value="economy">Fast</option>
+                  <option value="balanced" selected>Balanced</option>
+                  <option value="premium">Strategic</option>
+                </select>
+              </div>
+
+              <div class="lead-analytics" id="leadAnalytics"></div>
+
+              <div class="detail-grid">
+                <section class="subpanel">
+                  <div class="subpanel-heading">
+                    <h3>Profile</h3>
+                    <span id="selectedProspectStatus">new</span>
+                  </div>
+                  <dl class="profile-fields" id="profileFields"></dl>
+                </section>
+
+                <section class="subpanel">
+                  <div class="subpanel-heading">
+                    <h3>Contact Discovery</h3>
+                    <span id="contactPolicy">public review</span>
+                  </div>
+                  <div class="contact-list" id="contactList"></div>
+                </section>
+              </div>
+
+              <section class="subpanel tracker-panel">
+                <div class="subpanel-heading">
+                  <h3>Lead Tracker</h3>
+                  <span>historical analysis</span>
+                </div>
+                <div class="interaction-controls">
+                  <select id="interactionTypeSelect" aria-label="Interaction type">
+                    <option value="email_sent">Email sent</option>
+                    <option value="email_opened">Email opened</option>
+                    <option value="linkedin_connected">LinkedIn connected</option>
+                    <option value="linkedin_reply">LinkedIn reply</option>
+                    <option value="meeting_booked">Meeting booked</option>
+                    <option value="no_reply">No reply</option>
+                  </select>
+                  <button id="logInteractionBtn"><i data-lucide="list-plus"></i><span>Log Interaction</span></button>
+                </div>
+                <div class="interaction-list" id="interactionList"></div>
+              </section>
+
+              <section class="subpanel call-panel">
+                <div class="subpanel-heading">
+                  <h3>Call Coach</h3>
+                  <span>transcript to next steps</span>
+                </div>
+                <form class="call-analysis-form" id="callAnalysisForm">
+                  <textarea id="callTranscriptInput" rows="5" placeholder="Paste call transcript or notes. Example: Prospect asked for a workflow next week, mentioned current CRM data quality issues, and asked about implementation timeline."></textarea>
+                  <button type="submit"><i data-lucide="mic-vocal"></i><span>Analyze Call</span></button>
+                </form>
+                <div class="call-analysis" id="callAnalysis"></div>
+              </section>
+
+              <section class="subpanel task-panel">
+                <div class="subpanel-heading">
+                  <h3>Follow-Up Tasks</h3>
+                  <span>notifications</span>
+                </div>
+                <div class="task-notification-list" id="taskNotificationList"></div>
+              </section>
+
+              <section class="subpanel outreach-panel">
+                <div class="subpanel-heading">
+                  <h3>AI Outreach</h3>
+                  <span id="outreachModel">not prepared</span>
+                </div>
+                <div id="outreachContent" class="outreach-content"></div>
+              </section>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="view-ai">
+          <div class="ai-layout">
+            <section class="panel ai-command-panel">
+              <div class="panel-heading">
+                <div>
+                  <h2>AI Operator</h2>
+                  <p>Bulk sales actions across leads and CRM activity</p>
+                </div>
+                <span class="pill" id="aiRuntimePill">ready</span>
+              </div>
+              <form class="assistant-task-form" id="assistantTaskForm">
+                <textarea id="assistantTaskInput" rows="6" placeholder="Examples:&#10;Import 50 LinkedIn leads from CRM&#10;Sort leads by close chance and prepare outreach for the top 10&#10;Log LinkedIn connection sent for all outreach-ready leads&#10;Move all no-reply leads to follow-up due"></textarea>
+                <div class="assistant-controls">
+                  <select id="assistantScopeSelect" aria-label="Action scope">
+                    <option value="selected">Selected lead</option>
+                    <option value="all">All leads</option>
+                    <option value="new">New leads</option>
+                    <option value="outreach_ready">Outreach ready</option>
+                    <option value="contacted">Contacted</option>
+                    <option value="follow_up_due">Follow-up due</option>
+                  </select>
+                  <input id="assistantLimitInput" type="number" min="1" max="200" value="25" aria-label="Maximum leads" />
+                  <button class="primary-button" type="submit"><i data-lucide="sparkles"></i><span>Run AI Action</span></button>
+                </div>
+              </form>
+              <div class="quick-command-grid">
+                <button data-assistant-template="Import 50 LinkedIn leads from CRM"><i data-lucide="download-cloud"></i><span>Import CRM Leads</span></button>
+                <button data-assistant-template="Sort leads by close chance and prepare outreach for the top 10"><i data-lucide="arrow-down-wide-narrow"></i><span>Prepare Top 10</span></button>
+                <button data-assistant-template="Log LinkedIn connection sent for all outreach-ready leads"><i data-lucide="list-plus"></i><span>Log LinkedIn Touch</span></button>
+                <button data-assistant-template="Move all contacted leads with no reply to follow-up due"><i data-lucide="bell-ring"></i><span>Set Follow-Ups</span></button>
+              </div>
+            </section>
+
+            <section class="panel crm-pull-panel">
+              <div class="panel-heading">
+                <div>
+                  <h2>CRM Lead Pull</h2>
+                  <p>Bring LinkedIn-heavy leads into the machine</p>
+                </div>
+              </div>
+              <form class="crm-pull-form" id="crmLeadPullForm">
+                <select id="crmPullSourceInput" aria-label="CRM source">
+                  <option value="supabase">Supabase REST</option>
+                  <option value="custom_crm">Custom CRM API</option>
+                </select>
+                <input id="crmPullResourceInput" type="text" placeholder="Table or endpoint, e.g. leads" />
+                <div class="split-fields">
+                  <input id="crmPullLimitInput" type="number" min="1" max="500" value="50" />
+                  <input id="crmPullLinkedInFieldInput" type="text" placeholder="LinkedIn field, e.g. linkedin_url" />
+                </div>
+                <button class="primary-button" type="submit"><i data-lucide="database-zap"></i><span>Pull Leads</span></button>
+              </form>
+              <div class="crm-import-status" id="crmImportStatus"></div>
+            </section>
+
+            <section class="panel agent-panel span-2">
+              <div class="panel-heading">
+                <div>
+                  <h2>Outbound Agents</h2>
+                  <p>Specialist skills coordinated by the outbound orchestrator</p>
+                </div>
+                <button class="primary-button" id="runPipelineBtn" type="button"><i data-lucide="workflow"></i><span>Run Pipeline</span></button>
+              </div>
+              <form class="agent-run-form" id="agentRunForm">
+                <select id="agentSelect" aria-label="Outbound agent"></select>
+                <select id="agentScopeSelect" aria-label="Agent scope">
+                  <option value="selected">Selected lead</option>
+                  <option value="all">All leads</option>
+                  <option value="icp_seed">ICP seed leads</option>
+                  <option value="new">New leads</option>
+                  <option value="outreach_ready">Outreach ready</option>
+                </select>
+                <input id="agentLimitInput" type="number" min="1" max="100" value="10" aria-label="Agent lead limit" />
+                <button type="submit"><i data-lucide="play"></i><span>Run Agent</span></button>
+              </form>
+              <textarea id="agentInstructionInput" rows="3" placeholder="Optional agent instruction, e.g. focus on US founder-led SaaS accounts"></textarea>
+              <div class="agent-grid" id="agentGrid"></div>
+            </section>
+
+            <section class="panel ai-log-panel span-2">
+              <div class="panel-heading">
+                <div>
+                  <h2>Execution Log</h2>
+                  <p>What AI did and what still needs credentials</p>
+                </div>
+              </div>
+              <div class="assistant-action-list" id="assistantActionList"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="view-database">
+          <div class="database-layout">
+            <section class="panel learning-ingest-panel">
+              <div class="panel-heading">
+                <div>
+                  <h2>Learning Database</h2>
+                  <p>Winning messages, screenshots, profiles, outcomes</p>
+                </div>
+                <span class="pill" id="learningStatusPill">empty</span>
+              </div>
+              <form class="learning-form" id="learningExampleForm">
+                <div class="split-fields">
+                  <label>
+                    <span>Product</span>
+                    <select id="learningProductInput"></select>
+                  </label>
+                  <label>
+                    <span>Channel</span>
+                    <select id="learningChannelInput">
+                      <option value="linkedin">LinkedIn</option>
+                      <option value="sms">SMS</option>
+                      <option value="whatsapp">WhatsApp</option>
+                      <option value="telegram">Telegram</option>
+                      <option value="email">Email</option>
+                      <option value="call_follow_up">Call follow-up</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="split-fields">
+                  <label>
+                    <span>Persona</span>
+                    <input id="learningPersonaInput" type="text" placeholder="Founder, VP Sales, RevOps" />
+                  </label>
+                  <label>
+                    <span>Outcome</span>
+                    <input id="learningOutcomeInput" type="text" placeholder="Reply, booked call, closed deal" />
+                  </label>
+                </div>
+                <div class="split-fields">
+                  <label>
+                    <span>Score</span>
+                    <input id="learningOutcomeScoreInput" type="number" min="0" max="100" value="80" />
+                  </label>
+                  <label>
+                    <span>Profile URL</span>
+                    <input id="learningProfileUrlInput" type="url" placeholder="LinkedIn or CRM lead URL" />
+                  </label>
+                </div>
+                <label>
+                  <span>Message text</span>
+                  <textarea id="learningMessageInput" rows="6" placeholder="Paste the winning SMS, LinkedIn message, email, or follow-up"></textarea>
+                </label>
+                <label>
+                  <span>Notes</span>
+                  <textarea id="learningNotesInput" rows="3" placeholder="Context, sequence step, reply reason, objection handled"></textarea>
+                </label>
+                <label>
+                  <span>Tags</span>
+                  <input id="learningTagsInput" type="text" placeholder="short, pain-led, founder, post-call" />
+                </label>
+                <label class="file-drop screenshot-drop">
+                  <input id="learningScreenshotInput" type="file" accept="image/*" />
+                  <i data-lucide="image-plus"></i>
+                  <strong>Upload screenshot</strong>
+                  <span id="learningScreenshotName">PNG or JPG from SMS, LinkedIn, WhatsApp, email, CRM</span>
+                </label>
+                <div class="screenshot-preview" id="learningScreenshotPreview"></div>
+                <button class="primary-button" type="submit"><i data-lucide="brain-circuit"></i><span>Save + Learn</span></button>
+              </form>
+            </section>
+
+            <section class="panel learning-playbook-panel">
+              <div class="panel-heading">
+                <div>
+                  <h2>Learned Playbook</h2>
+                  <p>Patterns applied to future outreach</p>
+                </div>
+                <button id="learningRetrainBtn" type="button"><i data-lucide="refresh-cw"></i><span>Rebuild</span></button>
+              </div>
+              <div class="learning-metric-grid">
+                <div><span>Examples</span><strong id="learningExampleCount">0</strong></div>
+                <div><span>Wins</span><strong id="learningWinCount">0</strong></div>
+                <div><span>Screenshots</span><strong id="learningScreenshotCount">0</strong></div>
+                <div><span>Top channel</span><strong id="learningTopChannel">none</strong></div>
+              </div>
+              <div class="playbook-summary" id="learningPlaybookSummary"></div>
+              <div class="playbook-grid">
+                <div>
+                  <strong>Winning patterns</strong>
+                  <ul id="learningPatternList"></ul>
+                </div>
+                <div>
+                  <strong>Rules</strong>
+                  <ul id="learningRuleList"></ul>
+                </div>
+              </div>
+              <div class="channel-tip-list" id="learningChannelTips"></div>
+            </section>
+
+            <section class="panel icp-panel span-2">
+              <div class="panel-heading">
+                <div>
+                  <h2>ICP Seed Leads</h2>
+                  <p>Upload ideal leads, train filters, find similar leads with PipelineLabs Apify</p>
+                </div>
+                <span class="pill" id="icpStatusPill">empty</span>
+              </div>
+              <div class="icp-layout">
+                <form class="icp-seed-form" id="icpSeedForm">
+                  <textarea id="icpSeedTextInput" rows="7" placeholder="name,title,company,location,website,linkedin,notes&#10;Alex Morgan,Founder,Acme SaaS,New York,acme.com,https://linkedin.com/in/alex,Best customer profile"></textarea>
+                  <div class="assistant-controls">
+                    <input id="icpTotalResultsInput" type="number" min="1" max="50000" value="1000" aria-label="Lookalike results" />
+                    <button class="primary-button" type="submit"><i data-lucide="target"></i><span>Train ICP</span></button>
+                    <button id="icpGenerateJsonBtn" type="button"><i data-lucide="file-json"></i><span>Generate JSON</span></button>
+                  </div>
+                  <button id="icpRunApifyBtn" type="button"><i data-lucide="search"></i><span>Run Apify Search</span></button>
+                </form>
+                <div class="icp-profile-card">
+                  <strong id="icpProfileSummary">Upload ICP leads to train lookalike filters.</strong>
+                  <div class="icp-chip-row" id="icpChipRow"></div>
+                  <pre id="icpActorJson" class="jsonbox">{}</pre>
+                  <button id="copyIcpJsonBtn" type="button" data-copy-text="{}"><i data-lucide="copy"></i><span>Copy JSON</span></button>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel learning-example-panel span-2">
+              <div class="panel-heading">
+                <div>
+                  <h2>Training Data</h2>
+                  <p>Recent examples fed into the machine</p>
+                </div>
+                <span class="pill" id="learningVersionPill">learning-local-v1</span>
+              </div>
+              <div class="learning-example-list" id="learningExampleList"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="view-products">
+          <div class="product-studio-layout">
+            <section class="panel">
+              <div class="panel-heading">
+                <div>
+                  <h2>Product Definition</h2>
+                  <p>Used by AI for tailored outreach</p>
+                </div>
+                <div class="button-row">
+                  <span class="pill" id="productStudioSelected">selected</span>
+                  <button id="newProductBtn" type="button"><i data-lucide="plus"></i><span>New</span></button>
+                </div>
+              </div>
+              <form class="product-form" id="productForm">
+                <div class="split-fields">
+                  <label>
+                    <span>Name</span>
+                    <input id="productNameInput" type="text" />
+                  </label>
+                  <label>
+                    <span>Category</span>
+                    <input id="productCategoryInput" type="text" />
+                  </label>
+                </div>
+                <label>
+                  <span>Positioning</span>
+                  <textarea id="productPositioningInput" rows="3"></textarea>
+                </label>
+                <label>
+                  <span>Target personas</span>
+                  <textarea id="productPersonasInput" rows="3"></textarea>
+                </label>
+                <label>
+                  <span>Use cases</span>
+                  <textarea id="productUseCasesInput" rows="3"></textarea>
+                </label>
+                <label>
+                  <span>Proof points</span>
+                  <textarea id="productProofInput" rows="3"></textarea>
+                </label>
+                <label>
+                  <span>Differentiators</span>
+                  <textarea id="productDifferentiatorsInput" rows="3"></textarea>
+                </label>
+                <label>
+                  <span>Common objections</span>
+                  <textarea id="productObjectionsInput" rows="3"></textarea>
+                </label>
+                <button class="primary-button" type="submit"><i data-lucide="save"></i><span>Save Product</span></button>
+              </form>
+            </section>
+
+            <section class="panel product-knowledge-panel span-2">
+              <div class="panel-heading">
+                <div>
+                  <h2>Product Knowledge</h2>
+                  <p>Links, lessons, notes, and platform screenshots</p>
+                </div>
+                <span class="pill" id="productKnowledgeStats">0 items</span>
+              </div>
+              <form class="knowledge-form" id="productKnowledgeForm">
+                <div class="split-fields">
+                  <label>
+                    <span>Type</span>
+                    <select id="knowledgeTypeInput">
+                      <option value="lesson">Lesson</option>
+                      <option value="link">Link</option>
+                      <option value="platform_note">Platform note</option>
+                      <option value="screenshot">Screenshot</option>
+                      <option value="faq">FAQ</option>
+                      <option value="case_study">Case study</option>
+                      <option value="objection">Objection</option>
+                      <option value="competitor">Competitor</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Priority</span>
+                    <input id="knowledgePriorityInput" type="number" min="1" max="100" value="75" />
+                  </label>
+                </div>
+                <label>
+                  <span>Title</span>
+                  <input id="knowledgeTitleInput" type="text" placeholder="Demo lesson, pricing page, onboarding screenshot" />
+                </label>
+                <label>
+                  <span>URL</span>
+                  <input id="knowledgeUrlInput" type="url" placeholder="https://..." />
+                </label>
+                <label>
+                  <span>Lesson or notes</span>
+                  <textarea id="knowledgeTextInput" rows="5" placeholder="What should the AI know about this product, demo flow, customer pain, feature, proof, limitation, or objection?"></textarea>
+                </label>
+                <label>
+                  <span>Tags</span>
+                  <input id="knowledgeTagsInput" type="text" placeholder="pricing, demo, onboarding, proof" />
+                </label>
+                <div class="knowledge-upload-row">
+                  <label class="file-drop screenshot-drop">
+                    <input id="productKnowledgeScreenshotInput" type="file" accept="image/*" />
+                    <i data-lucide="image-plus"></i>
+                    <strong>Upload screenshot</strong>
+                    <span id="productKnowledgeScreenshotName">PNG or JPG from product, demo, CRM, docs</span>
+                  </label>
+                  <div class="screenshot-preview" id="productKnowledgeScreenshotPreview"></div>
+                </div>
+                <button type="submit"><i data-lucide="book-plus"></i><span>Add Knowledge</span></button>
+              </form>
+              <div class="knowledge-list" id="productKnowledgeList"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-heading">
+                <div>
+                  <h2>Outreach Examples</h2>
+                  <p>Training examples for this product</p>
+                </div>
+              </div>
+              <form class="example-form" id="exampleForm">
+                <div class="split-fields">
+                  <label>
+                    <span>Channel</span>
+                    <select id="exampleChannelInput">
+                      <option value="linkedin">LinkedIn</option>
+                      <option value="email">Email</option>
+                      <option value="call">Call</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Persona</span>
+                    <input id="examplePersonaInput" type="text" placeholder="VP Sales" />
+                  </label>
+                </div>
+                <label>
+                  <span>Example message</span>
+                  <textarea id="exampleMessageInput" rows="6"></textarea>
+                </label>
+                <label>
+                  <span>Outcome or note</span>
+                  <input id="exampleOutcomeInput" type="text" placeholder="High reply rate, meeting booked, approved tone" />
+                </label>
+                <button type="submit"><i data-lucide="brain-circuit"></i><span>Add Example</span></button>
+              </form>
+              <div class="example-list" id="exampleList"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="view-integrations">
+          <div class="integrations-layout">
+            <section class="panel">
+              <div class="panel-heading">
+                <div>
+                  <h2>Runtime Status</h2>
+                  <p>AI gateway and data connectors</p>
+                </div>
+              </div>
+              <div class="integration-status-grid">
+                <div><span>AI runtime</span><strong id="aiRuntimeStatus">mock</strong></div>
+                <div><span>OpenRouter models</span><strong id="openRouterModelCount">0</strong></div>
+                <div><span>Apify</span><strong id="apifyStatus">not configured</strong></div>
+                <div><span>CRM</span><strong id="crmStatus">not configured</strong></div>
+                <div><span>Calls</span><strong id="transcriptStatus">manual paste</strong></div>
+                <div><span>Tasks</span><strong id="notificationStatus">in-app</strong></div>
+                <div><span>Supabase</span><strong id="supabaseStatus">not configured</strong></div>
+                <div><span>Postgres</span><strong id="postgresStatus">not configured</strong></div>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-heading">
+                <div>
+                  <h2>OpenRouter AI</h2>
+                  <p>Haiku 4.5 for analysis, Sonnet 5 for writing</p>
+                </div>
+              </div>
+              <form class="integration-form" id="openRouterConfigForm">
+                <input id="openRouterKeyInput" type="password" autocomplete="off" placeholder="OpenRouter API key" aria-label="OpenRouter API key" />
+                <div class="split-fields">
+                  <input id="analysisModelInput" type="text" placeholder="anthropic/claude-haiku-4.5" aria-label="Analysis model" />
+                  <input id="writingModelInput" type="text" placeholder="anthropic/claude-sonnet-5" aria-label="Writing model" />
+                </div>
+                <button class="primary-button" type="submit"><i data-lucide="plug-zap"></i><span>Connect OpenRouter</span></button>
+              </form>
+            </section>
+
+            <section class="panel">
+              <div class="panel-heading">
+                <div>
+                  <h2>MCP + Knowledge Base</h2>
+                  <p>Products, lead context, and approved proof</p>
+                </div>
+              </div>
+              <form class="integration-form" id="mcpConfigForm">
+                <input id="mcpBaseUrlInput" type="url" placeholder="https://mcp.yourcompany.com" aria-label="MCP base URL" />
+                <input id="mcpNamespaceInput" type="text" placeholder="products, leads, knowledge-base namespace" aria-label="MCP namespace" />
+                <input id="mcpTokenInput" type="password" autocomplete="off" placeholder="MCP API token" aria-label="MCP API token" />
+                <button class="primary-button" type="submit"><i data-lucide="save"></i><span>Save MCP</span></button>
+              </form>
+            </section>
+
+            <section class="panel">
+              <div class="panel-heading">
+                <div>
+                  <h2>Apify Enrichment</h2>
+                  <p>Lead database lookup plus specialist scrapers</p>
+                </div>
+              </div>
+              <form class="integration-form" id="apifyConfigForm">
+                <input id="apifyTokenInput" type="password" autocomplete="off" placeholder="Apify API token" aria-label="Apify API token" />
+                <input id="leadDatabaseActorInput" type="text" placeholder="Lead database actor URL or ID" />
+                <details class="optional-fields">
+                  <summary>Actor input template</summary>
+                  <textarea id="leadDatabaseInputTemplate" rows="5" spellcheck="false" placeholder='{"search":"{{name}} {{company}}","linkedinUrl":"{{linkedinUrl}}","limit":1}'></textarea>
+                </details>
+                <details class="optional-fields">
+                  <summary>Specialist actors</summary>
+                  <input id="linkedinActorInput" type="text" placeholder="LinkedIn actor id, e.g. user~linkedin-profile" />
+                  <input id="contactFinderActorInput" type="text" placeholder="Contact finder actor id" />
+                  <input id="apolloActorInput" type="text" placeholder="Apollo actor id" />
+                  <input id="zoominfoActorInput" type="text" placeholder="ZoomInfo actor id" />
+                  <input id="facebookProfileActorInput" type="text" placeholder="Facebook/person match actor id" />
+                  <input id="emailPhoneFinderActorInput" type="text" placeholder="Email and phone finder actor id" />
+                  <input id="phoneMessengerCheckActorInput" type="text" placeholder="WhatsApp/Telegram phone check actor id" />
+                </details>
+                <input id="apifyMaxChargeInput" type="number" min="0.05" step="0.05" />
+                <button class="primary-button" type="submit"><i data-lucide="save"></i><span>Save Apify</span></button>
+              </form>
+            </section>
+
+            <section class="panel">
+              <div class="panel-heading">
+                <div>
+                  <h2>Custom CRM</h2>
+                  <p>Push leads, pull history, sync outcomes</p>
+                </div>
+              </div>
+              <form class="integration-form" id="crmConfigForm">
+                <input id="crmNameInput" type="text" placeholder="CRM name" />
+                <input id="crmBaseUrlInput" type="url" placeholder="https://crm.yourcompany.com/api" />
+                <input id="crmTokenInput" type="password" autocomplete="off" placeholder="CRM API token" />
+                <div class="split-fields">
+                  <input id="crmLeadObjectInput" type="text" placeholder="Lead object" />
+                  <input id="crmContactObjectInput" type="text" placeholder="Contact object" />
+                </div>
+                <input id="crmActivityObjectInput" type="text" placeholder="Activity or task object" />
+                <button class="primary-button" type="submit"><i data-lucide="save"></i><span>Save CRM</span></button>
+              </form>
+            </section>
+
+            <section class="panel">
+              <div class="panel-heading">
+                <div>
+                  <h2>Supabase + Postgres</h2>
+                  <p>Persistent data layer for leads, products, and history</p>
+                </div>
+              </div>
+              <form class="integration-form" id="dataConfigForm">
+                <input id="supabaseUrlInput" type="url" placeholder="http://144.91.104.211:8200" aria-label="Supabase API URL" />
+                <input id="supabaseApiKeyInput" type="password" autocomplete="off" placeholder="Supabase anon or service role key" aria-label="Supabase API key" />
+                <div class="split-fields">
+                  <input id="pgHostInput" type="text" placeholder="PostgreSQL host" />
+                  <input id="pgPortInput" type="number" min="1" max="65535" placeholder="55432" />
+                </div>
+                <div class="split-fields">
+                  <input id="pgDatabaseInput" type="text" placeholder="Database" />
+                  <input id="pgUserInput" type="text" placeholder="User" />
+                </div>
+                <input id="pgPasswordInput" type="password" autocomplete="off" placeholder="PostgreSQL password" />
+                <button class="primary-button" type="submit"><i data-lucide="database-zap"></i><span>Connect Data</span></button>
+              </form>
+            </section>
+
+            <section class="panel">
+              <div class="panel-heading">
+                <div>
+                  <h2>Calls + Follow-Ups</h2>
+                  <p>Transcript feed and task notifications</p>
+                </div>
+              </div>
+              <form class="integration-form" id="transcriptConfigForm">
+                <select id="transcriptProviderInput" aria-label="Transcript provider">
+                  <option value="manual">Manual paste</option>
+                  <option value="gong">Gong</option>
+                  <option value="zoom">Zoom</option>
+                  <option value="aircall">Aircall</option>
+                  <option value="twilio">Twilio</option>
+                  <option value="custom">Custom webhook</option>
+                </select>
+                <input id="transcriptWebhookInput" type="url" placeholder="https://calls.yourcompany.com/webhooks/transcripts" />
+                <input id="transcriptTokenInput" type="password" autocomplete="off" placeholder="Transcript API token" />
+                <select id="notificationChannelInput" aria-label="Notification channel">
+                  <option value="in_app">In-app tasks</option>
+                  <option value="crm_task">CRM tasks</option>
+                  <option value="slack">Slack</option>
+                  <option value="email">Email</option>
+                </select>
+                <input id="notificationTargetInput" type="text" placeholder="Slack channel, email, or CRM queue" />
+                <button class="primary-button" type="submit"><i data-lucide="bell-plus"></i><span>Save Calls</span></button>
+              </form>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="view-overview">
+          <div class="metric-grid">
+            <article class="metric">
+              <span>Monthly Spend</span>
+              <strong id="totalCost">$0.00</strong>
+              <div class="meter"><span id="budgetMeter"></span></div>
+            </article>
+            <article class="metric">
+              <span>Token Volume</span>
+              <strong id="tokenVolume">0</strong>
+              <small>input + output</small>
+            </article>
+            <article class="metric">
+              <span>Average Latency</span>
+              <strong id="avgLatency">0 ms</strong>
+              <small>observed requests</small>
+            </article>
+            <article class="metric">
+              <span>Fallback Rate</span>
+              <strong id="fallbackRate">0%</strong>
+              <small>automatic recovery</small>
+            </article>
+          </div>
+
+          <div class="overview-layout">
+            <section class="panel span-2">
+              <div class="panel-heading">
+                <div>
+                  <h2>Gateway Traffic</h2>
+                  <p>Cost, latency, and routing behavior</p>
+                </div>
+                <select id="chartMode" aria-label="Chart mode">
+                  <option value="cost">Cost</option>
+                  <option value="latency">Latency</option>
+                  <option value="tokens">Tokens</option>
+                </select>
+              </div>
+              <canvas id="trafficChart" width="900" height="280" aria-label="Gateway traffic chart"></canvas>
+            </section>
+
+            <section class="panel">
+              <div class="panel-heading compact">
+                <h2>Provider</h2>
+                <span class="pill" id="healthPill">mock_ready</span>
+              </div>
+              <div class="provider-card">
+                <div class="provider-logo">OR</div>
+                <div>
+                  <strong>OpenRouter</strong>
+                  <span id="keyState">No key configured</span>
+                </div>
+              </div>
+              <form class="key-form" id="keyForm">
+                <input id="apiKeyInput" type="password" autocomplete="off" placeholder="OpenRouter API key" aria-label="OpenRouter API key" />
+                <select id="environmentInput" aria-label="Environment">
+                  <option value="development">Development</option>
+                  <option value="staging">Staging</option>
+                  <option value="production">Production</option>
+                </select>
+                <button type="submit"><i data-lucide="key-round"></i><span>Save</span></button>
+              </form>
+              <div class="button-row">
+                <button id="testConnectionBtn"><i data-lucide="plug-zap"></i><span>Test</span></button>
+                <button id="revokeKeyBtn"><i data-lucide="ban"></i><span>Revoke</span></button>
+              </div>
+            </section>
+          </div>
+
+          <section class="panel">
+            <div class="panel-heading">
+              <div>
+                <h2>Recent AI Events</h2>
+                <p>Requests, fallbacks, policy updates</p>
+              </div>
+            </div>
+            <div class="event-list" id="eventList"></div>
+          </section>
+        </section>
+
+        <section class="view" id="view-models">
+          <section class="panel">
+            <div class="panel-heading">
+              <div>
+                <h2>Model Registry</h2>
+                <p>Capability-aware catalog</p>
+              </div>
+              <div class="filter-row">
+                <select id="modelTierFilter" aria-label="Model tier">
+                  <option value="all">All tiers</option>
+                  <option value="economy">Economy</option>
+                  <option value="balanced">Balanced</option>
+                  <option value="premium">Premium</option>
+                </select>
+                <input id="modelSearch" type="search" placeholder="Search models" aria-label="Search models" />
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Model</th>
+                    <th>Tier</th>
+                    <th>Context</th>
+                    <th>Capabilities</th>
+                    <th>Cost / 1M</th>
+                    <th>Quality</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="modelTable"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <section class="view" id="view-routing">
+          <div class="routing-layout">
+            <section class="panel">
+              <div class="panel-heading">
+                <div>
+                  <h2>Task Routing</h2>
+                  <p>Primary and fallback model assignments</p>
+                </div>
+              </div>
+              <div class="task-list" id="taskList"></div>
+            </section>
+            <section class="panel sticky-panel">
+              <div class="panel-heading compact">
+                <h2>Selected Task</h2>
+                <span class="pill" id="selectedTaskTier">balanced</span>
+              </div>
+              <form class="routing-form" id="routingForm">
+                <label>
+                  <span>Task</span>
+                  <select id="taskSelect"></select>
+                </label>
+                <label>
+                  <span>Primary model</span>
+                  <select id="primaryModelSelect"></select>
+                </label>
+                <label>
+                  <span>Fallback models</span>
+                  <select id="fallbackModelSelect" multiple size="5"></select>
+                </label>
+                <div class="split-fields">
+                  <label>
+                    <span>Max cost</span>
+                    <input id="taskCostInput" type="number" min="0.001" step="0.001" />
+                  </label>
+                  <label>
+                    <span>Latency ms</span>
+                    <input id="taskLatencyInput" type="number" min="500" step="500" />
+                  </label>
+                </div>
+                <label>
+                  <span>Privacy</span>
+                  <select id="taskPrivacySelect">
+                    <option value="standard">Standard</option>
+                    <option value="no_training">No training</option>
+                    <option value="zero_retention">Zero retention</option>
+                  </select>
+                </label>
+                <button class="primary-button" type="submit"><i data-lucide="save"></i><span>Save Routing</span></button>
+              </form>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="view-budgets">
+          <div class="budget-layout">
+            <section class="panel">
+              <div class="panel-heading">
+                <div>
+                  <h2>Budget Controls</h2>
+                  <p>Workspace and user spend limits</p>
+                </div>
+              </div>
+              <form class="budget-form" id="budgetForm">
+                <label>
+                  <span>Monthly workspace</span>
+                  <input id="monthlyBudgetInput" type="number" min="1" step="1" />
+                </label>
+                <label>
+                  <span>Daily workspace</span>
+                  <input id="dailyBudgetInput" type="number" min="1" step="1" />
+                </label>
+                <label>
+                  <span>User monthly</span>
+                  <input id="userBudgetInput" type="number" min="1" step="1" />
+                </label>
+                <label>
+                  <span>Warning threshold</span>
+                  <input id="thresholdInput" type="number" min="1" max="100" step="1" />
+                </label>
+                <label class="switch-line">
+                  <input id="hardLimitInput" type="checkbox" />
+                  <span>Hard spending limits</span>
+                </label>
+                <button class="primary-button" type="submit"><i data-lucide="save"></i><span>Save Budgets</span></button>
+              </form>
+            </section>
+            <section class="panel">
+              <div class="panel-heading">
+                <div>
+                  <h2>Spend by Model</h2>
+                  <p>Current workspace period</p>
+                </div>
+              </div>
+              <div id="spendBars" class="bar-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="view-privacy">
+          <section class="panel privacy-panel">
+            <div class="panel-heading">
+              <div>
+                <h2>Provider Routing Policy</h2>
+                <p>Compliance rules take priority over price and speed</p>
+              </div>
+            </div>
+            <form class="privacy-form" id="privacyForm">
+              <label>
+                <span>Policy</span>
+                <select id="providerPolicyInput">
+                  <option value="approved_providers_only">Approved providers only</option>
+                  <option value="lowest_cost">Lowest cost</option>
+                  <option value="lowest_latency">Lowest latency</option>
+                  <option value="preferred_provider_order">Preferred order</option>
+                </select>
+              </label>
+              <label class="switch-line">
+                <input id="providerFallbackInput" type="checkbox" />
+                <span>Provider fallbacks</span>
+              </label>
+              <label class="switch-line">
+                <input id="noTrainingInput" type="checkbox" />
+                <span>No-training endpoints</span>
+              </label>
+              <label class="switch-line">
+                <input id="zeroRetentionInput" type="checkbox" />
+                <span>Zero-retention endpoints</span>
+              </label>
+              <button class="primary-button" type="submit"><i data-lucide="shield-check"></i><span>Apply Policy</span></button>
+            </form>
+            <div class="policy-grid">
+              <div><strong>Prompt logging</strong><span>Disabled by default</span></div>
+              <div><strong>Tool calls</strong><span>Strict schemas required</span></div>
+              <div><strong>Fallbacks</strong><span>No privacy downgrade</span></div>
+              <div><strong>External content</strong><span>Untrusted context</span></div>
+            </div>
+          </section>
+        </section>
+
+        <section class="view" id="view-evaluation">
+          <div class="evaluation-layout">
+            <section class="panel span-2">
+              <div class="panel-heading">
+                <div>
+                  <h2>Model Comparison</h2>
+                  <p>Explicit evaluation workspace</p>
+                </div>
+                <button id="compareBtn"><i data-lucide="split"></i><span>Compare</span></button>
+              </div>
+              <div class="comparison-grid" id="comparisonGrid"></div>
+            </section>
+            <section class="panel">
+              <div class="panel-heading compact">
+                <h2>Quality Signals</h2>
+              </div>
+              <div class="signal-list">
+                <div><span>Structured output</span><strong id="schemaRate">0%</strong></div>
+                <div><span>Reliability</span><strong>98%</strong></div>
+                <div><span>Human ratings</span><strong>Good</strong></div>
+                <div><span>Compliance risk</span><strong>Low</strong></div>
+              </div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="runDialog">
+      <form method="dialog" class="dialog-body" id="runForm">
+        <div class="dialog-heading">
+          <h2>Run AI Task</h2>
+          <button value="cancel" class="icon-button" aria-label="Close"><i data-lucide="x"></i></button>
+        </div>
+        <label>
+          <span>Task</span>
+          <select id="runTaskSelect"></select>
+        </label>
+        <label>
+          <span>Profile</span>
+          <select id="runProfileSelect">
+            <option value="economy">Economy</option>
+            <option value="balanced" selected>Balanced</option>
+            <option value="premium">Premium</option>
+          </select>
+        </label>
+        <label>
+          <span>Preferred model</span>
+          <select id="runPreferredModelSelect"></select>
+        </label>
+        <output id="runOutput"></output>
+        <div class="dialog-actions">
+          <button value="cancel">Close</button>
+          <button class="primary-button" id="submitRunBtn" value="default"><i data-lucide="play"></i><span>Run</span></button>
+        </div>
+      </form>
+    </dialog>
+  </body>
+</html>

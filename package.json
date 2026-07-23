@@ -1,0 +1,14 @@
+{
+  "name": "outbound-sales-os",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Outbound Sales OS for AI-assisted prospect research, enrichment, outreach preparation, and sales activity tracking.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "check": "node --check server.mjs && node --check app/main.js"
+  }
+}
