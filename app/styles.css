@@ -1377,8 +1377,13 @@ output {
   --shadow: 0 18px 52px rgba(0, 0, 0, 0.34);
 }
 
+html {
+  overflow-x: clip;
+}
+
 body {
   font-size: 13px;
+  overflow-x: clip;
   background:
     radial-gradient(circle at 18% 10%, rgba(69, 125, 255, 0.28), transparent 30%),
     radial-gradient(circle at 84% 4%, rgba(40, 212, 191, 0.16), transparent 34%),
@@ -1473,6 +1478,7 @@ td span,
 
 .workspace {
   padding: 16px;
+  overflow: visible;
 }
 
 .topbar {
@@ -2431,12 +2437,395 @@ dialog {
   background: rgba(7, 22, 40, 0.64);
 }
 
+.lead-workspace {
+  display: grid;
+  gap: 12px;
+}
+
+.lead-command-bar {
+  position: sticky;
+  top: 0;
+  z-index: 12;
+  display: grid;
+  grid-template-columns: auto minmax(260px, 1fr) 132px auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  background:
+    linear-gradient(135deg, rgba(8, 31, 58, 0.96), rgba(9, 48, 77, 0.9)),
+    rgba(5, 18, 32, 0.95);
+  backdrop-filter: blur(16px);
+}
+
+.lead-command-summary {
+  min-width: 0;
+}
+
+.lead-command-summary span,
+.lead-command-summary strong,
+.lead-command-summary small {
+  display: block;
+}
+
+.lead-command-summary span,
+.lead-command-summary small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.lead-command-summary strong {
+  margin: 2px 0;
+  font-size: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lead-hero {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr) minmax(150px, 0.22fr);
+  gap: 16px;
+  align-items: center;
+  min-height: 148px;
+  background:
+    radial-gradient(circle at 8% 20%, rgba(40, 212, 191, 0.18), transparent 32%),
+    linear-gradient(135deg, rgba(16, 43, 75, 0.94), rgba(8, 24, 44, 0.9));
+}
+
+.lead-avatar {
+  width: 58px;
+  height: 58px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  font-weight: 900;
+  font-size: 18px;
+  background: linear-gradient(135deg, #24d7c0, #5c93ff);
+  color: #031421;
+  box-shadow: 0 16px 32px rgba(40, 212, 191, 0.2);
+}
+
+.lead-hero-main {
+  min-width: 0;
+}
+
+.lead-kicker {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.lead-kicker span {
+  min-height: 23px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 99px;
+  padding: 0 9px;
+  background: rgba(40, 212, 191, 0.12);
+  color: #84f6e4;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.lead-hero h2 {
+  margin: 0;
+  font-size: 28px;
+  line-height: 1.08;
+}
+
+.lead-hero p {
+  max-width: 860px;
+  margin: 8px 0 0;
+  color: #b7cbe0;
+  line-height: 1.45;
+}
+
+.lead-score-block {
+  min-height: 112px;
+  border-left: 1px solid rgba(143, 177, 207, 0.18);
+  padding-left: 18px;
+  display: grid;
+  align-content: center;
+  justify-items: start;
+}
+
+.lead-score-block span,
+.lead-score-block small {
+  color: var(--muted);
+}
+
+.lead-score-block strong {
+  font-size: 42px;
+  line-height: 1;
+  color: #65f0db;
+}
+
+.lead-section-nav {
+  position: sticky;
+  top: 72px;
+  z-index: 11;
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 8px;
+  border: 1px solid rgba(143, 177, 207, 0.18);
+  border-radius: 8px;
+  background: rgba(5, 18, 32, 0.82);
+  backdrop-filter: blur(14px);
+}
+
+.lead-section-nav a {
+  flex: 0 0 auto;
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 8px;
+  padding: 0 10px;
+  color: #b7cbe0;
+  text-decoration: none;
+  font-weight: 800;
+  font-size: 12px;
+}
+
+.lead-section-nav a:hover {
+  color: #f6fbff;
+  background: rgba(40, 212, 191, 0.12);
+}
+
+.lead-workbench-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 12px;
+  align-items: start;
+}
+
+.lead-workspace .product-panel,
+.lead-workspace .target-panel,
+.lead-workspace .import-panel,
+.lead-workspace .prospect-list-panel {
+  grid-area: auto;
+}
+
+.lead-main-stack,
+.lead-side-rail,
+.quick-action-panel,
+.research-signal-list,
+.buying-committee-list,
+.score-breakdown-grid,
+.source-audit-list,
+.sales-cycle-list,
+.leads-layout {
+  display: grid;
+  gap: 12px;
+}
+
+.lead-main-stack {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.lead-side-rail {
+  position: sticky;
+  top: 122px;
+  align-self: start;
+  height: calc(100vh - 134px);
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.quick-action-panel button,
+.target-panel button,
+.prospect-list-panel button,
+.import-panel button {
+  width: 100%;
+}
+
+.followup-grid,
+.leads-layout {
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.85fr);
+}
+
+.leads-layout .span-2 {
+  grid-column: 1 / -1;
+}
+
+.lead-stats-strip,
+.score-breakdown-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.lead-stats-strip div,
+.score-breakdown-grid div {
+  min-height: 82px;
+  border: 1px solid rgba(143, 177, 207, 0.18);
+  border-radius: 8px;
+  background: rgba(4, 16, 29, 0.5);
+  padding: 12px;
+}
+
+.lead-stats-strip span,
+.score-breakdown-grid span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.lead-stats-strip strong,
+.score-breakdown-grid strong {
+  display: block;
+  margin: 6px 0;
+  font-size: 22px;
+}
+
+.research-signal,
+.committee-card,
+.source-row,
+.next-action-card,
+.cycle-row {
+  border: 1px solid rgba(143, 177, 207, 0.18);
+  border-radius: 8px;
+  background: rgba(4, 16, 29, 0.46);
+  padding: 10px;
+}
+
+.research-signal {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.research-signal strong,
+.research-signal span,
+.committee-card strong,
+.committee-card span,
+.source-row strong,
+.source-row span,
+.source-row small,
+.cycle-row strong,
+.cycle-row small,
+.next-action-card strong,
+.next-action-card span {
+  display: block;
+}
+
+.research-signal span,
+.committee-card span,
+.source-row span,
+.source-row small,
+.cycle-row small,
+.next-action-card span,
+.next-action-card p {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.research-signal b {
+  color: #65f0db;
+}
+
+.committee-card {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.next-action-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  background: linear-gradient(135deg, rgba(40, 212, 191, 0.14), rgba(79, 140, 255, 0.12));
+}
+
+.next-action-card p {
+  margin: 8px 0 0;
+}
+
+.cycle-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.cycle-row > span {
+  width: 9px;
+  height: 9px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: #62758a;
+}
+
+.cycle-row.done > span {
+  background: var(--teal);
+  box-shadow: 0 0 0 4px rgba(40, 212, 191, 0.12);
+}
+
+.source-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.source-row small {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.lead-side-rail .prospect-list {
+  max-height: 330px;
+}
+
+.lead-side-rail .filter-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  margin-bottom: 10px;
+}
+
+.lead-side-rail .file-drop {
+  min-height: 84px;
+}
+
 @media (max-width: 1080px) {
   .database-layout,
   .learning-example-list,
   .icp-layout,
-  .agent-grid {
+  .agent-grid,
+  .lead-workbench-grid,
+  .followup-grid,
+  .leads-layout {
     grid-template-columns: 1fr;
+  }
+
+  .lead-side-rail {
+    position: static;
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
+  }
+
+  .lead-command-bar {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .lead-command-bar select {
+    grid-column: 1 / -1;
+  }
+
+  .lead-hero {
+    grid-template-columns: 52px minmax(0, 1fr);
+  }
+
+  .lead-score-block {
+    grid-column: 1 / -1;
+    min-height: 72px;
+    border-left: 0;
+    border-top: 1px solid rgba(143, 177, 207, 0.18);
+    padding: 12px 0 0;
   }
 }
 
@@ -2446,11 +2835,37 @@ dialog {
   }
 
   .learning-metric-grid,
+  .lead-command-bar,
+  .lead-hero,
+  .lead-stats-strip,
+  .score-breakdown-grid,
   .playbook-grid,
   .channel-tip,
   .learning-example-card,
   .screenshot-preview,
   .agent-run-form {
     grid-template-columns: 1fr;
+  }
+
+  .lead-command-bar {
+    position: static;
+  }
+
+  .lead-section-nav {
+    top: 0;
+  }
+
+  .lead-hero h2 {
+    font-size: 22px;
+  }
+
+  .source-row,
+  .committee-card,
+  .research-signal {
+    grid-template-columns: 1fr;
+  }
+
+  .source-row small {
+    text-align: left;
   }
 }

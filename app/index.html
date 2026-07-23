@@ -19,11 +19,11 @@
           </div>
         </div>
         <nav class="nav-list" aria-label="Workspace">
-          <button class="nav-item active" data-view="prospects"><i data-lucide="zap"></i><span>Machine</span></button>
-          <button class="nav-item" data-view="ai"><i data-lucide="bot"></i><span>AI</span></button>
-          <button class="nav-item" data-view="database"><i data-lucide="database"></i><span>Database</span></button>
-          <button class="nav-item" data-view="products"><i data-lucide="package-plus"></i><span>Products</span></button>
-          <button class="nav-item" data-view="integrations"><i data-lucide="plug"></i><span>Settings</span></button>
+          <button class="nav-item active" data-view="prospects"><i data-lucide="layout-dashboard"></i><span>Dashboard</span></button>
+          <button class="nav-item" data-view="leads"><i data-lucide="users"></i><span>Leads</span></button>
+          <button class="nav-item" data-view="database"><i data-lucide="book-open"></i><span>Knowledge Base</span></button>
+          <button class="nav-item" data-view="products"><i data-lucide="package"></i><span>Products</span></button>
+          <button class="nav-item" data-view="integrations"><i data-lucide="settings"></i><span>Settings</span></button>
         </nav>
         <div class="sidebar-footer">
           <span class="status-dot"></span>
@@ -34,12 +34,12 @@
       <main class="workspace">
         <header class="topbar">
           <div>
-            <h1 id="pageTitle">Outbound Machine</h1>
-            <p id="workspaceMeta">Paste lead · choose product · prepare next move</p>
+            <h1 id="pageTitle">Dashboard</h1>
+            <p id="workspaceMeta">Open lead · run research · prepare outreach · set next action</p>
           </div>
           <div class="topbar-actions">
             <select id="productSelect" aria-label="Product for outreach"></select>
-            <button class="primary-button" id="quickPrepareBtn"><i data-lucide="wand-sparkles"></i><span>Research + Prepare</span></button>
+            <button class="primary-button" id="quickPrepareBtn"><i data-lucide="wand-sparkles"></i><span>Run Research</span></button>
             <button class="utility-hidden" id="syncMcpBtn"><i data-lucide="database-zap"></i><span>Sync MCP</span></button>
             <button class="icon-button utility-hidden" id="syncModelsBtn" title="Synchronize models" aria-label="Synchronize models">
               <i data-lucide="refresh-cw"></i>
@@ -49,187 +49,366 @@
         </header>
 
         <section class="view active" id="view-prospects">
-          <div class="sales-layout">
-            <section class="panel product-panel">
-              <div class="panel-heading">
-                <div>
-                  <h2 id="activeProductName">Product Context</h2>
-                  <p id="activeProductPositioning">Used for messages, analysis, and next steps</p>
-                </div>
-                <span class="pill" id="mcpSyncState">synced</span>
+          <div class="lead-workspace">
+            <section class="panel lead-command-bar">
+              <button id="prevLeadBtn" type="button"><i data-lucide="chevron-left"></i><span>Previous</span></button>
+              <div class="lead-command-summary">
+                <span id="leadWorkspaceQueue">Lead 0 of 0</span>
+                <strong id="selectedProspectName">Select a prospect</strong>
+                <small id="selectedProspectMeta">Contact discovery and AI outreach</small>
               </div>
-              <div class="product-context-grid">
-                <div>
-                  <span>Target personas</span>
-                  <strong id="productPersonas">-</strong>
-                </div>
-                <div>
-                  <span>Primary use case</span>
-                  <strong id="productUseCase">-</strong>
-                </div>
-                <div>
-                  <span>Proof point</span>
-                  <strong id="productProofPoint">-</strong>
-                </div>
-              </div>
-              <div class="mcp-source-list" id="mcpSourceList"></div>
+              <select id="outreachProfileSelect" aria-label="AI profile">
+                <option value="economy">Fast</option>
+                <option value="balanced" selected>Balanced</option>
+                <option value="premium">Strategic</option>
+              </select>
+              <button class="primary-button" id="runResearchTopBtn" type="button"><i data-lucide="wand-sparkles"></i><span>Run Research</span></button>
+              <button id="nextLeadBtn" type="button"><span>Next</span><i data-lucide="chevron-right"></i></button>
             </section>
 
-            <section class="panel target-panel">
-              <div class="panel-heading">
-                <div>
-                  <h2>2-Click Targeting</h2>
-                  <p>LinkedIn target to contact options and messages</p>
+            <section class="panel lead-hero" id="dashboard-overview">
+              <div class="lead-avatar" id="selectedLeadAvatar">OS</div>
+              <div class="lead-hero-main">
+                <div class="lead-kicker">
+                  <span id="selectedProspectStatus">new</span>
+                  <span id="leadWorkspaceFit">No fit score yet</span>
+                  <span id="leadWorkspaceUpdated">Research not run</span>
                 </div>
+                <h2 id="leadWorkspaceCompany">Open a lead to start</h2>
+                <p id="leadWorkspacePosition">Add a LinkedIn URL, upload leads, or pull from CRM. The system prepares intelligence, contacts, messages, CRM logs, and next actions without auto-sending.</p>
               </div>
-              <form class="linkedin-target-form" id="linkedinTargetForm">
-                <div class="target-submit-row">
-                  <input id="linkedinTargetUrlInput" type="url" placeholder="https://www.linkedin.com/in/target-person" aria-label="LinkedIn profile URL" />
-                  <button class="primary-button" type="submit"><i data-lucide="send"></i><span>Add + Prepare</span></button>
-                </div>
-                <details class="optional-fields">
-                  <summary>Optional details</summary>
-                  <div class="target-inline-fields">
-                    <input id="linkedinTargetNameInput" type="text" placeholder="Name" aria-label="Target name" />
-                    <input id="linkedinTargetCompanyInput" type="text" placeholder="Company" aria-label="Target company" />
+              <div class="lead-score-block">
+                <span>Lead score</span>
+                <strong id="selectedProspectScore">0</strong>
+                <small id="leadWorkspaceConfidence">Awaiting evidence</small>
+              </div>
+            </section>
+
+            <nav class="lead-section-nav" aria-label="Lead workspace sections">
+              <a href="#dashboard-overview">Overview</a>
+              <a href="#dashboard-account">Research</a>
+              <a href="#dashboard-buying">Committee</a>
+              <a href="#dashboard-contact">Contacts</a>
+              <a href="#dashboard-score">Scoring</a>
+              <a href="#dashboard-outreach">Outreach</a>
+              <a href="#dashboard-followup">Follow-Up</a>
+              <a href="#dashboard-next">Next Action</a>
+              <a href="#dashboard-sources">Sources</a>
+            </nav>
+
+            <div class="lead-workbench-grid">
+              <main class="lead-main-stack">
+                <section class="panel product-panel lead-section" id="dashboard-account">
+                  <div class="panel-heading">
+                    <div>
+                      <h2 id="activeProductName">Product Context</h2>
+                      <p id="activeProductPositioning">Used for account research and tailored outreach</p>
+                    </div>
+                    <span class="pill" id="mcpSyncState">synced</span>
                   </div>
-                </details>
-              </form>
-            </section>
+                  <div class="product-context-grid">
+                    <div>
+                      <span>Target personas</span>
+                      <strong id="productPersonas">-</strong>
+                    </div>
+                    <div>
+                      <span>Primary use case</span>
+                      <strong id="productUseCase">-</strong>
+                    </div>
+                    <div>
+                      <span>Proof point</span>
+                      <strong id="productProofPoint">-</strong>
+                    </div>
+                  </div>
+                  <div class="mcp-source-list" id="mcpSourceList"></div>
+                  <div class="research-signal-list" id="accountSignalList"></div>
+                </section>
 
-            <section class="panel import-panel">
+                <section class="panel lead-section" id="dashboard-buying">
+                  <div class="panel-heading">
+                    <div>
+                      <h2>Buying Committee</h2>
+                      <p>Decision makers, influencers, blockers, and next people to reach</p>
+                    </div>
+                    <span class="pill" id="committeeCount">0 contacts</span>
+                  </div>
+                  <div class="buying-committee-list" id="buyingCommitteeList"></div>
+                </section>
+
+                <section class="panel lead-section" id="dashboard-contact">
+                  <div class="panel-heading">
+                    <div>
+                      <h2>Contact Data</h2>
+                      <p id="contactPolicy">public review</p>
+                    </div>
+                    <button id="enrichProspectBtn" type="button"><i data-lucide="search"></i><span>Refresh Contacts</span></button>
+                  </div>
+                  <div class="detail-grid">
+                    <section class="subpanel">
+                      <div class="subpanel-heading">
+                        <h3>Profile</h3>
+                        <span>CRM-ready fields</span>
+                      </div>
+                      <dl class="profile-fields" id="profileFields"></dl>
+                    </section>
+
+                    <section class="subpanel">
+                      <div class="subpanel-heading">
+                        <h3>Enrichment</h3>
+                        <span>verified vs. review needed</span>
+                      </div>
+                      <div class="contact-list" id="contactList"></div>
+                    </section>
+                  </div>
+                </section>
+
+                <section class="panel lead-section" id="dashboard-score">
+                  <div class="panel-heading">
+                    <div>
+                      <h2>Scoring</h2>
+                      <p>Fit, timing, reachability, expected response, and close chance</p>
+                    </div>
+                  </div>
+                  <div class="lead-analytics" id="leadAnalytics"></div>
+                  <div class="score-breakdown-grid" id="scoreBreakdown"></div>
+                </section>
+
+                <section class="panel outreach-panel lead-section" id="dashboard-outreach">
+                  <div class="panel-heading">
+                    <div>
+                      <h2>Personalized Outreach</h2>
+                      <p>LinkedIn, email, WhatsApp, Telegram, phone opener, and follow-ups</p>
+                    </div>
+                    <span id="outreachModel" class="pill">not prepared</span>
+                  </div>
+                  <div id="outreachContent" class="outreach-content"></div>
+                </section>
+
+                <section class="panel lead-section" id="dashboard-followup">
+                  <div class="panel-heading">
+                    <div>
+                      <h2>Follow-Up and Call Coach</h2>
+                      <p>Paste call notes to get tips, next templates, and a follow-up task</p>
+                    </div>
+                  </div>
+                  <div class="followup-grid">
+                    <section class="subpanel call-panel">
+                      <div class="subpanel-heading">
+                        <h3>Call Coach</h3>
+                        <span>transcript to next steps</span>
+                      </div>
+                      <form class="call-analysis-form" id="callAnalysisForm">
+                        <textarea id="callTranscriptInput" rows="5" placeholder="Paste call transcript or notes. Example: Prospect asked for a workflow next week, mentioned current CRM data quality issues, and asked about implementation timeline."></textarea>
+                        <button type="submit"><i data-lucide="mic-vocal"></i><span>Analyze Call</span></button>
+                      </form>
+                      <div class="call-analysis" id="callAnalysis"></div>
+                    </section>
+
+                    <section class="subpanel task-panel">
+                      <div class="subpanel-heading">
+                        <h3>Tasks</h3>
+                        <span>notifications</span>
+                      </div>
+                      <div class="task-notification-list" id="taskNotificationList"></div>
+                    </section>
+                  </div>
+                </section>
+
+                <section class="panel lead-section" id="dashboard-next">
+                  <div class="panel-heading">
+                    <div>
+                      <h2>Next Action</h2>
+                      <p>The exact move the seller should take now</p>
+                    </div>
+                  </div>
+                  <div class="next-action-summary" id="nextActionSummary"></div>
+                  <div class="tracker-panel">
+                    <div class="interaction-controls">
+                      <select id="interactionTypeSelect" aria-label="Interaction type">
+                        <option value="email_sent">Email sent</option>
+                        <option value="email_opened">Email opened</option>
+                        <option value="linkedin_connected">LinkedIn connected</option>
+                        <option value="linkedin_reply">LinkedIn reply</option>
+                        <option value="meeting_booked">Meeting booked</option>
+                        <option value="no_reply">No reply</option>
+                      </select>
+                      <button id="logInteractionBtn" type="button"><i data-lucide="list-plus"></i><span>Log Interaction</span></button>
+                    </div>
+                    <div class="interaction-list" id="interactionList"></div>
+                  </div>
+                </section>
+
+                <section class="panel lead-section" id="dashboard-cycle">
+                  <div class="panel-heading">
+                    <div>
+                      <h2>Sales Cycle</h2>
+                      <p>Current stage, CRM activity, follow-ups, and opportunity movement</p>
+                    </div>
+                  </div>
+                  <div class="sales-cycle-list" id="salesCycleList"></div>
+                </section>
+
+                <section class="panel lead-section" id="dashboard-sources">
+                  <div class="panel-heading">
+                    <div>
+                      <h2>Sources</h2>
+                      <p>Evidence, timestamps, confidence, and unresolved claims</p>
+                    </div>
+                  </div>
+                  <div class="source-audit-list" id="sourceAuditList"></div>
+                </section>
+              </main>
+
+              <aside class="lead-side-rail" aria-label="Lead actions and queue">
+                <section class="panel quick-action-panel">
+                  <div class="panel-heading compact">
+                    <div>
+                      <h2>Quick Actions</h2>
+                      <p>Review first, then copy or log</p>
+                    </div>
+                  </div>
+                  <button class="primary-button" id="prepareOutreachBtn" type="button"><i data-lucide="wand-sparkles"></i><span>Run Research</span></button>
+                  <button id="copyLinkedinQuick" type="button" data-copy-text=""><i data-lucide="linkedin"></i><span>Copy LinkedIn</span></button>
+                  <button id="copyEmailQuick" type="button" data-copy-text=""><i data-lucide="mail"></i><span>Copy Email</span></button>
+                  <button id="copyWhatsappQuick" type="button" data-copy-text=""><i data-lucide="message-circle"></i><span>Copy WhatsApp</span></button>
+                  <button id="saveCrmQuick" type="button" data-interaction-type="outreach_prepared"><i data-lucide="database"></i><span>Log to CRM</span></button>
+                  <button class="primary-button" id="nextLeadRailBtn" type="button"><i data-lucide="chevrons-right"></i><span>Next Lead</span></button>
+                </section>
+
+                <section class="panel target-panel">
+                  <div class="panel-heading compact">
+                    <div>
+                      <h2>Add LinkedIn Target</h2>
+                      <p>Paste URL, then run research</p>
+                    </div>
+                  </div>
+                  <form class="linkedin-target-form" id="linkedinTargetForm">
+                    <div class="target-submit-row">
+                      <input id="linkedinTargetUrlInput" type="url" placeholder="https://www.linkedin.com/in/target-person" aria-label="LinkedIn profile URL" />
+                      <button class="primary-button" type="submit"><i data-lucide="send"></i><span>Add</span></button>
+                    </div>
+                    <details class="optional-fields">
+                      <summary>Optional details</summary>
+                      <div class="target-inline-fields">
+                        <input id="linkedinTargetNameInput" type="text" placeholder="Name" aria-label="Target name" />
+                        <input id="linkedinTargetCompanyInput" type="text" placeholder="Company" aria-label="Target company" />
+                      </div>
+                    </details>
+                  </form>
+                </section>
+
+                <section class="panel prospect-list-panel">
+                  <div class="panel-heading compact">
+                    <div>
+                      <h2>Lead Queue</h2>
+                      <p id="prospectCount">0 records</p>
+                    </div>
+                  </div>
+                  <div class="filter-row">
+                    <input id="prospectSearch" type="search" placeholder="Search people" aria-label="Search people" />
+                    <select id="prospectStatusFilter" aria-label="Prospect status">
+                      <option value="all">All</option>
+                      <option value="new">New</option>
+                      <option value="enriched">Enriched</option>
+                      <option value="linkedin_ready">LinkedIn ready</option>
+                      <option value="outreach_ready">Ready</option>
+                      <option value="contacted">Contacted</option>
+                      <option value="engaged">Engaged</option>
+                      <option value="call_analyzed">Call analyzed</option>
+                      <option value="follow_up_due">Follow-up due</option>
+                      <option value="meeting_booked">Meeting booked</option>
+                      <option value="review">Review</option>
+                    </select>
+                  </div>
+                  <div class="prospect-list" id="prospectList"></div>
+                </section>
+
+                <section class="panel import-panel">
+                  <div class="panel-heading compact">
+                    <div>
+                      <h2>Bulk Leads</h2>
+                      <p>CSV, JSON, or paste</p>
+                    </div>
+                    <button id="sampleProspectsBtn" type="button"><i data-lucide="sparkles"></i><span>Sample</span></button>
+                  </div>
+                  <details class="optional-fields">
+                    <summary>Upload or paste leads</summary>
+                    <div class="import-grid">
+                      <label class="file-drop">
+                        <input id="profileFileInput" type="file" accept=".csv,.json,text/csv,application/json" />
+                        <i data-lucide="upload-cloud"></i>
+                        <strong>Upload profiles</strong>
+                        <span>name, title, company, location, website, linkedin, email, notes</span>
+                      </label>
+                      <form id="pasteProfilesForm" class="paste-form">
+                        <textarea id="profilesTextInput" rows="6" placeholder="name,title,company,location,website,notes&#10;Alex Rivera,VP Sales,Acme Robotics,Boston,acmerobotics.com,Scaling enterprise outbound"></textarea>
+                        <button class="primary-button" type="submit"><i data-lucide="import"></i><span>Import</span></button>
+                      </form>
+                    </div>
+                  </details>
+                </section>
+              </aside>
+            </div>
+          </div>
+        </section>
+
+        <section class="view" id="view-leads">
+          <div class="leads-layout">
+            <section class="panel span-2">
               <div class="panel-heading">
                 <div>
-                  <h2>Bulk Leads</h2>
-                  <p>Import a list when you need volume</p>
+                  <h2>Lead Command Center</h2>
+                  <p>Import, review, sort, and open the next best lead</p>
                 </div>
-                <button id="sampleProspectsBtn"><i data-lucide="sparkles"></i><span>Load Sample</span></button>
+                <button class="primary-button" type="button" data-view-link="prospects"><i data-lucide="layout-dashboard"></i><span>Open Dashboard</span></button>
               </div>
-              <div class="import-grid">
-                <label class="file-drop">
-                  <input id="profileFileInput" type="file" accept=".csv,.json,text/csv,application/json" />
-                  <i data-lucide="upload-cloud"></i>
-                  <strong>Upload profiles</strong>
-                  <span>name, title, company, location, website, linkedin, email, notes</span>
-                </label>
-                <form id="pasteProfilesForm" class="paste-form">
-                  <textarea id="profilesTextInput" rows="7" placeholder="name,title,company,location,website,notes&#10;Alex Rivera,VP Sales,Acme Robotics,Boston,acmerobotics.com,Scaling enterprise outbound"></textarea>
-                  <button class="primary-button" type="submit"><i data-lucide="import"></i><span>Import</span></button>
-                </form>
-              </div>
+              <div class="lead-stats-strip" id="leadStatsStrip"></div>
             </section>
 
-            <section class="panel prospect-list-panel">
+            <section class="panel crm-pull-panel">
               <div class="panel-heading">
                 <div>
-                  <h2>Prospects</h2>
-                  <p id="prospectCount">0 records</p>
-                </div>
-                <div class="filter-row">
-                  <input id="prospectSearch" type="search" placeholder="Search people" aria-label="Search people" />
-                  <select id="prospectStatusFilter" aria-label="Prospect status">
-                    <option value="all">All</option>
-                    <option value="new">New</option>
-                    <option value="enriched">Enriched</option>
-                    <option value="linkedin_ready">LinkedIn ready</option>
-                    <option value="outreach_ready">Ready</option>
-                    <option value="contacted">Contacted</option>
-                    <option value="engaged">Engaged</option>
-                    <option value="call_analyzed">Call analyzed</option>
-                    <option value="follow_up_due">Follow-up due</option>
-                    <option value="meeting_booked">Meeting booked</option>
-                    <option value="review">Review</option>
-                  </select>
+                  <h2>CRM Lead Pull</h2>
+                  <p>Bring LinkedIn-heavy leads into the OS</p>
                 </div>
               </div>
-              <div class="prospect-list" id="prospectList"></div>
-            </section>
-
-            <section class="panel prospect-detail-panel">
-              <div class="panel-heading">
-                <div>
-                  <h2 id="selectedProspectName">Select a prospect</h2>
-                  <p id="selectedProspectMeta">Contact discovery and AI outreach</p>
-                </div>
-                <span class="pill" id="selectedProspectScore">0</span>
-              </div>
-
-              <div class="prospect-actions">
-                <button class="primary-button" id="prepareOutreachBtn"><i data-lucide="wand-sparkles"></i><span>Research + Prepare</span></button>
-                <button id="enrichProspectBtn"><i data-lucide="search"></i><span>Refresh Contacts</span></button>
-                <select id="outreachProfileSelect" aria-label="AI profile">
-                  <option value="economy">Fast</option>
-                  <option value="balanced" selected>Balanced</option>
-                  <option value="premium">Strategic</option>
+              <form class="crm-pull-form" id="crmLeadPullForm">
+                <select id="crmPullSourceInput" aria-label="CRM source">
+                  <option value="supabase">Supabase REST</option>
+                  <option value="custom_crm">Custom CRM API</option>
                 </select>
+                <input id="crmPullResourceInput" type="text" placeholder="Table or endpoint, e.g. leads" />
+                <div class="split-fields">
+                  <input id="crmPullLimitInput" type="number" min="1" max="500" value="50" />
+                  <input id="crmPullLinkedInFieldInput" type="text" placeholder="LinkedIn field, e.g. linkedin_url" />
+                </div>
+                <button class="primary-button" type="submit"><i data-lucide="database-zap"></i><span>Pull Leads</span></button>
+              </form>
+              <div class="crm-import-status" id="crmImportStatus"></div>
+            </section>
+
+            <section class="panel leads-table-panel">
+              <div class="panel-heading">
+                <div>
+                  <h2>Lead List</h2>
+                  <p>Open a lead, run research, then move through the queue</p>
+                </div>
               </div>
-
-              <div class="lead-analytics" id="leadAnalytics"></div>
-
-              <div class="detail-grid">
-                <section class="subpanel">
-                  <div class="subpanel-heading">
-                    <h3>Profile</h3>
-                    <span id="selectedProspectStatus">new</span>
-                  </div>
-                  <dl class="profile-fields" id="profileFields"></dl>
-                </section>
-
-                <section class="subpanel">
-                  <div class="subpanel-heading">
-                    <h3>Contact Discovery</h3>
-                    <span id="contactPolicy">public review</span>
-                  </div>
-                  <div class="contact-list" id="contactList"></div>
-                </section>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Lead</th>
+                      <th>Status</th>
+                      <th>Score</th>
+                      <th>Reach</th>
+                      <th>Next Action</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="leadTableBody"></tbody>
+                </table>
               </div>
-
-              <section class="subpanel tracker-panel">
-                <div class="subpanel-heading">
-                  <h3>Lead Tracker</h3>
-                  <span>historical analysis</span>
-                </div>
-                <div class="interaction-controls">
-                  <select id="interactionTypeSelect" aria-label="Interaction type">
-                    <option value="email_sent">Email sent</option>
-                    <option value="email_opened">Email opened</option>
-                    <option value="linkedin_connected">LinkedIn connected</option>
-                    <option value="linkedin_reply">LinkedIn reply</option>
-                    <option value="meeting_booked">Meeting booked</option>
-                    <option value="no_reply">No reply</option>
-                  </select>
-                  <button id="logInteractionBtn"><i data-lucide="list-plus"></i><span>Log Interaction</span></button>
-                </div>
-                <div class="interaction-list" id="interactionList"></div>
-              </section>
-
-              <section class="subpanel call-panel">
-                <div class="subpanel-heading">
-                  <h3>Call Coach</h3>
-                  <span>transcript to next steps</span>
-                </div>
-                <form class="call-analysis-form" id="callAnalysisForm">
-                  <textarea id="callTranscriptInput" rows="5" placeholder="Paste call transcript or notes. Example: Prospect asked for a workflow next week, mentioned current CRM data quality issues, and asked about implementation timeline."></textarea>
-                  <button type="submit"><i data-lucide="mic-vocal"></i><span>Analyze Call</span></button>
-                </form>
-                <div class="call-analysis" id="callAnalysis"></div>
-              </section>
-
-              <section class="subpanel task-panel">
-                <div class="subpanel-heading">
-                  <h3>Follow-Up Tasks</h3>
-                  <span>notifications</span>
-                </div>
-                <div class="task-notification-list" id="taskNotificationList"></div>
-              </section>
-
-              <section class="subpanel outreach-panel">
-                <div class="subpanel-heading">
-                  <h3>AI Outreach</h3>
-                  <span id="outreachModel">not prepared</span>
-                </div>
-                <div id="outreachContent" class="outreach-content"></div>
-              </section>
             </section>
           </div>
         </section>
@@ -270,23 +449,15 @@
             <section class="panel crm-pull-panel">
               <div class="panel-heading">
                 <div>
-                  <h2>CRM Lead Pull</h2>
-                  <p>Bring LinkedIn-heavy leads into the machine</p>
+                  <h2>Seller Commands</h2>
+                  <p>Bulk updates and CRM actions are available from Leads</p>
                 </div>
               </div>
-              <form class="crm-pull-form" id="crmLeadPullForm">
-                <select id="crmPullSourceInput" aria-label="CRM source">
-                  <option value="supabase">Supabase REST</option>
-                  <option value="custom_crm">Custom CRM API</option>
-                </select>
-                <input id="crmPullResourceInput" type="text" placeholder="Table or endpoint, e.g. leads" />
-                <div class="split-fields">
-                  <input id="crmPullLimitInput" type="number" min="1" max="500" value="50" />
-                  <input id="crmPullLinkedInFieldInput" type="text" placeholder="LinkedIn field, e.g. linkedin_url" />
-                </div>
-                <button class="primary-button" type="submit"><i data-lucide="database-zap"></i><span>Pull Leads</span></button>
-              </form>
-              <div class="crm-import-status" id="crmImportStatus"></div>
+              <div class="connector-status-grid">
+                <div><span>Visible path</span><strong>Dashboard + Leads</strong></div>
+                <div><span>AI actions</span><strong>Logged with review</strong></div>
+                <div><span>CRM safety</span><strong>No auto-send</strong></div>
+              </div>
             </section>
 
             <section class="panel agent-panel span-2">
@@ -330,8 +501,8 @@
             <section class="panel learning-ingest-panel">
               <div class="panel-heading">
                 <div>
-                  <h2>Learning Database</h2>
-                  <p>Winning messages, screenshots, profiles, outcomes</p>
+                  <h2>Knowledge Base</h2>
+                  <p>Winning messages, screenshots, profiles, lessons, and outcomes</p>
                 </div>
                 <span class="pill" id="learningStatusPill">empty</span>
               </div>
@@ -399,7 +570,7 @@
             <section class="panel learning-playbook-panel">
               <div class="panel-heading">
                 <div>
-                  <h2>Learned Playbook</h2>
+                  <h2>AI Playbook</h2>
                   <p>Patterns applied to future outreach</p>
                 </div>
                 <button id="learningRetrainBtn" type="button"><i data-lucide="refresh-cw"></i><span>Rebuild</span></button>
@@ -454,7 +625,7 @@
             <section class="panel learning-example-panel span-2">
               <div class="panel-heading">
                 <div>
-                  <h2>Training Data</h2>
+                  <h2>Knowledge Feed</h2>
                   <p>Recent examples fed into the machine</p>
                 </div>
                 <span class="pill" id="learningVersionPill">learning-local-v1</span>

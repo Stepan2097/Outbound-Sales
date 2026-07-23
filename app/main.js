@@ -44,6 +44,7 @@ function render() {
   renderLearningDatabase();
   renderIntegrations();
   renderProspects();
+  renderLeadsPage();
   renderAssistant();
   renderAgents();
   renderOverview();
@@ -556,8 +557,8 @@ function prospectCard(prospect) {
 function renderSelectedProspect(prospect) {
   const enrichButton = document.getElementById("enrichProspectBtn");
   const prepareButton = document.getElementById("prepareOutreachBtn");
-  enrichButton.disabled = !prospect;
-  prepareButton.disabled = !prospect;
+  if (enrichButton) enrichButton.disabled = !prospect;
+  if (prepareButton) prepareButton.disabled = !prospect;
 
   if (!prospect) {
     document.getElementById("selectedProspectName").textContent = "Select a prospect";
@@ -572,6 +573,7 @@ function renderSelectedProspect(prospect) {
     document.getElementById("callAnalysis").innerHTML = `<div class="empty-state">Paste a transcript after a call</div>`;
     document.getElementById("taskNotificationList").innerHTML = `<div class="empty-state">No follow-up tasks</div>`;
     document.getElementById("outreachModel").textContent = "not prepared";
+    renderLeadWorkspaceExtras(null);
     return;
   }
 
@@ -588,6 +590,217 @@ function renderSelectedProspect(prospect) {
   document.getElementById("taskNotificationList").innerHTML = taskNotificationRows(prospect);
   document.getElementById("outreachContent").innerHTML = outreachRows(prospect);
   document.getElementById("outreachModel").textContent = prospect.outreach?.modelUsed || "not prepared";
+  renderLeadWorkspaceExtras(prospect);
+}
+
+function renderLeadWorkspaceExtras(prospect) {
+  const prospects = state.prospects || [];
+  const index = prospect ? prospects.findIndex((item) => item.id === prospect.id) : -1;
+  const analysis = prospect?.analysis || { reachProbability: 0, closeProbability: 0, recommendedAction: "Run research", reasoning: [] };
+  const confidence = bestContactConfidence(prospect);
+  const latest = prospect?.updatedAt ? `Updated ${relativeTime(prospect.updatedAt)}` : "Research not run";
+
+  setText("leadWorkspaceQueue", prospects.length ? `Lead ${index + 1 || 1} of ${prospects.length}` : "No leads loaded");
+  setText("selectedLeadAvatar", prospect ? initials(prospect.name) : "OS");
+  setText("leadWorkspaceCompany", prospect ? prospect.company || "Unknown account" : "Open a lead to start");
+  setText("leadWorkspacePosition", prospect ? [prospect.title, prospect.location, prospect.website].filter(Boolean).join(" · ") || "No profile details yet" : "Add a LinkedIn URL, upload leads, or pull from CRM. The system prepares intelligence, contacts, messages, CRM logs, and next actions without auto-sending.");
+  setText("leadWorkspaceFit", prospect ? `${titleCase(analysis.productFit || "unknown")} fit` : "No fit score yet");
+  setText("leadWorkspaceUpdated", latest);
+  setText("leadWorkspaceConfidence", prospect ? `${confidence}% best contact confidence` : "Awaiting evidence");
+  setText("committeeCount", prospect ? `${committeeForProspect(prospect).length} contact${committeeForProspect(prospect).length === 1 ? "" : "s"}` : "0 contacts");
+
+  setHtml("accountSignalList", accountSignalRows(prospect));
+  setHtml("buyingCommitteeList", buyingCommitteeRows(prospect));
+  setHtml("scoreBreakdown", scoreBreakdownRows(prospect));
+  setHtml("nextActionSummary", nextActionRows(prospect));
+  setHtml("salesCycleList", salesCycleRows(prospect));
+  setHtml("sourceAuditList", sourceAuditRows(prospect));
+  updateQuickCopies(prospect);
+}
+
+function renderLeadsPage() {
+  const prospects = state.prospects || [];
+  const ready = prospects.filter((prospect) => prospect.status === "outreach_ready" || prospect.status === "linkedin_ready").length;
+  const active = prospects.filter((prospect) => ["contacted", "engaged", "follow_up_due", "meeting_booked"].includes(prospect.status)).length;
+  const due = state.followUpTasks?.filter((task) => task.status !== "done").length || 0;
+  setHtml("leadStatsStrip", `
+    <div><span>Total leads</span><strong>${prospects.length}</strong></div>
+    <div><span>Ready to contact</span><strong>${ready}</strong></div>
+    <div><span>Active conversations</span><strong>${active}</strong></div>
+    <div><span>Follow-ups</span><strong>${due}</strong></div>
+  `);
+  setHtml("leadTableBody", prospects.length
+    ? prospects.map(leadTableRow).join("")
+    : `<tr><td colspan="6"><div class="empty-state">No leads yet. Pull from CRM or add a LinkedIn target from Dashboard.</div></td></tr>`);
+}
+
+function leadTableRow(prospect) {
+  const analysis = prospect.analysis || {};
+  return `
+    <tr>
+      <td><strong>${escapeHtml(prospect.name)}</strong><span>${escapeHtml([prospect.title, prospect.company].filter(Boolean).join(" · "))}</span></td>
+      <td><span class="pill">${escapeHtml(titleCase(prospect.status || "new"))}</span></td>
+      <td><strong>${prospect.score || 0}</strong></td>
+      <td><strong>${analysis.reachProbability || 0}%</strong></td>
+      <td><span>${escapeHtml(analysis.recommendedAction || "Run research")}</span></td>
+      <td><button type="button" data-open-prospect-id="${escapeAttr(prospect.id)}"><i data-lucide="arrow-up-right"></i><span>Open</span></button></td>
+    </tr>
+  `;
+}
+
+function accountSignalRows(prospect) {
+  if (!prospect) return `<div class="empty-state">Run research to see account signals</div>`;
+  const analysis = prospect.analysis || {};
+  const signals = [
+    prospect.notes ? { label: "Lead context", value: prospect.notes, confidence: 78 } : null,
+    prospect.contactDiscovery?.scraperNote ? { label: "Contact discovery", value: prospect.contactDiscovery.scraperNote, confidence: 70 } : null,
+    ...(analysis.reasoning || []).map((value) => ({ label: "AI reasoning", value, confidence: 74 }))
+  ].filter(Boolean);
+  return signals.length
+    ? signals.map((signal) => `
+      <article class="research-signal">
+        <i data-lucide="radar"></i>
+        <div>
+          <strong>${escapeHtml(signal.label)}</strong>
+          <span>${escapeHtml(signal.value)}</span>
+        </div>
+        <b>${signal.confidence}%</b>
+      </article>
+    `).join("")
+    : `<div class="empty-state">No account signals yet</div>`;
+}
+
+function buyingCommitteeRows(prospect) {
+  if (!prospect) return `<div class="empty-state">Open a lead to map the buying committee</div>`;
+  const committee = committeeForProspect(prospect);
+  return committee.map((member) => `
+    <article class="committee-card">
+      <div class="avatar">${initials(member.name)}</div>
+      <div>
+        <strong>${escapeHtml(member.name)}</strong>
+        <span>${escapeHtml([member.title, member.context].filter(Boolean).join(" · "))}</span>
+      </div>
+      <span class="pill">${escapeHtml(titleCase(member.role))}</span>
+    </article>
+  `).join("");
+}
+
+function committeeForProspect(prospect) {
+  if (!prospect) return [];
+  const sameCompany = (state.prospects || []).filter((item) => item.company?.toLowerCase() === prospect.company?.toLowerCase());
+  const known = sameCompany.length ? sameCompany : [prospect];
+  const rows = known.map((item) => ({
+    name: item.name,
+    title: item.title || "Unknown title",
+    role: committeeRole(item.title),
+    context: item.id === prospect.id ? "current lead" : "known in queue"
+  }));
+  rows.push({ name: "RevOps or Sales leader", title: "Suggested next person to research", role: "suggested", context: "not found yet" });
+  return rows.slice(0, 5);
+}
+
+function committeeRole(title) {
+  const text = String(title || "").toLowerCase();
+  if (/founder|ceo|owner|president/.test(text)) return "economic_buyer";
+  if (/vp|head|chief|revenue|sales|growth/.test(text)) return "decision_maker";
+  if (/ops|operations|revops|crm/.test(text)) return "champion";
+  if (/finance|legal|procurement|security/.test(text)) return "approver";
+  return "influencer";
+}
+
+function scoreBreakdownRows(prospect) {
+  if (!prospect) return `<div class="empty-state">Scoring appears after a lead is selected</div>`;
+  const analysis = prospect.analysis || {};
+  const rows = [
+    ["ICP fit", prospect.score || 0],
+    ["Reach chance", analysis.reachProbability || 0],
+    ["Close chance", analysis.closeProbability || 0],
+    ["Contact confidence", bestContactConfidence(prospect)]
+  ];
+  return rows.map(([label, value]) => `
+    <div>
+      <span>${escapeHtml(label)}</span>
+      <strong>${value}%</strong>
+      <div class="meter compact"><span style="width:${value}%"></span></div>
+    </div>
+  `).join("");
+}
+
+function nextActionRows(prospect) {
+  if (!prospect) return `<div class="empty-state">Select a lead to see the next action</div>`;
+  const analysis = prospect.analysis || {};
+  const channel = prospect.outreach?.recommendedChannel || preferredChannel(prospect);
+  return `
+    <article class="next-action-card">
+      <i data-lucide="sparkles"></i>
+      <div>
+        <strong>${escapeHtml(analysis.recommendedAction || "Run research and prepare outreach")}</strong>
+        <span>Best channel: ${escapeHtml(channel)} · Reach ${analysis.reachProbability || 0}% · Close ${analysis.closeProbability || 0}%</span>
+        <p>${escapeHtml((analysis.reasoning || []).join(" "))}</p>
+      </div>
+    </article>
+  `;
+}
+
+function salesCycleRows(prospect) {
+  if (!prospect) return `<div class="empty-state">No lead selected</div>`;
+  const items = [
+    { label: "Added to queue", value: relativeTime(prospect.createdAt), state: "done" },
+    { label: "Research", value: prospect.contactDiscovery ? "completed" : "not run", state: prospect.contactDiscovery ? "done" : "pending" },
+    { label: "Outreach prepared", value: prospect.outreach ? relativeTime(prospect.outreach.preparedAt || prospect.updatedAt) : "pending", state: prospect.outreach ? "done" : "pending" },
+    { label: "Latest CRM action", value: (prospect.interactions || [])[0]?.type ? titleCase(prospect.interactions[0].type) : "none logged", state: (prospect.interactions || []).length ? "done" : "pending" }
+  ];
+  return items.map((item) => `
+    <article class="cycle-row ${item.state}">
+      <span></span>
+      <div>
+        <strong>${escapeHtml(item.label)}</strong>
+        <small>${escapeHtml(item.value)}</small>
+      </div>
+    </article>
+  `).join("");
+}
+
+function sourceAuditRows(prospect) {
+  if (!prospect) return `<div class="empty-state">Sources appear after profile import and research</div>`;
+  const productSources = state.selectedProduct?.mcpContext?.sources || [];
+  const contactSources = prospect.contactDiscovery?.candidates || [];
+  const rows = [
+    { source: "Uploaded or CRM profile", claim: [prospect.name, prospect.company, prospect.title].filter(Boolean).join(" · "), confidence: 82, status: "workspace data" },
+    ...productSources.map((source) => ({ source: source.name, claim: source.type, confidence: source.confidence, status: "product context" })),
+    ...contactSources.map((candidate) => ({ source: candidate.source, claim: `${candidate.type}: ${candidate.value}`, confidence: candidate.confidence, status: candidate.status })),
+    ...(prospect.contactDiscovery?.warnings || []).map((warning) => ({ source: "Enrichment warning", claim: warning, confidence: 0, status: "review required" }))
+  ];
+  return rows.map((row) => `
+    <article class="source-row">
+      <div>
+        <strong>${escapeHtml(row.source || "Unknown source")}</strong>
+        <span>${escapeHtml(row.claim || "No claim")}</span>
+      </div>
+      <small>${escapeHtml(row.status || "review")} · ${row.confidence || 0}%</small>
+    </article>
+  `).join("");
+}
+
+function bestContactConfidence(prospect) {
+  const candidates = prospect?.contactDiscovery?.candidates || [];
+  return candidates.length ? Math.max(...candidates.map((candidate) => Number(candidate.confidence) || 0)) : 0;
+}
+
+function preferredChannel(prospect) {
+  const candidates = prospect?.contactDiscovery?.candidates || [];
+  if (prospect?.linkedin || candidates.some((candidate) => candidate.type === "linkedin")) return "linkedin";
+  if (prospect?.email || candidates.some((candidate) => candidate.type === "email")) return "email";
+  if (prospect?.phone || candidates.some((candidate) => candidate.type === "phone")) return "phone";
+  return "linkedin";
+}
+
+function updateQuickCopies(prospect) {
+  const messages = prospect?.outreach?.messages || [];
+  const variations = prospect?.outreach?.linkedinVariations || [];
+  setCopyText("copyLinkedinQuick", variations[0]?.body || messages.find((message) => /linkedin/i.test(message.channel))?.body || "");
+  setCopyText("copyEmailQuick", messages.find((message) => /email/i.test(message.channel))?.body || "");
+  setCopyText("copyWhatsappQuick", messages.find((message) => /whatsapp/i.test(message.channel))?.body || "");
 }
 
 function analyticsRows(prospect) {
@@ -919,16 +1132,34 @@ function fillSelect(select, items, valueFn, labelFn, selectedValue) {
     .join("");
 }
 
+function setText(id, value) {
+  const element = document.getElementById(id);
+  if (element) element.textContent = value;
+}
+
+function setHtml(id, html) {
+  const element = document.getElementById(id);
+  if (element) element.innerHTML = html;
+}
+
+function setCopyText(id, value) {
+  const element = document.getElementById(id);
+  if (!element) return;
+  element.dataset.copyText = value || "";
+  element.disabled = !value;
+}
+
 function setView(viewName) {
   views.forEach((view) => view.classList.toggle("active", view.id === `view-${viewName}`));
   navItems.forEach((item) => item.classList.toggle("active", item.dataset.view === viewName));
   document.getElementById("pageTitle").textContent =
     {
-      prospects: "Outbound Machine",
+      prospects: "Dashboard",
+      leads: "Leads",
       ai: "AI Operator",
-      database: "Learning Database",
-      products: "Product Studio",
-      integrations: "Integration Settings",
+      database: "Knowledge Base",
+      products: "Products",
+      integrations: "Settings",
       overview: "AI Orchestration Control",
       models: "Model Registry",
       routing: "Task Routing",
@@ -1085,6 +1316,20 @@ function parseCsv(text) {
   return rows;
 }
 
+function moveSelectedProspect(direction) {
+  const prospects = state.prospects || [];
+  if (!prospects.length) return;
+  const currentIndex = Math.max(0, prospects.findIndex((prospect) => prospect.id === selectedProspectId));
+  const nextIndex = (currentIndex + direction + prospects.length) % prospects.length;
+  selectedProspectId = prospects[nextIndex].id;
+  render();
+  scrollLeadWorkspaceToTop();
+}
+
+function scrollLeadWorkspaceToTop() {
+  document.getElementById("dashboard-overview")?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
 navItems.forEach((item) => {
   item.addEventListener("click", () => setView(item.dataset.view));
 });
@@ -1112,7 +1357,38 @@ document.getElementById("quickPrepareBtn").addEventListener("click", async () =>
   await researchAndPrepareSelected();
 });
 
+document.getElementById("runResearchTopBtn").addEventListener("click", async () => {
+  await researchAndPrepareSelected();
+});
+
+document.getElementById("prevLeadBtn").addEventListener("click", () => {
+  moveSelectedProspect(-1);
+});
+
+document.getElementById("nextLeadBtn").addEventListener("click", () => {
+  moveSelectedProspect(1);
+});
+
+document.getElementById("nextLeadRailBtn").addEventListener("click", () => {
+  moveSelectedProspect(1);
+});
+
 document.addEventListener("click", async (event) => {
+  const viewLink = event.target.closest("[data-view-link]");
+  if (viewLink) {
+    setView(viewLink.dataset.viewLink);
+    return;
+  }
+
+  const openProspect = event.target.closest("[data-open-prospect-id]");
+  if (openProspect) {
+    selectedProspectId = openProspect.dataset.openProspectId;
+    setView("prospects");
+    render();
+    scrollLeadWorkspaceToTop();
+    return;
+  }
+
   const assistantTemplate = event.target.closest("[data-assistant-template]");
   if (assistantTemplate) {
     document.getElementById("assistantTaskInput").value = assistantTemplate.dataset.assistantTemplate || "";
@@ -1124,6 +1400,7 @@ document.addEventListener("click", async (event) => {
   if (prospectCardButton) {
     selectedProspectId = prospectCardButton.dataset.prospectId;
     renderProspects();
+    renderLeadWorkspaceExtras(state.prospects?.find((prospect) => prospect.id === selectedProspectId));
     refreshIcons();
   }
 
