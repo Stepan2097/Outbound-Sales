@@ -1977,7 +1977,7 @@ function renderApifyInputTemplate(template, prospect, fallbackInput) {
     domain: normalizeDomain(prospect.website),
     phones: knownPhoneCandidates(prospect)
   };
-  return replaceTemplateValues(parsed, variables);
+  return compactApifyInput(replaceTemplateValues(parsed, variables));
 }
 
 function replaceTemplateValues(value, variables) {
@@ -1992,6 +1992,30 @@ function replaceTemplateValues(value, variables) {
     return variables[exactToken[1]] ?? "";
   }
   return value.replace(/{{\s*([a-zA-Z0-9_]+)\s*}}/g, (_, key) => String(variables[key] ?? ""));
+}
+
+function compactApifyInput(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => compactApifyInput(item))
+      .filter((item) => !isEmptyApifyValue(item));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .map(([key, child]) => [key, compactApifyInput(child)])
+        .filter(([, child]) => !isEmptyApifyValue(child))
+    );
+  }
+  return value;
+}
+
+function isEmptyApifyValue(value) {
+  if (value === null || value === undefined) return true;
+  if (typeof value === "string") return !value.trim();
+  if (Array.isArray(value)) return value.length === 0;
+  if (value && typeof value === "object") return Object.keys(value).length === 0;
+  return false;
 }
 
 async function runApifyActor(actorId, input, maxChargeUsd) {
@@ -5034,6 +5058,9 @@ function initializeRuntimeConfigFromEnv() {
       emailPhoneFinder: normalizeApifyActorId(process.env.APIFY_EMAIL_PHONE_FINDER_ACTOR_ID || state.integrations.apify.actorIds.emailPhoneFinder),
       phoneMessengerCheck: normalizeApifyActorId(process.env.APIFY_PHONE_MESSENGER_CHECK_ACTOR_ID || state.integrations.apify.actorIds.phoneMessengerCheck)
     };
+    if (process.env.APIFY_LEAD_DATABASE_INPUT_TEMPLATE?.trim()) {
+      state.integrations.apify.actorInputTemplates.leadDatabase = cleanLongText(process.env.APIFY_LEAD_DATABASE_INPUT_TEMPLATE);
+    }
     state.integrations.apify.maxChargeUsd = clampNumber(process.env.APIFY_MAX_CHARGE_USD, 0.01, 50, state.integrations.apify.maxChargeUsd);
     state.integrations.apify.keyMetadata = {
       provider: "apify",
