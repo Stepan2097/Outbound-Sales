@@ -850,6 +850,12 @@ async function handleApi(request, response, url) {
     }
 
     prospect.contactDiscovery = await enrichProspectContacts(prospect);
+    recordLeadResearch(prospect, {
+      stage: "contact_enriched",
+      summary: `${prospect.contactDiscovery.candidates.length} contact candidates reviewed for ${prospect.name}.`,
+      contactDiscovery: prospect.contactDiscovery,
+      warnings: prospect.contactDiscovery.warnings
+    });
     prospect.status = "enriched";
     prospect.updatedAt = new Date().toISOString();
     addEvent("enrichment", `${prospect.name} contact discovery refreshed.`);
@@ -875,6 +881,12 @@ async function handleApi(request, response, url) {
       notes: cleanText(body.notes || "Created from LinkedIn target URL.")
     });
     prospect.contactDiscovery = await enrichProspectContacts(prospect);
+    recordLeadResearch(prospect, {
+      stage: "contact_enriched",
+      summary: `${prospect.contactDiscovery.candidates.length} contact candidates reviewed from LinkedIn target import.`,
+      contactDiscovery: prospect.contactDiscovery,
+      warnings: prospect.contactDiscovery.warnings
+    });
     prospect.outreach = await prepareAndLogOutreach(prospect, "balanced", "LINKEDIN_CONNECTION_MESSAGE", {
       source: "linkedin-target-url"
     });
@@ -895,6 +907,12 @@ async function handleApi(request, response, url) {
 
     if (!prospect.contactDiscovery) {
       prospect.contactDiscovery = await enrichProspectContacts(prospect);
+      recordLeadResearch(prospect, {
+        stage: "contact_enriched",
+        summary: `${prospect.contactDiscovery.candidates.length} contact candidates reviewed before outreach preparation.`,
+        contactDiscovery: prospect.contactDiscovery,
+        warnings: prospect.contactDiscovery.warnings
+      });
     }
 
     const profile = body.profile === "premium" || body.profile === "economy" ? body.profile : "balanced";
@@ -1497,10 +1515,21 @@ function seedHistoricalOutcomes() {
       Partnerships: { reach: 0.42, close: 0.12 }
     },
     byInteraction: {
+      linkedin_profile_viewed: { reach: 0.03, close: 0.005 },
+      linkedin_viewed: { reach: 0.03, close: 0.005 },
+      linkedin_post_liked: { reach: 0.04, close: 0.005 },
+      linkedin_comment_planned: { reach: 0.05, close: 0.008 },
+      linkedin_skill_endorsed: { reach: 0.03, close: 0.004 },
+      linkedin_invite_sent: { reach: 0.09, close: 0.015 },
+      linkedin_invite_accepted: { reach: 0.2, close: 0.05 },
       email_sent: { reach: 0.05, close: 0.01 },
       email_opened: { reach: 0.12, close: 0.03 },
       linkedin_connected: { reach: 0.18, close: 0.04 },
       linkedin_reply: { reach: 0.32, close: 0.09 },
+      sms_sent: { reach: 0.09, close: 0.02 },
+      whatsapp_sent: { reach: 0.11, close: 0.025 },
+      telegram_sent: { reach: 0.08, close: 0.018 },
+      follow_up_scheduled: { reach: 0.02, close: 0.008 },
       meeting_booked: { reach: 0.45, close: 0.24 },
       call_completed: { reach: 0.2, close: 0.07 },
       no_reply: { reach: -0.08, close: -0.03 }
@@ -1538,6 +1567,9 @@ function normalizeProspect(input) {
     updatedAt: now,
     contactDiscovery: input.contactDiscovery || null,
     outreach: input.outreach || null,
+    researchHistory: Array.isArray(input.researchHistory) ? input.researchHistory.slice(0, 12) : [],
+    nextActionPlan: input.nextActionPlan || null,
+    salesCadence: input.salesCadence || null,
     isIcpSeed: Boolean(input.isIcpSeed),
     agentResults: input.agentResults || {},
     crmSource: input.crmSource || null
@@ -2222,6 +2254,12 @@ async function executeProspectAgent(agentId, prospect) {
   if (agentId === "map-buying-committee") return mapBuyingCommitteeForProspect(prospect);
   if (agentId === "enrich-contact") {
     prospect.contactDiscovery = await enrichProspectContacts(prospect);
+    recordLeadResearch(prospect, {
+      stage: "contact_enriched",
+      summary: `${prospect.contactDiscovery.candidates.length} contact candidates reviewed by Enrich Contact agent.`,
+      contactDiscovery: prospect.contactDiscovery,
+      warnings: prospect.contactDiscovery.warnings
+    });
     prospect.status = "enriched";
     return {
       summary: `${prospect.contactDiscovery.candidates.length} contact candidates found.`,
@@ -2250,13 +2288,16 @@ async function executeProspectAgent(agentId, prospect) {
   }
   if (agentId === "plan-next-action") {
     const analysis = analyzeLead(prospect);
+    const nextActionPlan = buildNextActionPlan(prospect, prospect.outreach || {}, currentProduct());
+    prospect.nextActionPlan = nextActionPlan;
     return {
-      summary: analysis.recommendedAction,
+      summary: nextActionPlan.primaryAction || analysis.recommendedAction,
       nextAction: {
-        label: analysis.recommendedAction,
-        reason: analysis.reasoning.join(" "),
+        label: nextActionPlan.primaryAction || analysis.recommendedAction,
+        reason: nextActionPlan.reason || analysis.reasoning.join(" "),
         priority: analysis.closeProbability > 25 ? "high" : "medium",
-        due: "today"
+        due: nextActionPlan.followUp?.due || "today",
+        channelOrder: nextActionPlan.channelOrder
       }
     };
   }
@@ -2718,35 +2759,40 @@ async function prepareOutreachWithAi(prospect, profile, taskType = "SEQUENCE_GEN
       model: state.aiModelDefaults.writingModel,
       taskType,
       profile,
-      maxTokens: 1400,
+      maxTokens: 900,
       messages: [
         {
           role: "system",
-          content: "You are an expert B2B outbound sales writer. Return only strict JSON with escaped newlines inside string values. Do not use markdown. Do not invent private contact data. Keep claims grounded in the provided product context."
+          content: "You are an expert B2B outbound sales writer. Return only strict JSON with escaped newlines inside string values. Do not use markdown. Do not invent private contact data. Keep claims grounded in the provided product context. Do not mention CRM metadata, folder IDs, import pages, owner names, internal status names, or any note that looks like operational metadata."
         },
         {
           role: "user",
           content: JSON.stringify({
-            instruction: "Create product-specific outreach for this prospect. Include email, LinkedIn, call opener, four LinkedIn variations, and practical next actions.",
+            instruction: "Create product-specific outreach for this prospect. First touch should usually be LinkedIn warm-up plus an invitation. Include concise LinkedIn invite, LinkedIn follow-up, email, SMS, WhatsApp, Telegram, call opener, four LinkedIn variations, and practical next actions. SMS and messenger drafts must be short and only used after contact/permission review.",
             requiredJsonShape: {
-              recommendedChannel: "email | linkedin | manual_research",
+              recommendedChannel: "linkedin | email | sms | whatsapp | telegram | manual_research",
               qualificationRationale: "short rationale",
               messages: [
+                { channel: "linkedin_invite", body: "string" },
+                { channel: "linkedin_follow_up", body: "string" },
                 { channel: "email", subject: "string", body: "string" },
-                { channel: "linkedin", body: "string" },
+                { channel: "sms", body: "string" },
+                { channel: "whatsapp", body: "string" },
+                { channel: "telegram", body: "string" },
                 { channel: "call", body: "string" }
               ],
               linkedinVariations: [
-                { label: "connection", channel: "linkedin", body: "string" },
+                { label: "connection invite", channel: "linkedin", body: "string" },
                 { label: "contextual", channel: "linkedin", body: "string" },
                 { label: "short follow-up", channel: "linkedin", body: "string" },
                 { label: "direct", channel: "linkedin", body: "string" }
               ],
               actions: [
-                { type: "review_contact_data", label: "string", due: "today", priority: "high | medium | low" }
+                { type: "linkedin_invite_sent", label: "string", due: "today", priority: "high | medium | low" },
+                { type: "follow_up_scheduled", label: "string", due: "2-3 days", priority: "high | medium | low" }
               ],
               warmupActions: [
-                { type: "review_profile_match", label: "string", channel: "linkedin | facebook | email | phone", due: "today", priority: "high | medium | low" }
+                { type: "linkedin_profile_viewed", label: "string", channel: "linkedin | facebook | email | phone", due: "today", priority: "high | medium | low" }
               ]
             },
             product: productForPrompt(product),
@@ -2761,32 +2807,59 @@ async function prepareOutreachWithAi(prospect, profile, taskType = "SEQUENCE_GEN
     });
     return normalizeAiOutreachPlan(fallbackPlan, data, run);
   } catch (error) {
-    addEvent("provider", `OpenRouter outreach fallback: ${error instanceof Error ? error.message : "generation failed"}`);
-    return fallbackPlan;
+    const fallbackReason = error instanceof Error ? error.message : "generation failed";
+    addEvent("provider", `OpenRouter outreach fallback: ${fallbackReason}`);
+    return {
+      ...fallbackPlan,
+      provider: "fallback",
+      fallbackReason
+    };
   }
 }
 
 async function prepareAndLogOutreach(prospect, profile, taskType = "SEQUENCE_GENERATION", context = {}) {
   const outreach = await prepareOutreachWithAi(prospect, profile, taskType);
-  const metadata = personalizationActivityMetadata(prospect, outreach, taskType, context);
+  const product = currentProduct();
+  const nextActionPlan = buildNextActionPlan(prospect, outreach, product);
+  const salesCadence = buildSalesCadence(prospect, outreach, product);
+  const acceptanceTask = ensureAcceptanceFollowUpTask(prospect, product, nextActionPlan.followUp);
+  const enrichedOutreach = {
+    ...outreach,
+    nextActionPlan,
+    salesCadence,
+    followUpTaskId: acceptanceTask.id
+  };
+  prospect.nextActionPlan = nextActionPlan;
+  prospect.salesCadence = salesCadence;
+  const metadata = personalizationActivityMetadata(prospect, enrichedOutreach, taskType, context);
   const { interaction } = await logAutomaticSalesActivity(prospect, {
     type: "outreach_prepared",
-    channel: outreach.recommendedChannel || "ai",
+    channel: enrichedOutreach.recommendedChannel || "ai",
     outcome: "prepared",
-    note: `Personalized outreach prepared for ${prospect.name} using ${outreach.productName || currentProduct().name}.`,
-    crmNote: buildPersonalizationCrmNote(prospect, outreach, context),
+    note: `Personalized outreach prepared for ${prospect.name} using ${enrichedOutreach.productName || product.name}.`,
+    crmNote: buildPersonalizationCrmNote(prospect, enrichedOutreach, context),
     source: context.source || "outbound-os",
     metadata
   });
 
-  return {
-    ...outreach,
+  const finalOutreach = {
+    ...enrichedOutreach,
     crmActivity: {
       interactionId: interaction.id,
       syncStatus: interaction.crmSync?.status || "not_synced",
       warnings: interaction.crmSync?.warnings || []
     }
   };
+  recordLeadResearch(prospect, {
+    stage: "outreach_prepared",
+    summary: `${finalOutreach.messages.length} channel drafts prepared and a LinkedIn acceptance check was scheduled.`,
+    analysis: finalOutreach.analysis,
+    outreach: finalOutreach,
+    modelUsed: finalOutreach.modelUsed,
+    provider: finalOutreach.provider,
+    warnings: finalOutreach.fallbackReason ? [`OpenRouter fallback used: ${finalOutreach.fallbackReason}`] : []
+  });
+  return finalOutreach;
 }
 
 async function logAutomaticSalesActivity(prospect, input) {
@@ -2893,11 +2966,17 @@ function buildOutreachPlan(prospect, profile, route, product = currentProduct())
   const proof = product.proofPoints[0] ?? "reduces manual outbound work";
   const differentiator = product.differentiators[0] ?? "AI-assisted sales execution";
   const knowledgeAngle = productKnowledgeForPrompt(product, 1)[0]?.lesson || "";
-  const cta = profile === "premium" ? "open to a 12-minute working session next week" : "worth a quick conversation next week";
+  const cta = profile === "premium" ? "open to a 12-minute working session next week" : "open to a quick conversation next week";
   const firstName = prospect.name.split(/\s+/)[0] || prospect.name;
   const company = prospect.company || "your team";
   const title = prospect.title || "your role";
-  const sourceLine = prospect.notes ? `I noticed ${prospect.notes.replace(/\.$/, "")}.` : `I was looking at ${company}'s go-to-market motion.`;
+  const useCaseText = lowerSalesPhrase(useCase);
+  const painText = lowerSalesPhrase(pain);
+  const differentiatorText = lowerSalesPhrase(differentiator);
+  const safeSignal = publicPersonalizationSignal(prospect);
+  const sourceLine = safeSignal ? `I noticed ${safeSignal.replace(/\.$/, "")}.` : `I was looking at ${company}'s go-to-market motion.`;
+  const useDirectPhone = hasReviewedPhoneCandidate(prospect);
+  const messengerHint = useDirectPhone ? "after confirming this is the right person and channel" : "only if a verified phone or messenger profile is added";
 
   return {
     preparedAt: new Date().toISOString(),
@@ -2915,17 +2994,33 @@ function buildOutreachPlan(prospect, profile, route, product = currentProduct())
     },
     messages: [
       {
-        channel: "email",
-        subject: `${company} and ${product.name}`,
-        body: `Hi ${firstName},\n\n${sourceLine}\n\nFor teams dealing with ${pain.toLowerCase()}, ${product.name} is usually most useful around ${useCase.toLowerCase()}. The reason I thought of ${company}: ${proof}, with ${differentiator.toLowerCase()} underneath so the workflow stays controlled.${knowledgeAngle ? ` ${knowledgeAngle}` : ""}\n\nWould you be ${cta}?`
+        channel: "linkedin_invite",
+        body: `Hi ${firstName}, noticed your work at ${company}. I’m researching how teams handle ${useCaseText}. Open to connecting?`
       },
       {
-        channel: "linkedin",
-        body: `Hi ${firstName}, noticed your work at ${company}. I’m exploring how teams handle ${useCase.toLowerCase()} with ${product.name}. Open to connecting?`
+        channel: "linkedin_follow_up",
+        body: `${firstName}, thanks for connecting. The reason I reached out: ${product.name} helps teams with ${useCaseText} without adding manual research/admin work. Is this something ${company} is trying to improve this quarter?`
+      },
+      {
+        channel: "email",
+        subject: `${company} and ${product.name}`,
+        body: `Hi ${firstName},\n\n${sourceLine}\n\nFor teams dealing with ${painText}, ${product.name} is usually most useful around ${useCaseText}. The reason I thought of ${company}: ${proof}, with ${differentiatorText} underneath so the workflow stays controlled.${knowledgeAngle ? ` ${knowledgeAngle}` : ""}\n\nWould you be ${cta}?`
+      },
+      {
+        channel: "sms",
+        body: `Hi ${firstName}, quick one: I help teams improve ${useCaseText} with ${product.name}. Worth sending you the short workflow?`
+      },
+      {
+        channel: "whatsapp",
+        body: `Hi ${firstName}, this is a quick note ${messengerHint}. I’m looking at ${company}'s ${useCaseText} workflow and thought ${product.name} could be relevant. Worth sharing a short example?`
+      },
+      {
+        channel: "telegram",
+        body: `Hi ${firstName}, quick question ${messengerHint}: is ${useCaseText} something your team is actively improving? I can share a short ${product.name} workflow if useful.`
       },
       {
         channel: "call",
-        body: `Lead with ${company}'s current motion, then ask how ${prospect.title || "the team"} handles ${useCase.toLowerCase()}, where the process breaks, and whether ${product.name}'s ${differentiator.toLowerCase()} would be useful.`
+        body: `Lead with ${company}'s current motion, then ask how ${prospect.title || "the team"} handles ${useCaseText}, where the process breaks, and whether ${product.name}'s ${differentiatorText} would be useful.`
       }
     ],
     actions: [
@@ -2936,21 +3031,33 @@ function buildOutreachPlan(prospect, profile, route, product = currentProduct())
         priority: "high"
       },
       {
-        type: "linkedin_connected",
-        label: "Send LinkedIn connection message",
+        type: "linkedin_profile_viewed",
+        label: "Open LinkedIn profile and check recent public activity",
+        due: "today",
+        priority: "high"
+      },
+      {
+        type: "linkedin_post_liked",
+        label: "Like one relevant public post if it is natural",
         due: "today",
         priority: "medium"
       },
       {
-        type: "email_sent",
-        label: "Approve cold email draft",
-        due: "tomorrow",
+        type: "linkedin_invite_sent",
+        label: "Send LinkedIn invitation with the short message",
+        due: "today",
         priority: "high"
       },
       {
-        type: "no_reply",
-        label: "Schedule follow-up if no reply",
-        due: "3 business days",
+        type: "follow_up_scheduled",
+        label: "Check in 2-3 days: if accepted, send LinkedIn follow-up; if not, review email/SMS path",
+        due: "2-3 days",
+        priority: "high"
+      },
+      {
+        type: "email_sent",
+        label: "Use email as the second channel after LinkedIn warm-up",
+        due: "after LinkedIn touch",
         priority: "medium"
       }
     ],
@@ -2971,24 +3078,45 @@ function buildWarmupActions(prospect) {
   const hasMessengerSignal = candidates.some((candidate) => candidate.type === "whatsapp_presence" || candidate.type === "telegram_presence" || candidate.type === "whatsapp_link" || candidate.type === "telegram_link" || candidate.type === "whatsapp" || candidate.type === "telegram");
   const actions = [
     {
-      type: "review_profile_match",
+      type: "linkedin_profile_viewed",
       label: "Review LinkedIn profile fit and recent public activity",
       channel: "linkedin",
       due: "today",
       priority: "high"
     },
     {
-      type: "soft_public_engagement",
+      type: "linkedin_post_liked",
       label: "Like or comment on a relevant public post before pitching",
       channel: "linkedin",
       due: "today",
       priority: "medium"
     },
     {
-      type: "send_connection",
+      type: "linkedin_comment_planned",
+      label: "Draft a helpful comment only if a recent post gives a real angle",
+      channel: "linkedin",
+      due: "today",
+      priority: "low"
+    },
+    {
+      type: "linkedin_skill_endorsed",
+      label: "Endorse a relevant skill only when the profile supports it",
+      channel: "linkedin",
+      due: "optional",
+      priority: "low"
+    },
+    {
+      type: "linkedin_invite_sent",
       label: "Send a short product-specific connection message",
       channel: "linkedin",
       due: "today",
+      priority: "high"
+    },
+    {
+      type: "follow_up_scheduled",
+      label: "Set a 2-3 day task to check acceptance and send the next message",
+      channel: "linkedin",
+      due: "2-3 days",
       priority: "high"
     }
   ];
@@ -3022,17 +3150,252 @@ function buildWarmupActions(prospect) {
   return actions;
 }
 
+function publicPersonalizationSignal(prospect) {
+  const raw = cleanText(prospect.notes || "");
+  if (!raw) return "";
+  const blockedPatterns = [
+    /\bcrm\b/i,
+    /\bfolder\b/i,
+    /\bpage\s+\d+/i,
+    /\bstatus\b/i,
+    /\bowner\b/i,
+    /\bimported\b/i,
+    /\badvantage\b/i,
+    /\bnetlify\b/i,
+    /\b(api token|api key|endpoint)\b/i,
+    /\buuid\b/i,
+    /\bid[:=]/i
+  ];
+  if (blockedPatterns.some((pattern) => pattern.test(raw))) return "";
+  return raw
+    .replace(/\bhttps?:\/\/\S+/gi, "")
+    .replace(/\b[A-Fa-f0-9]{8}-[A-Fa-f0-9-]{13,}\b/g, "")
+    .trim()
+    .slice(0, 180);
+}
+
+function lowerSalesPhrase(value) {
+  return cleanText(value || "")
+    .toLowerCase()
+    .replace(/\bai\b/g, "AI")
+    .replace(/\bcrm\b/g, "CRM")
+    .replace(/\bmcp\b/g, "MCP")
+    .replace(/\bsdr\b/g, "SDR")
+    .replace(/\bapi\b/g, "API")
+    .replace(/\broi\b/g, "ROI");
+}
+
+function hasReviewedPhoneCandidate(prospect) {
+  if (prospect.phone) return true;
+  return (prospect.contactDiscovery?.candidates || []).some((candidate) =>
+    candidate.type === "phone" && !String(candidate.status || "").includes("low_confidence")
+  );
+}
+
+function contactAvailability(prospect) {
+  const candidates = prospect.contactDiscovery?.candidates || [];
+  const hasType = (type) => candidates.some((candidate) => candidate.type === type || candidate.type === `${type}_link` || candidate.type === `${type}_presence`);
+  return {
+    linkedin: Boolean(prospect.linkedin || hasType("linkedin")),
+    email: Boolean(prospect.email || hasType("email")),
+    phone: Boolean(prospect.phone || hasType("phone")),
+    facebook: hasType("facebook") || hasType("facebook_match"),
+    whatsapp: hasType("whatsapp"),
+    telegram: hasType("telegram")
+  };
+}
+
+function buildNextActionPlan(prospect, outreach, product = currentProduct()) {
+  const interactions = interactionsForProspect(prospect.id);
+  const types = new Set(interactions.map((interaction) => interaction.type));
+  const availability = contactAvailability(prospect);
+  const analysis = analyzeLead(prospect, product);
+  const primaryAction = types.has("linkedin_invite_accepted") || types.has("linkedin_connected")
+    ? "Send the LinkedIn follow-up with the product-specific value angle"
+    : types.has("linkedin_invite_sent")
+      ? "Check whether the LinkedIn invitation was accepted before the next touch"
+      : "Warm the lead on LinkedIn, then send the short connection invitation";
+  const followUpDue = types.has("linkedin_invite_sent") ? dueTomorrowIso() : dueInDaysIso(2);
+
+  return {
+    createdAt: new Date().toISOString(),
+    productId: product.id,
+    productName: product.name,
+    primaryAction,
+    reason: `${prospect.name} is a ${analysis.productFit} fit for ${product.name}. Start low-friction on LinkedIn, then use stronger channels only after the profile and contact evidence are reviewed.`,
+    bestChannel: availability.linkedin ? "linkedin" : outreach.recommendedChannel || chooseBestChannel(prospect),
+    preTouchActions: [
+      "Open the LinkedIn profile and confirm this is the right person.",
+      "Like one relevant public post if it genuinely matches the offer.",
+      "Comment only when there is a useful non-generic point to add.",
+      "Endorse a skill only if the profile clearly supports it."
+    ],
+    followUp: {
+      label: "Check invite acceptance and send the next message",
+      due: followUpDue,
+      trigger: "2-3 days after invite, or immediately when the invite is accepted",
+      ifAccepted: "Send the LinkedIn follow-up and log LinkedIn accepted/connected.",
+      ifNotAccepted: availability.email ? "Use the email draft as the second channel." : "Review contact enrichment before switching channels."
+    },
+    channelOrder: [
+      "linkedin_warmup",
+      "linkedin_invite",
+      "linkedin_follow_up",
+      availability.email ? "email" : "",
+      availability.phone ? "sms" : "",
+      availability.whatsapp ? "whatsapp" : "",
+      availability.telegram ? "telegram" : "",
+      "call"
+    ].filter(Boolean),
+    score: {
+      reachProbability: analysis.reachProbability,
+      closeProbability: analysis.closeProbability,
+      contactConfidence: bestContactConfidenceServer(prospect)
+    }
+  };
+}
+
+function buildSalesCadence(prospect, outreach, product = currentProduct()) {
+  const due2 = dueInDaysIso(2);
+  const due3 = dueInDaysIso(3);
+  const due4 = dueInDaysIso(4);
+  const availability = contactAvailability(prospect);
+  return {
+    productId: product.id,
+    productName: product.name,
+    generatedAt: new Date().toISOString(),
+    steps: [
+      {
+        day: "today",
+        channel: "linkedin",
+        type: "linkedin_profile_viewed",
+        label: "Verify profile, company, and public activity",
+        messageChannel: "",
+        manualReview: true
+      },
+      {
+        day: "today",
+        channel: "linkedin",
+        type: "linkedin_invite_sent",
+        label: "Send the LinkedIn invitation",
+        messageChannel: "linkedin_invite",
+        manualReview: true
+      },
+      {
+        day: "2-3 days",
+        due: due2,
+        channel: "linkedin",
+        type: "linkedin_invite_accepted",
+        label: "If accepted, send the LinkedIn follow-up",
+        messageChannel: "linkedin_follow_up",
+        manualReview: true
+      },
+      {
+        day: "3 days",
+        due: due3,
+        channel: availability.email ? "email" : "research",
+        type: availability.email ? "email_sent" : "review_contact_data",
+        label: availability.email ? "If no LinkedIn acceptance, use the tailored email" : "If no acceptance, enrich or review alternate contacts",
+        messageChannel: availability.email ? "email" : "",
+        manualReview: true
+      },
+      {
+        day: "4 days",
+        due: due4,
+        channel: availability.whatsapp ? "whatsapp" : availability.phone ? "sms" : availability.telegram ? "telegram" : "research",
+        type: availability.whatsapp ? "whatsapp_sent" : availability.phone ? "sms_sent" : availability.telegram ? "telegram_sent" : "review_contact_data",
+        label: availability.whatsapp || availability.phone || availability.telegram
+          ? "Use a short direct-channel follow-up after source and permission review"
+          : "Keep researching verified direct contact data before using messenger channels",
+        messageChannel: availability.whatsapp ? "whatsapp" : availability.phone ? "sms" : availability.telegram ? "telegram" : "",
+        manualReview: true
+      }
+    ],
+    summary: `${prospect.name} should be warmed up and invited first, then followed up in 2-3 days based on acceptance and available contact data.`
+  };
+}
+
+function ensureAcceptanceFollowUpTask(prospect, product, followUp = {}) {
+  const existing = state.followUpTasks.find((task) =>
+    task.prospectId === prospect.id && task.source === "linkedin_acceptance_check" && task.status !== "done"
+  );
+  if (existing) {
+    existing.due = followUp.due || existing.due;
+    existing.label = followUp.label || existing.label;
+    existing.updatedAt = new Date().toISOString();
+    return existing;
+  }
+  const task = {
+    id: `task-${randomBytes(6).toString("hex")}`,
+    prospectId: prospect.id,
+    prospectName: prospect.name,
+    productId: product.id,
+    type: "linkedin_acceptance_check",
+    label: followUp.label || `Check whether ${prospect.name} accepted the LinkedIn invitation`,
+    due: followUp.due || dueInDaysIso(2),
+    status: "open",
+    source: "linkedin_acceptance_check",
+    createdAt: new Date().toISOString(),
+    notificationChannel: state.integrations.notifications.channel,
+    notificationTarget: state.integrations.notifications.target
+  };
+  state.followUpTasks.unshift(task);
+  return task;
+}
+
+function recordLeadResearch(prospect, input = {}) {
+  const product = currentProduct();
+  const contactDiscovery = input.contactDiscovery || prospect.contactDiscovery || {};
+  const analysis = input.analysis || analyzeLead(prospect, product);
+  const record = {
+    id: `research-${randomBytes(6).toString("hex")}`,
+    at: new Date().toISOString(),
+    stage: cleanText(input.stage || "research"),
+    productId: product.id,
+    productName: product.name,
+    summary: cleanText(input.summary || "Lead research updated."),
+    score: prospect.score || 0,
+    status: prospect.status || "review",
+    modelUsed: cleanText(input.modelUsed || input.outreach?.modelUsed || ""),
+    provider: cleanText(input.provider || input.outreach?.provider || "local"),
+    contactSnapshot: contactSnapshotForProspect(prospect, contactDiscovery),
+    analysis: {
+      reachProbability: analysis.reachProbability || 0,
+      closeProbability: analysis.closeProbability || 0,
+      productFit: analysis.productFit || "",
+      recommendedAction: analysis.recommendedAction || ""
+    },
+    nextAction: prospect.nextActionPlan?.primaryAction || "",
+    warnings: normalizeStringArray(input.warnings || contactDiscovery.warnings || []).slice(0, 6)
+  };
+  const previous = Array.isArray(prospect.researchHistory) ? prospect.researchHistory : [];
+  prospect.researchHistory = [record, ...previous].slice(0, 12);
+}
+
+function contactSnapshotForProspect(prospect, contactDiscovery = prospect.contactDiscovery || {}) {
+  const availability = contactAvailability({ ...prospect, contactDiscovery });
+  return {
+    candidates: Array.isArray(contactDiscovery.candidates) ? contactDiscovery.candidates.length : 0,
+    bestConfidence: bestContactConfidenceServer({ ...prospect, contactDiscovery }),
+    linkedin: availability.linkedin,
+    email: availability.email,
+    phone: availability.phone,
+    facebook: availability.facebook,
+    whatsapp: availability.whatsapp,
+    telegram: availability.telegram,
+    scraperStatus: contactDiscovery.scraperStatus || ""
+  };
+}
+
+function bestContactConfidenceServer(prospect) {
+  const candidates = prospect?.contactDiscovery?.candidates || [];
+  return candidates.length ? Math.max(...candidates.map((candidate) => Number(candidate.confidence) || 0)) : 0;
+}
+
 function normalizeAiOutreachPlan(fallbackPlan, data, run) {
   const messages = normalizeAiMessages(data?.messages, fallbackPlan.messages);
   const linkedinVariations = normalizeAiLinkedInVariations(data?.linkedinVariations, fallbackPlan.linkedinVariations);
-  const actions = Array.isArray(data?.actions) && data.actions.length
-    ? data.actions.slice(0, 6).map((action) => ({
-        type: cleanText(action.type || "next_action").slice(0, 64),
-        label: cleanText(action.label || "Review next action"),
-        due: cleanText(action.due || "today").slice(0, 64),
-        priority: cleanText(action.priority || "medium").slice(0, 16)
-      }))
-    : fallbackPlan.actions;
+  const actions = normalizeOutreachActions(data?.actions, fallbackPlan.actions || []);
 
   return {
     ...fallbackPlan,
@@ -3051,13 +3414,33 @@ function normalizeAiOutreachPlan(fallbackPlan, data, run) {
   };
 }
 
+function normalizeOutreachActions(actions, fallback) {
+  if (!Array.isArray(actions) || !actions.length) return fallback;
+  const normalized = actions.slice(0, 8).map((action) => ({
+    type: cleanText(action.type || "next_action").slice(0, 64),
+    label: cleanText(action.label || "Review next action"),
+    due: cleanText(action.due || "today").slice(0, 64),
+    priority: cleanText(action.priority || "medium").slice(0, 16)
+  })).filter((action) => action.label);
+  if (!normalized.length) return fallback;
+  const byType = new Map((fallback || []).map((action) => [String(action.type || "").toLowerCase(), action]));
+  for (const action of normalized) byType.set(String(action.type || "").toLowerCase(), action);
+  return [...byType.values()].slice(0, 8);
+}
+
 function normalizeAiMessages(messages, fallback) {
   if (!Array.isArray(messages) || !messages.length) return fallback;
-  return messages.slice(0, 4).map((message) => ({
+  const normalized = messages.slice(0, 8).map((message) => ({
     channel: cleanText(message.channel || "email").slice(0, 32),
     subject: message.subject ? cleanText(message.subject).slice(0, 140) : undefined,
     body: cleanLongText(message.body || "")
   })).filter((message) => message.body.length > 8);
+  if (!normalized.length) return fallback;
+  const byChannel = new Map((fallback || []).map((message) => [String(message.channel || "").toLowerCase(), message]));
+  for (const message of normalized) {
+    byChannel.set(String(message.channel || "").toLowerCase(), message);
+  }
+  return [...byChannel.values()].slice(0, 8);
 }
 
 function normalizeAiLinkedInVariations(variations, fallback) {
@@ -3078,7 +3461,10 @@ function normalizeWarmupActions(actions, fallback) {
     due: cleanText(action.due || "today").slice(0, 48),
     priority: cleanText(action.priority || "medium").slice(0, 16)
   })).filter((action) => action.label);
-  return normalized.length ? normalized : fallback;
+  if (!normalized.length) return fallback;
+  const byType = new Map((fallback || []).map((action) => [String(action.type || "").toLowerCase(), action]));
+  for (const action of normalized) byType.set(String(action.type || "").toLowerCase(), action);
+  return [...byType.values()].slice(0, 10);
 }
 
 function buildLinkedInOutreach(prospect, product = currentProduct(), profile = "balanced") {
@@ -3086,10 +3472,12 @@ function buildLinkedInOutreach(prospect, product = currentProduct(), profile = "
   const firstName = prospect.name.split(/\s+/)[0] || prospect.name;
   const company = prospect.company || "your team";
   const useCase = bestUseCaseFor(prospect, product);
+  const useCaseText = lowerSalesPhrase(useCase);
   const examples = (product.examples ?? []).filter((example) => example.channel === "linkedin").slice(0, 3);
   const exampleStyle = examples[0]?.message ? ` Similar style reference: ${examples[0].message}` : "";
   const proof = product.proofPoints[0] ?? "reduce manual sales work";
   const differentiator = product.differentiators[0] ?? "controlled AI workflow";
+  const differentiatorText = lowerSalesPhrase(differentiator);
 
   return {
     productId: product.id,
@@ -3099,24 +3487,24 @@ function buildLinkedInOutreach(prospect, product = currentProduct(), profile = "
     examplesUsed: examples.map((example) => example.id),
     variations: [
       {
-        label: "connection",
+        label: "connection invite",
         channel: "linkedin",
-        body: `Hi ${firstName}, noticed your work at ${company}. I’m looking at how teams handle ${useCase.toLowerCase()} with ${product.name}. Open to connecting?`
+        body: `Hi ${firstName}, noticed your work at ${company}. I’m looking at how teams handle ${useCaseText} with ${product.name}. Open to connecting?`
       },
       {
         label: "contextual",
         channel: "linkedin",
-        body: `Hi ${firstName}, saw the ${prospect.title || "go-to-market"} angle at ${company}. ${product.name} helps with ${useCase.toLowerCase()} and ${proof}. Curious if this is on your radar?`
+        body: `Hi ${firstName}, saw the ${prospect.title || "go-to-market"} angle at ${company}. ${product.name} helps with ${useCaseText} and ${proof}. Curious if this is on your radar?`
       },
       {
         label: "short follow-up",
         channel: "linkedin",
-        body: `${firstName}, quick follow-up. The relevant bit is ${differentiator.toLowerCase()} for ${useCase.toLowerCase()}.${exampleStyle ? " I kept this close to your saved example style." : ""}`
+        body: `${firstName}, quick follow-up. The relevant bit is ${differentiatorText} for ${useCaseText}.${exampleStyle ? " I kept this close to your saved example style." : ""}`
       },
       {
         label: profile === "premium" ? "executive" : "direct",
         channel: "linkedin",
-        body: `If ${company} is trying to improve ${useCase.toLowerCase()}, I can share a concrete workflow for ${product.name}. Worth comparing notes?`
+        body: `If ${company} is trying to improve ${useCaseText}, I can share a concrete workflow for ${product.name}. Worth comparing notes?`
       }
     ]
   };
@@ -3381,7 +3769,25 @@ async function interpretAssistantInstruction(instruction, defaults) {
               instruction,
               defaults,
               availableStatuses: prospectStatuses(),
-              interactionTypes: ["email_sent", "email_opened", "linkedin_connected", "linkedin_reply", "meeting_booked", "no_reply", "call_completed"],
+              interactionTypes: [
+                "linkedin_profile_viewed",
+                "linkedin_post_liked",
+                "linkedin_comment_planned",
+                "linkedin_skill_endorsed",
+                "linkedin_invite_sent",
+                "linkedin_invite_accepted",
+                "linkedin_connected",
+                "linkedin_reply",
+                "email_sent",
+                "email_opened",
+                "sms_sent",
+                "whatsapp_sent",
+                "telegram_sent",
+                "follow_up_scheduled",
+                "meeting_booked",
+                "no_reply",
+                "call_completed"
+              ],
               requiredJsonShape: {
                 summary: "short",
                 actions: [
@@ -3392,7 +3798,7 @@ async function interpretAssistantInstruction(instruction, defaults) {
                     sortBy: "score | reach | close | updated | company | status",
                     direction: "asc | desc",
                     status: "outreach_ready",
-                    interactionType: "linkedin_connected",
+                    interactionType: "linkedin_invite_sent",
                     note: "string",
                     source: "supabase | custom_crm",
                     resource: "leads",
@@ -3516,6 +3922,12 @@ async function executeAssistantStep(step, defaults) {
   if (step.type === "enrich_contacts") {
     for (const prospect of prospects.slice(0, 50)) {
       prospect.contactDiscovery = await enrichProspectContacts(prospect);
+      recordLeadResearch(prospect, {
+        stage: "contact_enriched",
+        summary: `${prospect.contactDiscovery.candidates.length} contact candidates reviewed by AI Operator.`,
+        contactDiscovery: prospect.contactDiscovery,
+        warnings: prospect.contactDiscovery.warnings
+      });
       prospect.status = "enriched";
       prospect.updatedAt = new Date().toISOString();
     }
@@ -4003,7 +4415,30 @@ function normalizeProspectStatus(value) {
 
 function normalizeInteractionType(value) {
   const normalized = cleanText(value).toLowerCase().replace(/[\s-]+/g, "_");
-  return ["email_sent", "email_opened", "linkedin_connected", "linkedin_reply", "meeting_booked", "no_reply", "call_completed", "note_added", "outreach_prepared", "personalization_requested"].includes(normalized)
+  return [
+    "email_sent",
+    "email_opened",
+    "linkedin_profile_viewed",
+    "linkedin_post_liked",
+    "linkedin_comment_planned",
+    "linkedin_skill_endorsed",
+    "linkedin_invite_sent",
+    "linkedin_invite_accepted",
+    "linkedin_connected",
+    "linkedin_reply",
+    "sms_sent",
+    "whatsapp_sent",
+    "telegram_sent",
+    "follow_up_scheduled",
+    "research_completed",
+    "contact_enriched",
+    "meeting_booked",
+    "no_reply",
+    "call_completed",
+    "note_added",
+    "outreach_prepared",
+    "personalization_requested"
+  ].includes(normalized)
     ? normalized
     : "";
 }
@@ -4036,6 +4471,15 @@ function inferStatus(text) {
 function inferInteractionType(text) {
   if (text.includes("meeting")) return "meeting_booked";
   if (text.includes("no reply") || text.includes("no-reply")) return "no_reply";
+  if (text.includes("whatsapp")) return "whatsapp_sent";
+  if (text.includes("telegram")) return "telegram_sent";
+  if (text.includes("sms") || text.includes("text message")) return "sms_sent";
+  if (text.includes("accepted") && text.includes("invite")) return "linkedin_invite_accepted";
+  if (text.includes("invite") || text.includes("connection request")) return "linkedin_invite_sent";
+  if (text.includes("endorse")) return "linkedin_skill_endorsed";
+  if (text.includes("comment")) return "linkedin_comment_planned";
+  if (text.includes("like")) return "linkedin_post_liked";
+  if (text.includes("view")) return "linkedin_profile_viewed";
   if (text.includes("reply")) return "linkedin_reply";
   if (text.includes("open")) return "email_opened";
   if (text.includes("email")) return "email_sent";
@@ -4081,6 +4525,13 @@ function dueTomorrowIso() {
   return due.toISOString();
 }
 
+function dueInDaysIso(days = 2, hour = 9) {
+  const due = new Date();
+  due.setDate(due.getDate() + clampNumber(days, 1, 30, 2));
+  due.setHours(clampNumber(hour, 0, 23, 9), 0, 0, 0);
+  return due.toISOString();
+}
+
 function findProspect(prospectId) {
   return state.prospects.find((prospect) => prospect.id === prospectId);
 }
@@ -4105,23 +4556,28 @@ function normalizeInteraction(prospectId, input) {
 function statusFromInteraction(type, currentStatus) {
   if (type === "meeting_booked") return "meeting_booked";
   if (type === "outreach_prepared" || type === "personalization_requested") return "outreach_ready";
-  if (type === "linkedin_reply" || type === "email_opened") return "engaged";
-  if (type === "email_sent" || type === "linkedin_connected") return "contacted";
-  if (type === "no_reply") return "follow_up_due";
+  if (type === "contact_enriched" || type === "research_completed") return "enriched";
+  if (type === "linkedin_reply" || type === "email_opened" || type === "linkedin_invite_accepted" || type === "linkedin_connected") return "engaged";
+  if (["email_sent", "linkedin_invite_sent", "sms_sent", "whatsapp_sent", "telegram_sent"].includes(type)) return "contacted";
+  if (type === "no_reply" || type === "follow_up_scheduled") return "follow_up_due";
   return currentStatus || "review";
 }
 
 function channelFromType(type) {
   if (type.startsWith("email")) return "email";
+  if (type.startsWith("sms")) return "sms";
+  if (type.startsWith("whatsapp")) return "whatsapp";
+  if (type.startsWith("telegram")) return "telegram";
   if (type.startsWith("linkedin")) return "linkedin";
   if (type.includes("outreach") || type.includes("personalization")) return "ai";
+  if (type.includes("research") || type.includes("enriched")) return "ai";
   if (type.includes("call")) return "phone";
   return "manual";
 }
 
 function outcomeFromType(type) {
   if (type === "outreach_prepared" || type === "personalization_requested") return "prepared";
-  if (type === "linkedin_reply" || type === "meeting_booked") return "positive";
+  if (type === "linkedin_reply" || type === "meeting_booked" || type === "linkedin_invite_accepted" || type === "linkedin_connected") return "positive";
   if (type === "email_opened") return "opened";
   if (type === "no_reply") return "neutral";
   return "logged";
@@ -4191,8 +4647,11 @@ function recommendedActionFor(prospect, interactions, reachProbability, closePro
   if (types.has("meeting_booked")) return "Prepare meeting notes, evidence, and product-specific discovery questions.";
   if (types.has("linkedin_reply")) return "Reply with a concise product-specific question and offer a short working session.";
   if (!prospect.contactDiscovery) return "Run contact discovery before drafting outreach.";
-  if (!types.has("linkedin_connected")) return "Send the LinkedIn connection message and review profile match.";
-  if (!types.has("email_sent")) return "Send the tailored email while the LinkedIn touch is warm.";
+  if (!types.has("linkedin_profile_viewed") && !types.has("linkedin_viewed")) return "Open the LinkedIn profile and verify fit before first touch.";
+  if (!types.has("linkedin_invite_sent") && !types.has("linkedin_connected") && !types.has("linkedin_invite_accepted")) return "Send the LinkedIn invitation and schedule the 2-3 day acceptance check.";
+  if (types.has("linkedin_invite_sent") && !types.has("linkedin_invite_accepted") && !types.has("linkedin_connected")) return "Check whether the LinkedIn invitation was accepted before switching channels.";
+  if ((types.has("linkedin_invite_accepted") || types.has("linkedin_connected")) && !types.has("linkedin_reply")) return "Send the LinkedIn follow-up with the tailored value angle.";
+  if (!types.has("email_sent")) return "Use the tailored email as the next channel if LinkedIn has not produced a reply.";
   if (types.has("email_opened") && closeProbability > 0.18) return "Ask for a short meeting with a product-specific agenda.";
   if (types.has("no_reply")) return "Switch channel and use a lighter follow-up.";
   if (reachProbability < 0.28) return "Add one more evidence point before contacting.";
@@ -4234,8 +4693,8 @@ function inferPainPoint(prospect) {
 }
 
 function chooseBestChannel(prospect) {
-  if (prospect.email || prospect.contactDiscovery?.candidates?.some((candidate) => candidate.type === "email")) return "email";
   if (prospect.linkedin || prospect.contactDiscovery?.candidates?.some((candidate) => candidate.type === "linkedin")) return "linkedin";
+  if (prospect.email || prospect.contactDiscovery?.candidates?.some((candidate) => candidate.type === "email")) return "email";
   return "manual_research";
 }
 
@@ -4279,7 +4738,7 @@ function prospectForPrompt(prospect) {
     location: prospect.location,
     website: prospect.website,
     linkedin: prospect.linkedin,
-    notes: prospect.notes,
+    notes: publicPersonalizationSignal(prospect),
     status: prospect.status,
     score: prospect.score
   };

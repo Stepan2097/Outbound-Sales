@@ -651,8 +651,9 @@ function leadTableRow(prospect) {
 function accountSignalRows(prospect) {
   if (!prospect) return `<div class="empty-state">Run research to see account signals</div>`;
   const analysis = prospect.analysis || {};
+  const publicNote = publicLeadNote(prospect.notes);
   const signals = [
-    prospect.notes ? { label: "Lead context", value: prospect.notes, confidence: 78 } : null,
+    publicNote ? { label: "Lead context", value: publicNote, confidence: 78 } : null,
     prospect.contactDiscovery?.scraperNote ? { label: "Contact discovery", value: prospect.contactDiscovery.scraperNote, confidence: 70 } : null,
     ...(analysis.reasoning || []).map((value) => ({ label: "AI reasoning", value, confidence: 74 }))
   ].filter(Boolean);
@@ -729,7 +730,28 @@ function scoreBreakdownRows(prospect) {
 function nextActionRows(prospect) {
   if (!prospect) return `<div class="empty-state">Select a lead to see the next action</div>`;
   const analysis = prospect.analysis || {};
+  const plan = prospect.nextActionPlan;
   const channel = prospect.outreach?.recommendedChannel || preferredChannel(prospect);
+  if (plan) {
+    const preTouch = (plan.preTouchActions || []).slice(0, 4).map((action) => `<span class="cap">${escapeHtml(action)}</span>`).join("");
+    const channelOrder = (plan.channelOrder || []).slice(0, 7).map((item) => `<span>${escapeHtml(titleCase(item))}</span>`).join("");
+    return `
+      <article class="next-action-card">
+        <i data-lucide="sparkles"></i>
+        <div>
+          <strong>${escapeHtml(plan.primaryAction || analysis.recommendedAction || "Run research and prepare outreach")}</strong>
+          <span>Best channel: ${escapeHtml(plan.bestChannel || channel)} · Reach ${plan.score?.reachProbability || analysis.reachProbability || 0}% · Close ${plan.score?.closeProbability || analysis.closeProbability || 0}%</span>
+          <p>${escapeHtml(plan.reason || (analysis.reasoning || []).join(" "))}</p>
+          ${preTouch ? `<div class="next-action-caps">${preTouch}</div>` : ""}
+          <div class="next-action-follow">
+            <strong>${escapeHtml(plan.followUp?.label || "Follow up")}</strong>
+            <span>${escapeHtml(plan.followUp?.trigger || "2-3 days after invite")} · ${plan.followUp?.due ? escapeHtml(new Date(plan.followUp.due).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })) : "scheduled"}</span>
+          </div>
+          ${channelOrder ? `<div class="channel-order">${channelOrder}</div>` : ""}
+        </div>
+      </article>
+    `;
+  }
   return `
     <article class="next-action-card">
       <i data-lucide="sparkles"></i>
@@ -744,12 +766,18 @@ function nextActionRows(prospect) {
 
 function salesCycleRows(prospect) {
   if (!prospect) return `<div class="empty-state">No lead selected</div>`;
-  const items = [
+  const baseItems = [
     { label: "Added to queue", value: relativeTime(prospect.createdAt), state: "done" },
     { label: "Research", value: prospect.contactDiscovery ? "completed" : "not run", state: prospect.contactDiscovery ? "done" : "pending" },
     { label: "Outreach prepared", value: prospect.outreach ? relativeTime(prospect.outreach.preparedAt || prospect.updatedAt) : "pending", state: prospect.outreach ? "done" : "pending" },
     { label: "Latest CRM action", value: (prospect.interactions || [])[0]?.type ? titleCase(prospect.interactions[0].type) : "none logged", state: (prospect.interactions || []).length ? "done" : "pending" }
   ];
+  const cadenceItems = (prospect.salesCadence?.steps || []).slice(0, 5).map((step) => ({
+    label: step.label,
+    value: [step.day, step.channel, step.messageChannel ? `copy ${titleCase(step.messageChannel)}` : ""].filter(Boolean).join(" · "),
+    state: (prospect.interactions || []).some((interaction) => interaction.type === step.type) ? "done" : "pending"
+  }));
+  const items = [...baseItems, ...cadenceItems];
   return items.map((item) => `
     <article class="cycle-row ${item.state}">
       <span></span>
@@ -765,8 +793,15 @@ function sourceAuditRows(prospect) {
   if (!prospect) return `<div class="empty-state">Sources appear after profile import and research</div>`;
   const productSources = state.selectedProduct?.mcpContext?.sources || [];
   const contactSources = prospect.contactDiscovery?.candidates || [];
+  const researchRows = (prospect.researchHistory || []).slice(0, 5).map((record) => ({
+    source: `Research memory · ${titleCase(record.stage || "research")}`,
+    claim: `${record.summary || "Lead research stored."} ${record.contactSnapshot ? `Contacts: ${record.contactSnapshot.candidates || 0}, best confidence: ${record.contactSnapshot.bestConfidence || 0}%` : ""}`.trim(),
+    confidence: record.analysis?.reachProbability || record.score || 0,
+    status: record.at ? `stored ${relativeTime(record.at)}` : "stored"
+  }));
   const rows = [
     { source: "Uploaded or CRM profile", claim: [prospect.name, prospect.company, prospect.title].filter(Boolean).join(" · "), confidence: 82, status: "workspace data" },
+    ...researchRows,
     ...productSources.map((source) => ({ source: source.name, claim: source.type, confidence: source.confidence, status: "product context" })),
     ...contactSources.map((candidate) => ({ source: candidate.source, claim: `${candidate.type}: ${candidate.value}`, confidence: candidate.confidence, status: candidate.status })),
     ...(prospect.contactDiscovery?.warnings || []).map((warning) => ({ source: "Enrichment warning", claim: warning, confidence: 0, status: "review required" }))
@@ -798,9 +833,11 @@ function preferredChannel(prospect) {
 function updateQuickCopies(prospect) {
   const messages = prospect?.outreach?.messages || [];
   const variations = prospect?.outreach?.linkedinVariations || [];
-  setCopyText("copyLinkedinQuick", variations[0]?.body || messages.find((message) => /linkedin/i.test(message.channel))?.body || "");
+  setCopyText("copyLinkedinQuick", messages.find((message) => /linkedin_invite/i.test(message.channel))?.body || variations[0]?.body || messages.find((message) => /linkedin/i.test(message.channel))?.body || "");
   setCopyText("copyEmailQuick", messages.find((message) => /email/i.test(message.channel))?.body || "");
+  setCopyText("copySmsQuick", messages.find((message) => /^sms$/i.test(message.channel))?.body || "");
   setCopyText("copyWhatsappQuick", messages.find((message) => /whatsapp/i.test(message.channel))?.body || "");
+  setCopyText("copyTelegramQuick", messages.find((message) => /telegram/i.test(message.channel))?.body || "");
 }
 
 function analyticsRows(prospect) {
@@ -827,6 +864,7 @@ function analyticsRows(prospect) {
 }
 
 function profileFieldRows(prospect) {
+  const publicNote = publicLeadNote(prospect.notes);
   const rows = [
     ["Title", prospect.title],
     ["Company", prospect.company],
@@ -835,7 +873,7 @@ function profileFieldRows(prospect) {
     ["LinkedIn", prospect.linkedin],
     ["Email", prospect.email],
     ["Phone", prospect.phone],
-    ["Notes", prospect.notes]
+    ["Notes", publicNote]
   ].filter(([, value]) => value);
   return rows
     .map(
@@ -938,6 +976,9 @@ function outreachRows(prospect) {
       `
     )
     .join("");
+  const fallbackWarning = outreach.fallbackReason
+    ? `<div class="outreach-warning"><i data-lucide="triangle-alert"></i><span>Live AI fallback used. ${escapeHtml(outreach.fallbackReason)}</span></div>`
+    : "";
 
   return `
     <div class="qualification-strip">
@@ -945,6 +986,7 @@ function outreachRows(prospect) {
       <div><span>Fit</span><strong>${escapeHtml(outreach.qualification?.fit || prospect.analysis?.productFit || "")}</strong></div>
       <div><span>Channel</span><strong>${escapeHtml(outreach.recommendedChannel)}</strong></div>
     </div>
+    ${fallbackWarning}
     <div class="message-list">${messages}</div>
     <div class="message-list">${variations}</div>
     ${warmupActions ? `<div class="warmup-list">${warmupActions}</div>` : ""}
@@ -956,6 +998,9 @@ function warmupIcon(channel) {
   if (channel === "facebook") return "badge-check";
   if (channel === "phone") return "phone";
   if (channel === "email") return "mail";
+  if (channel === "whatsapp") return "message-circle";
+  if (channel === "telegram") return "send";
+  if (channel === "sms") return "message-square-text";
   return "mouse-pointer-click";
 }
 
@@ -1206,6 +1251,17 @@ function shortUrl(value) {
   } catch {
     return value;
   }
+}
+
+function publicLeadNote(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (/\b(crm|folder|page\s+\d+|status|owner|imported|advantage|netlify|api token|api key|endpoint|uuid|id[:=])\b/i.test(raw)) return "";
+  return raw
+    .replace(/\bhttps?:\/\/\S+/gi, "")
+    .replace(/\b[A-Fa-f0-9]{8}-[A-Fa-f0-9-]{13,}\b/g, "")
+    .trim()
+    .slice(0, 180);
 }
 
 function fileToDataUrl(file) {

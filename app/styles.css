@@ -2744,6 +2744,43 @@ dialog {
   margin: 8px 0 0;
 }
 
+.next-action-caps,
+.channel-order {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.channel-order span {
+  border: 1px solid rgba(101, 240, 219, 0.26);
+  border-radius: 999px;
+  color: #d7f7ff;
+  background: rgba(40, 212, 191, 0.08);
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
+.next-action-follow {
+  border: 1px solid rgba(143, 177, 207, 0.16);
+  border-radius: 8px;
+  background: rgba(4, 16, 29, 0.42);
+  margin-top: 10px;
+  padding: 9px;
+}
+
+.outreach-warning {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid rgba(255, 208, 92, 0.22);
+  border-radius: 8px;
+  color: #ffe6a3;
+  background: rgba(255, 208, 92, 0.08);
+  padding: 10px;
+  font-size: 12px;
+}
+
 .cycle-row {
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr);

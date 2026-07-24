@@ -225,10 +225,20 @@
                   <div class="tracker-panel">
                     <div class="interaction-controls">
                       <select id="interactionTypeSelect" aria-label="Interaction type">
+                        <option value="linkedin_profile_viewed">LinkedIn profile viewed</option>
+                        <option value="linkedin_post_liked">LinkedIn post liked</option>
+                        <option value="linkedin_comment_planned">LinkedIn comment planned</option>
+                        <option value="linkedin_skill_endorsed">LinkedIn skill endorsed</option>
+                        <option value="linkedin_invite_sent">LinkedIn invite sent</option>
+                        <option value="linkedin_invite_accepted">LinkedIn invite accepted</option>
                         <option value="email_sent">Email sent</option>
                         <option value="email_opened">Email opened</option>
                         <option value="linkedin_connected">LinkedIn connected</option>
                         <option value="linkedin_reply">LinkedIn reply</option>
+                        <option value="sms_sent">SMS sent</option>
+                        <option value="whatsapp_sent">WhatsApp sent</option>
+                        <option value="telegram_sent">Telegram sent</option>
+                        <option value="follow_up_scheduled">Follow-up scheduled</option>
                         <option value="meeting_booked">Meeting booked</option>
                         <option value="no_reply">No reply</option>
                       </select>
@@ -270,7 +280,9 @@
                   <button class="primary-button" id="prepareOutreachBtn" type="button"><i data-lucide="wand-sparkles"></i><span>Run Research</span></button>
                   <button id="copyLinkedinQuick" type="button" data-copy-text=""><i data-lucide="linkedin"></i><span>Copy LinkedIn</span></button>
                   <button id="copyEmailQuick" type="button" data-copy-text=""><i data-lucide="mail"></i><span>Copy Email</span></button>
+                  <button id="copySmsQuick" type="button" data-copy-text=""><i data-lucide="message-square-text"></i><span>Copy SMS</span></button>
                   <button id="copyWhatsappQuick" type="button" data-copy-text=""><i data-lucide="message-circle"></i><span>Copy WhatsApp</span></button>
+                  <button id="copyTelegramQuick" type="button" data-copy-text=""><i data-lucide="send"></i><span>Copy Telegram</span></button>
                   <button id="saveCrmQuick" type="button" data-interaction-type="outreach_prepared"><i data-lucide="database"></i><span>Log to CRM</span></button>
                   <button class="primary-button" id="nextLeadRailBtn" type="button"><i data-lucide="chevrons-right"></i><span>Next Lead</span></button>
                 </section>
