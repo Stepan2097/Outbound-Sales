@@ -3994,7 +3994,7 @@ async function fetchCrmLeadRows(input) {
     if (!state.integrations.supabase.url) throw new Error("Supabase URL is not configured.");
     if (!state.supabaseVault) throw new Error("Supabase API key is required before pulling CRM leads.");
     const apiKey = decryptSecret(state.supabaseVault);
-    const url = `${state.integrations.supabase.url}/rest/v1/${encodeURIComponent(resource)}?select=*&limit=${limit}`;
+    const url = supabaseRestUrl(resource, limit);
     const response = await fetch(url, {
       headers: { apikey: apiKey, Authorization: `Bearer ${apiKey}` }
     });
@@ -4016,12 +4016,27 @@ async function fetchCrmLeadRows(input) {
   return Array.isArray(data) ? data : data.data || data.leads || data.records || [];
 }
 
+function supabaseRestUrl(resource, limit) {
+  const base = state.integrations.supabase.url.replace(/\/+$/, "");
+  const [tablePart, queryPart = ""] = String(resource || "contacts").split("?");
+  const table = cleanText(tablePart || "contacts").replace(/^\/+|\/+$/g, "") || "contacts";
+  const url = new URL(`${base}/rest/v1/${encodeURIComponent(table)}`);
+  const params = new URLSearchParams(queryPart);
+  if (!params.has("select")) params.set("select", "*");
+  if (!params.has("limit")) params.set("limit", String(limit));
+  for (const [key, value] of params.entries()) {
+    url.searchParams.set(key, value);
+  }
+  return url.toString();
+}
+
 function normalizeCrmLeadRows(rows, linkedinField = "") {
   return (rows || [])
     .map((row) => {
       const linkedin = valueFromKeys(row, [linkedinField, "linkedin", "linkedin_url", "linkedinUrl", "linkedIn", "profile_url", "profileUrl"]);
       const name = valueFromKeys(row, ["name", "full_name", "fullName", "person", "contact_name", "lead_name"]);
       const company = valueFromKeys(row, ["company", "account", "organization", "company_name", "account_name"]);
+      const crmStatus = valueFromKeys(row, ["lead_status", "status", "stage", "lifecycle_stage"]);
       return normalizeProspect({
         id: valueFromKeys(row, ["id", "lead_id", "crm_id"]),
         name,
@@ -4033,11 +4048,21 @@ function normalizeCrmLeadRows(rows, linkedinField = "") {
         email: valueFromKeys(row, ["email", "work_email", "business_email"]),
         phone: valueFromKeys(row, ["phone", "mobile", "direct_phone"]),
         notes: valueFromKeys(row, ["notes", "description", "context"]) || "Imported from CRM.",
-        status: valueFromKeys(row, ["status", "stage"]) || "new",
+        status: statusFromCrmLeadStatus(crmStatus),
         crmSource: row
       });
     })
     .filter((prospect) => prospect.name && prospect.company);
+}
+
+function statusFromCrmLeadStatus(value) {
+  const normalized = cleanText(value).toLowerCase().replace(/[\s-]+/g, "_");
+  if (!normalized) return "new";
+  if (normalized.includes("booked") || normalized.includes("meeting")) return "meeting_booked";
+  if (normalized.includes("reply") || normalized.includes("engaged")) return "engaged";
+  if (normalized.includes("progress") || normalized.includes("contact")) return "contacted";
+  if (normalized.includes("qualification") || normalized.includes("review")) return "review";
+  return normalizeProspectStatus(normalized) || "new";
 }
 
 function importProspectsIntoState(prospects) {
@@ -4340,6 +4365,16 @@ function sortProspects(sortBy, direction = "desc") {
 }
 
 async function pushCrmActivityForProspects(prospects, input) {
+  if (state.integrations.supabase.url && state.supabaseVault) {
+    const supabaseResult = await pushSupabaseCrmActivities(prospects, input);
+    if (supabaseResult.attempted) {
+      return {
+        results: supabaseResult.results,
+        warnings: supabaseResult.warnings
+      };
+    }
+  }
+
   if (!state.integrations.crm.baseUrl || !state.crmVault) {
     return { results: [], warnings: ["CRM activity push needs CRM base URL and API token in Settings."] };
   }
@@ -4384,6 +4419,58 @@ async function pushCrmActivityForProspects(prospects, input) {
     results: [{ type: "push_crm_activity", message: `${pushed} CRM activities pushed.`, pushed }],
     warnings
   };
+}
+
+async function pushSupabaseCrmActivities(prospects, input) {
+  const apiKey = decryptSecret(state.supabaseVault);
+  const url = `${state.integrations.supabase.url.replace(/\/+$/, "")}/rest/v1/activities`;
+  let pushed = 0;
+  let attempted = false;
+  const warnings = [];
+  for (const prospect of prospects.slice(0, 50)) {
+    const crmRecord = crmRecordIdentifiers(prospect);
+    const contactId = crmRecord.id || valueFromKeys(prospect.crmSource || {}, ["contact_id", "contactId"]);
+    if (!contactId) {
+      warnings.push(`${prospect.name}: no CRM contact id available for Supabase activity.`);
+      continue;
+    }
+    attempted = true;
+    const crmSource = prospect.crmSource && typeof prospect.crmSource === "object" ? prospect.crmSource : {};
+    const metadata = input.metadata && typeof input.metadata === "object" ? input.metadata : {};
+    const payload = compactObject({
+      contact_id: contactId,
+      user_id: valueFromKeys(crmSource, ["owner_id", "user_id", "assigned_to"]),
+      type: cleanText(input.interactionType || input.type || "note_added").slice(0, 64),
+      content: crmActivityContent(prospect, input, metadata)
+    });
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        apikey: apiKey,
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        Prefer: "return=minimal"
+      },
+      body: JSON.stringify(payload)
+    });
+    if (response.ok) pushed += 1;
+    else warnings.push(`${prospect.name}: Supabase CRM activity HTTP ${response.status}`);
+  }
+  return {
+    attempted,
+    results: [{ type: "push_crm_activity", message: `${pushed} Supabase CRM activities pushed.`, pushed }],
+    warnings
+  };
+}
+
+function crmActivityContent(prospect, input, metadata = {}) {
+  return cleanLongText([
+    input.note || "Outbound OS activity",
+    `Lead: ${prospect.name}${prospect.company ? `, ${prospect.company}` : ""}`,
+    metadata.productName ? `Product: ${metadata.productName}` : "",
+    metadata.recommendedChannel ? `Channel: ${metadata.recommendedChannel}` : input.channel ? `Channel: ${input.channel}` : "",
+    metadata.localInteractionId ? `Outbound OS interaction: ${metadata.localInteractionId}` : ""
+  ].filter(Boolean).join("\n")).slice(0, 1800);
 }
 
 function crmRecordIdentifiers(prospect) {
