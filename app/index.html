@@ -93,9 +93,8 @@
               <a href="#dashboard-contact">Contacts</a>
               <a href="#dashboard-score">Scoring</a>
               <a href="#dashboard-outreach">Outreach</a>
-              <a href="#dashboard-followup">Follow-Up</a>
+              <a href="#dashboard-followup">Tasks</a>
               <a href="#dashboard-next">Next Action</a>
-              <a href="#dashboard-sources">Sources</a>
             </nav>
 
             <div class="lead-workbench-grid">
@@ -115,30 +114,15 @@
                   <div class="intelligence-content" id="intelligenceContent"></div>
                 </section>
 
-                <section class="panel product-panel lead-section" id="dashboard-account">
+                <section class="panel company-panel lead-section" id="dashboard-account">
                   <div class="panel-heading">
                     <div>
-                      <h2 id="activeProductName">Product Context</h2>
-                      <p id="activeProductPositioning">Used for account research and tailored outreach</p>
+                      <h2>Company Intelligence</h2>
+                      <p id="companyBriefMeta">What this company does, who they sell to, and why this lead may matter</p>
                     </div>
-                    <span class="pill" id="mcpSyncState">synced</span>
+                    <span class="pill" id="companyConfidencePill">no research</span>
                   </div>
-                  <div class="product-context-grid">
-                    <div>
-                      <span>Target personas</span>
-                      <strong id="productPersonas">-</strong>
-                    </div>
-                    <div>
-                      <span>Primary use case</span>
-                      <strong id="productUseCase">-</strong>
-                    </div>
-                    <div>
-                      <span>Proof point</span>
-                      <strong id="productProofPoint">-</strong>
-                    </div>
-                  </div>
-                  <div class="mcp-source-list" id="mcpSourceList"></div>
-                  <div class="research-signal-list" id="accountSignalList"></div>
+                  <div class="company-brief" id="companyBriefContent"></div>
                 </section>
 
                 <section class="panel lead-section" id="dashboard-buying">
@@ -204,21 +188,35 @@
                 <section class="panel lead-section" id="dashboard-followup">
                   <div class="panel-heading">
                     <div>
-                      <h2>Follow-Up and Call Coach</h2>
-                      <p>Paste call notes to get tips, next templates, and a follow-up task</p>
+                      <h2>Tasks and Manual Actions</h2>
+                      <p>Mark seller actions done, keep reminders, and store work on the lead</p>
                     </div>
                   </div>
                   <div class="followup-grid">
-                    <section class="subpanel call-panel">
+                    <section class="subpanel task-panel">
                       <div class="subpanel-heading">
-                        <h3>Call Coach</h3>
-                        <span>transcript to next steps</span>
+                        <h3>Manual Action</h3>
+                        <span>one-click CRM log</span>
                       </div>
-                      <form class="call-analysis-form" id="callAnalysisForm">
-                        <textarea id="callTranscriptInput" rows="5" placeholder="Paste call transcript or notes. Example: Prospect asked for a workflow next week, mentioned current CRM data quality issues, and asked about implementation timeline."></textarea>
-                        <button type="submit"><i data-lucide="mic-vocal"></i><span>Analyze Call</span></button>
-                      </form>
-                      <div class="call-analysis" id="callAnalysis"></div>
+                      <div class="interaction-controls compact-actions">
+                        <select id="taskInteractionTypeSelect" aria-label="Manual action type">
+                          <option value="linkedin_profile_viewed">LinkedIn profile viewed</option>
+                          <option value="linkedin_post_liked">LinkedIn post liked</option>
+                          <option value="linkedin_comment_planned">LinkedIn comment planned</option>
+                          <option value="linkedin_skill_endorsed">LinkedIn skill endorsed</option>
+                          <option value="linkedin_invite_sent">LinkedIn invite sent</option>
+                          <option value="linkedin_invite_accepted">Invite accepted</option>
+                          <option value="email_sent">Email sent</option>
+                          <option value="sms_sent">SMS sent</option>
+                          <option value="whatsapp_sent">WhatsApp sent</option>
+                          <option value="telegram_sent">Telegram sent</option>
+                          <option value="follow_up_scheduled">Follow-up scheduled</option>
+                          <option value="meeting_booked">Meeting booked</option>
+                          <option value="no_reply">No reply</option>
+                        </select>
+                        <button id="taskLogInteractionBtn" type="button"><i data-lucide="check-circle-2"></i><span>Mark Done</span></button>
+                      </div>
+                      <div class="interaction-list" id="taskInteractionList"></div>
                     </section>
 
                     <section class="subpanel task-panel">
@@ -275,15 +273,6 @@
                   <div class="sales-cycle-list" id="salesCycleList"></div>
                 </section>
 
-                <section class="panel lead-section" id="dashboard-sources">
-                  <div class="panel-heading">
-                    <div>
-                      <h2>Sources</h2>
-                      <p>Evidence, timestamps, confidence, and unresolved claims</p>
-                    </div>
-                  </div>
-                  <div class="source-audit-list" id="sourceAuditList"></div>
-                </section>
               </main>
 
               <aside class="lead-side-rail" aria-label="Lead actions and queue">
@@ -302,6 +291,7 @@
                   <button id="copyWhatsappQuick" type="button" data-copy-text=""><i data-lucide="message-circle"></i><span>Copy WhatsApp</span></button>
                   <button id="copyTelegramQuick" type="button" data-copy-text=""><i data-lucide="send"></i><span>Copy Telegram</span></button>
                   <button id="saveCrmQuick" type="button" data-interaction-type="outreach_prepared"><i data-lucide="database"></i><span>Log to CRM</span></button>
+                  <button class="danger-button" id="removeLeadQuick" type="button"><i data-lucide="trash-2"></i><span>Remove Lead</span></button>
                   <button class="primary-button" id="nextLeadRailBtn" type="button"><i data-lucide="chevrons-right"></i><span>Next Lead</span></button>
                 </section>
 
@@ -531,6 +521,49 @@
 
         <section class="view" id="view-database">
           <div class="database-layout">
+            <section class="panel knowledge-inbox-panel span-2">
+              <div class="panel-heading">
+                <div>
+                  <h2>Knowledge Inbox</h2>
+                  <p>Feed product context, lessons, screenshots, URLs, objections, and market notes into the AI memory</p>
+                </div>
+                <span class="pill" id="knowledgeInboxStatusPill">ready</span>
+              </div>
+              <form class="knowledge-inbox-form" id="knowledgeInboxForm">
+                <div class="split-fields">
+                  <label>
+                    <span>Product</span>
+                    <select id="knowledgeInboxProductInput"></select>
+                  </label>
+                  <label>
+                    <span>Data type</span>
+                    <select id="knowledgeInboxTypeInput">
+                      <option value="product_knowledge">Product knowledge</option>
+                      <option value="winning_outreach">Winning outreach</option>
+                      <option value="market_note">Market note</option>
+                      <option value="objection">Objection</option>
+                      <option value="icp_note">ICP note</option>
+                      <option value="competitor_note">Competitor note</option>
+                      <option value="platform_screenshot">Platform screenshot</option>
+                    </select>
+                  </label>
+                </div>
+                <label>
+                  <span>Text, URL, or lesson</span>
+                  <textarea id="knowledgeInboxTextInput" rows="5" placeholder="Paste notes, a product lesson, a URL, screenshots context, winning message, objection, CRM lesson, or anything the AI should consider before writing outreach."></textarea>
+                </label>
+                <label class="file-drop screenshot-drop compact-drop">
+                  <input id="knowledgeInboxScreenshotInput" type="file" accept="image/*" />
+                  <i data-lucide="image-plus"></i>
+                  <strong>Add screenshot</strong>
+                  <span id="knowledgeInboxScreenshotName">Optional PNG/JPG from platform, SMS, LinkedIn, CRM, or product docs</span>
+                </label>
+                <div class="screenshot-preview" id="knowledgeInboxScreenshotPreview"></div>
+                <button class="primary-button" type="submit"><i data-lucide="brain-circuit"></i><span>Analyze + Learn</span></button>
+              </form>
+              <div class="knowledge-inbox-result" id="knowledgeInboxResult"></div>
+            </section>
+
             <section class="panel learning-ingest-panel">
               <div class="panel-heading">
                 <div>

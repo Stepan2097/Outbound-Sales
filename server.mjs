@@ -550,6 +550,50 @@ async function handleApi(request, response, url) {
     return;
   }
 
+  if (request.method === "POST" && url.pathname === "/api/knowledge/feed") {
+    const body = await readJson(request);
+    const product = state.products.find((item) => item.id === (body.productId || state.selectedProductId));
+    if (!product) {
+      sendJson(response, 404, { error: "Product not found." });
+      return;
+    }
+
+    const text = cleanLongText(body.text || body.messageText || body.notes || "");
+    const example = normalizeLearningExample({
+      ...body,
+      productId: product.id,
+      channel: body.channel || "knowledge",
+      assetType: body.assetType || (body.screenshot ? "screenshot" : "text"),
+      persona: body.persona || "general",
+      outcome: body.outcome || "knowledge",
+      outcomeScore: body.outcomeScore || 75,
+      messageText: text,
+      notes: body.notes || "Knowledge inbox entry. Use as internal context before lead research, scoring, and writing.",
+      tags: body.tags || "knowledge,inbox,context"
+    }, product);
+    if (!example.messageText && !example.screenshot && !example.profileUrl && !example.sourceUrl) {
+      sendJson(response, 400, { error: "Add text, a screenshot, or a URL before analyzing." });
+      return;
+    }
+
+    example.signals = await analyzeLearningExample(example, product);
+    state.learning.examples.unshift(example);
+    state.learning.examples = state.learning.examples.slice(0, 250);
+    await rebuildLearningPlaybook();
+    state.learning.lastInboxAnalysis = {
+      id: example.id,
+      productId: product.id,
+      productName: product.name,
+      summary: example.signals?.summary || "Knowledge saved and applied to the playbook.",
+      patterns: example.signals?.patterns || [],
+      rules: example.signals?.reusableRules || [],
+      updatedAt: new Date().toISOString()
+    };
+    addEvent("learning", `${product.name} knowledge feed analyzed.`);
+    sendJson(response, 200, publicState());
+    return;
+  }
+
   if (request.method === "POST" && url.pathname === "/api/learning/retrain") {
     await rebuildLearningPlaybook({ forceAi: true });
     addEvent("learning", "Learning playbook rebuilt from uploaded examples.");
@@ -1002,6 +1046,20 @@ async function handleApi(request, response, url) {
     return;
   }
 
+  if (request.method === "POST" && url.pathname === "/api/prospects/remove") {
+    const body = await readJson(request);
+    const prospect = findProspect(body.prospectId);
+    if (!prospect) {
+      sendJson(response, 404, { error: "Prospect not found." });
+      return;
+    }
+    state.prospects = state.prospects.filter((item) => item.id !== prospect.id);
+    state.followUpTasks = state.followUpTasks.filter((task) => task.prospectId !== prospect.id);
+    addEvent("prospects", `${prospect.name} removed from the active lead queue.`);
+    sendJson(response, 200, publicState());
+    return;
+  }
+
   if (request.method === "POST" && url.pathname === "/api/prospects/interaction") {
     const body = await readJson(request);
     const prospect = findProspect(body.prospectId);
@@ -1015,6 +1073,32 @@ async function handleApi(request, response, url) {
     prospect.status = statusFromInteraction(interaction.type, prospect.status);
     prospect.updatedAt = new Date().toISOString();
     addEvent("interaction", `${interaction.type} logged for ${prospect.name}.`);
+    sendJson(response, 200, publicState());
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/follow-up-tasks/complete") {
+    const body = await readJson(request);
+    const task = state.followUpTasks.find((item) => item.id === body.taskId);
+    if (!task) {
+      sendJson(response, 404, { error: "Task not found." });
+      return;
+    }
+    task.status = "done";
+    task.completedAt = new Date().toISOString();
+    task.updatedAt = task.completedAt;
+    const prospect = findProspect(task.prospectId);
+    if (prospect) {
+      const interaction = normalizeInteraction(prospect.id, {
+        type: task.type || "follow_up_scheduled",
+        channel: task.channel || "manual",
+        outcome: "completed",
+        note: `Completed task: ${task.label}`
+      });
+      state.interactions.unshift(interaction);
+      prospect.updatedAt = new Date().toISOString();
+      addEvent("task", `${task.label} completed for ${prospect.name}.`);
+    }
     sendJson(response, 200, publicState());
     return;
   }
@@ -1118,11 +1202,16 @@ function publicState() {
     selectedProductId: state.selectedProductId,
     selectedProduct,
     mcpSync: state.mcpSync,
-    prospects: state.prospects.map((prospect) => ({
-      ...prospect,
-      interactions: interactionsForProspect(prospect.id),
-      analysis: analyzeLead(prospect, selectedProduct)
-    })),
+    prospects: state.prospects.map((prospect) => {
+      const analysis = analyzeLead(prospect, selectedProduct);
+      return {
+        ...prospect,
+        score: analysis.score,
+        companyProfile: prospect.companyProfile || prospect.leadIntelligence?.company_context || buildCompanyProfile(prospect, selectedProduct),
+        interactions: interactionsForProspect(prospect.id),
+        analysis
+      };
+    }),
     interactions: state.interactions,
     followUpTasks: state.followUpTasks,
     aiActions: state.aiActions.slice(0, 25),
@@ -1787,6 +1876,7 @@ function normalizeProspect(input) {
     researchHistory: Array.isArray(input.researchHistory) ? input.researchHistory.slice(0, 12) : [],
     nextActionPlan: input.nextActionPlan || null,
     salesCadence: input.salesCadence || null,
+    companyProfile: input.companyProfile || null,
     isIcpSeed: Boolean(input.isIcpSeed),
     agentResults: input.agentResults || {},
     crmSource: input.crmSource || null
@@ -1969,36 +2059,186 @@ function interactionsForProspect(prospectId) {
 function analyzeLead(prospect, product = currentProduct()) {
   const interactions = interactionsForProspect(prospect.id);
   const persona = bestPersonaMatch(prospect, product);
-  const personaRates = state.historicalOutcomes.byPersona[persona] ?? {
-    reach: state.historicalOutcomes.baselineReachRate,
-    close: state.historicalOutcomes.baselineCloseRate
-  };
   const productFit = productFitForProspect(prospect, product);
-  const fitRates = state.historicalOutcomes.byProductFit[productFit.label];
-  const touchLift = interactions.reduce((acc, interaction) => {
+  const companyProfile = prospect.companyProfile || prospect.leadIntelligence?.company_context || buildCompanyProfile(prospect, product);
+  const contactConfidence = bestContactConfidenceServer(prospect);
+  const seniorityScore = /chief|ceo|founder|owner|president/i.test(prospect.title) ? 18
+    : /vp|head|director/i.test(prospect.title) ? 15
+      : /manager|lead|growth|sales|revenue|marketing|operations|ua|acquisition/i.test(prospect.title) ? 10
+        : prospect.title ? 6 : 1;
+  const fitScore = productFit.label === "high" ? 24 : productFit.label === "medium" ? 16 : 7;
+  const companyScore = clampNumber(Math.round((companyProfile.confidence || 0) * 0.22), 0, 18, 6);
+  const triggerScore = publicLeadNote(prospect.notes) || prospect.contactDiscovery?.scraperNote ? 12 : 3;
+  const contactScore = Math.round(Math.min(14, contactConfidence * 0.14));
+  const engagementScore = Math.min(12, interactions.reduce((sum, interaction) => {
     const lift = state.historicalOutcomes.byInteraction[interaction.type] ?? state.historicalOutcomes.byInteraction[interaction.outcome] ?? { reach: 0, close: 0 };
-    acc.reach += lift.reach;
-    acc.close += lift.close;
-    return acc;
-  }, { reach: 0, close: 0 });
-
-  const stalenessPenalty = latestInteractionDays(interactions) > 7 ? -0.06 : 0;
-  const reachProbability = clampProbability(personaRates.reach + fitRates.reach + touchLift.reach + stalenessPenalty);
-  const closeProbability = clampProbability(personaRates.close + fitRates.close + touchLift.close + (prospect.score - 70) / 500);
+    return sum + Math.max(0, Math.round((lift.reach + lift.close) * 35));
+  }, 0));
+  const completenessScore = [prospect.name, prospect.company, prospect.title, prospect.website, prospect.linkedin].filter(Boolean).length * 2;
+  const missingPenalty = [
+    !prospect.company,
+    !prospect.title,
+    !prospect.website,
+    !companyProfile.description || /unknown|needs research/i.test(companyProfile.description || ""),
+    contactConfidence < 55
+  ].filter(Boolean).length * 4;
+  const sensitivePenalty = /health|clinic|medical|casino|gambl|adult|children|kids/i.test(`${prospect.company} ${prospect.notes}`) ? 6 : 0;
+  const readinessRaw = clampNumber(Math.round(seniorityScore + fitScore + companyScore + triggerScore + contactScore + engagementScore + completenessScore - missingPenalty - sensitivePenalty), 0, 100, 45);
+  const reachProbability = clampProbability(0.12 + contactScore / 100 + engagementScore / 100 + triggerScore / 180 + (prospect.linkedin ? 0.08 : 0) - missingPenalty / 260);
+  const closeProbability = clampProbability(0.04 + readinessRaw / 500 + (productFit.label === "high" ? 0.07 : productFit.label === "medium" ? 0.035 : 0) + engagementScore / 220 - sensitivePenalty / 260);
+  const score = clampNumber(Math.round(readinessRaw * 0.55 + reachProbability * 28 + closeProbability * 17), 0, 94, 45);
   const recommendedAction = recommendedActionFor(prospect, interactions, reachProbability, closeProbability);
 
   return {
+    score,
     reachProbability: Math.round(reachProbability * 100),
     closeProbability: Math.round(closeProbability * 100),
     productFit: productFit.label,
     persona,
     recommendedAction,
+    scoreInputs: {
+      seniority: seniorityScore,
+      fit: fitScore,
+      companyContext: companyScore,
+      trigger: triggerScore,
+      contactEvidence: contactScore,
+      engagement: engagementScore,
+      completeness: completenessScore,
+      penalty: missingPenalty + sensitivePenalty,
+      readiness: readinessRaw
+    },
     reasoning: [
-      `${persona} historically reaches at ${Math.round(personaRates.reach * 100)}%.`,
+      `Company context confidence is ${companyProfile.confidence || 0}%; low confidence reduces the score.`,
       `${product.name} fit is ${productFit.label} because ${productFit.reason}.`,
-      interactions.length ? `${interactions.length} prior interaction${interactions.length === 1 ? "" : "s"} changes the forecast.` : "No prior touches logged yet."
+      contactConfidence ? `Best contact evidence is ${contactConfidence}% confidence.` : "No verified direct contact evidence yet.",
+      interactions.length ? `${interactions.length} logged interaction${interactions.length === 1 ? "" : "s"} affects reach.` : "No meaningful prior touches logged yet."
     ]
   };
+}
+
+function sentenceCase(value) {
+  const text = cleanText(value || "").replace(/\.$/, "");
+  return text ? text.charAt(0).toUpperCase() + text.slice(1) : "";
+}
+
+function buildCompanyProfile(prospect, product = currentProduct()) {
+  const text = `${prospect.company} ${prospect.title} ${prospect.notes} ${prospect.website}`.toLowerCase();
+  const knownNotes = publicLeadNote(prospect.notes);
+  const category = companyCategoryFromText(text);
+  const sizeEstimate = companySizeEstimate(text);
+  const audience = companyAudienceFromText(text, category);
+  const businessModel = companyBusinessModelFromText(text, category);
+  const techStack = ["hubspot", "salesforce", "snowflake", "apollo", "zoominfo", "adjust", "appsflyer", "singular"]
+    .filter((tool) => text.includes(tool))
+    .map((tool) => tool.charAt(0).toUpperCase() + tool.slice(1));
+  const growthSignals = [
+    /series\s+[abc]/i.test(prospect.notes) ? "funding or growth-stage note in CRM" : "",
+    /hiring|sdr|sales team|roles/i.test(prospect.notes) ? "hiring or team expansion signal" : "",
+    /outbound|pipeline|growth|revenue|marketing|ua|acquisition/i.test(prospect.notes) ? "go-to-market improvement signal" : ""
+  ].filter(Boolean);
+  const unknowns = [
+    prospect.website ? "" : "company website/domain",
+    knownNotes ? "" : "recent trigger",
+    techStack.length ? "" : "verified tools/tech stack",
+    /employee|employees|team|series|funding|roles/i.test(prospect.notes) ? "" : "company size",
+    "current vendor/incumbent"
+  ].filter(Boolean);
+  const confidence = clampNumber(
+    25
+      + (prospect.company ? 10 : 0)
+      + (prospect.website ? 14 : 0)
+      + (knownNotes ? 18 : 0)
+      + (category !== "Unknown" ? 10 : 0)
+      + (techStack.length ? 8 : 0)
+      + (growthSignals.length * 4),
+    15,
+    88,
+    40
+  );
+  const description = category === "Unknown"
+    ? `${prospect.company || "This account"} needs company research before confident outreach.`
+    : `${prospect.company || "This account"} appears to be ${articleFor(category)} ${category.toLowerCase()} company.${knownNotes ? ` CRM context: ${sentenceCase(knownNotes)}.` : ""}`;
+  return {
+    company_name: prospect.company || "Unknown company",
+    description,
+    category,
+    size_estimate: sizeEstimate,
+    audience,
+    business_model: businessModel,
+    likely_priorities: companyPrioritiesFor(prospect, product, category),
+    growth_signals: growthSignals,
+    tech_stack: techStack,
+    why_relevant: productFitForProspect(prospect, product).reason,
+    unknowns,
+    confidence,
+    research_links: companyResearchLinks(prospect),
+    source_ids: ["src-crm-profile"].filter(Boolean),
+    claim_type: confidence >= 65 ? "inference_from_workspace_data" : "needs_research"
+  };
+}
+
+function companyCategoryFromText(text) {
+  if (/analytics|data|snowflake|intelligence/.test(text)) return "Analytics software";
+  if (/logistics|supply|freight|transport/.test(text)) return "Logistics";
+  if (/clinic|health|medical|care/.test(text)) return "Healthcare services";
+  if (/game|gaming|casino|bet|app|mobile/.test(text)) return "Mobile app or gaming";
+  if (/finance|lending|bank|insurance|fintech/.test(text)) return "Financial services";
+  if (/energy|solar|grid|installer/.test(text)) return "Energy services";
+  if (/software|saas|crm|revops|sales/.test(text)) return "B2B software";
+  return "Unknown";
+}
+
+function companySizeEstimate(text) {
+  if (/1001|5000|enterprise|global/.test(text)) return "enterprise or large team - verify";
+  if (/201-500|series\s+c|series\s+b|vp|head/.test(text)) return "mid-market or growth-stage - verify";
+  if (/51-200|series\s+a|hiring|sdr/.test(text)) return "small-to-mid market - verify";
+  if (/founder|startup|seed/.test(text)) return "startup or founder-led - verify";
+  return "unknown - needs enrichment";
+}
+
+function companyAudienceFromText(text, category) {
+  if (/logistics|freight|supply/.test(text)) return "operations, shippers, logistics buyers, or transportation partners";
+  if (/clinic|health|medical/.test(text)) return "patients and local healthcare consumers; avoid sensitive assumptions";
+  if (/game|gaming|app/.test(text)) return "mobile users, players, or app customers";
+  if (/analytics|software|saas|crm/.test(text)) return "B2B teams buying software or data workflow improvements";
+  if (/finance|lending|bank/.test(text)) return "financial buyers, SMBs, consumers, or portfolio customers";
+  return category === "Unknown" ? "unknown audience - research required" : "business customers or end users - verify";
+}
+
+function companyBusinessModelFromText(text, category) {
+  if (/software|saas|analytics|crm/.test(text)) return "likely subscription/software revenue - verify";
+  if (/clinic|health/.test(text)) return "service delivery / appointments - verify";
+  if (/logistics/.test(text)) return "service or managed operations - verify";
+  if (/game|app|gaming/.test(text)) return "app monetization, advertising, IAP, or subscription - verify";
+  if (/finance|lending/.test(text)) return "financial product/service revenue - verify";
+  return category === "Unknown" ? "unknown - needs research" : "commercial model needs verification";
+}
+
+function companyPrioritiesFor(prospect, product, category) {
+  const note = publicLeadNote(prospect.notes);
+  const base = [];
+  if (/outbound|pipeline|sales|revenue|sdr/i.test(`${prospect.title} ${prospect.notes}`)) base.push("pipeline efficiency");
+  if (/hubspot|crm|snowflake|data/i.test(prospect.notes)) base.push("data quality and workflow automation");
+  if (/hiring|series|growth|expansion/i.test(prospect.notes)) base.push("scaling repeatable go-to-market motion");
+  if (category.includes("Mobile")) base.push("user acquisition performance and quality");
+  if (!base.length && note) base.push("evaluate current growth/process priorities");
+  if (!base.length) base.push(`verify whether ${lowerSalesPhrase(product.useCases?.[0] || product.name)} is a real priority`);
+  return base.slice(0, 4);
+}
+
+function companyResearchLinks(prospect) {
+  const query = encodeURIComponent([prospect.company, prospect.website].filter(Boolean).join(" "));
+  const peopleQuery = encodeURIComponent([prospect.company, "leadership"].filter(Boolean).join(" "));
+  return [
+    prospect.website ? { label: "Company website", url: `https://${normalizeDomain(prospect.website)}` } : null,
+    prospect.company ? { label: "Company web search", url: `https://www.google.com/search?q=${query}` } : null,
+    prospect.company ? { label: "Leadership search", url: `https://www.google.com/search?q=${peopleQuery}` } : null,
+    prospect.linkedin ? { label: "Lead LinkedIn", url: prospect.linkedin } : null
+  ].filter(Boolean);
+}
+
+function articleFor(value) {
+  return /^[aeiou]/i.test(value) ? "an" : "a";
 }
 
 function buildContactDiscovery(prospect) {
@@ -3005,12 +3245,12 @@ async function prepareOutreachWithAi(prospect, profile, taskType = "SEQUENCE_GEN
       messages: [
         {
           role: "system",
-          content: "You are an expert B2B outbound sales writer. Return only strict JSON with escaped newlines inside string values. Do not use markdown. Do not invent private contact data. Keep claims grounded in the provided product context. Do not mention CRM metadata, folder IDs, import pages, owner names, internal status names, or any note that looks like operational metadata."
+          content: "You are an elite outbound strategist and plain-spoken sales writer. Return only strict JSON with escaped newlines inside string values. The copy must sound human, specific, calm, and low-pressure. Avoid salesy phrases like 'I help', 'we help', 'quick demo', 'revolutionize', 'streamline', 'unlock', 'synergy', 'touch base', 'just checking in', and generic ROI claims. Do not invent private contact data or company facts. Ground every personalization point in provided company context, lead context, product knowledge, or mark it as something to verify. First touch should usually be a LinkedIn profile review/warm-up and a short invitation, not a pitch."
         },
         {
           role: "user",
           content: JSON.stringify({
-            instruction: "Create product-specific outreach for this prospect. First touch should usually be LinkedIn warm-up plus an invitation. Include concise LinkedIn invite, LinkedIn follow-up, email, SMS, WhatsApp, Telegram, call opener, four LinkedIn variations, and practical next actions. SMS and messenger drafts must be short and only used after contact/permission review.",
+            instruction: "Create a product-specific outbound strategy for this exact lead. Start from company context, likely priorities, unknowns, contact evidence, product knowledge, and learning memory. Write messages that feel like a researched note from one professional to another. Do not use broad claims. If company data is weak, make the first touch a research-based question and add a research gap instead of pretending. Include concise LinkedIn invite, LinkedIn follow-up, email, SMS, WhatsApp, Telegram, call opener, four LinkedIn variations, and practical next actions. SMS and messenger drafts must be short and only used after contact/permission review.",
             requiredJsonShape: {
               recommendedChannel: "linkedin | email | sms | whatsapp | telegram | manual_research",
               qualificationRationale: "short rationale",
@@ -3041,6 +3281,14 @@ async function prepareOutreachWithAi(prospect, profile, taskType = "SEQUENCE_GEN
             outreachExamples: (product.examples || []).slice(0, 5),
             learningMemory: learningContextForProduct(product.id),
             prospect: prospectForPrompt(prospect),
+            companyContext: prospect.companyProfile || prospect.leadIntelligence?.company_context || buildCompanyProfile(prospect, product),
+            leadIntelligence: prospect.leadIntelligence ? {
+              executive_summary: prospect.leadIntelligence.executive_summary,
+              company_context: prospect.leadIntelligence.company_context,
+              scoring_inputs: prospect.leadIntelligence.scoring_inputs,
+              research_gaps: prospect.leadIntelligence.research_gaps,
+              next_steps: prospect.leadIntelligence.next_steps
+            } : null,
             leadAnalysis: analyzeLead(prospect, product),
             contactCandidates: (prospect.contactDiscovery?.candidates || []).slice(0, 8)
           })
@@ -3200,25 +3448,88 @@ function contactCandidatesForCrm(prospect) {
     }));
 }
 
+function cleanOutboundSignal(value) {
+  return cleanText(value || "")
+    .replace(/\s+/g, " ")
+    .replace(/\.\.+/g, ".")
+    .replace(/\s+\./g, ".")
+    .replace(/\.$/, "")
+    .trim()
+    .slice(0, 190);
+}
+
+function lowerFirst(value) {
+  const text = String(value || "");
+  return text ? text.charAt(0).toLowerCase() + text.slice(1) : "";
+}
+
+function humanUseCasePhrase(useCase, product) {
+  const text = `${useCase || ""} ${product?.positioning || ""}`.toLowerCase();
+  if (/outbound|prospect|research|contact|follow-up|crm/.test(text)) return "keeping lead research, message quality, and follow-up logging consistent";
+  if (/paid|media|ua|acquisition|campaign/.test(text)) return "turning acquisition signals into a cleaner outbound motion";
+  if (/revops|revenue|sales/.test(text)) return "reducing manual RevOps work around prospect research and follow-up";
+  return lowerSalesPhrase(useCase || "the workflow");
+}
+
+function rolePainPoint(prospect, product, priority) {
+  const title = `${prospect.title || ""} ${priority || ""}`.toLowerCase();
+  if (/revops|operations|crm/.test(title)) return "keeping account research, contacts, CRM notes, and next actions in one repeatable flow";
+  if (/sales|revenue|growth|commercial/.test(title)) return "helping reps attack good leads without spending 10 minutes researching each one";
+  if (/founder|ceo|owner/.test(title)) return "getting outbound quality up without adding management overhead";
+  if (/marketing|demand|acquisition|ua/.test(title)) return "turning campaign or market signals into targeted outbound follow-up";
+  return humanUseCasePhrase(product?.useCases?.[0], product);
+}
+
+function firstTouchQuestion(prospect, product, company, reason, rolePain) {
+  const example = (product.examples || []).find((item) => /linkedin/i.test(item.channel || "") && item.message);
+  if (example?.message) {
+    const cleaned = cleanOutboundSignal(example.message)
+      .replace(/\byour team\b/gi, company)
+      .replace(/\byou are\b/gi, `${company} is`);
+    const line = cleaned.endsWith("?") ? cleaned : `${cleaned}.`;
+    return lowerFirst(line);
+  }
+  const signal = cleanOutboundSignal(reason);
+  return signal && !/company context/i.test(signal)
+    ? `saw ${signal}. Curious how you handle ${rolePain}`
+    : `curious how ${company} handles ${rolePain}`;
+}
+
+function shortOutreachTopic(rolePain, product) {
+  const text = `${rolePain || ""} ${product?.name || ""}`.toLowerCase();
+  if (/research|contact|crm|follow/.test(text)) return "outbound research and follow-up workflows";
+  if (/media|campaign|acquisition/.test(text)) return "acquisition-led outbound workflows";
+  if (/management|overhead/.test(text)) return "outbound quality without extra management overhead";
+  return "sales workflow quality";
+}
+
 function buildOutreachPlan(prospect, profile, route, product = currentProduct()) {
-  const pain = inferPainPoint(prospect);
   const channel = chooseBestChannel(prospect);
   const analysis = analyzeLead(prospect, product);
   const useCase = bestUseCaseFor(prospect, product);
-  const proof = product.proofPoints[0] ?? "reduces manual outbound work";
-  const differentiator = product.differentiators[0] ?? "AI-assisted sales execution";
+  const companyProfile = prospect.companyProfile || prospect.leadIntelligence?.company_context || buildCompanyProfile(prospect, product);
+  const proof = product.proofPoints[0] ?? "approved product proof is still missing";
+  const differentiator = product.differentiators[0] ?? "a controlled workflow rather than a generic automation pitch";
   const knowledgeAngle = productKnowledgeForPrompt(product, 1)[0]?.lesson || "";
-  const cta = profile === "premium" ? "open to a 12-minute working session next week" : "open to a quick conversation next week";
   const firstName = prospect.name.split(/\s+/)[0] || prospect.name;
   const company = prospect.company || "your team";
-  const title = prospect.title || "your role";
-  const useCaseText = lowerSalesPhrase(useCase);
-  const painText = lowerSalesPhrase(pain);
+  const useCaseText = humanUseCasePhrase(useCase, product);
   const differentiatorText = lowerSalesPhrase(differentiator);
-  const safeSignal = publicPersonalizationSignal(prospect);
-  const sourceLine = safeSignal ? `I noticed ${safeSignal.replace(/\.$/, "")}.` : `I was looking at ${company}'s go-to-market motion.`;
+  const safeSignal = cleanOutboundSignal(publicPersonalizationSignal(prospect));
+  const sourceLine = safeSignal ? `I noticed ${lowerFirst(safeSignal)}.` : `I was looking at ${company}'s go-to-market motion.`;
   const useDirectPhone = hasReviewedPhoneCandidate(prospect);
   const messengerHint = useDirectPhone ? "after confirming this is the right person and channel" : "only if a verified phone or messenger profile is added";
+  const companyAngle = companyProfile?.description && !/needs company research/i.test(companyProfile.description)
+    ? cleanOutboundSignal(companyProfile.description)
+    : `${company} still needs a better company read before a stronger pitch`;
+  const priority = (companyProfile?.likely_priorities || [useCaseText])[0] || useCaseText;
+  const unknown = (companyProfile?.unknowns || [])[0] || "whether this is a priority right now";
+  const rolePain = rolePainPoint(prospect, product, priority);
+  const softQuestion = "Is that already handled in your current workflow, or still partly manual?";
+  const reason = safeSignal || companyProfile?.growth_signals?.[0] || companyProfile?.category || "the company context";
+  const firstTouch = firstTouchQuestion(prospect, product, company, reason, rolePain);
+  const shortTopic = shortOutreachTopic(rolePain, product);
+  const companyPossessive = company.endsWith("s") ? `${company}'` : `${company}'s`;
 
   return {
     preparedAt: new Date().toISOString(),
@@ -3230,39 +3541,46 @@ function buildOutreachPlan(prospect, profile, route, product = currentProduct())
     recommendedChannel: channel,
     analysis,
     qualification: {
-      score: prospect.score,
+      score: analysis.score,
       fit: analysis.productFit,
-      rationale: `${title} at ${company} maps to ${useCase.toLowerCase()} for ${product.name}.`
+      rationale: `${prospect.title || "This role"} at ${company} maps to ${useCase.toLowerCase()}, but company context confidence is ${companyProfile.confidence || 0}%.`
     },
     messages: [
       {
         channel: "linkedin_invite",
-        body: `Hi ${firstName}, noticed your work at ${company}. I’m researching how teams handle ${useCaseText}. Open to connecting?`
+        body: trimMessage(`Hi ${firstName}, ${firstTouch} Open to connecting?`, 260),
+        personalization_basis: [reason, prospect.title, priority].filter(Boolean)
       },
       {
         channel: "linkedin_follow_up",
-        body: `${firstName}, thanks for connecting. The reason I reached out: ${product.name} helps teams with ${useCaseText} without adding manual research/admin work. Is this something ${company} is trying to improve this quarter?`
+        body: trimMessage(`${firstName}, thanks for connecting. ${sourceLine} For ${prospect.title || "your role"}, I would guess the hard part is ${rolePain} without slowing reps down. ${softQuestion}`, 520),
+        personalization_basis: [sourceLine, prospect.title, rolePain].filter(Boolean)
       },
       {
         channel: "email",
-        subject: `${company} and ${product.name}`,
-        body: `Hi ${firstName},\n\n${sourceLine}\n\nFor teams dealing with ${painText}, ${product.name} is usually most useful around ${useCaseText}. The reason I thought of ${company}: ${proof}, with ${differentiatorText} underneath so the workflow stays controlled.${knowledgeAngle ? ` ${knowledgeAngle}` : ""}\n\nWould you be ${cta}?`
+        subject: `${company}: quick RevOps question`,
+        body: trimWords(`Hi ${firstName},\n\n${sourceLine}\n\nI may be early here, but ${companyAngle}. For ${prospect.title || "your team"}, the angle I would test is ${rolePain}.\n\nThe part I do not want to assume is ${unknown}. Are you already handling that inside your current workflow, or is it still a rep-by-rep process?\n\nIf this sits with someone else, who normally owns it?${knowledgeAngle ? `\n\nContext I am using internally: ${knowledgeAngle}` : ""}`, 105),
+        personalization_basis: [companyAngle, rolePain, unknown].filter(Boolean)
       },
       {
         channel: "sms",
-        body: `Hi ${firstName}, quick one: I help teams improve ${useCaseText} with ${product.name}. Worth sending you the short workflow?`
+        body: trimWords(`Hi ${firstName}, saw ${company} while researching ${shortTopic}. Is that yours, or should I leave it?`, 28),
+        personalization_basis: [company, rolePain].filter(Boolean)
       },
       {
         channel: "whatsapp",
-        body: `Hi ${firstName}, this is a quick note ${messengerHint}. I’m looking at ${company}'s ${useCaseText} workflow and thought ${product.name} could be relevant. Worth sharing a short example?`
+        body: trimWords(`Hi ${firstName}, one question on ${companyPossessive} outbound research process. Is that your area?`, 24),
+        personalization_basis: [messengerHint, company].filter(Boolean)
       },
       {
         channel: "telegram",
-        body: `Hi ${firstName}, quick question ${messengerHint}: is ${useCaseText} something your team is actively improving? I can share a short ${product.name} workflow if useful.`
+        body: trimWords(`Hi ${firstName}, is outbound research quality something you own at ${company}?`, 18),
+        personalization_basis: [messengerHint, company].filter(Boolean)
       },
       {
         channel: "call",
-        body: `Lead with ${company}'s current motion, then ask how ${prospect.title || "the team"} handles ${useCaseText}, where the process breaks, and whether ${product.name}'s ${differentiatorText} would be useful.`
+        body: `Open with: "I may be early, but I had ${company} on a list because of ${reason}. I wanted to ask one question rather than pitch." Then ask how ${prospect.title || "the team"} handles ${rolePain}, what is already solved, and whether ${differentiatorText} would be relevant.`,
+        personalization_basis: [reason, rolePain, differentiatorText].filter(Boolean)
       }
     ],
     actions: [
@@ -3706,6 +4024,7 @@ function buildLocalLeadIntelligenceSnapshot(prospect, product, profile, sources,
   const trigger = triggerForProspect(prospect, sources);
   const gaps = researchGapsForIntelligence(prospect, product, profile, contactCandidates, sources);
   const warnings = qualityWarningsForIntelligence(prospect, product, profile, sources, gaps);
+  const companyContext = buildCompanyProfile(prospect, product);
   return {
     id: `intel-${randomBytes(8).toString("hex")}`,
     workspace_id: state.workspaceId,
@@ -3730,12 +4049,7 @@ function buildLocalLeadIntelligenceSnapshot(prospect, product, profile, sources,
     priority_score: scoreSummary.priority_score,
     priority_wave: scoreSummary.priority_wave,
     scoring_inputs: scoringInputs,
-    company_context: {
-      statement: `${prospect.company || "This account"} is being evaluated for ${product.name}.`,
-      fit_reason: productFitForProspect(prospect, product).reason,
-      source_ids: ["src-crm-profile", "src-product-context"].filter((id) => sourceIds.includes(id)),
-      claim_type: "inference"
-    },
+    company_context: companyContext,
     parent_and_control: { parent_company: "unknown", control_notes: "Unknown until public ownership or CRM account hierarchy is verified.", source_ids: [], confidence: 35 },
     selected_game_or_app: selectedGame,
     genre_and_monetization: genreAndMonetizationFor(prospect, profile),
@@ -3821,6 +4135,7 @@ function normalizeLeadIntelligenceSnapshot(snapshot, fallback, profile) {
     prompt_version: cleanText(snapshot.prompt_version || fallback.prompt_version || profile.promptVersion),
     executive_summary: cleanLongText(snapshot.executive_summary || fallback.executive_summary).slice(0, 1200),
     overall_confidence: clampNumber(snapshot.overall_confidence, 0, 100, fallback.overall_confidence),
+    company_context: normalizeCompanyContext(snapshot.company_context, fallback.company_context),
     scoring_inputs: normalizeScoringInputs(snapshot.scoring_inputs, fallback.scoring_inputs),
     triggers: normalizeTriggerRows(snapshot.triggers, fallback.triggers),
     recommended_contacts: normalizeRecommendedContacts(snapshot.recommended_contacts, fallback.recommended_contacts),
@@ -3853,6 +4168,7 @@ function attachLeadIntelligence(prospect, snapshot, mode) {
     reusedFromAccount: snapshot.lead_id !== prospect.id || mode === "reused_account_snapshot",
     contact_personalization: contactPersonalizationLayer(prospect, snapshot)
   };
+  prospect.companyProfile = snapshot.company_context || prospect.companyProfile || null;
   prospect.intelligenceSnapshotId = snapshot.id;
   prospect.accountKey = snapshot.account_id;
 }
@@ -3926,19 +4242,24 @@ function buildIntelligenceScoringInputs(prospect, product, profile, sources) {
   const hasTrigger = Boolean(publicLeadNote(prospect.notes) || prospect.contactDiscovery?.scraperNote);
   const fit = productFitForProspect(prospect, product);
   const isAdAction = profile.id.includes("adaction");
+  const companyProfile = buildCompanyProfile(prospect, product);
+  const companyConfidence = Number(companyProfile.confidence || 0);
+  const verifiedContact = contactConfidence >= 75;
+  const seniorDecisionMaker = /chief|ceo|founder|owner|president|vp|head|director/i.test(prospect.title);
+  const hasProductProof = (product.proofPoints || []).length || (product.knowledge || []).some((item) => /case|proof|lesson|platform/i.test(item.type || ""));
   const values = {
-    spend_capacity: /chief|ceo|founder|head|vp|growth|marketing|ua|user acquisition|performance/.test(text) ? 15 : 9,
-    monetization_economics: isAdAction ? (/casino|gaming|game|bet|app|media/.test(text) ? 12 : 8) : (prospect.score >= 80 ? 11 : 8),
-    event_progression_depth: isAdAction ? (/game|casino|bet|app|performance|growth/.test(text) ? 11 : 7) : (prospect.notes ? 10 : 6),
-    supply_fit: fit.label === "high" ? 9 : fit.label === "medium" ? 6 : 4,
-    need_to_diversify: /growth|marketing|acquisition|ua|performance|sales|outbound/.test(text) ? 8 : 5,
-    current_trigger: hasTrigger ? 7 : 3,
-    data_mmp_readiness: /analytics|mmp|adjust|appsflyer|singular|snowflake|hubspot|crm|performance/.test(text) ? 8 : 5,
-    buyer_access: /chief|ceo|founder|head|vp|director/.test(text) ? 5 : 3,
-    proof_match: product.proofPoints?.length ? 4 : 2,
-    penalties: restrictedCategoryPenalty(prospect, profile)
+    spend_capacity: seniorDecisionMaker ? (companyConfidence >= 65 ? 16 : 12) : companyConfidence >= 65 ? 10 : 6,
+    monetization_economics: isAdAction ? (/casino|gaming|game|bet|app|media/.test(text) ? 11 : 5) : (companyConfidence >= 70 ? 10 : companyConfidence >= 45 ? 7 : 4),
+    event_progression_depth: isAdAction ? (/game|casino|bet|app|performance|growth/.test(text) ? 10 : 4) : (publicLeadNote(prospect.notes) ? 9 : 4),
+    supply_fit: fit.label === "high" ? 9 : fit.label === "medium" ? 6 : 3,
+    need_to_diversify: /growth|marketing|acquisition|ua|performance|sales|outbound|pipeline|sdr/.test(text) ? 8 : 3,
+    current_trigger: hasTrigger ? 8 : 2,
+    data_mmp_readiness: /analytics|mmp|adjust|appsflyer|singular|snowflake|hubspot|crm|performance/.test(text) ? 8 : 3,
+    buyer_access: seniorDecisionMaker && verifiedContact ? 5 : seniorDecisionMaker ? 4 : verifiedContact ? 3 : 1,
+    proof_match: hasProductProof && fit.label === "high" ? 5 : hasProductProof ? 3 : 1,
+    penalties: restrictedCategoryPenalty(prospect, profile) + (companyConfidence < 45 ? 8 : 0) + (contactConfidence < 55 ? 5 : 0)
   };
-  return profile.scoreWeights.map((weight) => ({ key: weight.key, label: weight.label, max: weight.max, value: clampNumber(values[weight.key], 0, weight.max, weight.penalty ? 0 : Math.floor(weight.max / 2)), penalty: Boolean(weight.penalty), rationale: scoringRationale(weight.key, prospect, product, contactConfidence, sources), confidence: weight.key === "penalties" ? 72 : Math.max(45, Math.min(92, 55 + contactConfidence / 3 + (sources.length * 2))), source_ids: sourceIdsForScoring(weight.key, sources) }));
+  return profile.scoreWeights.map((weight) => ({ key: weight.key, label: weight.label, max: weight.max, value: clampNumber(values[weight.key], 0, weight.max, weight.penalty ? 0 : Math.floor(weight.max / 2)), penalty: Boolean(weight.penalty), rationale: scoringRationale(weight.key, prospect, product, contactConfidence, sources), confidence: weight.key === "penalties" ? 80 : Math.max(35, Math.min(88, 35 + contactConfidence / 4 + companyConfidence / 4 + (sources.length * 1.5))), source_ids: sourceIdsForScoring(weight.key, sources) }));
 }
 
 function calculateIntelligenceScores(inputs, profile) {
@@ -4037,13 +4358,16 @@ function localIntelligenceMessages(prospect, product, profile, selectedGame, sou
   const isAdAction = profile.id.includes("adaction");
   const cta = profile.messageRules.lowFrictionCta;
   const trigger = (publicLeadNote(prospect.notes) || `${company} appears relevant to ${product.name}`).replace(/[.!?]+$/, "");
-  const hypothesis = isAdAction ? `a capped value-exchange/rewarded test for ${selectedGame.name} with one payable milestone and one natural quality KPI` : `a small workflow test for ${lowerSalesPhrase(product.useCases?.[0] || "outbound preparation")}`;
-  const question = isAdAction ? "which KPI would make a rewarded UA test worth continuing after the payable event?" : "where does manual prep slow the team down most today?";
+  const companyContext = buildCompanyProfile(prospect, product);
+  const priority = (companyContext.likely_priorities || [])[0] || lowerSalesPhrase(product.useCases?.[0] || "the workflow");
+  const unknown = (companyContext.unknowns || [])[0] || "whether this is a current priority";
+  const hypothesis = isAdAction ? `a capped value-exchange/rewarded test for ${selectedGame.name} with one payable milestone and one natural quality KPI` : `a narrow test around ${lowerSalesPhrase(product.useCases?.[0] || "outbound preparation")}`;
+  const question = isAdAction ? "which KPI would make a rewarded UA test worth continuing after the payable event?" : `is ${priority} actually on your plate, or am I early?`;
   return [
-    { contact_id: prospect.id, target_role: "", channel: "linkedin_connection", subject: "", body: trimMessage(`Hi ${firstName}, saw the ${prospect.title || "growth"} angle at ${company}. Curious if ${hypothesis} is relevant enough to compare notes?`, profile.messageRules.connectionNoteMaxChars), personalization_basis: [trigger, hypothesis], source_ids: ["src-crm-profile", "src-product-context"].filter((id) => sourceIds.includes(id)), status: "draft" },
-    { contact_id: prospect.id, target_role: "", channel: "linkedin_dm", subject: "", body: trimMessage(`Thanks for connecting, ${firstName}. The specific reason I reached out: ${trigger}. My hypothesis is ${hypothesis}. Quick question: ${question} Open to a ${cta}?`, profile.messageRules.linkedinDmMaxChars), personalization_basis: [trigger, hypothesis, question], source_ids: ["src-crm-profile", "src-product-context"].filter((id) => sourceIds.includes(id)), status: "draft" },
-    { contact_id: prospect.id, target_role: "", channel: "email", subject: isAdAction ? `${selectedGame.name}: capped rewarded UA test-fit question` : `${company}: quick test-fit question`, body: trimWords(`Hi ${firstName},\n\n${trigger}.\n\nI am reaching out with a narrow hypothesis: ${hypothesis}. ${isAdAction ? "I would describe this plainly as value-exchange/rewarded traffic, not ordinary non-incentivized programmatic traffic." : ""}\n\nThe main question is: ${question}\n\nWould it be useful to compare notes in a ${cta}?`, profile.messageRules.emailMaxWords), personalization_basis: [trigger, hypothesis, question], source_ids: ["src-crm-profile", "src-product-context"].filter((id) => sourceIds.includes(id)), status: "draft" },
-    { contact_id: prospect.id, target_role: "", channel: "follow_up", subject: "", body: trimWords(`${firstName}, quick follow-up. The ask is not a broad demo; it is a ${cta} around ${hypothesis}. Worth checking if the assumptions are even valid?`, profile.messageRules.followUpMaxWords), personalization_basis: [hypothesis], source_ids: ["src-product-context"].filter((id) => sourceIds.includes(id)), status: "draft" }
+    { contact_id: prospect.id, target_role: "", channel: "linkedin_connection", subject: "", body: trimMessage(`Hi ${firstName}, noticed ${trigger}. I am trying to understand how ${company} thinks about ${priority}. Open to connecting?`, profile.messageRules.connectionNoteMaxChars), personalization_basis: [trigger, priority], source_ids: ["src-crm-profile", "src-product-context"].filter((id) => sourceIds.includes(id)), status: "draft" },
+    { contact_id: prospect.id, target_role: "", channel: "linkedin_dm", subject: "", body: trimMessage(`Thanks for connecting, ${firstName}. I may be early, but ${companyContext.description.replace(/[.!?]+$/, "")}. The reason I reached out is ${hypothesis}. Before I assume too much: ${question}`, profile.messageRules.linkedinDmMaxChars), personalization_basis: [trigger, hypothesis, question], source_ids: ["src-crm-profile", "src-product-context"].filter((id) => sourceIds.includes(id)), status: "draft" },
+    { contact_id: prospect.id, target_role: "", channel: "email", subject: isAdAction ? `${selectedGame.name}: capped rewarded UA question` : `${company}: ${priority} question`, body: trimWords(`Hi ${firstName},\n\nI am reaching out with a narrow assumption, not a broad pitch.\n\nWhat I can see: ${trigger}. What I cannot verify yet: ${unknown}.\n\nThe potential angle is ${hypothesis}. ${isAdAction ? "I would frame this plainly as value-exchange/rewarded traffic, with MMP measurement and a separate natural quality KPI." : `For ${product.name}, this is only relevant if ${priority} is active right now.`}\n\n${question}\n\nIf yes, would a ${cta} make sense?`, profile.messageRules.emailMaxWords), personalization_basis: [trigger, hypothesis, question], source_ids: ["src-crm-profile", "src-product-context"].filter((id) => sourceIds.includes(id)), status: "draft" },
+    { contact_id: prospect.id, target_role: "", channel: "follow_up", subject: "", body: trimWords(`${firstName}, circling back once. I am trying to validate whether ${priority} is real at ${company}. If not, I will park it.`, profile.messageRules.followUpMaxWords), personalization_basis: [priority], source_ids: ["src-product-context"].filter((id) => sourceIds.includes(id)), status: "draft" }
   ];
 }
 
@@ -4124,6 +4448,28 @@ function createTaskFromIntelligence(prospect, stepIndex = 0) {
 function contactPersonalizationLayer(prospect, snapshot) {
   const messages = (snapshot.messages || []).filter((message) => !message.contact_id || message.contact_id === prospect.id);
   return { contact_id: prospect.id, full_name: prospect.name, title: prospect.title, role: committeeRoleServer(prospect.title), personalization_basis: messages.flatMap((message) => message.personalization_basis || []).slice(0, 6), messages: messages.slice(0, 6), source_ids: [...new Set(messages.flatMap((message) => message.source_ids || []))] };
+}
+
+function normalizeCompanyContext(input = {}, fallback = {}) {
+  const source = input && typeof input === "object" ? input : {};
+  const base = fallback && typeof fallback === "object" ? fallback : {};
+  return {
+    company_name: cleanText(source.company_name || source.companyName || base.company_name || "Unknown company"),
+    description: cleanLongText(source.description || source.statement || base.description || base.statement || "Company research is not complete.").slice(0, 900),
+    category: cleanText(source.category || base.category || "Unknown").slice(0, 120),
+    size_estimate: cleanText(source.size_estimate || source.sizeEstimate || base.size_estimate || "unknown - needs enrichment").slice(0, 120),
+    audience: cleanText(source.audience || base.audience || "unknown audience - research required").slice(0, 200),
+    business_model: cleanText(source.business_model || source.businessModel || base.business_model || "unknown - needs research").slice(0, 200),
+    likely_priorities: normalizeStringArray(source.likely_priorities || source.likelyPriorities || base.likely_priorities || [], []).slice(0, 6),
+    growth_signals: normalizeStringArray(source.growth_signals || source.growthSignals || base.growth_signals || [], []).slice(0, 6),
+    tech_stack: normalizeStringArray(source.tech_stack || source.techStack || base.tech_stack || [], []).slice(0, 8),
+    why_relevant: cleanText(source.why_relevant || source.whyRelevant || source.fit_reason || base.why_relevant || "").slice(0, 320),
+    unknowns: normalizeStringArray(source.unknowns || base.unknowns || [], []).slice(0, 8),
+    confidence: clampNumber(source.confidence, 0, 100, base.confidence || 35),
+    research_links: Array.isArray(source.research_links || source.researchLinks) ? (source.research_links || source.researchLinks).slice(0, 6).map((link) => ({ label: cleanText(link.label || "Research link"), url: cleanText(link.url || "") })).filter((link) => link.url) : (base.research_links || []),
+    source_ids: normalizeStringArray(source.source_ids || source.sourceIds || base.source_ids || [], []).slice(0, 8),
+    claim_type: cleanText(source.claim_type || source.claimType || base.claim_type || "needs_research")
+  };
 }
 
 function normalizeScoringInputs(inputs, fallback = []) {

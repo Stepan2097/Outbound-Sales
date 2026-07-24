@@ -2,8 +2,12 @@ let state = null;
 let selectedTaskType = "COLD_EMAIL";
 let selectedProspectId = null;
 let creatingNewProduct = false;
+let busyAction = "";
+let busyMessage = "";
+let uiNotice = "";
 let pendingProductKnowledgeScreenshot = null;
 let pendingLearningScreenshot = null;
+let pendingKnowledgeInboxScreenshot = null;
 
 const views = [...document.querySelectorAll(".view")];
 const navItems = [...document.querySelectorAll(".nav-item")];
@@ -53,12 +57,13 @@ function render() {
   renderBudgets();
   renderPrivacy();
   renderEvaluation();
+  renderBusyState();
   refreshIcons();
 }
 
 function renderTopbar() {
   const runtime = state.aiRuntime?.mode === "openrouter" ? "OpenRouter live" : "Mock AI";
-  document.getElementById("workspaceMeta").textContent = `${runtime} · ${state.prospects?.length || 0} leads · ${state.followUpTasks?.length || 0} follow-ups`;
+  document.getElementById("workspaceMeta").textContent = busyMessage || uiNotice || `${runtime} · ${state.prospects?.length || 0} leads · ${state.followUpTasks?.length || 0} follow-ups`;
   document.getElementById("providerStatus").textContent = state.providerHealth.status;
   document.getElementById("healthPill").textContent = state.providerHealth.status;
   document.getElementById("keyState").textContent = state.hasOpenRouterKey
@@ -68,26 +73,10 @@ function renderTopbar() {
 }
 
 function renderProductContext() {
-  const product = state.selectedProduct;
-  if (!product) return;
-
-  document.getElementById("activeProductName").textContent = product.name;
-  document.getElementById("activeProductPositioning").textContent = product.positioning;
-  document.getElementById("productPersonas").textContent = product.targetPersonas.slice(0, 3).join(", ");
-  document.getElementById("productUseCase").textContent = product.useCases[0] || "-";
-  document.getElementById("productProofPoint").textContent = product.proofPoints[0] || "-";
-  document.getElementById("mcpSyncState").textContent = `MCP ${state.mcpSync.status}`;
-  document.getElementById("mcpSourceList").innerHTML = product.mcpContext.sources
-    .map(
-      (source) => `
-        <div class="mcp-source">
-          <i data-lucide="file-check-2"></i>
-          <span>${escapeHtml(source.name)}</span>
-          <strong>${source.confidence}%</strong>
-        </div>
-      `
-    )
-    .join("");
+  const selected = state.prospects?.find((prospect) => prospect.id === selectedProspectId);
+  setHtml("companyBriefContent", companyBriefRows(selected));
+  setText("companyConfidencePill", companyConfidenceLabel(selected));
+  setText("companyBriefMeta", selected?.company ? `${selected.company} account context for ${state.selectedProduct?.name || "selected product"}` : "What this company does, who they sell to, and why this lead may matter");
 }
 
 function renderProductStudio() {
@@ -240,8 +229,13 @@ function renderLearningDatabase() {
   if (productSelect) {
     fillSelect(productSelect, state.products || [], (product) => product.id, (product) => product.name, state.selectedProductId);
   }
+  const inboxProductSelect = document.getElementById("knowledgeInboxProductInput");
+  if (inboxProductSelect) {
+    fillSelect(inboxProductSelect, state.products || [], (product) => product.id, (product) => product.name, state.selectedProductId);
+  }
 
   document.getElementById("learningStatusPill").textContent = playbook.status || "empty";
+  renderKnowledgeInboxResult(learning.lastInboxAnalysis);
   document.getElementById("learningExampleCount").textContent = stats.totalExamples || 0;
   document.getElementById("learningWinCount").textContent = stats.winningExamples || 0;
   document.getElementById("learningScreenshotCount").textContent = stats.screenshotExamples || 0;
@@ -264,6 +258,7 @@ function renderLearningDatabase() {
   document.getElementById("learningExampleList").innerHTML = (learning.examples || []).length
     ? learning.examples.map(learningExampleRow).join("")
     : `<div class="empty-state">No training data yet</div>`;
+  renderKnowledgeInboxScreenshotPreview();
   renderIcpDatabase();
 }
 
@@ -295,6 +290,29 @@ function listItems(items, emptyText) {
   return (items || []).length
     ? items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")
     : `<li>${escapeHtml(emptyText)}</li>`;
+}
+
+function renderKnowledgeInboxResult(analysis) {
+  const result = document.getElementById("knowledgeInboxResult");
+  if (!result) return;
+  setText("knowledgeInboxStatusPill", analysis ? "learned" : "ready");
+  if (!analysis) {
+    result.innerHTML = `<div class="empty-state">Paste or upload knowledge and the AI playbook will extract patterns, rules, and reusable sales context.</div>`;
+    return;
+  }
+  const patterns = (analysis.patterns || []).slice(0, 5).map((item) => `<span class="cap">${escapeHtml(item)}</span>`).join("");
+  const rules = (analysis.rules || []).slice(0, 4).map((item) => `<li>${escapeHtml(item)}</li>`).join("");
+  result.innerHTML = `
+    <article class="knowledge-inbox-card">
+      <div>
+        <span class="pill">${escapeHtml(analysis.productName || "Product")}</span>
+        <strong>${escapeHtml(analysis.summary || "Knowledge analyzed and added to the playbook.")}</strong>
+        <small>${analysis.updatedAt ? `Updated ${new Date(analysis.updatedAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}` : ""}</small>
+      </div>
+      <div class="cap-list">${patterns}</div>
+      <ul>${rules}</ul>
+    </article>
+  `;
 }
 
 function learningExampleRow(example) {
@@ -542,15 +560,20 @@ function renderProspects() {
 
 function prospectCard(prospect) {
   return `
-    <button class="prospect-card ${prospect.id === selectedProspectId ? "active" : ""}" data-prospect-id="${escapeAttr(prospect.id)}">
-      <div class="avatar">${initials(prospect.name)}</div>
-      <div>
-        <strong>${escapeHtml(prospect.name)}</strong>
-        <span>${escapeHtml([prospect.title, prospect.company].filter(Boolean).join(" · "))}</span>
-        <small>${escapeHtml(prospect.location || "No location")} · ${escapeHtml(prospect.status)} · reach ${prospect.analysis?.reachProbability ?? 0}%</small>
-      </div>
-      <b>${prospect.score}</b>
-    </button>
+    <article class="prospect-queue-row ${prospect.id === selectedProspectId ? "active" : ""}">
+      <button class="prospect-card" data-prospect-id="${escapeAttr(prospect.id)}">
+        <div class="avatar">${initials(prospect.name)}</div>
+        <div>
+          <strong>${escapeHtml(prospect.name)}</strong>
+          <span>${escapeHtml([prospect.title, prospect.company].filter(Boolean).join(" · "))}</span>
+          <small>${escapeHtml(prospect.location || "No location")} · ${escapeHtml(prospect.status)} · reach ${prospect.analysis?.reachProbability ?? 0}%</small>
+        </div>
+        <b>${prospect.score}</b>
+      </button>
+      <button class="icon-button queue-remove danger-button" type="button" data-remove-prospect-id="${escapeAttr(prospect.id)}" title="Remove from queue" aria-label="Remove from queue">
+        <i data-lucide="trash-2"></i>
+      </button>
+    </article>
   `;
 }
 
@@ -576,7 +599,7 @@ function renderSelectedProspect(prospect) {
     document.getElementById("outreachContent").innerHTML = `<div class="empty-state">No outreach prepared</div>`;
     document.getElementById("leadAnalytics").innerHTML = "";
     document.getElementById("interactionList").innerHTML = `<div class="empty-state">No interactions logged</div>`;
-    document.getElementById("callAnalysis").innerHTML = `<div class="empty-state">Paste a transcript after a call</div>`;
+    setHtml("taskInteractionList", `<div class="empty-state">No interactions logged</div>`);
     document.getElementById("taskNotificationList").innerHTML = `<div class="empty-state">No follow-up tasks</div>`;
     document.getElementById("outreachModel").textContent = "not prepared";
     renderLeadWorkspaceExtras(null);
@@ -592,7 +615,7 @@ function renderSelectedProspect(prospect) {
   document.getElementById("contactList").innerHTML = contactRows(prospect);
   document.getElementById("leadAnalytics").innerHTML = analyticsRows(prospect);
   document.getElementById("interactionList").innerHTML = interactionRows(prospect);
-  document.getElementById("callAnalysis").innerHTML = callAnalysisRows(prospect);
+  setHtml("taskInteractionList", interactionRows(prospect));
   document.getElementById("taskNotificationList").innerHTML = taskNotificationRows(prospect);
   document.getElementById("outreachContent").innerHTML = outreachRows(prospect);
   document.getElementById("outreachModel").textContent = prospect.outreach?.modelUsed || "not prepared";
@@ -615,12 +638,13 @@ function renderLeadWorkspaceExtras(prospect) {
   setText("leadWorkspaceConfidence", prospect ? `${confidence}% best contact confidence` : "Awaiting evidence");
   setText("committeeCount", prospect ? `${committeeForProspect(prospect).length} contact${committeeForProspect(prospect).length === 1 ? "" : "s"}` : "0 contacts");
 
-  setHtml("accountSignalList", accountSignalRows(prospect));
+  setHtml("companyBriefContent", companyBriefRows(prospect));
+  setText("companyConfidencePill", companyConfidenceLabel(prospect));
+  setText("companyBriefMeta", prospect?.company ? `${prospect.company} account context for ${state.selectedProduct?.name || "selected product"}` : "What this company does, who they sell to, and why this lead may matter");
   setHtml("buyingCommitteeList", buyingCommitteeRows(prospect));
   setHtml("scoreBreakdown", scoreBreakdownRows(prospect));
   setHtml("nextActionSummary", nextActionRows(prospect));
   setHtml("salesCycleList", salesCycleRows(prospect));
-  setHtml("sourceAuditList", sourceAuditRows(prospect));
   setHtml("intelligenceContent", intelligenceRows(prospect));
   setText("intelligenceStatusPill", intelligenceStatusLabel(prospect));
   updateQuickCopies(prospect);
@@ -651,9 +675,88 @@ function leadTableRow(prospect) {
       <td><strong>${prospect.score || 0}</strong></td>
       <td><strong>${analysis.reachProbability || 0}%</strong></td>
       <td><span>${escapeHtml(analysis.recommendedAction || "Run research")}</span></td>
-      <td><button type="button" data-open-prospect-id="${escapeAttr(prospect.id)}"><i data-lucide="arrow-up-right"></i><span>Open</span></button></td>
+      <td>
+        <div class="table-action-row">
+          <button type="button" data-open-prospect-id="${escapeAttr(prospect.id)}"><i data-lucide="arrow-up-right"></i><span>Open</span></button>
+          <button class="icon-button danger-button" type="button" data-remove-prospect-id="${escapeAttr(prospect.id)}" title="Remove lead" aria-label="Remove lead"><i data-lucide="trash-2"></i></button>
+        </div>
+      </td>
     </tr>
   `;
+}
+
+function companyConfidenceLabel(prospect) {
+  if (!prospect) return "no research";
+  const profile = prospect.companyProfile || prospect.leadIntelligence?.company_context;
+  if (!profile) return "needs research";
+  const confidence = Number(profile.confidence || 0);
+  if (confidence >= 75) return `${confidence}% confidence`;
+  if (confidence >= 45) return `${confidence}% needs review`;
+  return "low company data";
+}
+
+function companyBriefRows(prospect) {
+  if (!prospect) return `<div class="empty-state">Open a lead and run research to build company context.</div>`;
+  const profile = prospect.companyProfile || prospect.leadIntelligence?.company_context || {};
+  const confidence = Number(profile.confidence || 0);
+  const description = profile.description || `${prospect.company || "This account"} needs company research before high-confidence outreach.`;
+  const cards = [
+    ["What they do", description],
+    ["Company size", profile.size_estimate || "Unknown"],
+    ["Audience", profile.audience || "Unknown"],
+    ["Business model", profile.business_model || "Unknown"],
+    ["Category", profile.category || "Needs research"],
+    ["Why relevant", profile.why_relevant || prospect.analysis?.reasoning?.[0] || "Run research to build the angle."]
+  ];
+  const priorities = detailChipList(profile.likely_priorities, "No priorities inferred yet");
+  const growth = detailChipList(profile.growth_signals, "No growth signals yet");
+  const stack = detailChipList(profile.tech_stack, "No tech stack found yet");
+  const unknowns = detailChipList(profile.unknowns, "No open company gaps");
+  const links = (profile.research_links || []).slice(0, 4).map((item) => {
+    const url = typeof item === "string" ? item : item.url;
+    const label = typeof item === "string" ? shortUrl(item) : item.label || item.title || shortUrl(item.url || "");
+    return url ? `<a href="${escapeAttr(url)}" target="_blank" rel="noreferrer">${escapeHtml(label)}</a>` : "";
+  }).filter(Boolean).join("");
+
+  return `
+    <div class="company-summary">
+      ${cards.map(([label, value]) => `
+        <article>
+          <span>${escapeHtml(label)}</span>
+          <strong>${escapeHtml(value)}</strong>
+        </article>
+      `).join("")}
+    </div>
+    <div class="company-detail-grid">
+      <section>
+        <strong>Likely Priorities</strong>
+        <div class="cap-list">${priorities}</div>
+      </section>
+      <section>
+        <strong>Growth Signals</strong>
+        <div class="cap-list">${growth}</div>
+      </section>
+      <section>
+        <strong>Tech and Tools</strong>
+        <div class="cap-list">${stack}</div>
+      </section>
+      <section>
+        <strong>Unknowns to Verify</strong>
+        <div class="cap-list">${unknowns}</div>
+      </section>
+    </div>
+    <div class="company-research-footer">
+      <span>Company context confidence: ${confidence}%</span>
+      <div>${links || `<span>No research links yet</span>`}</div>
+    </div>
+  `;
+}
+
+function detailChipList(items, emptyText) {
+  const values = (items || []).filter(Boolean).slice(0, 6);
+  return values.length
+    ? values.map((item) => `<span class="cap">${escapeHtml(item)}</span>`).join("")
+    : `<span class="cap muted">${escapeHtml(emptyText)}</span>`;
 }
 
 function accountSignalRows(prospect) {
@@ -720,17 +823,23 @@ function committeeRole(title) {
 function scoreBreakdownRows(prospect) {
   if (!prospect) return `<div class="empty-state">Scoring appears after a lead is selected</div>`;
   const analysis = prospect.analysis || {};
+  const inputs = analysis.scoreInputs || {};
   const rows = [
-    ["ICP fit", prospect.score || 0],
-    ["Reach chance", analysis.reachProbability || 0],
-    ["Close chance", analysis.closeProbability || 0],
-    ["Contact confidence", bestContactConfidence(prospect)]
+    ["Lead score", prospect.score || 0, "final"],
+    ["Readiness", inputs.readiness || 0, "driver"],
+    ["Reach chance", analysis.reachProbability || 0, "probability"],
+    ["Close chance", analysis.closeProbability || 0, "probability"],
+    ["Company context", inputs.companyContext || 0, "driver"],
+    ["Contact evidence", inputs.contactEvidence || bestContactConfidence(prospect), "driver"],
+    ["Timing trigger", inputs.trigger || 0, "driver"],
+    ["Product fit", inputs.fit || 0, "driver"],
+    ["Penalty", inputs.penalty || 0, "penalty"]
   ];
-  return rows.map(([label, value]) => `
+  return rows.map(([label, value, type]) => `
     <div>
       <span>${escapeHtml(label)}</span>
-      <strong>${value}%</strong>
-      <div class="meter compact"><span style="width:${value}%"></span></div>
+      <strong>${type === "penalty" ? `-${value}` : `${value}%`}</strong>
+      <div class="meter compact ${type === "penalty" ? "penalty" : ""}"><span style="width:${Math.max(0, Math.min(100, Number(value) || 0))}%"></span></div>
     </div>
   `).join("");
 }
@@ -777,13 +886,14 @@ function salesCycleRows(prospect) {
   const baseItems = [
     { label: "Added to queue", value: relativeTime(prospect.createdAt), state: "done" },
     { label: "Research", value: prospect.contactDiscovery ? "completed" : "not run", state: prospect.contactDiscovery ? "done" : "pending" },
-    { label: "Outreach prepared", value: prospect.outreach ? relativeTime(prospect.outreach.preparedAt || prospect.updatedAt) : "pending", state: prospect.outreach ? "done" : "pending" },
+    { label: "Outreach prepared", value: prospect.outreach ? relativeTime(prospect.outreach.preparedAt || prospect.updatedAt) : "pending", state: prospect.outreach ? "done" : "pending", type: "outreach_prepared" },
     { label: "Latest CRM action", value: (prospect.interactions || [])[0]?.type ? titleCase(prospect.interactions[0].type) : "none logged", state: (prospect.interactions || []).length ? "done" : "pending" }
   ];
   const cadenceItems = (prospect.salesCadence?.steps || []).slice(0, 5).map((step) => ({
     label: step.label,
     value: [step.day, step.channel, step.messageChannel ? `copy ${titleCase(step.messageChannel)}` : ""].filter(Boolean).join(" · "),
-    state: (prospect.interactions || []).some((interaction) => interaction.type === step.type) ? "done" : "pending"
+    state: (prospect.interactions || []).some((interaction) => interaction.type === step.type) ? "done" : "pending",
+    type: step.type
   }));
   const items = [...baseItems, ...cadenceItems];
   return items.map((item) => `
@@ -793,6 +903,7 @@ function salesCycleRows(prospect) {
         <strong>${escapeHtml(item.label)}</strong>
         <small>${escapeHtml(item.value)}</small>
       </div>
+      ${item.type && item.state !== "done" ? `<button type="button" data-interaction-type="${escapeAttr(item.type)}"><i data-lucide="check"></i><span>Done</span></button>` : ""}
     </article>
   `).join("");
 }
@@ -925,16 +1036,6 @@ function intelligenceRows(prospect) {
       <small>${escapeHtml(item.qualification_question || item.proof_required || "")}</small>
     </article>
   `).join("");
-  const sources = (intel.sources || []).slice(0, 8).map((source) => `
-    <article class="intel-source-row">
-      <div>
-        <strong>${escapeHtml(source.title || source.source_id)}</strong>
-        <span>${escapeHtml(source.evidence_excerpt || source.source_type || "")}</span>
-      </div>
-      <button type="button" data-intel-review-action="verify_source" data-intel-target-id="${escapeAttr(source.source_id)}"><i data-lucide="${source.verified_at ? "badge-check" : "circle-check"}"></i><span>${source.verified_at ? "Verified" : "Verify"}</span></button>
-    </article>
-  `).join("");
-
   return `
     <div class="intelligence-hero">
       <div>
@@ -969,10 +1070,6 @@ function intelligenceRows(prospect) {
       <section class="intel-card">
         <div class="intel-card-heading"><strong>Objections</strong><span>Likely blockers</span></div>
         <div class="intel-list">${objections || `<div class="empty-state">No objections mapped</div>`}</div>
-      </section>
-      <section class="intel-card span-wide">
-        <div class="intel-card-heading"><strong>Sources</strong><span>Facts, inferences, product knowledge</span></div>
-        <div class="intel-source-list">${sources || `<div class="empty-state">No source records</div>`}</div>
       </section>
     </div>
   `;
@@ -1085,7 +1182,9 @@ function outreachRows(prospect) {
 
   const messages = (outreach.messages || [])
     .map(
-      (message) => `
+      (message) => {
+        const basis = (message.personalization_basis || message.basis || []).slice(0, 4).join(" · ");
+        return `
         <article class="message-card">
           <div class="message-heading">
             <span class="pill">${escapeHtml(message.channel)}</span>
@@ -1093,8 +1192,10 @@ function outreachRows(prospect) {
             <button data-copy-text="${escapeAttr(message.body)}" title="Copy" aria-label="Copy"><i data-lucide="copy"></i></button>
           </div>
           <pre>${escapeHtml(message.body)}</pre>
+          ${basis ? `<small class="message-basis">${escapeHtml(basis)}</small>` : ""}
         </article>
-      `
+      `;
+      }
     )
     .join("");
 
@@ -1299,12 +1400,13 @@ function taskNotificationRows(prospect) {
   return tasks
     .map(
       (task) => `
-        <article class="task-alert">
+        <article class="task-alert ${task.status === "done" ? "done" : ""}">
           <i data-lucide="bell-ring"></i>
           <div>
             <strong>${escapeHtml(task.label)}</strong>
             <span>${new Date(task.due).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })} · ${escapeHtml(task.status)}</span>
           </div>
+          ${task.status === "done" ? "" : `<button type="button" data-task-complete-id="${escapeAttr(task.id)}"><i data-lucide="check"></i><span>Done</span></button>`}
         </article>
       `
     )
@@ -1353,6 +1455,55 @@ function setCopyText(id, value) {
   if (!element) return;
   element.dataset.copyText = value || "";
   element.disabled = !value;
+}
+
+function renderBusyState() {
+  const anyBusy = Boolean(busyAction);
+  setBusyButton("quickPrepareBtn", "research", "Running...");
+  setBusyButton("runResearchTopBtn", "research", "Running...");
+  setBusyButton("prepareOutreachBtn", "research", "Running...");
+  setBusyButton("analyzeIntelligenceBtn", "intelligence", "Analyzing...");
+  setBusyButton("refreshIntelligenceBtn", "intelligence", "Refreshing...");
+  setBusyButton("analyzeIntelligenceQuick", "intelligence", "Analyzing...");
+  setBusyButton("enrichProspectBtn", "enrich", "Refreshing...");
+  setBusyButton("removeLeadQuick", "remove", "Removing...");
+  document.querySelectorAll("[data-interaction-type], [data-task-complete-id], [data-remove-prospect-id]").forEach((button) => {
+    button.disabled = anyBusy;
+  });
+}
+
+function setBusyButton(id, actionName, activeText) {
+  const button = document.getElementById(id);
+  if (!button) return;
+  if (!button.dataset.defaultHtml) button.dataset.defaultHtml = button.innerHTML;
+  const active = busyAction === actionName;
+  button.disabled = active || (Boolean(busyAction) && ["research", "intelligence", "enrich", "remove"].includes(actionName));
+  button.classList.toggle("is-loading", active);
+  if (active) {
+    const icon = actionName === "remove" ? "loader-circle" : "loader-circle";
+    button.innerHTML = `<i data-lucide="${icon}"></i><span>${escapeHtml(activeText)}</span>`;
+  } else {
+    button.innerHTML = button.dataset.defaultHtml;
+  }
+}
+
+async function runUiAction(actionName, message, work) {
+  if (busyAction) return;
+  busyAction = actionName;
+  busyMessage = message;
+  uiNotice = "";
+  renderBusyState();
+  refreshIcons();
+  try {
+    await work();
+    uiNotice = actionName === "research" ? "Research refreshed. Outreach, score, company context, and next actions are updated." : "Action completed.";
+  } catch (error) {
+    uiNotice = error?.message || "Action failed. Please try again.";
+  } finally {
+    busyAction = "";
+    busyMessage = "";
+    render();
+  }
 }
 
 function setView(viewName) {
@@ -1464,6 +1615,22 @@ function renderLearningScreenshotPreview() {
   `;
 }
 
+function renderKnowledgeInboxScreenshotPreview() {
+  const preview = document.getElementById("knowledgeInboxScreenshotPreview");
+  const name = document.getElementById("knowledgeInboxScreenshotName");
+  if (!preview || !name) return;
+  if (!pendingKnowledgeInboxScreenshot) {
+    preview.innerHTML = "";
+    name.textContent = "Optional PNG/JPG from platform, SMS, LinkedIn, CRM, or product docs";
+    return;
+  }
+  name.textContent = `${pendingKnowledgeInboxScreenshot.name} · ${Math.round(pendingKnowledgeInboxScreenshot.size / 1024)} KB`;
+  preview.innerHTML = `
+    <img src="${escapeAttr(pendingKnowledgeInboxScreenshot.dataUrl)}" alt="${escapeAttr(pendingKnowledgeInboxScreenshot.name)}" />
+    <span>${escapeHtml(pendingKnowledgeInboxScreenshot.name)}</span>
+  `;
+}
+
 function initials(name) {
   return String(name || "?")
     .split(/\s+/)
@@ -1558,11 +1725,12 @@ document.getElementById("prospectSearch").addEventListener("input", renderProspe
 document.getElementById("prospectStatusFilter").addEventListener("change", renderProspects);
 document.getElementById("productSelect").addEventListener("change", async (event) => {
   creatingNewProduct = false;
-  state = await api("/api/products/select", {
-    method: "POST",
-    body: JSON.stringify({ productId: event.target.value })
+  await runUiAction("product", "Switching product context...", async () => {
+    state = await api("/api/products/select", {
+      method: "POST",
+      body: JSON.stringify({ productId: event.target.value })
+    });
   });
-  render();
 });
 
 document.getElementById("syncMcpBtn").addEventListener("click", async () => {
@@ -1571,23 +1739,23 @@ document.getElementById("syncMcpBtn").addEventListener("click", async () => {
 });
 
 document.getElementById("quickPrepareBtn").addEventListener("click", async () => {
-  await researchAndPrepareSelected();
+  await runUiAction("research", "Running lead research, enrichment, scoring, and outreach...", researchAndPrepareSelected);
 });
 
 document.getElementById("runResearchTopBtn").addEventListener("click", async () => {
-  await researchAndPrepareSelected();
+  await runUiAction("research", "Running lead research, enrichment, scoring, and outreach...", researchAndPrepareSelected);
 });
 
 document.getElementById("analyzeIntelligenceBtn").addEventListener("click", async () => {
-  await analyzeLeadIntelligence(false);
+  await runUiAction("intelligence", "Building the account intelligence brief...", () => analyzeLeadIntelligence(false));
 });
 
 document.getElementById("refreshIntelligenceBtn").addEventListener("click", async () => {
-  await analyzeLeadIntelligence(true);
+  await runUiAction("intelligence", "Refreshing the account intelligence brief...", () => analyzeLeadIntelligence(true));
 });
 
 document.getElementById("analyzeIntelligenceQuick").addEventListener("click", async () => {
-  await analyzeLeadIntelligence(false);
+  await runUiAction("intelligence", "Building the account intelligence brief...", () => analyzeLeadIntelligence(false));
 });
 
 document.getElementById("prevLeadBtn").addEventListener("click", () => {
@@ -1627,31 +1795,39 @@ document.addEventListener("click", async (event) => {
 
   const inlineAnalyze = event.target.closest("[data-intel-analyze]");
   if (inlineAnalyze) {
-    await analyzeLeadIntelligence(inlineAnalyze.dataset.intelAnalyze === "refresh");
+    await runUiAction("intelligence", "Building the account intelligence brief...", () => analyzeLeadIntelligence(inlineAnalyze.dataset.intelAnalyze === "refresh"));
     return;
   }
 
   const intelligenceTask = event.target.closest("[data-intel-task-index]");
   if (intelligenceTask && selectedProspectId) {
-    state = await api("/api/prospects/intelligence/create-task", {
-      method: "POST",
-      body: JSON.stringify({ prospectId: selectedProspectId, stepIndex: Number(intelligenceTask.dataset.intelTaskIndex || 0) })
+    await runUiAction("task", "Creating follow-up task...", async () => {
+      state = await api("/api/prospects/intelligence/create-task", {
+        method: "POST",
+        body: JSON.stringify({ prospectId: selectedProspectId, stepIndex: Number(intelligenceTask.dataset.intelTaskIndex || 0) })
+      });
     });
-    render();
     return;
   }
 
   const intelligenceReview = event.target.closest("[data-intel-review-action]");
   if (intelligenceReview && selectedProspectId) {
-    state = await api("/api/prospects/intelligence/review", {
-      method: "POST",
-      body: JSON.stringify({
-        prospectId: selectedProspectId,
-        action: intelligenceReview.dataset.intelReviewAction,
-        targetId: intelligenceReview.dataset.intelTargetId
-      })
+    await runUiAction("task", "Saving review update...", async () => {
+      state = await api("/api/prospects/intelligence/review", {
+        method: "POST",
+        body: JSON.stringify({
+          prospectId: selectedProspectId,
+          action: intelligenceReview.dataset.intelReviewAction,
+          targetId: intelligenceReview.dataset.intelTargetId
+        })
+      });
     });
-    render();
+    return;
+  }
+
+  const removeProspect = event.target.closest("[data-remove-prospect-id]");
+  if (removeProspect) {
+    await removeProspectById(removeProspect.dataset.removeProspectId);
     return;
   }
 
@@ -1666,18 +1842,31 @@ document.addEventListener("click", async (event) => {
   const copyButton = event.target.closest("[data-copy-text]");
   if (copyButton) {
     await navigator.clipboard.writeText(copyButton.dataset.copyText || "");
-    copyButton.innerHTML = `<i data-lucide="check"></i>`;
+    const originalHtml = copyButton.dataset.copyDefaultHtml || copyButton.innerHTML;
+    copyButton.dataset.copyDefaultHtml = originalHtml;
+    copyButton.innerHTML = `<i data-lucide="check"></i><span>Copied</span>`;
     refreshIcons();
+    window.setTimeout(() => {
+      copyButton.innerHTML = originalHtml;
+      refreshIcons();
+    }, 900);
     return;
   }
 
   const actionInteraction = event.target.closest("[data-interaction-type]");
   if (actionInteraction && selectedProspectId) {
-    state = await api("/api/prospects/interaction", {
-      method: "POST",
-      body: JSON.stringify({ prospectId: selectedProspectId, type: actionInteraction.dataset.interactionType })
+    await logInteraction(actionInteraction.dataset.interactionType);
+    return;
+  }
+
+  const completeTask = event.target.closest("[data-task-complete-id]");
+  if (completeTask) {
+    await runUiAction("task", "Marking follow-up complete...", async () => {
+      state = await api("/api/follow-up-tasks/complete", {
+        method: "POST",
+        body: JSON.stringify({ taskId: completeTask.dataset.taskCompleteId })
+      });
     });
-    render();
     return;
   }
 
@@ -2003,6 +2192,60 @@ document.getElementById("dataConfigForm").addEventListener("submit", async (even
   render();
 });
 
+document.getElementById("knowledgeInboxScreenshotInput").addEventListener("change", async (event) => {
+  const file = event.target.files?.[0];
+  if (!file) {
+    pendingKnowledgeInboxScreenshot = null;
+    renderKnowledgeInboxScreenshotPreview();
+    return;
+  }
+  if (!file.type.startsWith("image/")) {
+    window.alert("Upload a PNG or JPG screenshot.");
+    event.target.value = "";
+    return;
+  }
+  if (file.size > 2_000_000) {
+    window.alert("Keep screenshots under 2 MB for this local prototype.");
+    event.target.value = "";
+    return;
+  }
+  pendingKnowledgeInboxScreenshot = {
+    name: file.name,
+    type: file.type,
+    size: file.size,
+    dataUrl: await fileToDataUrl(file)
+  };
+  renderKnowledgeInboxScreenshotPreview();
+});
+
+document.getElementById("knowledgeInboxForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const text = document.getElementById("knowledgeInboxTextInput").value;
+  if (!text.trim() && !pendingKnowledgeInboxScreenshot) {
+    setHtml("knowledgeInboxResult", `<div class="empty-state">Paste text, a URL, a lesson, or upload a screenshot first.</div>`);
+    return;
+  }
+  await runUiAction("knowledge", "Analyzing knowledge and updating the AI playbook...", async () => {
+    state = await api("/api/knowledge/feed", {
+      method: "POST",
+      body: JSON.stringify({
+        productId: document.getElementById("knowledgeInboxProductInput").value,
+        assetType: document.getElementById("knowledgeInboxTypeInput").value,
+        channel: document.getElementById("knowledgeInboxTypeInput").value,
+        messageText: text,
+        notes: text,
+        outcome: "knowledge_saved",
+        outcomeScore: 75,
+        tags: `knowledge,inbox,${document.getElementById("knowledgeInboxTypeInput").value}`,
+        screenshot: pendingKnowledgeInboxScreenshot
+      })
+    });
+    pendingKnowledgeInboxScreenshot = null;
+    document.getElementById("knowledgeInboxScreenshotInput").value = "";
+    document.getElementById("knowledgeInboxTextInput").value = "";
+  });
+});
+
 document.getElementById("learningScreenshotInput").addEventListener("change", async (event) => {
   const file = event.target.files?.[0];
   if (!file) {
@@ -2129,30 +2372,16 @@ document.getElementById("pasteProfilesForm").addEventListener("submit", async (e
 
 document.getElementById("enrichProspectBtn").addEventListener("click", async () => {
   if (!selectedProspectId) return;
-  state = await api("/api/prospects/enrich", {
-    method: "POST",
-    body: JSON.stringify({ prospectId: selectedProspectId })
+  await runUiAction("enrich", "Refreshing contact and messenger data...", async () => {
+    state = await api("/api/prospects/enrich", {
+      method: "POST",
+      body: JSON.stringify({ prospectId: selectedProspectId })
+    });
   });
-  render();
 });
 
 document.getElementById("prepareOutreachBtn").addEventListener("click", async () => {
-  await researchAndPrepareSelected();
-});
-
-document.getElementById("callAnalysisForm").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  if (!selectedProspectId) return;
-  const textarea = document.getElementById("callTranscriptInput");
-  state = await api("/api/prospects/call-analysis", {
-    method: "POST",
-    body: JSON.stringify({
-      prospectId: selectedProspectId,
-      transcript: textarea.value
-    })
-  });
-  textarea.value = "";
-  render();
+  await runUiAction("research", "Running lead research, enrichment, scoring, and outreach...", researchAndPrepareSelected);
 });
 
 async function analyzeLeadIntelligence(force = false) {
@@ -2176,9 +2405,17 @@ async function researchAndPrepareSelected() {
     method: "POST",
     body: JSON.stringify({ prospectId: selectedProspectId })
   });
+  state = await api("/api/prospects/intelligence/analyze", {
+    method: "POST",
+    body: JSON.stringify({
+      prospectId: selectedProspectId,
+      force: true,
+      refreshReason: "run_research_pipeline"
+    })
+  });
   state = await api("/api/prospects/prepare", {
     method: "POST",
-    body: JSON.stringify({ prospectId: selectedProspectId, profile })
+    body: JSON.stringify({ prospectId: selectedProspectId, profile, useIntelligenceAi: true })
   });
   render();
 }
@@ -2196,16 +2433,41 @@ async function runAssistantTask(payload) {
   render();
 }
 
+async function logInteraction(type) {
+  if (!selectedProspectId || !type) return;
+  await runUiAction("task", "Logging the action on this lead...", async () => {
+    state = await api("/api/prospects/interaction", {
+      method: "POST",
+      body: JSON.stringify({ prospectId: selectedProspectId, type })
+    });
+  });
+}
+
+async function removeProspectById(prospectId = selectedProspectId) {
+  if (!prospectId) return;
+  await runUiAction("remove", "Removing lead from the queue...", async () => {
+    state = await api("/api/prospects/remove", {
+      method: "POST",
+      body: JSON.stringify({ prospectId })
+    });
+    if (selectedProspectId === prospectId) {
+      selectedProspectId = state.prospects?.[0]?.id || null;
+    }
+  });
+}
+
 document.getElementById("logInteractionBtn").addEventListener("click", async () => {
   if (!selectedProspectId) return;
-  state = await api("/api/prospects/interaction", {
-    method: "POST",
-    body: JSON.stringify({
-      prospectId: selectedProspectId,
-      type: document.getElementById("interactionTypeSelect").value
-    })
-  });
-  render();
+  await logInteraction(document.getElementById("interactionTypeSelect").value);
+});
+
+document.getElementById("taskLogInteractionBtn").addEventListener("click", async () => {
+  if (!selectedProspectId) return;
+  await logInteraction(document.getElementById("taskInteractionTypeSelect").value);
+});
+
+document.getElementById("removeLeadQuick").addEventListener("click", async () => {
+  await removeProspectById(selectedProspectId);
 });
 
 document.getElementById("keyForm").addEventListener("submit", async (event) => {

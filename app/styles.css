@@ -1359,7 +1359,7 @@ output {
   }
 }
 
-/* Dark, denser product mode */
+/* Dark sales workspace */
 :root {
   --bg: #061322;
   --surface: rgba(10, 27, 48, 0.86);
@@ -1385,8 +1385,6 @@ body {
   font-size: 13px;
   overflow-x: clip;
   background:
-    radial-gradient(circle at 18% 10%, rgba(69, 125, 255, 0.28), transparent 30%),
-    radial-gradient(circle at 84% 4%, rgba(40, 212, 191, 0.16), transparent 34%),
     linear-gradient(135deg, #07182a 0%, #071426 42%, #0b1e3d 72%, #13204b 100%);
   color: var(--ink);
 }
@@ -1477,7 +1475,7 @@ td span,
 }
 
 .workspace {
-  padding: 16px;
+  padding: 22px;
   overflow: visible;
 }
 
@@ -1509,6 +1507,21 @@ td span,
   background: linear-gradient(135deg, #24d7c0, #5c93ff);
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.is-loading svg {
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .metric,
 .panel,
 .subpanel,
@@ -1531,7 +1544,7 @@ td span,
 }
 
 .panel {
-  padding: 12px;
+  padding: 16px;
 }
 
 .panel-heading {
@@ -1684,16 +1697,51 @@ td span,
   padding: 8px;
 }
 
+.prospect-queue-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.prospect-queue-row .prospect-card {
+  min-width: 0;
+}
+
 .prospect-card b,
 .avatar {
   width: 34px;
   height: 34px;
 }
 
+.prospect-queue-row.active .prospect-card,
 .prospect-card.active,
 .task-row.active {
   border-color: rgba(40, 212, 191, 0.7);
   box-shadow: inset 3px 0 0 var(--teal), var(--shadow);
+}
+
+.queue-remove {
+  width: 34px;
+  min-height: 100%;
+}
+
+.danger-button {
+  border-color: rgba(255, 107, 97, 0.26);
+  color: #ffaaa3;
+  background: rgba(255, 107, 97, 0.08);
+}
+
+.danger-button:hover {
+  border-color: rgba(255, 107, 97, 0.52);
+  background: rgba(255, 107, 97, 0.14);
+}
+
+.table-action-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-end;
 }
 
 .prospect-detail-panel {
@@ -1756,6 +1804,10 @@ td span,
 
 .meter.compact.accent span {
   background: linear-gradient(90deg, #4f8cff, #b89cff);
+}
+
+.meter.compact.penalty span {
+  background: linear-gradient(90deg, #f4bd50, #ff6b61);
 }
 
 .profile-fields {
@@ -1850,13 +1902,19 @@ td span,
 
 .task-alert {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
   border: 1px solid rgba(40, 212, 191, 0.28);
   border-radius: 8px;
   background: rgba(40, 212, 191, 0.1);
   padding: 9px;
+}
+
+.task-alert.done {
+  opacity: 0.72;
+  border-color: rgba(143, 177, 207, 0.16);
+  background: rgba(4, 16, 29, 0.5);
 }
 
 .task-alert strong,
@@ -1919,6 +1977,14 @@ td span,
 
 .message-card pre {
   font-size: 12.5px;
+}
+
+.message-basis {
+  display: block;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .product-studio-layout,
@@ -2233,6 +2299,50 @@ dialog {
   grid-column: 1 / -1;
 }
 
+.knowledge-inbox-panel {
+  background:
+    linear-gradient(135deg, rgba(18, 53, 91, 0.94), rgba(7, 25, 47, 0.92)),
+    rgba(10, 27, 48, 0.9);
+}
+
+.knowledge-inbox-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.38fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.knowledge-inbox-form > .split-fields,
+.knowledge-inbox-form > label:first-of-type,
+.knowledge-inbox-form > button {
+  grid-column: 1;
+}
+
+.knowledge-inbox-form .compact-drop,
+.knowledge-inbox-form .screenshot-preview {
+  grid-column: 2;
+}
+
+.knowledge-inbox-form .compact-drop {
+  min-height: 126px;
+}
+
+.knowledge-inbox-result {
+  margin-top: 14px;
+}
+
+.knowledge-inbox-card {
+  display: grid;
+  gap: 10px;
+}
+
+.knowledge-inbox-card ul {
+  margin: 0;
+  padding-left: 18px;
+  color: #d8e7f3;
+  line-height: 1.45;
+}
+
 .learning-form {
   gap: 9px;
 }
@@ -2439,7 +2549,7 @@ dialog {
 
 .lead-workspace {
   display: grid;
-  gap: 12px;
+  gap: 16px;
 }
 
 .lead-command-bar {
@@ -2449,8 +2559,8 @@ dialog {
   display: grid;
   grid-template-columns: auto minmax(260px, 1fr) 132px auto auto;
   align-items: center;
-  gap: 10px;
-  padding: 10px;
+  gap: 12px;
+  padding: 12px;
   background:
     linear-gradient(135deg, rgba(8, 31, 58, 0.96), rgba(9, 48, 77, 0.9)),
     rgba(5, 18, 32, 0.95);
@@ -2568,7 +2678,7 @@ dialog {
   display: flex;
   gap: 8px;
   overflow-x: auto;
-  padding: 8px;
+  padding: 10px;
   border: 1px solid rgba(143, 177, 207, 0.18);
   border-radius: 8px;
   background: rgba(5, 18, 32, 0.82);
@@ -2595,12 +2705,13 @@ dialog {
 
 .lead-workbench-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 280px;
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 18px;
   align-items: start;
 }
 
 .lead-workspace .product-panel,
+.lead-workspace .company-panel,
 .lead-workspace .target-panel,
 .lead-workspace .import-panel,
 .lead-workspace .prospect-list-panel {
@@ -2617,7 +2728,7 @@ dialog {
 .sales-cycle-list,
 .leads-layout {
   display: grid;
-  gap: 12px;
+  gap: 16px;
 }
 
 .lead-main-stack {
@@ -2783,7 +2894,7 @@ dialog {
 
 .cycle-row {
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
+  grid-template-columns: 16px minmax(0, 1fr) auto;
   gap: 8px;
   align-items: start;
 }
@@ -2825,6 +2936,94 @@ dialog {
 
 .lead-side-rail .file-drop {
   min-height: 84px;
+}
+
+.company-panel {
+  background:
+    linear-gradient(135deg, rgba(20, 49, 84, 0.94), rgba(8, 24, 44, 0.92)),
+    rgba(10, 27, 48, 0.9);
+}
+
+.company-brief {
+  display: grid;
+  gap: 14px;
+}
+
+.company-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.company-summary article,
+.company-detail-grid section,
+.company-research-footer,
+.knowledge-inbox-card {
+  border: 1px solid rgba(143, 177, 207, 0.18);
+  border-radius: 8px;
+  background: rgba(4, 16, 29, 0.5);
+  padding: 12px;
+}
+
+.company-summary span,
+.company-summary strong,
+.company-detail-grid strong,
+.company-research-footer span,
+.knowledge-inbox-card strong,
+.knowledge-inbox-card small {
+  display: block;
+}
+
+.company-summary span,
+.company-research-footer span,
+.knowledge-inbox-card small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.company-summary strong {
+  margin-top: 6px;
+  color: #f4fbff;
+  line-height: 1.38;
+  font-size: 13px;
+}
+
+.company-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.company-detail-grid section {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.company-research-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.company-research-footer div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.company-research-footer a {
+  color: #84d8ff;
+  text-decoration: none;
+  font-weight: 800;
+  font-size: 12px;
+}
+
+.cap.muted {
+  color: #9db0c2;
+  background: rgba(143, 177, 207, 0.12);
 }
 
 .intelligence-panel {
@@ -3024,8 +3223,19 @@ dialog {
   .followup-grid,
   .leads-layout,
   .intelligence-hero,
-  .intelligence-grid {
+  .intelligence-grid,
+  .company-summary,
+  .company-detail-grid,
+  .knowledge-inbox-form {
     grid-template-columns: 1fr;
+  }
+
+  .knowledge-inbox-form > .split-fields,
+  .knowledge-inbox-form > label:first-of-type,
+  .knowledge-inbox-form > button,
+  .knowledge-inbox-form .compact-drop,
+  .knowledge-inbox-form .screenshot-preview {
+    grid-column: 1;
   }
 
   .lead-side-rail {
@@ -3089,11 +3299,14 @@ dialog {
   .source-row,
   .committee-card,
   .research-signal,
+  .company-research-footer,
   .intelligence-empty,
   .intelligence-score-grid,
   .intel-step,
   .intel-gap,
-  .intel-source-row {
+  .intel-source-row,
+  .task-alert,
+  .cycle-row {
     grid-template-columns: 1fr;
   }
 
