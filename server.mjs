@@ -4440,7 +4440,7 @@ async function pushSupabaseCrmActivities(prospects, input) {
     const payload = compactObject({
       contact_id: contactId,
       user_id: valueFromKeys(crmSource, ["owner_id", "user_id", "assigned_to"]),
-      type: cleanText(input.interactionType || input.type || "note_added").slice(0, 64),
+      type: supabaseActivityType(input),
       content: crmActivityContent(prospect, input, metadata)
     });
     const response = await fetch(url, {
@@ -4461,6 +4461,26 @@ async function pushSupabaseCrmActivities(prospects, input) {
     results: [{ type: "push_crm_activity", message: `${pushed} Supabase CRM activities pushed.`, pushed }],
     warnings
   };
+}
+
+function supabaseActivityType(input = {}) {
+  const allowedTypes = new Set(["call", "email", "linkedin", "meeting", "note", "whatsapp"]);
+  const rawValues = [
+    input.channel,
+    input.interactionType,
+    input.type
+  ].map((value) => cleanText(value).toLowerCase());
+
+  for (const value of rawValues) {
+    if (allowedTypes.has(value)) return value;
+    if (value.includes("linkedin")) return "linkedin";
+    if (value.includes("email")) return "email";
+    if (value.includes("whatsapp")) return "whatsapp";
+    if (value.includes("call") || value.includes("phone")) return "call";
+    if (value.includes("meeting")) return "meeting";
+  }
+
+  return "note";
 }
 
 function crmActivityContent(prospect, input, metadata = {}) {
