@@ -557,8 +557,14 @@ function prospectCard(prospect) {
 function renderSelectedProspect(prospect) {
   const enrichButton = document.getElementById("enrichProspectBtn");
   const prepareButton = document.getElementById("prepareOutreachBtn");
+  const analyzeButton = document.getElementById("analyzeIntelligenceBtn");
+  const refreshButton = document.getElementById("refreshIntelligenceBtn");
+  const analyzeQuickButton = document.getElementById("analyzeIntelligenceQuick");
   if (enrichButton) enrichButton.disabled = !prospect;
   if (prepareButton) prepareButton.disabled = !prospect;
+  if (analyzeButton) analyzeButton.disabled = !prospect;
+  if (refreshButton) refreshButton.disabled = !prospect;
+  if (analyzeQuickButton) analyzeQuickButton.disabled = !prospect;
 
   if (!prospect) {
     document.getElementById("selectedProspectName").textContent = "Select a prospect";
@@ -615,12 +621,14 @@ function renderLeadWorkspaceExtras(prospect) {
   setHtml("nextActionSummary", nextActionRows(prospect));
   setHtml("salesCycleList", salesCycleRows(prospect));
   setHtml("sourceAuditList", sourceAuditRows(prospect));
+  setHtml("intelligenceContent", intelligenceRows(prospect));
+  setText("intelligenceStatusPill", intelligenceStatusLabel(prospect));
   updateQuickCopies(prospect);
 }
 
 function renderLeadsPage() {
   const prospects = state.prospects || [];
-  const ready = prospects.filter((prospect) => prospect.status === "outreach_ready" || prospect.status === "linkedin_ready").length;
+  const ready = prospects.filter((prospect) => ["intelligence_ready", "outreach_ready", "linkedin_ready"].includes(prospect.status)).length;
   const active = prospects.filter((prospect) => ["contacted", "engaged", "follow_up_due", "meeting_booked"].includes(prospect.status)).length;
   const due = state.followUpTasks?.filter((task) => task.status !== "done").length || 0;
   setHtml("leadStatsStrip", `
@@ -793,6 +801,7 @@ function sourceAuditRows(prospect) {
   if (!prospect) return `<div class="empty-state">Sources appear after profile import and research</div>`;
   const productSources = state.selectedProduct?.mcpContext?.sources || [];
   const contactSources = prospect.contactDiscovery?.candidates || [];
+  const intelSources = prospect.leadIntelligence?.sources || [];
   const researchRows = (prospect.researchHistory || []).slice(0, 5).map((record) => ({
     source: `Research memory · ${titleCase(record.stage || "research")}`,
     claim: `${record.summary || "Lead research stored."} ${record.contactSnapshot ? `Contacts: ${record.contactSnapshot.candidates || 0}, best confidence: ${record.contactSnapshot.bestConfidence || 0}%` : ""}`.trim(),
@@ -803,6 +812,7 @@ function sourceAuditRows(prospect) {
     { source: "Uploaded or CRM profile", claim: [prospect.name, prospect.company, prospect.title].filter(Boolean).join(" · "), confidence: 82, status: "workspace data" },
     ...researchRows,
     ...productSources.map((source) => ({ source: source.name, claim: source.type, confidence: source.confidence, status: "product context" })),
+    ...intelSources.slice(0, 8).map((source) => ({ source: source.title || source.source_id, claim: source.evidence_excerpt || source.source_type, confidence: source.quality === "high" ? 90 : source.quality === "medium" ? 70 : 45, status: `${source.source_type || "source"} · ${source.claim_type || "claim"}` })),
     ...contactSources.map((candidate) => ({ source: candidate.source, claim: `${candidate.type}: ${candidate.value}`, confidence: candidate.confidence, status: candidate.status })),
     ...(prospect.contactDiscovery?.warnings || []).map((warning) => ({ source: "Enrichment warning", claim: warning, confidence: 0, status: "review required" }))
   ];
@@ -815,6 +825,157 @@ function sourceAuditRows(prospect) {
       <small>${escapeHtml(row.status || "review")} · ${row.confidence || 0}%</small>
     </article>
   `).join("");
+}
+
+function intelligenceStatusLabel(prospect) {
+  const intel = prospect?.leadIntelligence;
+  if (!prospect) return "no lead";
+  if (!intel) return "not analyzed";
+  return `${titleCase(intel.status || "ready")} · ${intel.priority_wave || "no wave"}`;
+}
+
+function intelligenceRows(prospect) {
+  if (!prospect) {
+    return `<div class="empty-state">Select a lead to analyze account fit, sources, gaps, messages, and next action.</div>`;
+  }
+  const intel = prospect.leadIntelligence;
+  if (!intel) {
+    return `
+      <div class="intelligence-empty">
+        <i data-lucide="brain-circuit"></i>
+        <div>
+          <strong>No intelligence brief yet</strong>
+          <span>Analyze once, then the account research is stored and reused when you return to this lead or another contact from the same account.</span>
+        </div>
+        <button class="primary-button" type="button" data-intel-analyze="fresh"><i data-lucide="sparkles"></i><span>Analyze Brief</span></button>
+      </div>
+    `;
+  }
+
+  const warnings = (intel.warnings || []).map((warning) => `<span class="warning-chip">${escapeHtml(warning)}</span>`).join("");
+  const profile = [intel.analysis_profile_name, intel.schema_version, intel.prompt_version].filter(Boolean).join(" · ");
+  const refreshed = intel.last_refreshed_at ? `Updated ${relativeTime(intel.last_refreshed_at)}` : "Stored";
+  const scores = [
+    ["Fit", intel.fit_score || 0],
+    ["Priority", intel.priority_score || 0],
+    ["Confidence", intel.overall_confidence || 0],
+    ["Call ease", 100 - ((Number(intel.call_difficulty || 3) - 1) * 20)]
+  ];
+  const scoreCards = scores.map(([label, value]) => `
+    <div>
+      <span>${escapeHtml(label)}</span>
+      <strong>${Math.max(0, Math.min(100, Math.round(value)))}%</strong>
+      <div class="meter compact"><span style="width:${Math.max(0, Math.min(100, Math.round(value)))}%"></span></div>
+    </div>
+  `).join("");
+  const scoringInputs = (intel.scoring_inputs || []).map((input) => {
+    const pct = input.max ? Math.round((Number(input.value || 0) / Number(input.max || 1)) * 100) : 0;
+    return `
+      <article class="intel-input-row ${input.penalty ? "penalty" : ""}">
+        <div>
+          <strong>${escapeHtml(input.label || input.key)}</strong>
+          <span>${escapeHtml(input.rationale || "")}</span>
+        </div>
+        <b>${escapeHtml(input.penalty ? `-${input.value}` : `${input.value}/${input.max}`)}</b>
+        <div class="meter compact"><span style="width:${Math.max(0, Math.min(100, pct))}%"></span></div>
+      </article>
+    `;
+  }).join("");
+  const nextSteps = (intel.next_steps || []).slice(0, 4).map((step, index) => `
+    <article class="intel-step ${step.priority === "high" ? "urgent" : ""}">
+      <div>
+        <strong>${escapeHtml(step.action)}</strong>
+        <span>${escapeHtml([step.priority, step.owner, step.rationale].filter(Boolean).join(" · "))}</span>
+      </div>
+      <button type="button" data-intel-task-index="${index}"><i data-lucide="bell-plus"></i><span>Task</span></button>
+    </article>
+  `).join("");
+  const gaps = (intel.research_gaps || []).slice(0, 5).map((gap) => `
+    <article class="intel-gap ${gap.status === "resolved" ? "resolved" : ""}">
+      <div>
+        <strong>${escapeHtml(gap.missing_field)}</strong>
+        <span>${escapeHtml(gap.why_it_matters)}</span>
+        <small>${escapeHtml(gap.recommended_resolution || "")}</small>
+      </div>
+      <button type="button" data-intel-review-action="mark_gap_resolved" data-intel-target-id="${escapeAttr(gap.id)}"><i data-lucide="check-circle-2"></i><span>Resolve</span></button>
+    </article>
+  `).join("");
+  const messages = (intel.contact_personalization?.messages || intel.messages || []).slice(0, 5).map((message) => `
+    <article class="message-card intel-message">
+      <div class="message-heading">
+        <span class="pill">${escapeHtml(titleCase(message.channel || "draft"))}</span>
+        ${message.subject ? `<strong>${escapeHtml(message.subject)}</strong>` : ""}
+        <button data-copy-text="${escapeAttr(message.body || "")}" title="Copy" aria-label="Copy"><i data-lucide="copy"></i></button>
+      </div>
+      <pre>${escapeHtml(message.body || "")}</pre>
+      <small>${escapeHtml((message.personalization_basis || []).slice(0, 3).join(" · "))}</small>
+    </article>
+  `).join("");
+  const contacts = (intel.recommended_contacts || []).slice(0, 4).map((contact) => `
+    <article class="intel-contact">
+      <strong>${escapeHtml(contact.full_name || contact.target_role || "Target role")}</strong>
+      <span>${escapeHtml([contact.role, contact.persona, contact.verification_status].filter(Boolean).join(" · "))}</span>
+      <small>${escapeHtml(contact.why_target || "")}</small>
+    </article>
+  `).join("");
+  const objections = (intel.objections || []).slice(0, 4).map((item) => `
+    <article class="intel-objection">
+      <strong>${escapeHtml(item.objection)}</strong>
+      <span>${escapeHtml(item.recommended_response)}</span>
+      <small>${escapeHtml(item.qualification_question || item.proof_required || "")}</small>
+    </article>
+  `).join("");
+  const sources = (intel.sources || []).slice(0, 8).map((source) => `
+    <article class="intel-source-row">
+      <div>
+        <strong>${escapeHtml(source.title || source.source_id)}</strong>
+        <span>${escapeHtml(source.evidence_excerpt || source.source_type || "")}</span>
+      </div>
+      <button type="button" data-intel-review-action="verify_source" data-intel-target-id="${escapeAttr(source.source_id)}"><i data-lucide="${source.verified_at ? "badge-check" : "circle-check"}"></i><span>${source.verified_at ? "Verified" : "Verify"}</span></button>
+    </article>
+  `).join("");
+
+  return `
+    <div class="intelligence-hero">
+      <div>
+        <span class="pill">${escapeHtml(intel.priority_wave || "Wave")}</span>
+        <h3>${escapeHtml(intel.executive_summary || "Intelligence brief ready")}</h3>
+        <p>${escapeHtml(profile)} · ${escapeHtml(refreshed)}${intel.reusedFromAccount ? " · reused from account" : ""}</p>
+      </div>
+      <div class="intelligence-score-grid">${scoreCards}</div>
+    </div>
+    ${warnings ? `<div class="warning-row">${warnings}</div>` : ""}
+    <div class="intelligence-grid">
+      <section class="intel-card span-wide">
+        <div class="intel-card-heading"><strong>Score Drivers</strong><span>Evidence-weighted, product-specific</span></div>
+        <div class="intel-input-list">${scoringInputs || `<div class="empty-state">No scoring inputs</div>`}</div>
+      </section>
+      <section class="intel-card">
+        <div class="intel-card-heading"><strong>Next Steps</strong><span>Seller actions only</span></div>
+        <div class="intel-list">${nextSteps || `<div class="empty-state">No next steps</div>`}</div>
+      </section>
+      <section class="intel-card">
+        <div class="intel-card-heading"><strong>Research Gaps</strong><span>Fix before high-confidence outreach</span></div>
+        <div class="intel-list">${gaps || `<div class="empty-state">No open gaps</div>`}</div>
+      </section>
+      <section class="intel-card span-wide">
+        <div class="intel-card-heading"><strong>Draft Messages</strong><span>Human review required before sending</span></div>
+        <div class="message-list">${messages || `<div class="empty-state">No messages drafted</div>`}</div>
+      </section>
+      <section class="intel-card">
+        <div class="intel-card-heading"><strong>Buying Path</strong><span>Who to reach next</span></div>
+        <div class="intel-list">${contacts || `<div class="empty-state">No recommended contacts</div>`}</div>
+      </section>
+      <section class="intel-card">
+        <div class="intel-card-heading"><strong>Objections</strong><span>Likely blockers</span></div>
+        <div class="intel-list">${objections || `<div class="empty-state">No objections mapped</div>`}</div>
+      </section>
+      <section class="intel-card span-wide">
+        <div class="intel-card-heading"><strong>Sources</strong><span>Facts, inferences, product knowledge</span></div>
+        <div class="intel-source-list">${sources || `<div class="empty-state">No source records</div>`}</div>
+      </section>
+    </div>
+  `;
 }
 
 function bestContactConfidence(prospect) {
@@ -1417,6 +1578,18 @@ document.getElementById("runResearchTopBtn").addEventListener("click", async () 
   await researchAndPrepareSelected();
 });
 
+document.getElementById("analyzeIntelligenceBtn").addEventListener("click", async () => {
+  await analyzeLeadIntelligence(false);
+});
+
+document.getElementById("refreshIntelligenceBtn").addEventListener("click", async () => {
+  await analyzeLeadIntelligence(true);
+});
+
+document.getElementById("analyzeIntelligenceQuick").addEventListener("click", async () => {
+  await analyzeLeadIntelligence(false);
+});
+
 document.getElementById("prevLeadBtn").addEventListener("click", () => {
   moveSelectedProspect(-1);
 });
@@ -1449,6 +1622,36 @@ document.addEventListener("click", async (event) => {
   if (assistantTemplate) {
     document.getElementById("assistantTaskInput").value = assistantTemplate.dataset.assistantTemplate || "";
     setView("ai");
+    return;
+  }
+
+  const inlineAnalyze = event.target.closest("[data-intel-analyze]");
+  if (inlineAnalyze) {
+    await analyzeLeadIntelligence(inlineAnalyze.dataset.intelAnalyze === "refresh");
+    return;
+  }
+
+  const intelligenceTask = event.target.closest("[data-intel-task-index]");
+  if (intelligenceTask && selectedProspectId) {
+    state = await api("/api/prospects/intelligence/create-task", {
+      method: "POST",
+      body: JSON.stringify({ prospectId: selectedProspectId, stepIndex: Number(intelligenceTask.dataset.intelTaskIndex || 0) })
+    });
+    render();
+    return;
+  }
+
+  const intelligenceReview = event.target.closest("[data-intel-review-action]");
+  if (intelligenceReview && selectedProspectId) {
+    state = await api("/api/prospects/intelligence/review", {
+      method: "POST",
+      body: JSON.stringify({
+        prospectId: selectedProspectId,
+        action: intelligenceReview.dataset.intelReviewAction,
+        targetId: intelligenceReview.dataset.intelTargetId
+      })
+    });
+    render();
     return;
   }
 
@@ -1951,6 +2154,20 @@ document.getElementById("callAnalysisForm").addEventListener("submit", async (ev
   textarea.value = "";
   render();
 });
+
+async function analyzeLeadIntelligence(force = false) {
+  if (!selectedProspectId) return;
+  state = await api("/api/prospects/intelligence/analyze", {
+    method: "POST",
+    body: JSON.stringify({
+      prospectId: selectedProspectId,
+      force,
+      refreshReason: force ? "manual_refresh" : "seller_requested_brief"
+    })
+  });
+  render();
+  document.getElementById("dashboard-intelligence")?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
 
 async function researchAndPrepareSelected() {
   if (!selectedProspectId) return;

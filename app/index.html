@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Outbound Sales OS · AI Gateway</title>
+    <title>Outbound Sales OS · Sales Intelligence</title>
     <link rel="stylesheet" href="/styles.css" />
     <script defer src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
     <script defer type="module" src="/main.js"></script>
@@ -15,12 +15,13 @@
           <div class="brand-mark">OS</div>
           <div>
             <strong>Outbound Sales OS</strong>
-            <span>AI Gateway</span>
+            <span>Sales Intelligence</span>
           </div>
         </div>
         <nav class="nav-list" aria-label="Workspace">
           <button class="nav-item active" data-view="prospects"><i data-lucide="layout-dashboard"></i><span>Dashboard</span></button>
           <button class="nav-item" data-view="leads"><i data-lucide="users"></i><span>Leads</span></button>
+          <button class="nav-item" data-view="ai"><i data-lucide="bot"></i><span>AI Operator</span></button>
           <button class="nav-item" data-view="database"><i data-lucide="book-open"></i><span>Knowledge Base</span></button>
           <button class="nav-item" data-view="products"><i data-lucide="package"></i><span>Products</span></button>
           <button class="nav-item" data-view="integrations"><i data-lucide="settings"></i><span>Settings</span></button>
@@ -86,6 +87,7 @@
 
             <nav class="lead-section-nav" aria-label="Lead workspace sections">
               <a href="#dashboard-overview">Overview</a>
+              <a href="#dashboard-intelligence">Intelligence</a>
               <a href="#dashboard-account">Research</a>
               <a href="#dashboard-buying">Committee</a>
               <a href="#dashboard-contact">Contacts</a>
@@ -98,6 +100,21 @@
 
             <div class="lead-workbench-grid">
               <main class="lead-main-stack">
+                <section class="panel lead-section intelligence-panel" id="dashboard-intelligence">
+                  <div class="panel-heading">
+                    <div>
+                      <h2>AI Intelligence Brief</h2>
+                      <p>Reusable account research, source checks, scoring, gaps, and approved draft messages</p>
+                    </div>
+                    <div class="intelligence-actions">
+                      <span class="pill" id="intelligenceStatusPill">not analyzed</span>
+                      <button id="analyzeIntelligenceBtn" type="button"><i data-lucide="brain-circuit"></i><span>Analyze Brief</span></button>
+                      <button id="refreshIntelligenceBtn" type="button"><i data-lucide="refresh-cw"></i><span>Refresh</span></button>
+                    </div>
+                  </div>
+                  <div class="intelligence-content" id="intelligenceContent"></div>
+                </section>
+
                 <section class="panel product-panel lead-section" id="dashboard-account">
                   <div class="panel-heading">
                     <div>
@@ -278,7 +295,8 @@
                     </div>
                   </div>
                   <button class="primary-button" id="prepareOutreachBtn" type="button"><i data-lucide="wand-sparkles"></i><span>Run Research</span></button>
-                  <button id="copyLinkedinQuick" type="button" data-copy-text=""><i data-lucide="linkedin"></i><span>Copy LinkedIn</span></button>
+                  <button id="analyzeIntelligenceQuick" type="button"><i data-lucide="brain-circuit"></i><span>Analyze Brief</span></button>
+                  <button id="copyLinkedinQuick" type="button" data-copy-text=""><i data-lucide="send"></i><span>Copy LinkedIn</span></button>
                   <button id="copyEmailQuick" type="button" data-copy-text=""><i data-lucide="mail"></i><span>Copy Email</span></button>
                   <button id="copySmsQuick" type="button" data-copy-text=""><i data-lucide="message-square-text"></i><span>Copy SMS</span></button>
                   <button id="copyWhatsappQuick" type="button" data-copy-text=""><i data-lucide="message-circle"></i><span>Copy WhatsApp</span></button>
@@ -322,6 +340,7 @@
                       <option value="all">All</option>
                       <option value="new">New</option>
                       <option value="enriched">Enriched</option>
+                      <option value="intelligence_ready">Intelligence ready</option>
                       <option value="linkedin_ready">LinkedIn ready</option>
                       <option value="outreach_ready">Ready</option>
                       <option value="contacted">Contacted</option>
@@ -442,6 +461,7 @@
                     <option value="selected">Selected lead</option>
                     <option value="all">All leads</option>
                     <option value="new">New leads</option>
+                    <option value="intelligence_ready">Intelligence ready</option>
                     <option value="outreach_ready">Outreach ready</option>
                     <option value="contacted">Contacted</option>
                     <option value="follow_up_due">Follow-up due</option>
@@ -453,6 +473,7 @@
               <div class="quick-command-grid">
                 <button data-assistant-template="Import 50 LinkedIn leads from CRM"><i data-lucide="download-cloud"></i><span>Import CRM Leads</span></button>
                 <button data-assistant-template="Sort leads by close chance and prepare outreach for the top 10"><i data-lucide="arrow-down-wide-narrow"></i><span>Prepare Top 10</span></button>
+                <button data-assistant-template="Analyze intelligence briefs for the top 10 new leads"><i data-lucide="brain-circuit"></i><span>Analyze Briefs</span></button>
                 <button data-assistant-template="Log LinkedIn connection sent for all outreach-ready leads"><i data-lucide="list-plus"></i><span>Log LinkedIn Touch</span></button>
                 <button data-assistant-template="Move all contacted leads with no reply to follow-up due"><i data-lucide="bell-ring"></i><span>Set Follow-Ups</span></button>
               </div>
