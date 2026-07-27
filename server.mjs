@@ -2368,17 +2368,25 @@ async function enrichProspectContacts(prospect) {
   const apifyCandidates = [];
   let actorsRun = 0;
   let skippedForTemplate = false;
-  for (const [source, actorId, input] of actorInputs) {
+  const actorResults = await Promise.all(actorInputs.map(async ([source, actorId, input]) => {
     try {
       const renderedInput = apifyInputFor(source, prospect, input);
       const items = await runApifyActor(actorId, renderedInput, state.integrations.apify.maxChargeUsd);
-      actorsRun += 1;
-      apifyCandidates.push(...items.flatMap((item) => candidatesFromScraperItem(item, source)));
+      return { source, items };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (message.includes("input template")) skippedForTemplate = true;
-      discovery.warnings.push(`${source} scraper failed: ${message}`);
+      return { source, error };
     }
+  }));
+
+  for (const result of actorResults) {
+    if (result.error) {
+      const message = result.error instanceof Error ? result.error.message : String(result.error);
+      if (message.includes("input template")) skippedForTemplate = true;
+      discovery.warnings.push(`${result.source} scraper failed: ${message}`);
+      continue;
+    }
+    actorsRun += 1;
+    apifyCandidates.push(...(result.items || []).flatMap((item) => candidatesFromScraperItem(item, result.source)));
   }
 
   discovery.candidates = mergeContactCandidates(addMessengerLinkCandidates([...apifyCandidates, ...discovery.candidates]));
@@ -2479,17 +2487,36 @@ function isEmptyApifyValue(value) {
 async function runApifyActor(actorId, input, maxChargeUsd) {
   const token = decryptSecret(state.apifyVault);
   const safeActorId = actorId.split("/").map(encodeURIComponent).join("/").replaceAll("%7E", "~");
-  const url = `https://api.apify.com/v2/acts/${safeActorId}/run-sync-get-dataset-items?token=${encodeURIComponent(token)}&maxTotalChargeUsd=${encodeURIComponent(maxChargeUsd)}&clean=true`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input)
-  });
-  if (!response.ok) {
-    throw new Error(`Apify actor ${actorId} returned HTTP ${response.status}.`);
+  const timeoutMs = apifyTimeoutMs();
+  const timeoutSeconds = Math.max(5, Math.ceil(timeoutMs / 1000));
+  const url = `https://api.apify.com/v2/acts/${safeActorId}/run-sync-get-dataset-items?token=${encodeURIComponent(token)}&maxTotalChargeUsd=${encodeURIComponent(maxChargeUsd)}&clean=true&timeout=${timeoutSeconds}`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+      signal: controller.signal
+    });
+    if (!response.ok) {
+      throw new Error(`Apify actor ${actorId} returned HTTP ${response.status}.`);
+    }
+    const data = await response.json();
+    return Array.isArray(data) ? data : [];
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error(`Apify actor ${actorId} timed out after ${Math.round(timeoutMs / 1000)}s`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
   }
-  const data = await response.json();
-  return Array.isArray(data) ? data : [];
+}
+
+function apifyTimeoutMs() {
+  const envValue = Number(process.env.APIFY_ACTOR_TIMEOUT_MS || 0);
+  return Number.isFinite(envValue) && envValue >= 3000 ? envValue : 10000;
 }
 
 function candidatesFromScraperItem(item, source) {
