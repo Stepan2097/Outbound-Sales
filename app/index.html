@@ -305,7 +305,7 @@
                   <form class="linkedin-target-form" id="linkedinTargetForm">
                     <div class="target-submit-row">
                       <input id="linkedinTargetUrlInput" type="url" placeholder="https://www.linkedin.com/in/target-person" aria-label="LinkedIn profile URL" />
-                      <button class="primary-button" type="submit"><i data-lucide="send"></i><span>Add</span></button>
+                      <button class="primary-button" id="addLinkedinTargetBtn" type="submit"><i data-lucide="send"></i><span>Add</span></button>
                     </div>
                     <details class="optional-fields">
                       <summary>Optional details</summary>
@@ -403,7 +403,7 @@
                   <input id="crmPullLimitInput" type="number" min="1" max="500" value="50" />
                   <input id="crmPullLinkedInFieldInput" type="text" value="linkedin" placeholder="LinkedIn field, e.g. linkedin_url" />
                 </div>
-                <button class="primary-button" type="submit"><i data-lucide="database-zap"></i><span>Pull Leads</span></button>
+                <button class="primary-button" id="crmImportBtn" type="submit"><i data-lucide="database-zap"></i><span>Pull Leads</span></button>
               </form>
               <div class="crm-import-status" id="crmImportStatus"></div>
             </section>

@@ -943,6 +943,12 @@ async function handleApi(request, response, url) {
       return;
     }
 
+    if (!body.force && isRecentContactDiscovery(prospect)) {
+      addEvent("enrichment", `${prospect.name} contact discovery reused from the saved research cache.`);
+      sendJson(response, 200, publicState());
+      return;
+    }
+
     prospect.contactDiscovery = await enrichProspectContacts(prospect);
     recordLeadResearch(prospect, {
       stage: "contact_enriched",
@@ -974,24 +980,28 @@ async function handleApi(request, response, url) {
       linkedin: linkedinUrl,
       notes: cleanText(body.notes || "Created from LinkedIn target URL.")
     });
-    prospect.contactDiscovery = await enrichProspectContacts(prospect);
+    const existing = state.prospects.find((item) => item.dedupeKey === prospect.dedupeKey || item.linkedin === prospect.linkedin);
+    if (existing) {
+      existing.name = prospect.name || existing.name;
+      existing.title = prospect.title || existing.title;
+      existing.company = prospect.company && prospect.company !== "Unknown account" ? prospect.company : existing.company;
+      existing.location = prospect.location || existing.location;
+      existing.website = prospect.website || existing.website;
+      existing.linkedin = prospect.linkedin || existing.linkedin;
+      existing.notes = prospect.notes || existing.notes;
+      existing.updatedAt = new Date().toISOString();
+      prospect.id = existing.id;
+      Object.assign(prospect, existing);
+    } else {
+      prospect.status = "new";
+    }
     recordLeadResearch(prospect, {
-      stage: "contact_enriched",
-      summary: `${prospect.contactDiscovery.candidates.length} contact candidates reviewed from LinkedIn target import.`,
-      contactDiscovery: prospect.contactDiscovery,
-      warnings: prospect.contactDiscovery.warnings
+      stage: "linkedin_target_added",
+      summary: `${prospect.name} added to the queue. Run Research to enrich contact data, analyze the account, and prepare outreach.`,
+      warnings: prospect.company === "Unknown account" ? ["Company is missing; research quality improves when the company is provided."] : []
     });
-    await ensureLeadIntelligenceSnapshot(prospect, {
-      force: false,
-      useAi: true,
-      refreshReason: "linkedin_target_import"
-    });
-    prospect.outreach = await prepareAndLogOutreach(prospect, "balanced", "LINKEDIN_CONNECTION_MESSAGE", {
-      source: "linkedin-target-url"
-    });
-    prospect.status = "linkedin_ready";
     state.prospects = [prospect, ...state.prospects.filter((item) => item.dedupeKey !== prospect.dedupeKey)];
-    addEvent("linkedin", `${prospect.name} imported from LinkedIn URL with message variations.`);
+    addEvent("linkedin", `${prospect.name} added from LinkedIn URL. Research is ready to run.`);
     sendJson(response, 200, publicState());
     return;
   }
@@ -2242,6 +2252,7 @@ function articleFor(value) {
 }
 
 function buildContactDiscovery(prospect) {
+  const now = new Date().toISOString();
   const domain = normalizeDomain(prospect.website);
   const nameParts = prospect.name.toLowerCase().replace(/[^a-z\s-]/g, "").split(/\s+/).filter(Boolean);
   const first = nameParts[0] || "";
@@ -2324,7 +2335,9 @@ function buildContactDiscovery(prospect) {
   }
 
   return {
-    searchedAt: new Date().toISOString(),
+    searchedAt: now,
+    completedAt: now,
+    updatedAt: now,
     policy: "public_business_contact_data_only",
     candidates: mergeContactCandidates(addMessengerLinkCandidates(candidates)),
     warnings: [
@@ -2335,6 +2348,15 @@ function buildContactDiscovery(prospect) {
       "Use suppression and permission checks before sending."
     ]
   };
+}
+
+function isRecentContactDiscovery(prospect, minutes = 20) {
+  const discovery = prospect?.contactDiscovery;
+  if (!discovery || !Array.isArray(discovery.candidates)) return false;
+  const timestamp = discovery.completedAt || discovery.updatedAt || discovery.searchedAt;
+  if (!timestamp) return false;
+  const ageMs = Date.now() - new Date(timestamp).getTime();
+  return Number.isFinite(ageMs) && ageMs >= 0 && ageMs <= minutes * 60 * 1000;
 }
 
 async function enrichProspectContacts(prospect) {

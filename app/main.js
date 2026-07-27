@@ -1467,6 +1467,8 @@ function renderBusyState() {
   setBusyButton("analyzeIntelligenceQuick", "intelligence", "Analyzing...");
   setBusyButton("enrichProspectBtn", "enrich", "Refreshing...");
   setBusyButton("removeLeadQuick", "remove", "Removing...");
+  setBusyButton("addLinkedinTargetBtn", "linkedin-import", "Adding...");
+  setBusyButton("crmImportBtn", "crm-import", "Pulling...");
   document.querySelectorAll("[data-interaction-type], [data-task-complete-id], [data-remove-prospect-id]").forEach((button) => {
     button.disabled = anyBusy;
   });
@@ -1477,7 +1479,7 @@ function setBusyButton(id, actionName, activeText) {
   if (!button) return;
   if (!button.dataset.defaultHtml) button.dataset.defaultHtml = button.innerHTML;
   const active = busyAction === actionName;
-  button.disabled = active || (Boolean(busyAction) && ["research", "intelligence", "enrich", "remove"].includes(actionName));
+  button.disabled = active || (Boolean(busyAction) && ["research", "intelligence", "enrich", "remove", "linkedin-import", "crm-import"].includes(actionName));
   button.classList.toggle("is-loading", active);
   if (active) {
     const icon = actionName === "remove" ? "loader-circle" : "loader-circle";
@@ -1496,7 +1498,13 @@ async function runUiAction(actionName, message, work) {
   refreshIcons();
   try {
     await work();
-    uiNotice = actionName === "research" ? "Research refreshed. Outreach, score, company context, and next actions are updated." : "Action completed.";
+    uiNotice = {
+      research: "Research refreshed. Outreach, score, company context, and next actions are updated.",
+      enrich: "Contact data refreshed. Review confidence before using any phone or social profile.",
+      "linkedin-import": "Lead added to the queue. Run Research when you are ready to enrich and prepare outreach.",
+      "crm-import": "CRM leads pulled into the queue.",
+      remove: "Lead removed from the queue."
+    }[actionName] || "Action completed.";
   } catch (error) {
     uiNotice = error?.message || "Action failed. Please try again.";
   } finally {
@@ -1916,19 +1924,20 @@ document.getElementById("sampleProspectsBtn").addEventListener("click", async ()
 
 document.getElementById("linkedinTargetForm").addEventListener("submit", async (event) => {
   event.preventDefault();
-  state = await api("/api/prospects/linkedin-target", {
-    method: "POST",
-    body: JSON.stringify({
-      linkedinUrl: document.getElementById("linkedinTargetUrlInput").value,
-      name: document.getElementById("linkedinTargetNameInput").value,
-      company: document.getElementById("linkedinTargetCompanyInput").value
-    })
+  await runUiAction("linkedin-import", "Adding LinkedIn target to the queue...", async () => {
+    state = await api("/api/prospects/linkedin-target", {
+      method: "POST",
+      body: JSON.stringify({
+        linkedinUrl: document.getElementById("linkedinTargetUrlInput").value,
+        name: document.getElementById("linkedinTargetNameInput").value,
+        company: document.getElementById("linkedinTargetCompanyInput").value
+      })
+    });
+    selectedProspectId = state.prospects[0]?.id || selectedProspectId;
+    document.getElementById("linkedinTargetUrlInput").value = "";
+    document.getElementById("linkedinTargetNameInput").value = "";
+    document.getElementById("linkedinTargetCompanyInput").value = "";
   });
-  selectedProspectId = state.prospects[0]?.id || selectedProspectId;
-  document.getElementById("linkedinTargetUrlInput").value = "";
-  document.getElementById("linkedinTargetNameInput").value = "";
-  document.getElementById("linkedinTargetCompanyInput").value = "";
-  render();
 });
 
 document.getElementById("assistantTaskForm").addEventListener("submit", async (event) => {
@@ -1951,12 +1960,13 @@ document.getElementById("crmLeadPullForm").addEventListener("submit", async (eve
     limit: Number(document.getElementById("crmPullLimitInput").value),
     linkedinField: document.getElementById("crmPullLinkedInFieldInput").value
   };
-  state = await api("/api/crm/import-leads", {
-    method: "POST",
-    body: JSON.stringify(payload)
+  await runUiAction("crm-import", "Pulling leads from CRM...", async () => {
+    state = await api("/api/crm/import-leads", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    selectedProspectId = state.prospects[0]?.id || selectedProspectId;
   });
-  selectedProspectId = state.prospects[0]?.id || selectedProspectId;
-  render();
 });
 
 document.getElementById("agentRunForm").addEventListener("submit", async (event) => {
@@ -2375,7 +2385,7 @@ document.getElementById("enrichProspectBtn").addEventListener("click", async () 
   await runUiAction("enrich", "Refreshing contact and messenger data...", async () => {
     state = await api("/api/prospects/enrich", {
       method: "POST",
-      body: JSON.stringify({ prospectId: selectedProspectId })
+      body: JSON.stringify({ prospectId: selectedProspectId, force: true })
     });
   });
 });
@@ -2403,7 +2413,7 @@ async function researchAndPrepareSelected() {
   const profile = document.getElementById("outreachProfileSelect").value;
   state = await api("/api/prospects/enrich", {
     method: "POST",
-    body: JSON.stringify({ prospectId: selectedProspectId })
+    body: JSON.stringify({ prospectId: selectedProspectId, force: false })
   });
   state = await api("/api/prospects/intelligence/analyze", {
     method: "POST",
