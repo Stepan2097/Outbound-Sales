@@ -3287,10 +3287,10 @@ async function prepareOutreachWithAi(prospect, profile, taskType = "SEQUENCE_GEN
 
   try {
     const { data, run } = await callOpenRouterJson({
-      model: state.aiModelDefaults.writingModel,
+      model: outreachModelForProfile(profile),
       taskType,
       profile,
-      maxTokens: 900,
+      maxTokens: outreachMaxTokensForProfile(profile),
       messages: [
         {
           role: "system",
@@ -3354,6 +3354,17 @@ async function prepareOutreachWithAi(prospect, profile, taskType = "SEQUENCE_GEN
       fallbackReason
     };
   }
+}
+
+function outreachModelForProfile(profile = "balanced") {
+  if (profile === "economy") return state.aiModelDefaults.analysisModel;
+  return state.aiModelDefaults.writingModel;
+}
+
+function outreachMaxTokensForProfile(profile = "balanced") {
+  if (profile === "economy") return 650;
+  if (profile === "premium") return 1200;
+  return 900;
 }
 
 async function prepareAndLogOutreach(prospect, profile, taskType = "SEQUENCE_GENERATION", context = {}) {
@@ -6572,9 +6583,9 @@ async function callOpenRouterJson({ model, taskType, profile, messages, maxToken
 function openRouterTimeoutFor(profile = "balanced", taskType = "") {
   const envValue = Number(process.env.OPENROUTER_CHAT_TIMEOUT_MS || 0);
   if (Number.isFinite(envValue) && envValue >= 3000) return envValue;
-  if (profile === "economy") return 8000;
-  if (profile === "premium") return 24000;
-  if (/SEQUENCE_GENERATION|ACCOUNT_QUALIFICATION/i.test(taskType)) return 14000;
+  if (profile === "economy") return 12000;
+  if (profile === "premium") return 36000;
+  if (/SEQUENCE_GENERATION|ACCOUNT_QUALIFICATION/i.test(taskType)) return 24000;
   return 12000;
 }
 
