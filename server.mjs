@@ -6474,6 +6474,7 @@ function openRouterHeaders(apiKey = decryptSecret(state.vault)) {
 
 async function callOpenRouterJson({ model, taskType, profile, messages, maxTokens = 1200 }) {
   const startedAt = performance.now();
+  const timeoutMs = openRouterTimeoutFor(profile, taskType);
   const requestBody = {
     model,
     messages,
@@ -6484,12 +6485,12 @@ async function callOpenRouterJson({ model, taskType, profile, messages, maxToken
 
   let payload;
   try {
-    payload = await postOpenRouterChat(requestBody);
+    payload = await postOpenRouterChat(requestBody, { timeoutMs });
   } catch (error) {
     if (String(error?.message || "").includes("response_format")) {
       const retryBody = { ...requestBody };
       delete retryBody.response_format;
-      payload = await postOpenRouterChat(retryBody);
+      payload = await postOpenRouterChat(retryBody, { timeoutMs: Math.min(timeoutMs, 9000) });
     } else {
       throw error;
     }
@@ -6517,6 +6518,15 @@ async function callOpenRouterJson({ model, taskType, profile, messages, maxToken
   };
   addEvent("request", `${taskType} used ${model} through OpenRouter.`);
   return { data, run };
+}
+
+function openRouterTimeoutFor(profile = "balanced", taskType = "") {
+  const envValue = Number(process.env.OPENROUTER_CHAT_TIMEOUT_MS || 0);
+  if (Number.isFinite(envValue) && envValue >= 3000) return envValue;
+  if (profile === "economy") return 8000;
+  if (profile === "premium") return 24000;
+  if (/SEQUENCE_GENERATION|ACCOUNT_QUALIFICATION/i.test(taskType)) return 14000;
+  return 12000;
 }
 
 function messageContentForTokens(message) {
@@ -6556,22 +6566,34 @@ async function parseOrRepairOpenRouterJson(content, context) {
       temperature: 0,
       max_tokens: 1400,
       response_format: { type: "json_object" }
-    });
+    }, { timeoutMs: 7000 });
     return parseJsonObject(repairPayload.choices?.[0]?.message?.content || "");
   }
 }
 
-async function postOpenRouterChat(body) {
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: openRouterHeaders(),
-    body: JSON.stringify(body)
-  });
-  const text = await response.text();
-  if (!response.ok) {
-    throw new Error(`OpenRouter chat HTTP ${response.status}: ${text.slice(0, 220)}`);
+async function postOpenRouterChat(body, { timeoutMs = 12000 } = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: openRouterHeaders(),
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      throw new Error(`OpenRouter chat HTTP ${response.status}: ${text.slice(0, 220)}`);
+    }
+    return JSON.parse(text);
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error(`OpenRouter timed out after ${Math.round(timeoutMs / 1000)}s`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
   }
-  return JSON.parse(text);
 }
 
 function parseJsonObject(text) {
