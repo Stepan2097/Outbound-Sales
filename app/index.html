@@ -756,57 +756,17 @@
             <section class="panel product-knowledge-panel span-2">
               <div class="panel-heading">
                 <div>
-                  <h2>Product Knowledge</h2>
-                  <p>Links, lessons, notes, and platform screenshots</p>
+                  <h2>Product Context Updates</h2>
+                  <p>Paste product changes, sales notes, positioning, objections, proof, and selling instructions</p>
                 </div>
                 <span class="pill" id="productKnowledgeStats">0 items</span>
               </div>
               <form class="knowledge-form" id="productKnowledgeForm">
-                <div class="split-fields">
-                  <label>
-                    <span>Type</span>
-                    <select id="knowledgeTypeInput">
-                      <option value="lesson">Lesson</option>
-                      <option value="link">Link</option>
-                      <option value="platform_note">Platform note</option>
-                      <option value="screenshot">Screenshot</option>
-                      <option value="faq">FAQ</option>
-                      <option value="case_study">Case study</option>
-                      <option value="objection">Objection</option>
-                      <option value="competitor">Competitor</option>
-                    </select>
-                  </label>
-                  <label>
-                    <span>Priority</span>
-                    <input id="knowledgePriorityInput" type="number" min="1" max="100" value="75" />
-                  </label>
-                </div>
                 <label>
-                  <span>Title</span>
-                  <input id="knowledgeTitleInput" type="text" placeholder="Demo lesson, pricing page, onboarding screenshot" />
+                  <span>Plain text product context</span>
+                  <textarea id="knowledgeTextInput" class="product-context-textarea" rows="9" placeholder="Paste any update the AI should use when selling this product. Example: target buyers, pain points, use cases, strongest proof, pricing logic, objections, what not to claim, good discovery questions, message style, competitors, recent changes, or how reps should position the offer."></textarea>
                 </label>
-                <label>
-                  <span>URL</span>
-                  <input id="knowledgeUrlInput" type="url" placeholder="https://..." />
-                </label>
-                <label>
-                  <span>Lesson or notes</span>
-                  <textarea id="knowledgeTextInput" rows="5" placeholder="What should the AI know about this product, demo flow, customer pain, feature, proof, limitation, or objection?"></textarea>
-                </label>
-                <label>
-                  <span>Tags</span>
-                  <input id="knowledgeTagsInput" type="text" placeholder="pricing, demo, onboarding, proof" />
-                </label>
-                <div class="knowledge-upload-row">
-                  <label class="file-drop screenshot-drop">
-                    <input id="productKnowledgeScreenshotInput" type="file" accept="image/*" />
-                    <i data-lucide="image-plus"></i>
-                    <strong>Upload screenshot</strong>
-                    <span id="productKnowledgeScreenshotName">PNG or JPG from product, demo, CRM, docs</span>
-                  </label>
-                  <div class="screenshot-preview" id="productKnowledgeScreenshotPreview"></div>
-                </div>
-                <button type="submit"><i data-lucide="book-plus"></i><span>Add Knowledge</span></button>
+                <button type="submit"><i data-lucide="book-plus"></i><span>Save Context Update</span></button>
               </form>
               <div class="knowledge-list" id="productKnowledgeList"></div>
             </section>

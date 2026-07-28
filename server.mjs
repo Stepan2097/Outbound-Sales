@@ -498,7 +498,7 @@ async function handleApi(request, response, url) {
 
     const item = normalizeProductKnowledge(body);
     if (!item.title && !item.text && !item.url && !item.screenshot) {
-      sendJson(response, 400, { error: "Add a link, lesson, note, or screenshot before saving." });
+      sendJson(response, 400, { error: "Add product context before saving." });
       return;
     }
 
@@ -1947,7 +1947,7 @@ function normalizeProductKnowledge(input) {
 
 function normalizeKnowledgeType(value) {
   const normalized = cleanText(value).toLowerCase().replace(/[\s-]+/g, "_");
-  return ["link", "lesson", "platform_note", "screenshot", "faq", "case_study", "objection", "competitor"].includes(normalized)
+  return ["link", "lesson", "product_context_update", "platform_note", "screenshot", "faq", "case_study", "objection", "competitor"].includes(normalized)
     ? normalized
     : "lesson";
 }

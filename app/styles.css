@@ -987,7 +987,6 @@ tbody tr:last-child td {
 
 .knowledge-form {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.55fr);
   gap: 12px;
 }
 
@@ -995,6 +994,11 @@ tbody tr:last-child td {
 .knowledge-form > .split-fields,
 .knowledge-form > button {
   grid-column: 1;
+}
+
+.product-context-textarea {
+  min-height: 220px;
+  line-height: 1.55;
 }
 
 .knowledge-upload-row {

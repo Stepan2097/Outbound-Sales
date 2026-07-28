@@ -1306,6 +1306,7 @@ function knowledgeIcon(type) {
   const icons = {
     link: "link",
     lesson: "book-open-check",
+    product_context_update: "file-pen-line",
     platform_note: "panel-top",
     screenshot: "image",
     faq: "circle-help",
@@ -2045,7 +2046,7 @@ document.getElementById("exampleForm").addEventListener("submit", async (event) 
   render();
 });
 
-document.getElementById("productKnowledgeScreenshotInput").addEventListener("change", async (event) => {
+document.getElementById("productKnowledgeScreenshotInput")?.addEventListener("change", async (event) => {
   const file = event.target.files?.[0];
   if (!file) {
     pendingProductKnowledgeScreenshot = null;
@@ -2081,22 +2082,14 @@ document.getElementById("productKnowledgeForm").addEventListener("submit", async
     method: "POST",
     body: JSON.stringify({
       productId: state.selectedProductId,
-      type: document.getElementById("knowledgeTypeInput").value,
-      title: document.getElementById("knowledgeTitleInput").value,
-      url: document.getElementById("knowledgeUrlInput").value,
+      type: "product_context_update",
       text: document.getElementById("knowledgeTextInput").value,
-      tags: document.getElementById("knowledgeTagsInput").value,
-      priority: Number(document.getElementById("knowledgePriorityInput").value),
-      screenshot: pendingProductKnowledgeScreenshot
+      tags: "product-context,sales-playbook,positioning",
+      priority: 92
     })
   });
   pendingProductKnowledgeScreenshot = null;
-  document.getElementById("productKnowledgeScreenshotInput").value = "";
-  document.getElementById("knowledgeTitleInput").value = "";
-  document.getElementById("knowledgeUrlInput").value = "";
   document.getElementById("knowledgeTextInput").value = "";
-  document.getElementById("knowledgeTagsInput").value = "";
-  document.getElementById("knowledgePriorityInput").value = 75;
   render();
 });
 
