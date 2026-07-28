@@ -1,13 +1,14 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { createReadStream, existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { connect as connectTcp } from "node:net";
-import { extname, join, normalize } from "node:path";
+import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 const appRoot = join(root, "app");
+const stateFilePath = process.env.STATE_FILE_PATH || join(root, ".data", "outbound-state.json");
 const port = Number.parseInt(process.env.PORT ?? "4173", 10);
 const masterKey = createHash("sha256").update(randomBytes(32)).digest();
 const openRouterDefaults = {
@@ -221,6 +222,7 @@ const state = {
 };
 
 initializeRuntimeConfigFromEnv();
+await loadPersistentWorkspaceState();
 void warmRuntimeConnections();
 
 const server = createServer(async (request, response) => {
@@ -433,7 +435,24 @@ async function handleApi(request, response, url) {
 
     state.selectedProductId = product.id;
     addEvent("product", `${product.name} selected for tailored outreach.`);
+    await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/products/teach") {
+    const body = await readJson(request);
+    const text = cleanLongText(body.text || body.context || "");
+    if (text.length < 20) {
+      sendJson(response, 400, { error: "Paste enough product context for the system to learn from it." });
+      return;
+    }
+
+    const result = await teachProductFromText(text, cleanText(body.productId || state.selectedProductId));
+    state.selectedProductId = result.product.id;
+    addEvent("product", `${result.product.name} studied and saved from product context text.`);
+    await writePersistentWorkspaceState();
+    sendJson(response, 200, { ...publicState(), productTraining: result.summary });
     return;
   }
 
@@ -462,6 +481,7 @@ async function handleApi(request, response, url) {
     }
     state.selectedProductId = product.id;
     addEvent("product", `${product.name} ${existing ? "updated" : "added"}.`);
+    await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
   }
@@ -484,6 +504,7 @@ async function handleApi(request, response, url) {
     product.examples.unshift(example);
     product.examples = product.examples.slice(0, 50);
     addEvent("training", `Example outreach added for ${product.name}.`);
+    await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
   }
@@ -513,6 +534,7 @@ async function handleApi(request, response, url) {
       lastSyncedAt: new Date().toISOString()
     };
     addEvent("product", `Knowledge added for ${product.name}.`);
+    await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
   }
@@ -546,6 +568,7 @@ async function handleApi(request, response, url) {
     }
     await rebuildLearningPlaybook();
     addEvent("learning", `${product.name} learned from ${example.channel} ${example.assetType}.`);
+    await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
   }
@@ -590,6 +613,7 @@ async function handleApi(request, response, url) {
       updatedAt: new Date().toISOString()
     };
     addEvent("learning", `${product.name} knowledge feed analyzed.`);
+    await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
   }
@@ -597,6 +621,7 @@ async function handleApi(request, response, url) {
   if (request.method === "POST" && url.pathname === "/api/learning/retrain") {
     await rebuildLearningPlaybook({ forceAi: true });
     addEvent("learning", "Learning playbook rebuilt from uploaded examples.");
+    await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
   }
@@ -1173,9 +1198,107 @@ async function serveStatic(response, pathname) {
   createReadStream(filePath).pipe(response);
 }
 
+let persistTimer = null;
+
+async function loadPersistentWorkspaceState() {
+  if (!existsSync(stateFilePath)) return;
+  try {
+    const saved = JSON.parse(await readFile(stateFilePath, "utf8"));
+    applyPersistentWorkspaceState(saved);
+    addEvent("system", "Workspace memory loaded from persistent storage.");
+  } catch (error) {
+    addEvent("system", `Workspace memory could not be loaded: ${error instanceof Error ? error.message : "unknown error"}.`);
+  }
+}
+
+function applyPersistentWorkspaceState(saved = {}) {
+  if (Array.isArray(saved.products)) {
+    const byId = new Map(state.products.map((product) => [product.id, product]));
+    for (const input of saved.products) {
+      const product = normalizeProduct(input);
+      const existing = byId.get(product.id);
+      byId.set(product.id, existing ? mergeProductMemory(existing, product) : product);
+    }
+    state.products = [...byId.values()].sort((left, right) => {
+      if (left.id === saved.selectedProductId) return -1;
+      if (right.id === saved.selectedProductId) return 1;
+      return left.name.localeCompare(right.name);
+    });
+  }
+
+  if (saved.selectedProductId && state.products.some((product) => product.id === saved.selectedProductId)) {
+    state.selectedProductId = saved.selectedProductId;
+  }
+  if (Array.isArray(saved.prospects)) {
+    state.prospects = saved.prospects.map(normalizeProspect).filter((prospect) => prospect.name && prospect.company).slice(0, 1000);
+  }
+  if (Array.isArray(saved.interactions)) state.interactions = saved.interactions.slice(0, 2000);
+  if (Array.isArray(saved.followUpTasks)) state.followUpTasks = saved.followUpTasks.slice(0, 1000);
+  if (saved.learning && typeof saved.learning === "object") {
+    state.learning = {
+      ...state.learning,
+      examples: Array.isArray(saved.learning.examples) ? saved.learning.examples.slice(0, 500) : state.learning.examples,
+      playbook: saved.learning.playbook || state.learning.playbook,
+      modelVersion: saved.learning.modelVersion || state.learning.modelVersion,
+      lastTrainedAt: saved.learning.lastTrainedAt || state.learning.lastTrainedAt
+    };
+  }
+}
+
+function mergeProductMemory(existing, product) {
+  return {
+    ...existing,
+    ...product,
+    examples: product.examples?.length ? product.examples : existing.examples || [],
+    knowledge: product.knowledge?.length ? product.knowledge : existing.knowledge || [],
+    memory: product.memory || existing.memory || synthesizeProductMemory(product),
+    mcpContext: {
+      ...existing.mcpContext,
+      ...product.mcpContext
+    },
+    createdAt: existing.createdAt || product.createdAt,
+    updatedAt: product.updatedAt || existing.updatedAt
+  };
+}
+
+function persistWorkspaceState() {
+  if (persistTimer) clearTimeout(persistTimer);
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    void writePersistentWorkspaceState();
+  }, 150);
+}
+
+async function writePersistentWorkspaceState() {
+  try {
+    await mkdir(dirname(stateFilePath), { recursive: true });
+    await writeFile(stateFilePath, JSON.stringify({
+      version: 1,
+      savedAt: new Date().toISOString(),
+      selectedProductId: state.selectedProductId,
+      products: state.products,
+      prospects: state.prospects.slice(0, 1000),
+      interactions: state.interactions.slice(0, 2000),
+      followUpTasks: state.followUpTasks.slice(0, 1000),
+      learning: {
+        examples: state.learning.examples.slice(0, 500),
+        playbook: state.learning.playbook,
+        modelVersion: state.learning.modelVersion,
+        lastTrainedAt: state.learning.lastTrainedAt
+      }
+    }, null, 2), "utf8");
+  } catch (error) {
+    console.error("Could not persist workspace memory:", error instanceof Error ? error.message : error);
+  }
+}
+
 function publicState() {
   const usageSummary = summarizeUsage();
-  const selectedProduct = currentProduct();
+  const products = state.products.map((product) => ({
+    ...product,
+    memory: product.memory || synthesizeProductMemory(product)
+  }));
+  const selectedProduct = products.find((product) => product.id === state.selectedProductId) || products[0] || currentProduct();
   return {
     workspaceId: state.workspaceId,
     environment: state.environment,
@@ -1208,7 +1331,7 @@ function publicState() {
     intelligenceJobs: state.intelligenceJobs.slice(0, 20),
     icp: publicIcpState(),
     learning: publicLearningState(),
-    products: state.products,
+    products,
     selectedProductId: state.selectedProductId,
     selectedProduct,
     mcpSync: state.mcpSync,
@@ -1692,6 +1815,64 @@ function seedProducts() {
       }
     },
     {
+      id: "black-affiliate",
+      name: "Black Affiliate",
+      category: "iGaming affiliate and performance marketing",
+      analysisProfileId: "adaction-mobile-games-value-exchange-ua",
+      positioning: "Product context needs precise training data before the system should make claims. Use the product training text field to define the offer, ICP, proof, objections, and sales rules.",
+      targetPersonas: ["Affiliate Manager", "Head of Affiliates", "Performance Marketing Lead", "Media Buyer", "Partnerships Manager"],
+      useCases: ["affiliate partner growth", "iGaming traffic monetization", "performance marketing workflow"],
+      proofPoints: [],
+      differentiators: [],
+      objections: ["approved product proof is missing", "do not make performance claims until trained", "tracking and compliance rules must be defined"],
+      examples: [],
+      knowledge: [
+        {
+          id: "know-black-affiliate-1",
+          type: "product_context_update",
+          title: "Training required",
+          url: "",
+          text: "Black Affiliate is available as a product shell, but the AI should not make specific claims until precise product context is uploaded through the Products tab.",
+          tags: ["needs-training", "product-context"],
+          priority: 70,
+          screenshot: null,
+          createdAt: now
+        }
+      ],
+      memory: {
+        status: "needs_training",
+        summary: "Black Affiliate product shell exists, but precise product data is still required before confident scoring or outreach.",
+        confidence: 25,
+        source: "seed_shell",
+        analyzedAt: now,
+        segments: {
+          idealCustomers: ["iGaming affiliate or performance marketing teams - verify"],
+          buyerPersonas: ["Affiliate Manager", "Head of Affiliates", "Performance Marketing Lead", "Media Buyer", "Partnerships Manager"],
+          painPoints: ["affiliate partner growth", "tracking and campaign performance visibility"],
+          buyingTriggers: ["active search for new affiliate or traffic growth channels"],
+          exclusions: ["do not use without precise product proof"],
+          salesAngles: ["ask discovery questions before pitching specific claims"],
+          proofPoints: [],
+          objections: ["missing product proof", "tracking/compliance concerns"],
+          discoveryQuestions: ["What exact affiliate or performance workflow should Black Affiliate improve?", "Which buyer owns the decision?", "What proof can we safely reference?"],
+          claimsToAvoid: ["guaranteed revenue", "guaranteed traffic quality", "unverified compliance or tracking claims"],
+          qualificationCriteria: ["ICP and offer are defined", "approved proof is uploaded", "tracking/compliance limits are clear"]
+        },
+        scoring: [
+          { label: "Training completeness", score: 25, rationale: "Product shell exists, but precise context is missing." },
+          { label: "Claim safety", score: 35, rationale: "System must avoid unsupported claims until product proof is added." }
+        ]
+      },
+      mcpContext: {
+        version: "manual-v1",
+        freshness: "needs_training",
+        lastSyncedAt: now,
+        sources: [
+          { name: "Product shell", type: "workspace seed", confidence: 30 }
+        ]
+      }
+    },
+    {
       id: "adaction-value-exchange-ua",
       name: "AdAction - Value Exchange UA",
       category: "Mobile games/apps user acquisition",
@@ -1898,7 +2079,7 @@ function normalizeProduct(input) {
   const now = new Date().toISOString();
   const name = cleanText(input.name || "");
   const id = cleanText(input.id || slugify(name));
-  return {
+  const product = {
     id,
     name,
     category: cleanText(input.category || "Product"),
@@ -1911,11 +2092,15 @@ function normalizeProduct(input) {
     objections: splitList(input.objections),
     examples: Array.isArray(input.examples) ? input.examples.map(normalizeOutreachExample) : [],
     knowledge: Array.isArray(input.knowledge) ? input.knowledge.map(normalizeProductKnowledge).filter(Boolean) : [],
+    rawContext: cleanLongText(input.rawContext || input.context || ""),
+    memory: normalizeProductMemory(input.memory),
+    createdAt: input.createdAt || now,
+    updatedAt: input.updatedAt || now,
     mcpContext: {
-      version: cleanText(input.mcpVersion || "manual-v1"),
-      freshness: "manual",
-      lastSyncedAt: now,
-      sources: [
+      version: cleanText(input.mcpVersion || input.mcpContext?.version || "manual-v1"),
+      freshness: cleanText(input.mcpContext?.freshness || "manual"),
+      lastSyncedAt: input.mcpContext?.lastSyncedAt || now,
+      sources: Array.isArray(input.mcpContext?.sources) ? input.mcpContext.sources : [
         {
           name: "Manual product definition",
           type: "workspace input",
@@ -1924,6 +2109,477 @@ function normalizeProduct(input) {
       ]
     }
   };
+  product.memory ||= synthesizeProductMemory(product);
+  return product;
+}
+
+function normalizeProductMemory(memory) {
+  if (!memory || typeof memory !== "object") return null;
+  const segments = memory.segments && typeof memory.segments === "object" ? memory.segments : {};
+  return {
+    status: cleanText(memory.status || "trained"),
+    summary: cleanText(memory.summary || ""),
+    confidence: clampNumber(memory.confidence, 0, 100, 60),
+    source: cleanText(memory.source || "workspace"),
+    analyzedAt: memory.analyzedAt || new Date().toISOString(),
+    segments: {
+      idealCustomers: normalizeStringArray(segments.idealCustomers || memory.idealCustomers).slice(0, 12),
+      buyerPersonas: normalizeStringArray(segments.buyerPersonas || memory.buyerPersonas).slice(0, 12),
+      painPoints: normalizeStringArray(segments.painPoints || memory.painPoints).slice(0, 12),
+      buyingTriggers: normalizeStringArray(segments.buyingTriggers || memory.buyingTriggers).slice(0, 12),
+      exclusions: normalizeStringArray(segments.exclusions || memory.exclusions).slice(0, 12),
+      salesAngles: normalizeStringArray(segments.salesAngles || memory.salesAngles).slice(0, 12),
+      proofPoints: normalizeStringArray(segments.proofPoints || memory.proofPoints).slice(0, 12),
+      objections: normalizeStringArray(segments.objections || memory.objections).slice(0, 12),
+      discoveryQuestions: normalizeStringArray(segments.discoveryQuestions || memory.discoveryQuestions).slice(0, 12),
+      claimsToAvoid: normalizeStringArray(segments.claimsToAvoid || memory.claimsToAvoid).slice(0, 12),
+      qualificationCriteria: normalizeStringArray(segments.qualificationCriteria || memory.qualificationCriteria).slice(0, 12)
+    },
+    scoring: normalizeProductScoring(memory.scoring)
+  };
+}
+
+function normalizeProductScoring(scoring) {
+  if (!Array.isArray(scoring)) return [];
+  return scoring.slice(0, 10).map((item) => ({
+    label: cleanText(item.label || item.name || "Fit signal"),
+    score: clampNumber(item.score, 0, 100, 50),
+    rationale: cleanText(item.rationale || item.reason || "")
+  })).filter((item) => item.label);
+}
+
+async function teachProductFromText(text, selectedProductId = "") {
+  const selectedProduct = state.products.find((product) => product.id === selectedProductId) || currentProduct();
+  const localAnalysis = analyzeProductContextLocally(text, selectedProduct);
+  let analysis = localAnalysis;
+  let source = "local";
+
+  if (state.vault && state.providerHealth.status === "healthy") {
+    try {
+      const ai = await analyzeProductContextWithAi(text, selectedProduct, localAnalysis);
+      analysis = mergeProductAnalyses(localAnalysis, ai.analysis);
+      source = ai.source;
+    } catch (error) {
+      addEvent("product", `Product context AI analysis used local fallback: ${error instanceof Error ? error.message : "analysis failed"}.`);
+    }
+  }
+
+  analysis.name = cleanText(analysis.name || localAnalysis.name || selectedProduct?.name || "Untitled Product");
+  analysis.id = cleanText(analysis.id || slugify(analysis.name));
+  const existing = findProductForTeaching(analysis, selectedProduct);
+  const now = new Date().toISOString();
+  const contextItem = normalizeProductKnowledge({
+    type: "product_context_update",
+    title: `${analysis.name} product context update`,
+    text,
+    tags: "product-context,sales-playbook,ai-memory",
+    priority: 96
+  });
+  const previousKnowledge = Array.isArray(existing?.knowledge) ? existing.knowledge : [];
+  const previousExamples = Array.isArray(existing?.examples) ? existing.examples : [];
+  const product = normalizeProduct({
+    ...(existing || {}),
+    id: existing?.id || analysis.id,
+    name: analysis.name,
+    category: analysis.category || existing?.category || "Product",
+    analysisProfileId: analysis.analysisProfileId || existing?.analysisProfileId || inferAnalysisProfileId(analysis.name, analysis.category || ""),
+    positioning: analysis.positioning || existing?.positioning || "",
+    targetPersonas: analysis.targetPersonas?.length ? analysis.targetPersonas : existing?.targetPersonas || [],
+    useCases: analysis.useCases?.length ? analysis.useCases : existing?.useCases || [],
+    proofPoints: analysis.proofPoints?.length ? analysis.proofPoints : existing?.proofPoints || [],
+    differentiators: analysis.differentiators?.length ? analysis.differentiators : existing?.differentiators || [],
+    objections: analysis.objections?.length ? analysis.objections : existing?.objections || [],
+    examples: previousExamples,
+    knowledge: [contextItem, ...previousKnowledge].filter(Boolean).slice(0, 120),
+    rawContext: [text, existing?.rawContext].filter(Boolean).join("\n\n--- previous context ---\n\n").slice(0, 30000),
+    memory: {
+      ...(analysis.memory || {}),
+      source,
+      status: "trained",
+      analyzedAt: now
+    },
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+    mcpContext: {
+      ...(existing?.mcpContext || {}),
+      freshness: "workspace_trained",
+      lastSyncedAt: now,
+      sources: [
+        { name: "Plain text product training", type: "workspace input", confidence: source === "openrouter" ? 92 : 78 },
+        ...(existing?.mcpContext?.sources || []).slice(0, 6)
+      ]
+    }
+  });
+
+  const index = state.products.findIndex((item) => item.id === product.id);
+  if (index >= 0) state.products[index] = product;
+  else state.products.push(product);
+
+  state.products = state.products.sort((left, right) => {
+    if (left.id === product.id) return -1;
+    if (right.id === product.id) return 1;
+    return left.name.localeCompare(right.name);
+  });
+
+  return {
+    product,
+    summary: {
+      source,
+      status: product.memory?.status || "trained",
+      confidence: product.memory?.confidence || 0,
+      created: index < 0,
+      segments: Object.fromEntries(Object.entries(product.memory?.segments || {}).map(([key, value]) => [key, value.length]))
+    }
+  };
+}
+
+async function analyzeProductContextWithAi(text, selectedProduct, localAnalysis) {
+  const { data, run } = await callOpenRouterJson({
+    model: state.aiModelDefaults.analysisModel,
+    taskType: "MCP_CONTEXT_SYNTHESIS",
+    profile: "economy",
+    maxTokens: 1200,
+    messages: [
+      {
+        role: "system",
+        content: "Extract product sales context from raw notes. Return strict JSON only. Do not invent facts. If a field is missing, use an empty array or a cautious low-confidence summary."
+      },
+      {
+        role: "user",
+        content: JSON.stringify({
+          instruction: "Analyze this product context for an outbound sales system. Segment it so sales research, scoring, and messaging can use it later.",
+          selectedProduct: selectedProduct ? { id: selectedProduct.id, name: selectedProduct.name, category: selectedProduct.category } : null,
+          localFallback: localAnalysis,
+          requiredShape: {
+            name: "product name",
+            category: "product category",
+            positioning: "one clear sentence",
+            targetPersonas: ["persona"],
+            useCases: ["use case"],
+            proofPoints: ["approved proof only"],
+            differentiators: ["differentiator"],
+            objections: ["objection"],
+            memory: {
+              summary: "short internal summary",
+              confidence: 0,
+              segments: {
+                idealCustomers: [],
+                buyerPersonas: [],
+                painPoints: [],
+                buyingTriggers: [],
+                exclusions: [],
+                salesAngles: [],
+                proofPoints: [],
+                objections: [],
+                discoveryQuestions: [],
+                claimsToAvoid: [],
+                qualificationCriteria: []
+              },
+              scoring: [{ label: "fit dimension", score: 0, rationale: "why" }]
+            }
+          },
+          rawText: text
+        })
+      }
+    ]
+  });
+  return { analysis: normalizeProductAnalysis(data, localAnalysis), source: run.provider || "openrouter" };
+}
+
+function normalizeProductAnalysis(data = {}, fallback = {}) {
+  const memory = normalizeProductMemory({
+    ...(data.memory || {}),
+    summary: data.memory?.summary || fallback.memory?.summary || data.positioning || fallback.positioning,
+    confidence: data.memory?.confidence ?? fallback.memory?.confidence ?? 60
+  });
+  return {
+    id: data.id ? cleanText(data.id) : "",
+    name: cleanText(data.name || fallback.name || ""),
+    category: cleanText(data.category || fallback.category || "Product"),
+    positioning: cleanText(data.positioning || fallback.positioning || ""),
+    targetPersonas: normalizeStringArray(data.targetPersonas || data.target_personas || fallback.targetPersonas).slice(0, 10),
+    useCases: normalizeStringArray(data.useCases || data.use_cases || fallback.useCases).slice(0, 10),
+    proofPoints: normalizeStringArray(data.proofPoints || data.proof_points || fallback.proofPoints).slice(0, 10),
+    differentiators: normalizeStringArray(data.differentiators || fallback.differentiators).slice(0, 10),
+    objections: normalizeStringArray(data.objections || fallback.objections).slice(0, 10),
+    analysisProfileId: cleanText(data.analysisProfileId || data.analysis_profile_id || fallback.analysisProfileId || ""),
+    memory
+  };
+}
+
+function mergeProductAnalyses(fallback, preferred) {
+  return {
+    ...fallback,
+    ...preferred,
+    targetPersonas: mergeStringLists(preferred.targetPersonas, fallback.targetPersonas).slice(0, 10),
+    useCases: mergeStringLists(preferred.useCases, fallback.useCases).slice(0, 10),
+    proofPoints: mergeStringLists(preferred.proofPoints, fallback.proofPoints).slice(0, 10),
+    differentiators: mergeStringLists(preferred.differentiators, fallback.differentiators).slice(0, 10),
+    objections: mergeStringLists(preferred.objections, fallback.objections).slice(0, 10),
+    memory: mergeProductMemoryAnalysis(fallback.memory, preferred.memory)
+  };
+}
+
+function mergeProductMemoryAnalysis(fallback, preferred) {
+  const left = normalizeProductMemory(fallback) || {};
+  const right = normalizeProductMemory(preferred) || {};
+  const segmentKeys = new Set([...Object.keys(left.segments || {}), ...Object.keys(right.segments || {})]);
+  const segments = {};
+  for (const key of segmentKeys) {
+    segments[key] = mergeStringLists(right.segments?.[key], left.segments?.[key]).slice(0, 12);
+  }
+  return normalizeProductMemory({
+    ...left,
+    ...right,
+    summary: right.summary || left.summary,
+    confidence: Math.max(Number(left.confidence || 0), Number(right.confidence || 0), 55),
+    segments,
+    scoring: right.scoring?.length ? right.scoring : left.scoring
+  });
+}
+
+function analyzeProductContextLocally(text, selectedProduct) {
+  const clean = cleanLongText(text);
+  const name = extractProductName(clean, selectedProduct);
+  const category = inferProductCategory(clean, selectedProduct);
+  const targetPersonas = extractProductList(clean, ["target", "persona", "buyer", "icp", "audience", "sell to"], inferredPersonasFromText(clean));
+  const painPoints = extractProductList(clean, ["pain", "problem", "issue", "challenge"], inferredPainPointsFromText(clean));
+  const useCases = extractProductList(clean, ["use case", "helps", "workflow"], inferredUseCasesFromText(clean, category));
+  const proofPoints = extractProductList(clean, ["proof", "case", "result", "evidence", "why it works"], inferredProofFromText(clean));
+  const differentiators = extractProductList(clean, ["differentiator", "advantage", "feature", "unique", "better"], inferredDifferentiatorsFromText(clean));
+  const objections = extractProductList(clean, ["objection", "risk", "concern", "limitation", "do not", "don't", "avoid"], inferredObjectionsFromText(clean));
+  const salesAngles = extractProductList(clean, ["angle", "pitch", "position", "sell", "message"], inferredSalesAnglesFromText(clean, category));
+  const claimsToAvoid = extractProductList(clean, ["do not claim", "don't claim", "avoid", "never"], objections.filter((item) => /claim|guarantee|avoid|not/i.test(item)));
+  const discoveryQuestions = inferredDiscoveryQuestionsFromText(clean, useCases, objections);
+  const qualificationCriteria = inferredQualificationCriteriaFromText(clean, targetPersonas, useCases);
+  const summary = cleanText(firstSentence(clean) || `${name} product context trained for outbound sales.`);
+  const confidence = clampNumber(45 + Math.min(30, Math.floor(clean.length / 450)) + Math.min(15, targetPersonas.length + useCases.length + proofPoints.length), 35, 88, 60);
+  return normalizeProductAnalysis({
+    name,
+    category,
+    positioning: summary,
+    targetPersonas,
+    useCases,
+    proofPoints,
+    differentiators,
+    objections,
+    analysisProfileId: inferAnalysisProfileId(name, category),
+    memory: {
+      status: "trained",
+      summary,
+      confidence,
+      source: "local",
+      analyzedAt: new Date().toISOString(),
+      segments: {
+        idealCustomers: inferIdealCustomers(clean, category, targetPersonas),
+        buyerPersonas: targetPersonas,
+        painPoints,
+        buyingTriggers: inferredBuyingTriggersFromText(clean),
+        exclusions: extractProductList(clean, ["exclude", "not for", "bad fit"], claimsToAvoid),
+        salesAngles,
+        proofPoints,
+        objections,
+        discoveryQuestions,
+        claimsToAvoid,
+        qualificationCriteria
+      },
+      scoring: productScoringFromContext(targetPersonas, useCases, proofPoints, objections, confidence)
+    }
+  });
+}
+
+function findProductForTeaching(analysis, selectedProduct) {
+  const slug = slugify(analysis.name);
+  return state.products.find((product) => product.id === analysis.id || product.id === slug || product.name.toLowerCase() === analysis.name.toLowerCase())
+    || (!analysis.name && selectedProduct ? selectedProduct : null);
+}
+
+function synthesizeProductMemory(product) {
+  const text = [product.positioning, ...(product.knowledge || []).map((item) => item.text), ...(product.proofPoints || []), ...(product.objections || [])].filter(Boolean).join("\n");
+  return analyzeProductContextLocally(text || `${product.name}\n${product.positioning || ""}`, product).memory;
+}
+
+function extractProductName(text, selectedProduct) {
+  const explicit = text.match(/(?:^|\n)\s*(?:product|product name|name|offer|продукт|назва|название)\s*[:\-]\s*([^\n]+)/i);
+  if (explicit?.[1]) return cleanProductName(explicit[1]);
+  const blackAffiliate = text.match(/\bBlack\s+Affiliate\b/i);
+  if (blackAffiliate) return "Black Affiliate";
+  const firstLine = text.split(/\n/).map((line) => cleanProductName(line.replace(/^#+\s*/, ""))).find(Boolean) || "";
+  if (firstLine && firstLine.length <= 80 && !/^(context|sales|positioning|target|persona|we |our |this product|update)/i.test(firstLine)) return firstLine;
+  return selectedProduct?.name || "Untitled Product";
+}
+
+function cleanProductName(value) {
+  return cleanText(value)
+    .replace(/^[\s"'`*:-]+|[\s"'`*:-]+$/g, "")
+    .replace(/\s+\(.+\)$/, "")
+    .slice(0, 90);
+}
+
+function inferProductCategory(text, selectedProduct) {
+  const lower = text.toLowerCase();
+  if (/black affiliate|affiliate|igaming|casino|gambl|betting/.test(lower)) return "iGaming affiliate and performance marketing";
+  if (/webview|pwa|app|ios|android|facebook|fb/.test(lower)) return "iGaming app and WebView infrastructure";
+  if (/reward|value-exchange|ua|user acquisition|mmp|appsflyer|adjust/.test(lower)) return "Mobile games/apps user acquisition";
+  if (/crm|revops|sales ops|outbound/.test(lower)) return "AI sales execution platform";
+  return selectedProduct?.category || "Product";
+}
+
+function extractProductList(text, sectionHints, fallback = []) {
+  const lines = cleanLongText(text).split(/\n+/).map((line) => cleanText(line.replace(/^[-*•\d.)\s]+/, ""))).filter(Boolean);
+  const picked = [];
+  let active = false;
+  for (const line of lines) {
+    const lower = line.toLowerCase();
+    const matchesSection = sectionHints.some((hint) => lower.includes(hint));
+    const looksLikeNewHeading = /^[^:]{2,60}:\s*/.test(line);
+    if (looksLikeNewHeading && !matchesSection) {
+      active = false;
+      continue;
+    }
+    if (matchesSection) {
+      active = true;
+      const afterColon = line.includes(":") ? line.split(":").slice(1).join(":") : "";
+      if (afterColon) picked.push(...splitList(afterColon));
+      continue;
+    }
+    if (active && /^[A-ZА-ЯІЇЄҐa-zа-яіїєґ0-9]/.test(line) && line.length <= 180) {
+      if (/^[A-ZА-ЯІЇЄҐ][^:]{2,50}:$/.test(line)) active = false;
+      else picked.push(line);
+    }
+    if (picked.length >= 12) break;
+  }
+  return mergeStringLists(picked, fallback).map((item) => item.replace(/[.;]+$/, "")).filter((item) => item.length > 2).slice(0, 12);
+}
+
+function inferredPersonasFromText(text) {
+  const candidates = ["Head of User Acquisition", "Affiliate Manager", "Head of Affiliates", "CMO", "Performance Marketing Lead", "Media Buyer", "Partnerships Manager", "Founder", "VP Sales", "Revenue Operations"];
+  return candidates.filter((candidate) => new RegExp(candidate.replace(/\s+/g, ".{0,8}"), "i").test(text));
+}
+
+function inferredUseCasesFromText(text, category) {
+  const lower = text.toLowerCase();
+  const useCases = [];
+  if (/affiliate|partner/.test(lower)) useCases.push("affiliate partner acquisition and activation");
+  if (/tracking|postback|mmp|attribution/.test(lower)) useCases.push("tracking, attribution, and event visibility");
+  if (/app|webview|pwa|ios|android/.test(lower)) useCases.push("app/WebView traffic monetization workflow");
+  if (/facebook|fb|media buy|paid/.test(lower)) useCases.push("paid traffic launch and conversion flow");
+  if (/outbound|lead|sales/.test(lower)) useCases.push("sales outreach preparation and follow-up execution");
+  if (!useCases.length) useCases.push(`validate whether ${category.toLowerCase()} is a current priority`);
+  return useCases;
+}
+
+function inferredPainPointsFromText(text) {
+  const lower = text.toLowerCase();
+  const painPoints = [];
+  if (/tracking|postback|registration|deposit|attribution/.test(lower)) painPoints.push("tracking, attribution, and event visibility gaps");
+  if (/affiliate|partner/.test(lower)) painPoints.push("inactive affiliates or weak partner activation");
+  if (/facebook|fb|moderation|ban/.test(lower)) painPoints.push("traffic launch friction from moderation or account stability");
+  if (/quality|fraud|retention|roi|roas/.test(lower)) painPoints.push("quality and performance proof concerns");
+  return painPoints;
+}
+
+function inferredProofFromText(text) {
+  return cleanLongText(text)
+    .split(/[.\n]/)
+    .map(cleanText)
+    .filter((sentence) => /\b(result|case|proof|paid|payment|test|conversion|registration|deposit|revenue|works|success)\b/i.test(sentence))
+    .slice(0, 8);
+}
+
+function inferredDifferentiatorsFromText(text) {
+  const lower = text.toLowerCase();
+  const items = [];
+  if (/support|handled by us|fully handled|done for you/.test(lower)) items.push("operational work is handled for the customer");
+  if (/affiliate|partner/.test(lower)) items.push("fits affiliate and partner-led distribution");
+  if (/tracking|postback|mmp/.test(lower)) items.push("can be positioned around measurable event flow");
+  if (/white label|wl/.test(lower)) items.push("white-label or partner format can be discussed");
+  return items;
+}
+
+function inferredObjectionsFromText(text) {
+  const lower = text.toLowerCase();
+  const items = [];
+  if (/tracking|postback|not see|не вид/.test(lower)) items.push("tracking and registration/deposit visibility must be verified before scaling");
+  if (/ban|banned|модер|facebook|fb/.test(lower)) items.push("platform moderation and account stability concerns");
+  if (/quality|fraud|retention|roi|roas/.test(lower)) items.push("traffic quality, fraud, and retention proof concerns");
+  if (/claim|guarantee|обещ/.test(lower)) items.push("avoid guarantees without approved proof");
+  return items;
+}
+
+function inferredSalesAnglesFromText(text, category) {
+  const lower = text.toLowerCase();
+  if (/affiliate|igaming|casino/.test(lower)) return ["position around affiliate growth, tracked events, and partner monetization", "start with a narrow test before discussing scale"];
+  if (/app|webview|pwa/.test(lower)) return ["position around ready-to-use app infrastructure and traffic flow", "qualify OS, geo, source, event, and moderation risk"];
+  if (/outbound|crm/.test(lower)) return ["position around faster lead research and cleaner follow-up execution"];
+  return [`position as a narrow ${category.toLowerCase()} workflow improvement`];
+}
+
+function inferredBuyingTriggersFromText(text) {
+  const lower = text.toLowerCase();
+  const triggers = [];
+  if (/launch|new|test|trying|scale|growth/.test(lower)) triggers.push("testing or scaling a new acquisition channel");
+  if (/problem|issue|can't|cannot|не получ|not see|tracking/.test(lower)) triggers.push("current workflow or tracking pain");
+  if (/conference|event|intro|network/.test(lower)) triggers.push("recent relationship or event-based warm path");
+  if (/hire|team|buyer/.test(lower)) triggers.push("team or media-buying capacity growth");
+  return triggers.length ? triggers : ["confirmed pain, trigger, and owner need verification"];
+}
+
+function inferredDiscoveryQuestionsFromText(text, useCases, objections) {
+  const questions = [
+    useCases[0] ? `How are you currently handling ${lowerSalesPhrase(useCases[0])}?` : "What workflow are you trying to improve right now?",
+    "Who owns the decision and who checks the quality of the result?",
+    "What would make a small test successful enough to continue?"
+  ];
+  if (objections.some((item) => /tracking|visibility/i.test(item))) questions.push("How are registrations, deposits, postbacks, or other key events verified today?");
+  if (/mmp|appsflyer|adjust|tracking/i.test(text)) questions.push("Which attribution or tracking setup needs to be in place before a test?");
+  return questions.slice(0, 8);
+}
+
+function inferredQualificationCriteriaFromText(text, personas, useCases) {
+  return [
+    personas[0] ? `buyer or influencer matches ${personas[0]}` : "clear buyer or owner identified",
+    useCases[0] ? `active need around ${lowerSalesPhrase(useCases[0])}` : "active pain confirmed",
+    "approved proof or test conditions available",
+    "next step can be framed as a small, measurable test"
+  ];
+}
+
+function inferIdealCustomers(text, category, personas) {
+  const lower = text.toLowerCase();
+  const customers = [];
+  if (/igaming|casino|betting|affiliate/.test(lower)) customers.push("iGaming operators, affiliate networks, and performance teams");
+  if (/media buyer|facebook|paid/.test(lower)) customers.push("paid media buyers and teams buying traffic");
+  if (/app|webview|pwa/.test(lower)) customers.push("teams needing app, PWA, or WebView infrastructure for traffic flows");
+  if (!customers.length && personas.length) customers.push(`${personas.slice(0, 3).join(", ")} teams`);
+  if (!customers.length) customers.push(`${category} buyers with a verified active pain`);
+  return customers;
+}
+
+function productScoringFromContext(personas, useCases, proofPoints, objections, confidence) {
+  return [
+    { label: "ICP clarity", score: personas.length ? 80 : 45, rationale: personas.length ? `${personas.length} buyer/persona signals extracted.` : "Buyer persona still needs detail." },
+    { label: "Use-case clarity", score: useCases.length ? 78 : 42, rationale: useCases.length ? `${useCases.length} use-case signals extracted.` : "Use cases need clearer product context." },
+    { label: "Proof strength", score: proofPoints.length ? 72 : 35, rationale: proofPoints.length ? "Some proof or evidence was provided." : "Approved proof is missing." },
+    { label: "Risk clarity", score: objections.length ? 70 : 50, rationale: objections.length ? "Risks/objections are captured for safer outreach." : "Objections and limits should be added." },
+    { label: "Memory confidence", score: confidence, rationale: "Confidence is based on product text depth and extracted segments." }
+  ];
+}
+
+function mergeStringLists(primary = [], secondary = []) {
+  const values = [...normalizeStringArray(primary), ...normalizeStringArray(secondary)];
+  const byKey = new Map();
+  for (const value of values) {
+    const cleaned = cleanText(value).replace(/^[-*•\s]+/, "").trim();
+    if (!cleaned) continue;
+    const key = cleaned.toLowerCase();
+    if (!byKey.has(key)) byKey.set(key, cleaned);
+  }
+  return [...byKey.values()];
+}
+
+function firstSentence(text) {
+  return cleanLongText(text).split(/[.\n]/).map(cleanText).find((sentence) => sentence.length > 12) || "";
 }
 
 function normalizeProductKnowledge(input) {
@@ -6084,6 +6740,7 @@ function productForPrompt(product) {
     proofPoints: product.proofPoints,
     differentiators: product.differentiators,
     objections: product.objections,
+    memory: product.memory || synthesizeProductMemory(product),
     knowledge: productKnowledgeForPrompt(product)
   };
 }

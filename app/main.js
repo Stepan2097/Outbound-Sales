@@ -83,23 +83,65 @@ function renderProductStudio() {
   const product = creatingNewProduct ? emptyProductDraft() : state.selectedProduct;
   if (!product) return;
 
-  document.getElementById("productStudioSelected").textContent = creatingNewProduct ? "new product" : product.name;
-  document.getElementById("productNameInput").value = product.name || "";
-  document.getElementById("productCategoryInput").value = product.category || "";
-  document.getElementById("productPositioningInput").value = product.positioning || "";
-  document.getElementById("productPersonasInput").value = (product.targetPersonas || []).join("\n");
-  document.getElementById("productUseCasesInput").value = (product.useCases || []).join("\n");
-  document.getElementById("productProofInput").value = (product.proofPoints || []).join("\n");
-  document.getElementById("productDifferentiatorsInput").value = (product.differentiators || []).join("\n");
-  document.getElementById("productObjectionsInput").value = (product.objections || []).join("\n");
-  document.getElementById("productKnowledgeStats").textContent = `${(product.knowledge || []).length} item${(product.knowledge || []).length === 1 ? "" : "s"}`;
-  document.getElementById("productKnowledgeList").innerHTML = (product.knowledge || []).length
-    ? product.knowledge.map(productKnowledgeRow).join("")
-    : `<div class="empty-state">${creatingNewProduct ? "Save the product first, then add knowledge" : "No product knowledge uploaded yet"}</div>`;
+  document.getElementById("productStudioSelected").textContent = product.name || "selected product";
+  renderProductMemory(product);
   document.getElementById("exampleList").innerHTML = (product.examples || []).length
     ? product.examples.map(exampleRow).join("")
-    : `<div class="empty-state">${creatingNewProduct ? "Save the product before adding examples" : "No examples loaded for this product"}</div>`;
-  renderProductKnowledgeScreenshotPreview();
+    : `<div class="empty-state">No examples loaded for this product</div>`;
+}
+
+function renderProductMemory(product) {
+  const memory = product.memory || {};
+  const segments = memory.segments || {};
+  setText("productMemoryStatus", `${memory.status || "not trained"} · ${Number(memory.confidence || 0)}%`);
+  setHtml("productMemorySummary", `
+    <div class="product-memory-card">
+      <strong>${escapeHtml(product.name || "Product")}</strong>
+      <p>${escapeHtml(memory.summary || product.positioning || "Paste product context to train the system memory.")}</p>
+      <div class="mini-facts">
+        <span>${escapeHtml(product.category || "Product")}</span>
+        <span>${escapeHtml((product.targetPersonas || [])[0] || "buyer persona needed")}</span>
+        <span>${escapeHtml((product.useCases || [])[0] || "use case needed")}</span>
+      </div>
+    </div>
+  `);
+  setHtml("productScoreList", (memory.scoring || []).length
+    ? memory.scoring.map((item) => `
+      <div class="product-score-row">
+        <span>${escapeHtml(item.label)}</span>
+        <strong>${Number(item.score || 0)}</strong>
+        <small>${escapeHtml(item.rationale || "")}</small>
+      </div>
+    `).join("")
+    : `<div class="empty-state">No scoring rubric yet. Paste product context to create one.</div>`);
+  const segmentLabels = {
+    idealCustomers: "Ideal Customers",
+    buyerPersonas: "Buyer Personas",
+    painPoints: "Pain Points",
+    buyingTriggers: "Buying Triggers",
+    exclusions: "Exclusions",
+    salesAngles: "Sales Angles",
+    proofPoints: "Proof",
+    objections: "Objections",
+    discoveryQuestions: "Discovery Questions",
+    claimsToAvoid: "Claims To Avoid",
+    qualificationCriteria: "Qualification Criteria"
+  };
+  setHtml("productMemorySegments", Object.entries(segmentLabels).map(([key, label]) => memorySegmentCard(label, segments[key] || [])).join(""));
+  const knowledge = product.knowledge || [];
+  setHtml("productKnowledgeList", knowledge.length
+    ? knowledge.slice(0, 8).map(productKnowledgeRow).join("")
+    : `<div class="empty-state">No saved product context updates yet</div>`);
+}
+
+function memorySegmentCard(label, values) {
+  const items = (values || []).slice(0, 8);
+  return `
+    <article class="memory-segment-card">
+      <strong>${escapeHtml(label)}</strong>
+      ${items.length ? `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : `<p>Needs product data.</p>`}
+    </article>
+  `;
 }
 
 function renderIntegrations() {
@@ -1470,6 +1512,7 @@ function renderBusyState() {
   setBusyButton("removeLeadQuick", "remove", "Removing...");
   setBusyButton("addLinkedinTargetBtn", "linkedin-import", "Adding...");
   setBusyButton("crmImportBtn", "crm-import", "Pulling...");
+  setBusyButton("productTeachBtn", "product", "Studying...");
   document.querySelectorAll("[data-interaction-type], [data-task-complete-id], [data-remove-prospect-id]").forEach((button) => {
     button.disabled = anyBusy;
   });
@@ -1480,7 +1523,7 @@ function setBusyButton(id, actionName, activeText) {
   if (!button) return;
   if (!button.dataset.defaultHtml) button.dataset.defaultHtml = button.innerHTML;
   const active = busyAction === actionName;
-  button.disabled = active || (Boolean(busyAction) && ["research", "intelligence", "enrich", "remove", "linkedin-import", "crm-import"].includes(actionName));
+  button.disabled = active || (Boolean(busyAction) && ["research", "intelligence", "enrich", "remove", "linkedin-import", "crm-import", "product"].includes(actionName));
   button.classList.toggle("is-loading", active);
   if (active) {
     const icon = actionName === "remove" ? "loader-circle" : "loader-circle";
@@ -1504,6 +1547,7 @@ async function runUiAction(actionName, message, work) {
       enrich: "Contact data refreshed. Review confidence before using any phone or social profile.",
       "linkedin-import": "Lead added to the queue. Run Research when you are ready to enrich and prepare outreach.",
       "crm-import": "CRM leads pulled into the queue.",
+      product: "Product memory saved. The system will use the updated context for scoring and outreach.",
       remove: "Lead removed from the queue."
     }[actionName] || "Action completed.";
   } catch (error) {
@@ -1998,7 +2042,7 @@ document.getElementById("runPipelineBtn").addEventListener("click", async () => 
   render();
 });
 
-document.getElementById("newProductBtn").addEventListener("click", () => {
+document.getElementById("newProductBtn")?.addEventListener("click", () => {
   creatingNewProduct = true;
   renderProductStudio();
   refreshIcons();
@@ -2006,23 +2050,18 @@ document.getElementById("newProductBtn").addEventListener("click", () => {
 
 document.getElementById("productForm").addEventListener("submit", async (event) => {
   event.preventDefault();
-  const existingProduct = state.selectedProduct;
-  state = await api("/api/products/upsert", {
-    method: "POST",
-    body: JSON.stringify({
-      id: creatingNewProduct ? "" : existingProduct?.id,
-      name: document.getElementById("productNameInput").value,
-      category: document.getElementById("productCategoryInput").value,
-      positioning: document.getElementById("productPositioningInput").value,
-      targetPersonas: document.getElementById("productPersonasInput").value,
-      useCases: document.getElementById("productUseCasesInput").value,
-      proofPoints: document.getElementById("productProofInput").value,
-      differentiators: document.getElementById("productDifferentiatorsInput").value,
-      objections: document.getElementById("productObjectionsInput").value
-    })
+  const input = document.getElementById("productContextInput");
+  await runUiAction("product", "Analyzing product text and updating system memory...", async () => {
+    state = await api("/api/products/teach", {
+      method: "POST",
+      body: JSON.stringify({
+        productId: state.selectedProductId,
+        text: input.value
+      })
+    });
+    input.value = "";
   });
   creatingNewProduct = false;
-  render();
 });
 
 document.getElementById("exampleForm").addEventListener("submit", async (event) => {
@@ -2043,53 +2082,6 @@ document.getElementById("exampleForm").addEventListener("submit", async (event) 
   });
   document.getElementById("exampleMessageInput").value = "";
   document.getElementById("exampleOutcomeInput").value = "";
-  render();
-});
-
-document.getElementById("productKnowledgeScreenshotInput")?.addEventListener("change", async (event) => {
-  const file = event.target.files?.[0];
-  if (!file) {
-    pendingProductKnowledgeScreenshot = null;
-    renderProductKnowledgeScreenshotPreview();
-    return;
-  }
-  if (!file.type.startsWith("image/")) {
-    window.alert("Upload a PNG or JPG screenshot.");
-    event.target.value = "";
-    return;
-  }
-  if (file.size > 2_000_000) {
-    window.alert("Keep screenshots under 2 MB for this local prototype.");
-    event.target.value = "";
-    return;
-  }
-  pendingProductKnowledgeScreenshot = {
-    name: file.name,
-    type: file.type,
-    size: file.size,
-    dataUrl: await fileToDataUrl(file)
-  };
-  renderProductKnowledgeScreenshotPreview();
-});
-
-document.getElementById("productKnowledgeForm").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  if (creatingNewProduct) {
-    document.getElementById("productKnowledgeList").innerHTML = `<div class="empty-state">Save the new product first, then add knowledge</div>`;
-    return;
-  }
-  state = await api("/api/products/knowledge", {
-    method: "POST",
-    body: JSON.stringify({
-      productId: state.selectedProductId,
-      type: "product_context_update",
-      text: document.getElementById("knowledgeTextInput").value,
-      tags: "product-context,sales-playbook,positioning",
-      priority: 92
-    })
-  });
-  pendingProductKnowledgeScreenshot = null;
-  document.getElementById("knowledgeTextInput").value = "";
   render();
 });
 

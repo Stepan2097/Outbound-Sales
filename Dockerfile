@@ -4,11 +4,14 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=3000
+ENV STATE_FILE_PATH=/data/outbound-state.json
 
 COPY package.json ./
 COPY server.mjs ./
 COPY app ./app
 COPY README.md INTEGRATION_HANDOFF.md ./
+
+RUN mkdir -p /data
 
 EXPOSE 3000
 

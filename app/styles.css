@@ -1001,6 +1001,140 @@ tbody tr:last-child td {
   line-height: 1.55;
 }
 
+.product-teach-panel,
+.product-intelligence-panel {
+  min-width: 0;
+}
+
+.product-memory-summary {
+  margin-bottom: 12px;
+}
+
+.product-memory-card {
+  border: 1px solid rgba(104, 184, 255, 0.2);
+  border-radius: 8px;
+  background: rgba(5, 18, 35, 0.68);
+  padding: 14px;
+}
+
+.product-memory-card strong {
+  display: block;
+  font-size: 18px;
+  margin-bottom: 8px;
+}
+
+.product-memory-card p {
+  color: var(--muted);
+  line-height: 1.55;
+  margin: 0 0 12px;
+}
+
+.mini-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mini-facts span {
+  border: 1px solid rgba(143, 177, 207, 0.18);
+  border-radius: 999px;
+  color: #cbd8e5;
+  padding: 5px 9px;
+  font-size: 12px;
+}
+
+.product-score-list {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.product-score-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 42px;
+  gap: 6px 10px;
+  align-items: center;
+  border: 1px solid rgba(143, 177, 207, 0.16);
+  border-radius: 8px;
+  background: rgba(7, 22, 40, 0.48);
+  padding: 10px 12px;
+}
+
+.product-score-row span,
+.product-score-row small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.product-score-row strong {
+  color: #4ade80;
+  text-align: right;
+}
+
+.product-score-row small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+}
+
+.product-more-info {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.product-more-info summary {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #6ee7b7;
+  font-weight: 700;
+  list-style: none;
+}
+
+.product-more-info summary::-webkit-details-marker {
+  display: none;
+}
+
+.product-memory-segments {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.memory-segment-card {
+  border: 1px solid rgba(143, 177, 207, 0.16);
+  border-radius: 8px;
+  background: rgba(7, 22, 40, 0.46);
+  padding: 12px;
+  min-width: 0;
+}
+
+.memory-segment-card strong {
+  display: block;
+  margin-bottom: 8px;
+}
+
+.memory-segment-card ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.memory-segment-card li {
+  overflow-wrap: anywhere;
+}
+
+.memory-segment-card p {
+  color: var(--muted);
+  margin: 0;
+}
+
+.knowledge-list.compact {
+  grid-template-columns: 1fr;
+}
+
 .knowledge-upload-row {
   grid-column: 2;
   grid-row: 1 / span 5;
@@ -2238,6 +2372,7 @@ dialog {
   .product-studio-layout,
   .knowledge-form,
   .knowledge-list,
+  .product-memory-segments,
   .integrations-layout,
   .integration-status-grid {
     grid-template-columns: 1fr;
@@ -3276,6 +3411,7 @@ dialog {
   }
 
   .learning-metric-grid,
+  .product-memory-segments,
   .lead-command-bar,
   .lead-hero,
   .lead-stats-strip,

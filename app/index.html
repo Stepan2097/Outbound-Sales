@@ -703,72 +703,40 @@
 
         <section class="view" id="view-products">
           <div class="product-studio-layout">
-            <section class="panel">
+            <section class="panel product-teach-panel">
               <div class="panel-heading">
                 <div>
-                  <h2>Product Definition</h2>
-                  <p>Used by AI for tailored outreach</p>
+                  <h2>Teach Product</h2>
+                  <p>Paste the product truth once, then keep adding updates over time</p>
                 </div>
                 <div class="button-row">
                   <span class="pill" id="productStudioSelected">selected</span>
-                  <button id="newProductBtn" type="button"><i data-lucide="plus"></i><span>New</span></button>
                 </div>
               </div>
               <form class="product-form" id="productForm">
-                <div class="split-fields">
-                  <label>
-                    <span>Name</span>
-                    <input id="productNameInput" type="text" />
-                  </label>
-                  <label>
-                    <span>Category</span>
-                    <input id="productCategoryInput" type="text" />
-                  </label>
-                </div>
                 <label>
-                  <span>Positioning</span>
-                  <textarea id="productPositioningInput" rows="3"></textarea>
+                  <span>Plain text product training</span>
+                  <textarea id="productContextInput" class="product-context-textarea" rows="14" placeholder="Paste the full product context here. Include product name, what it does, ICP, who buys it, pain points, use cases, proof, pricing logic, objections, claims to avoid, how to sell it, message tone, competitors, and what makes a lead high or low fit. The system will analyze this text, create/update the product, segment the knowledge, and use it for outreach."></textarea>
                 </label>
-                <label>
-                  <span>Target personas</span>
-                  <textarea id="productPersonasInput" rows="3"></textarea>
-                </label>
-                <label>
-                  <span>Use cases</span>
-                  <textarea id="productUseCasesInput" rows="3"></textarea>
-                </label>
-                <label>
-                  <span>Proof points</span>
-                  <textarea id="productProofInput" rows="3"></textarea>
-                </label>
-                <label>
-                  <span>Differentiators</span>
-                  <textarea id="productDifferentiatorsInput" rows="3"></textarea>
-                </label>
-                <label>
-                  <span>Common objections</span>
-                  <textarea id="productObjectionsInput" rows="3"></textarea>
-                </label>
-                <button class="primary-button" type="submit"><i data-lucide="save"></i><span>Save Product</span></button>
+                <button class="primary-button" id="productTeachBtn" type="submit"><i data-lucide="brain-circuit"></i><span>Analyze & Save Product</span></button>
               </form>
             </section>
 
-            <section class="panel product-knowledge-panel span-2">
+            <section class="panel product-intelligence-panel">
               <div class="panel-heading">
                 <div>
-                  <h2>Product Context Updates</h2>
-                  <p>Paste product changes, sales notes, positioning, objections, proof, and selling instructions</p>
+                  <h2>Product Intelligence</h2>
+                  <p>Internal memory used for scoring and outreach</p>
                 </div>
-                <span class="pill" id="productKnowledgeStats">0 items</span>
+                <span class="pill" id="productMemoryStatus">not trained</span>
               </div>
-              <form class="knowledge-form" id="productKnowledgeForm">
-                <label>
-                  <span>Plain text product context</span>
-                  <textarea id="knowledgeTextInput" class="product-context-textarea" rows="9" placeholder="Paste any update the AI should use when selling this product. Example: target buyers, pain points, use cases, strongest proof, pricing logic, objections, what not to claim, good discovery questions, message style, competitors, recent changes, or how reps should position the offer."></textarea>
-                </label>
-                <button type="submit"><i data-lucide="book-plus"></i><span>Save Context Update</span></button>
-              </form>
-              <div class="knowledge-list" id="productKnowledgeList"></div>
+              <div class="product-memory-summary" id="productMemorySummary"></div>
+              <div class="product-score-list" id="productScoreList"></div>
+              <details class="product-more-info">
+                <summary><span>More info</span><i data-lucide="chevron-down"></i></summary>
+                <div class="product-memory-segments" id="productMemorySegments"></div>
+                <div class="knowledge-list compact" id="productKnowledgeList"></div>
+              </details>
             </section>
 
             <section class="panel">
