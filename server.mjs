@@ -2769,7 +2769,7 @@ function analyzeLead(prospect, product = currentProduct()) {
     : /vp|head|director/i.test(prospect.title) ? 15
       : /manager|lead|growth|sales|revenue|marketing|operations|ua|acquisition/i.test(prospect.title) ? 10
         : prospect.title ? 6 : 1;
-  const fitScore = productFit.label === "high" ? 24 : productFit.label === "medium" ? 16 : 7;
+  const fitScore = productFit.label === "high" ? 24 : productFit.label === "medium" ? 14 : 2;
   const companyScore = clampNumber(Math.round((companyProfile.confidence || 0) * 0.22), 0, 18, 6);
   const triggerScore = publicLeadNote(prospect.notes) || prospect.contactDiscovery?.scraperNote ? 12 : 3;
   const contactScore = Math.round(Math.min(14, contactConfidence * 0.14));
@@ -2785,12 +2785,15 @@ function analyzeLead(prospect, product = currentProduct()) {
     !companyProfile.description || /unknown|needs research/i.test(companyProfile.description || ""),
     contactConfidence < 55
   ].filter(Boolean).length * 4;
-  const sensitivePenalty = /health|clinic|medical|casino|gambl|adult|children|kids/i.test(`${prospect.company} ${prospect.notes}`) ? 6 : 0;
-  const readinessRaw = clampNumber(Math.round(seniorityScore + fitScore + companyScore + triggerScore + contactScore + engagementScore + completenessScore - missingPenalty - sensitivePenalty), 0, 100, 45);
+  const sensitivePenalty = isBlackAffiliateProduct(product)
+    ? (/health|clinic|medical|adult|children|kids/i.test(`${prospect.company} ${prospect.notes}`) ? 6 : 0)
+    : (/health|clinic|medical|casino|gambl|adult|children|kids/i.test(`${prospect.company} ${prospect.notes}`) ? 6 : 0);
+  const mismatchPenalty = shouldHoldForProductFitReview(prospect, product, productFit) ? 24 : 0;
+  const readinessRaw = clampNumber(Math.round(seniorityScore + fitScore + companyScore + triggerScore + contactScore + engagementScore + completenessScore - missingPenalty - sensitivePenalty - mismatchPenalty), 0, 100, 45);
   const reachProbability = clampProbability(0.12 + contactScore / 100 + engagementScore / 100 + triggerScore / 180 + (prospect.linkedin ? 0.08 : 0) - missingPenalty / 260);
-  const closeProbability = clampProbability(0.04 + readinessRaw / 500 + (productFit.label === "high" ? 0.07 : productFit.label === "medium" ? 0.035 : 0) + engagementScore / 220 - sensitivePenalty / 260);
+  const closeProbability = clampProbability(0.04 + readinessRaw / 500 + (productFit.label === "high" ? 0.07 : productFit.label === "medium" ? 0.03 : 0) + engagementScore / 220 - sensitivePenalty / 260 - mismatchPenalty / 300);
   const score = clampNumber(Math.round(readinessRaw * 0.55 + reachProbability * 28 + closeProbability * 17), 0, 94, 45);
-  const recommendedAction = recommendedActionFor(prospect, interactions, reachProbability, closeProbability);
+  const recommendedAction = recommendedActionFor(prospect, interactions, reachProbability, closeProbability, productFit, product);
 
   return {
     score,
@@ -2807,7 +2810,7 @@ function analyzeLead(prospect, product = currentProduct()) {
       contactEvidence: contactScore,
       engagement: engagementScore,
       completeness: completenessScore,
-      penalty: missingPenalty + sensitivePenalty,
+      penalty: missingPenalty + sensitivePenalty + mismatchPenalty,
       readiness: readinessRaw
     },
     reasoning: [
@@ -3974,6 +3977,20 @@ async function prepareOutreachWithAi(prospect, profile, taskType = "SEQUENCE_GEN
     run: fallbackRoute
   };
 
+  if (shouldHoldForProductFitReview(prospect, product, fallbackPlan.analysis)) {
+    return {
+      ...fallbackPlan,
+      modelUsed: "product-fit-guard",
+      provider: "local",
+      run: {
+        ...fallbackRoute,
+        ok: true,
+        provider: "local",
+        modelUsed: "product-fit-guard"
+      }
+    };
+  }
+
   if (!canUseLiveAi) {
     return fallbackPlan;
   }
@@ -4218,6 +4235,7 @@ function lowerFirst(value) {
 
 function humanUseCasePhrase(useCase, product) {
   const text = `${useCase || ""} ${product?.positioning || ""}`.toLowerCase();
+  if (isBlackAffiliateProduct(product)) return "using app-based acquisition or affiliate-network distribution without taking on development, moderation, and maintenance work";
   if (/outbound|prospect|research|contact|follow-up|crm/.test(text)) return "keeping lead research, message quality, and follow-up logging consistent";
   if (/paid|media|ua|acquisition|campaign/.test(text)) return "turning acquisition signals into a cleaner outbound motion";
   if (/revops|revenue|sales/.test(text)) return "reducing manual RevOps work around prospect research and follow-up";
@@ -4226,6 +4244,11 @@ function humanUseCasePhrase(useCase, product) {
 
 function rolePainPoint(prospect, product, priority) {
   const title = `${prospect.title || ""} ${priority || ""}`.toLowerCase();
+  if (isBlackAffiliateProduct(product)) {
+    if (/affiliate|partner/.test(title)) return "giving affiliates a useful app-based offer without building and maintaining the app stack internally";
+    if (/media|buy|acquisition|ua|growth|marketing/.test(title)) return "testing app-based traffic paths while keeping tracking, GEO, and moderation risk clear";
+    return "validating whether app-based acquisition or affiliate distribution is relevant before pitching anything";
+  }
   if (/revops|operations|crm/.test(title)) return "keeping account research, contacts, CRM notes, and next actions in one repeatable flow";
   if (/sales|revenue|growth|commercial/.test(title)) return "helping reps attack good leads without spending 10 minutes researching each one";
   if (/founder|ceo|owner/.test(title)) return "getting outbound quality up without adding management overhead";
@@ -4250,6 +4273,7 @@ function firstTouchQuestion(prospect, product, company, reason, rolePain) {
 
 function shortOutreachTopic(rolePain, product) {
   const text = `${rolePain || ""} ${product?.name || ""}`.toLowerCase();
+  if (isBlackAffiliateProduct(product)) return "app-based acquisition and affiliate distribution";
   if (/research|contact|crm|follow/.test(text)) return "outbound research and follow-up workflows";
   if (/media|campaign|acquisition/.test(text)) return "acquisition-led outbound workflows";
   if (/management|overhead/.test(text)) return "outbound quality without extra management overhead";
@@ -4259,6 +4283,9 @@ function shortOutreachTopic(rolePain, product) {
 function buildOutreachPlan(prospect, profile, route, product = currentProduct()) {
   const channel = chooseBestChannel(prospect);
   const analysis = analyzeLead(prospect, product);
+  if (shouldHoldForProductFitReview(prospect, product, analysis)) {
+    return buildFitReviewOutreachPlan(prospect, profile, route, product, analysis);
+  }
   const useCase = bestUseCaseFor(prospect, product);
   const companyProfile = prospect.companyProfile || prospect.leadIntelligence?.company_context || buildCompanyProfile(prospect, product);
   const proof = product.proofPoints[0] ?? "approved product proof is still missing";
@@ -4381,6 +4408,114 @@ function buildOutreachPlan(prospect, profile, route, product = currentProduct())
     ],
     warmupActions: buildWarmupActions(prospect),
     linkedinVariations: buildLinkedInOutreach(prospect, product, profile).variations
+  };
+}
+
+function buildFitReviewOutreachPlan(prospect, profile, route, product, analysis) {
+  const firstName = prospect.name.split(/\s+/)[0] || prospect.name || "there";
+  const company = prospect.company || "this account";
+  const reason = analysis.reasoning?.find((item) => /fit is/i.test(item)) || `${company} does not yet show enough product-specific evidence for ${product.name}.`;
+  const reviewLabel = isBlackAffiliateProduct(product)
+    ? "Verify iGaming, affiliate, traffic, casino/sportsbook, app, GEO, and monetization fit before outreach"
+    : "Verify product fit before outreach";
+  return {
+    preparedAt: new Date().toISOString(),
+    profile,
+    productId: product.id,
+    productName: product.name,
+    modelUsed: route.ok ? route.modelUsed : "product-fit-guard",
+    provider: route.ok ? route.provider : "local",
+    recommendedChannel: "manual_research",
+    analysis,
+    qualification: {
+      score: analysis.score,
+      fit: analysis.productFit,
+      rationale: `Hold outreach for ${company}. ${reason}`
+    },
+    messages: [
+      {
+        channel: "linkedin_invite",
+        body: `Do not send yet. First verify whether ${company} operates in iGaming/affiliate traffic, casino/sportsbook acquisition, app distribution, or a related partner-network workflow.`,
+        personalization_basis: [reason, reviewLabel]
+      },
+      {
+        channel: "linkedin_follow_up",
+        body: `After fit is verified: Hi ${firstName}, saw ${company} around app-based acquisition or affiliate distribution. Curious whether apps are already part of the way you support traffic partners?`,
+        personalization_basis: ["Use only after ICP fit is confirmed"]
+      },
+      {
+        channel: "email",
+        subject: `${company}: app/affiliate fit check`,
+        body: `Hi ${firstName},\n\nI am holding the outreach until I can verify whether ${company} is actually relevant for ${product.name}.\n\nBefore contacting this account, confirm: iGaming/casino/sportsbook activity, affiliate or traffic partner model, active GEOs, existing app strategy, and who owns partnerships/acquisition.\n\nIf those are confirmed, use a short LinkedIn-first touch rather than a broad pitch.`,
+        personalization_basis: [reviewLabel]
+      },
+      {
+        channel: "sms",
+        body: "Do not use SMS until direct contact source, permission, and product fit are verified.",
+        personalization_basis: ["permission and fit hold"]
+      },
+      {
+        channel: "whatsapp",
+        body: "Do not use WhatsApp until the phone source, messenger presence, permission, and ICP fit are verified.",
+        personalization_basis: ["permission and fit hold"]
+      },
+      {
+        channel: "telegram",
+        body: "Do not use Telegram until the phone/source link and ICP fit are verified.",
+        personalization_basis: ["permission and fit hold"]
+      },
+      {
+        channel: "call",
+        body: `Do not call yet. First verify ${company}'s market, buyer role, and whether app-based acquisition or affiliate distribution is relevant.`,
+        personalization_basis: [reviewLabel]
+      }
+    ],
+    actions: [
+      {
+        type: "research_company_fit",
+        label: reviewLabel,
+        due: "today",
+        priority: "high"
+      },
+      {
+        type: "find_correct_buyer",
+        label: "Find Head of Affiliates, Affiliate Manager, Partnerships, Media Buying, or Acquisition owner if the account fits",
+        due: "today",
+        priority: "high"
+      },
+      {
+        type: "research_gap_logged",
+        label: "Store the fit evidence or disqualify the lead before preparing outreach",
+        due: "today",
+        priority: "high"
+      }
+    ],
+    complianceChecks: [
+      "No outreach should be sent until ICP fit is verified.",
+      "No unsupported product or performance claims added.",
+      "Phone/messenger channels require source and permission review."
+    ],
+    warmupActions: [
+      {
+        type: "linkedin_profile_viewed",
+        label: "Review LinkedIn profile only for fit evidence; do not pitch yet",
+        channel: "linkedin",
+        due: "today",
+        priority: "high"
+      }
+    ],
+    linkedinVariations: [
+      {
+        label: "fit verified only",
+        channel: "linkedin",
+        body: `Use only after fit is confirmed: Hi ${firstName}, saw ${company} around app-based acquisition or affiliate distribution. Curious whether apps are already part of the way you support traffic partners?`
+      },
+      {
+        label: "hold",
+        channel: "linkedin",
+        body: "Hold. Need iGaming/affiliate/app-distribution evidence before writing a real message."
+      }
+    ]
   };
 }
 
@@ -4523,6 +4658,35 @@ function buildNextActionPlan(prospect, outreach, product = currentProduct()) {
   const types = new Set(interactions.map((interaction) => interaction.type));
   const availability = contactAvailability(prospect);
   const analysis = analyzeLead(prospect, product);
+  if (shouldHoldForProductFitReview(prospect, product, analysis)) {
+    return {
+      createdAt: new Date().toISOString(),
+      productId: product.id,
+      productName: product.name,
+      primaryAction: "Verify ICP fit before contacting this lead",
+      reason: `${prospect.company || prospect.name} is not yet verified as an iGaming, affiliate, traffic, app-distribution, or casino/sportsbook account for ${product.name}.`,
+      bestChannel: "manual_research",
+      preTouchActions: [
+        "Confirm whether the company operates in iGaming/casino/sportsbook or affiliate traffic.",
+        "Find the correct buyer: Head of Affiliates, Affiliate Manager, Partnerships, Media Buying, or Acquisition owner.",
+        "Check current app strategy, GEOs, traffic sources, tracking setup, and monetization model.",
+        "Only prepare/send outreach after fit evidence is stored."
+      ],
+      followUp: {
+        label: "Recheck after fit research is completed",
+        due: dueTomorrowIso(),
+        trigger: "When company/product fit evidence is found or the lead is disqualified",
+        ifAccepted: "Not applicable until outreach is approved.",
+        ifNotAccepted: "Not applicable until outreach is approved."
+      },
+      channelOrder: ["manual_research", "linkedin_profile_review"],
+      score: {
+        reachProbability: analysis.reachProbability,
+        closeProbability: analysis.closeProbability,
+        contactConfidence: bestContactConfidenceServer(prospect)
+      }
+    };
+  }
   const primaryAction = types.has("linkedin_invite_accepted") || types.has("linkedin_connected")
     ? "Send the LinkedIn follow-up with the product-specific value angle"
     : types.has("linkedin_invite_sent")
@@ -4573,6 +4737,30 @@ function buildSalesCadence(prospect, outreach, product = currentProduct()) {
   const due3 = dueInDaysIso(3);
   const due4 = dueInDaysIso(4);
   const availability = contactAvailability(prospect);
+  const analysis = analyzeLead(prospect, product);
+  if (shouldHoldForProductFitReview(prospect, product, analysis)) {
+    return {
+      productId: product.id,
+      productName: product.name,
+      generatedAt: new Date().toISOString(),
+      steps: [
+        {
+          day: "today",
+          channel: "research",
+          type: "research_company_fit",
+          label: "Verify iGaming/affiliate/app-distribution fit before any outreach",
+          messageRef: "research_hold"
+        },
+        {
+          day: "after verification",
+          channel: "linkedin",
+          type: "linkedin_profile_review",
+          label: "Use LinkedIn only after ICP fit evidence is stored",
+          messageRef: "linkedin_invite"
+        }
+      ]
+    };
+  }
   return {
     productId: product.id,
     productName: product.name,
@@ -6673,6 +6861,7 @@ function bestPersonaMatch(prospect, product) {
       .some((token) => token.length > 2 && text.includes(token))
   );
   if (matched) return matched;
+  if (isBlackAffiliateProduct(product)) return "Unverified iGaming buyer";
   if (text.includes("revops") || text.includes("operations")) return "Revenue Operations";
   if (text.includes("sales")) return "VP Sales";
   if (text.includes("founder")) return "Founder";
@@ -6682,6 +6871,20 @@ function bestPersonaMatch(prospect, product) {
 
 function productFitForProspect(prospect, product) {
   const text = `${prospect.title} ${prospect.company} ${prospect.notes}`.toLowerCase();
+  if (isBlackAffiliateProduct(product)) {
+    const evidence = blackAffiliateFitEvidence(prospect);
+    const persona = bestPersonaMatch(prospect, product);
+    if (evidence.strongSignals >= 2 || (evidence.strongSignals >= 1 && evidence.roleSignals >= 1)) {
+      return { label: "high", reason: `${persona} has ${evidence.summary}` };
+    }
+    if (evidence.strongSignals >= 1 || evidence.roleSignals >= 1) {
+      return { label: "medium", reason: `${persona} has partial Black Affiliate evidence: ${evidence.summary}` };
+    }
+    return {
+      label: "developing",
+      reason: "no verified iGaming, affiliate, casino/sportsbook, traffic, app-distribution, or media-buying evidence is available yet"
+    };
+  }
   const matchedUseCases = product.useCases.filter((useCase) =>
     useCase
       .toLowerCase()
@@ -6699,6 +6902,49 @@ function productFitForProspect(prospect, product) {
   return { label: "developing", reason: "the available profile has limited product-specific evidence" };
 }
 
+function isBlackAffiliateProduct(product = {}) {
+  return /black[-\s]*affiliate|white[-\s]*label app|casino|sportsbook|igaming/i.test(`${product.id || ""} ${product.name || ""} ${product.category || ""} ${product.positioning || ""}`);
+}
+
+function blackAffiliateFitEvidence(prospect = {}) {
+  const text = `${prospect.title || ""} ${prospect.company || ""} ${prospect.notes || ""} ${prospect.website || ""} ${prospect.companyProfile?.category || ""} ${prospect.companyProfile?.description || ""}`.toLowerCase();
+  const strongPatterns = [
+    /\bigaming\b|\bi-gaming\b|\bgambling\b|\bgaming\b/,
+    /\bcasino\b|\bsportsbook\b|\bbookmaker\b|\bbetting\b|\bbets\b/,
+    /\baffiliate\b|\baffiliates\b|\baffiliate network\b|\bpartnership network\b/,
+    /\btraffic\b|\bmedia buying\b|\bpaid media\b|\bperformance marketing\b/,
+    /\bandroid app\b|\bios app\b|\bmobile app\b|\bapp distribution\b|\bwebview\b|\bpwa\b/,
+    /\bgeo\b|\bgeos\b|\bdeposits\b|\bregistrations\b|\bftd\b/
+  ];
+  const rolePatterns = [
+    /\bhead of affiliates\b|\baffiliate manager\b|\baffiliate lead\b/,
+    /\bmedia buyer\b|\bpaid media\b|\bacquisition\b|\bua\b|\bgrowth\b/,
+    /\bpartnerships?\b|\bbusiness development\b|\bcommercial\b/
+  ];
+  const strongSignals = strongPatterns.filter((pattern) => pattern.test(text)).length;
+  const roleSignals = rolePatterns.filter((pattern) => pattern.test(text)).length;
+  const labels = [
+    /\bigaming\b|\bcasino\b|\bsportsbook\b|\bbetting\b|\bgambling\b/.test(text) ? "iGaming/casino market" : "",
+    /\baffiliate\b|\bpartnership network\b/.test(text) ? "affiliate or partner-network context" : "",
+    /\btraffic\b|\bmedia buying\b|\bpaid media\b|\bperformance marketing\b/.test(text) ? "traffic or performance marketing context" : "",
+    /\bandroid app\b|\bios app\b|\bmobile app\b|\bapp distribution\b|\bwebview\b|\bpwa\b/.test(text) ? "app-distribution context" : "",
+    /\bgeo\b|\bdeposits\b|\bregistrations\b|\bftd\b/.test(text) ? "iGaming funnel language" : ""
+  ].filter(Boolean);
+  return {
+    strongSignals,
+    roleSignals,
+    summary: labels.length ? labels.join(", ") : "no Black Affiliate ICP signal"
+  };
+}
+
+function shouldHoldForProductFitReview(prospect, product, analysisOrFit = null) {
+  if (!isBlackAffiliateProduct(product)) return false;
+  const fitLabel = typeof analysisOrFit === "string"
+    ? analysisOrFit
+    : analysisOrFit?.productFit || analysisOrFit?.label || "";
+  return fitLabel === "developing";
+}
+
 function bestUseCaseFor(prospect, product) {
   const fit = productFitForProspect(prospect, product);
   const text = `${prospect.title} ${prospect.notes}`.toLowerCase();
@@ -6710,8 +6956,9 @@ function bestUseCaseFor(prospect, product) {
   ) ?? product.useCases[0] ?? fit.reason;
 }
 
-function recommendedActionFor(prospect, interactions, reachProbability, closeProbability) {
+function recommendedActionFor(prospect, interactions, reachProbability, closeProbability, productFit = null, product = currentProduct()) {
   const types = new Set(interactions.map((interaction) => interaction.type));
+  if (shouldHoldForProductFitReview(prospect, product, productFit)) return "Do not contact yet. Verify iGaming/affiliate/app-distribution fit and company context first.";
   if (types.has("meeting_booked")) return "Prepare meeting notes, evidence, and product-specific discovery questions.";
   if (types.has("linkedin_reply")) return "Reply with a concise product-specific question and offer a short working session.";
   if (!prospect.contactDiscovery) return "Run contact discovery before drafting outreach.";
