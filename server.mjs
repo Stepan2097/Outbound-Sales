@@ -1213,17 +1213,25 @@ async function loadPersistentWorkspaceState() {
 
 function applyPersistentWorkspaceState(saved = {}) {
   if (Array.isArray(saved.products)) {
-    const byId = new Map(state.products.map((product) => [product.id, product]));
+    const byKey = new Map(state.products.map((product) => [productCanonicalKey(product), product]));
+    const idAliases = new Map();
     for (const input of saved.products) {
       const product = normalizeProduct(input);
-      const existing = byId.get(product.id);
-      byId.set(product.id, existing ? mergeProductMemory(existing, product) : product);
+      const key = productCanonicalKey(product);
+      const existing = byKey.get(key);
+      const merged = existing ? mergeProductMemory(existing, product) : product;
+      byKey.set(key, merged);
+      idAliases.set(product.id, merged.id);
     }
-    state.products = [...byId.values()].sort((left, right) => {
-      if (left.id === saved.selectedProductId) return -1;
-      if (right.id === saved.selectedProductId) return 1;
+    const selectedProductId = idAliases.get(saved.selectedProductId) || canonicalProductId(saved.selectedProductId);
+    state.products = [...byKey.values()].sort((left, right) => {
+      if (left.id === selectedProductId) return -1;
+      if (right.id === selectedProductId) return 1;
       return left.name.localeCompare(right.name);
     });
+    if (selectedProductId && state.products.some((product) => product.id === selectedProductId)) {
+      state.selectedProductId = selectedProductId;
+    }
   }
 
   if (saved.selectedProductId && state.products.some((product) => product.id === saved.selectedProductId)) {
@@ -1249,6 +1257,8 @@ function mergeProductMemory(existing, product) {
   return {
     ...existing,
     ...product,
+    id: existing.id || product.id,
+    name: existing.name || product.name,
     examples: product.examples?.length ? product.examples : existing.examples || [],
     knowledge: product.knowledge?.length ? product.knowledge : existing.knowledge || [],
     memory: product.memory || existing.memory || synthesizeProductMemory(product),
@@ -1259,6 +1269,17 @@ function mergeProductMemory(existing, product) {
     createdAt: existing.createdAt || product.createdAt,
     updatedAt: product.updatedAt || existing.updatedAt
   };
+}
+
+function productCanonicalKey(product = {}) {
+  return `product:${canonicalProductId(product.id || product.name)}`;
+}
+
+function canonicalProductId(value = "") {
+  const clean = cleanText(value);
+  if (!clean) return "";
+  if (/black[-\s]*affiliate/i.test(clean)) return "black-affiliate";
+  return slugify(clean);
 }
 
 function persistWorkspaceState() {
@@ -2149,7 +2170,8 @@ function normalizeProductScoring(scoring) {
 }
 
 async function teachProductFromText(text, selectedProductId = "") {
-  const selectedProduct = state.products.find((product) => product.id === selectedProductId) || currentProduct();
+  const explicitProduct = selectedProductId ? state.products.find((product) => product.id === selectedProductId) : null;
+  const selectedProduct = explicitProduct || currentProduct();
   const localAnalysis = analyzeProductContextLocally(text, selectedProduct);
   let analysis = localAnalysis;
   let source = "local";
@@ -2166,7 +2188,7 @@ async function teachProductFromText(text, selectedProductId = "") {
 
   analysis.name = cleanText(analysis.name || localAnalysis.name || selectedProduct?.name || "Untitled Product");
   analysis.id = cleanText(analysis.id || slugify(analysis.name));
-  const existing = findProductForTeaching(analysis, selectedProduct);
+  const existing = findProductForTeaching(analysis, selectedProduct, Boolean(explicitProduct));
   const now = new Date().toISOString();
   const contextItem = normalizeProductKnowledge({
     type: "product_context_update",
@@ -2180,7 +2202,7 @@ async function teachProductFromText(text, selectedProductId = "") {
   const product = normalizeProduct({
     ...(existing || {}),
     id: existing?.id || analysis.id,
-    name: analysis.name,
+    name: existing?.name || analysis.name,
     category: analysis.category || existing?.category || "Product",
     analysisProfileId: analysis.analysisProfileId || existing?.analysisProfileId || inferAnalysisProfileId(analysis.name, analysis.category || ""),
     positioning: analysis.positioning || existing?.positioning || "",
@@ -2388,9 +2410,19 @@ function analyzeProductContextLocally(text, selectedProduct) {
   });
 }
 
-function findProductForTeaching(analysis, selectedProduct) {
+function findProductForTeaching(analysis, selectedProduct, preferSelected = false) {
+  if (preferSelected && selectedProduct) return selectedProduct;
   const slug = slugify(analysis.name);
-  return state.products.find((product) => product.id === analysis.id || product.id === slug || product.name.toLowerCase() === analysis.name.toLowerCase())
+  const analysisName = analysis.name.toLowerCase();
+  return state.products.find((product) => {
+    const productName = product.name.toLowerCase();
+    return product.id === analysis.id
+      || product.id === slug
+      || product.id === canonicalProductId(analysis.id || analysis.name)
+      || productCanonicalKey(product) === `product:${canonicalProductId(analysis.id || analysis.name)}`
+      || productName === analysisName
+      || (analysisName.includes(productName) && productName.length > 4);
+  })
     || (!analysis.name && selectedProduct ? selectedProduct : null);
 }
 
@@ -2401,7 +2433,12 @@ function synthesizeProductMemory(product) {
 
 function extractProductName(text, selectedProduct) {
   const explicit = text.match(/(?:^|\n)\s*(?:product|product name|name|offer|продукт|назва|название)\s*[:\-]\s*([^\n]+)/i);
-  if (explicit?.[1]) return cleanProductName(explicit[1]);
+  if (explicit?.[1]) {
+    const explicitName = cleanProductName(explicit[1]);
+    if (selectedProduct?.name && explicitName.toLowerCase().includes(selectedProduct.name.toLowerCase())) return selectedProduct.name;
+    if (/\bBlack\s+Affiliate\b/i.test(explicitName)) return "Black Affiliate";
+    return explicitName;
+  }
   const blackAffiliate = text.match(/\bBlack\s+Affiliate\b/i);
   if (blackAffiliate) return "Black Affiliate";
   const firstLine = text.split(/\n/).map((line) => cleanProductName(line.replace(/^#+\s*/, ""))).find(Boolean) || "";
