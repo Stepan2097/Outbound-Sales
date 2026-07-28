@@ -642,6 +642,7 @@ async function handleApi(request, response, url) {
       }
     }));
     addEvent("mcp", "Product context synchronized from MCP portal.");
+    await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
   }
@@ -817,6 +818,7 @@ async function handleApi(request, response, url) {
       linkedinField: cleanText(body.linkedinField || "")
     });
     state.aiActions.unshift(action);
+    await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
   }
@@ -830,6 +832,7 @@ async function handleApi(request, response, url) {
       selectedProspectId: cleanText(body.selectedProspectId || "")
     });
     state.aiActions.unshift(action);
+    await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
   }
@@ -845,6 +848,7 @@ async function handleApi(request, response, url) {
     state.agentRuns.unshift(run);
     state.agentRuns = state.agentRuns.slice(0, 100);
     state.aiActions.unshift(agentRunToAiAction(run));
+    await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
   }
@@ -860,6 +864,7 @@ async function handleApi(request, response, url) {
     state.agentRuns.unshift(run);
     state.agentRuns = state.agentRuns.slice(0, 100);
     state.aiActions.unshift(agentRunToAiAction(run));
+    await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
   }
@@ -881,6 +886,7 @@ async function handleApi(request, response, url) {
     else if (snapshot.status === "needs_review") prospect.status = "review";
     prospect.updatedAt = new Date().toISOString();
     addEvent("intelligence", `${prospect.company || prospect.name} intelligence ${snapshot.status}.`);
+    await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
   }
@@ -894,6 +900,7 @@ async function handleApi(request, response, url) {
     }
     const result = reviewLeadIntelligence(prospect, body);
     addEvent("intelligence", result.message);
+    await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
   }
@@ -907,6 +914,7 @@ async function handleApi(request, response, url) {
     }
     const task = createTaskFromIntelligence(prospect, clampNumber(body.stepIndex, 0, 20, 0));
     addEvent("tasks", `${task.label} created for ${prospect.name}.`);
+    await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
   }
@@ -918,6 +926,7 @@ async function handleApi(request, response, url) {
     rebuildIcpProfile();
     buildPipelineLabsActorPayload(clampNumber(body.totalResults, 1, 50000, state.icp.lookalikeSearch.totalResults || 1000));
     addEvent("icp", `${result.importedCount} ICP seed leads trained the lookalike profile.`);
+    await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
   }
@@ -937,6 +946,7 @@ async function handleApi(request, response, url) {
     buildPipelineLabsActorPayload(totalResults);
     const result = await runIcpLookalikeSearch(limit);
     addEvent("icp", `${result.importedCount} lookalike leads imported from Apify.`);
+    await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
   }
@@ -956,6 +966,7 @@ async function handleApi(request, response, url) {
     }
     state.prospects = [...byKey.values()].sort((left, right) => new Date(right.updatedAt) - new Date(left.updatedAt));
     addEvent("prospects", `${imported.length} prospect profiles imported.`);
+    await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
   }
@@ -970,6 +981,7 @@ async function handleApi(request, response, url) {
 
     if (!body.force && isRecentContactDiscovery(prospect)) {
       addEvent("enrichment", `${prospect.name} contact discovery reused from the saved research cache.`);
+      await writePersistentWorkspaceState();
       sendJson(response, 200, publicState());
       return;
     }
@@ -984,6 +996,7 @@ async function handleApi(request, response, url) {
     prospect.status = "enriched";
     prospect.updatedAt = new Date().toISOString();
     addEvent("enrichment", `${prospect.name} contact discovery refreshed.`);
+    await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
   }
@@ -1027,6 +1040,7 @@ async function handleApi(request, response, url) {
     });
     state.prospects = [prospect, ...state.prospects.filter((item) => item.dedupeKey !== prospect.dedupeKey)];
     addEvent("linkedin", `${prospect.name} added from LinkedIn URL. Research is ready to run.`);
+    await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
   }
@@ -1059,9 +1073,10 @@ async function handleApi(request, response, url) {
     prospect.outreach = await prepareAndLogOutreach(prospect, profile, "SEQUENCE_GENERATION", {
       source: "manual-prepare"
     });
-    prospect.status = "outreach_ready";
+    prospect.status = statusAfterOutreachPlan(prospect.outreach);
     prospect.updatedAt = new Date().toISOString();
     addEvent("outreach", `${prospect.name} outreach plan prepared.`);
+    await writePersistentWorkspaceState();
     sendJson(response, 200, { ...publicState(), run: prospect.outreach.run });
     return;
   }
@@ -1077,6 +1092,7 @@ async function handleApi(request, response, url) {
     prospect.status = typeof body.status === "string" ? body.status.slice(0, 48) : prospect.status;
     prospect.updatedAt = new Date().toISOString();
     addEvent("prospects", `${prospect.name} moved to ${prospect.status}.`);
+    await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
   }
@@ -1091,6 +1107,7 @@ async function handleApi(request, response, url) {
     state.prospects = state.prospects.filter((item) => item.id !== prospect.id);
     state.followUpTasks = state.followUpTasks.filter((task) => task.prospectId !== prospect.id);
     addEvent("prospects", `${prospect.name} removed from the active lead queue.`);
+    await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
   }
@@ -1108,6 +1125,7 @@ async function handleApi(request, response, url) {
     prospect.status = statusFromInteraction(interaction.type, prospect.status);
     prospect.updatedAt = new Date().toISOString();
     addEvent("interaction", `${interaction.type} logged for ${prospect.name}.`);
+    await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
   }
@@ -1134,6 +1152,7 @@ async function handleApi(request, response, url) {
       prospect.updatedAt = new Date().toISOString();
       addEvent("task", `${task.label} completed for ${prospect.name}.`);
     }
+    await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
   }
@@ -1154,6 +1173,7 @@ async function handleApi(request, response, url) {
 
     await attachCallAnalysis(prospect, transcript, "manual_paste");
     addEvent("call", `${prospect.name} call analyzed and next steps prepared.`);
+    await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
   }
@@ -3507,7 +3527,7 @@ async function executeProspectAgent(agentId, prospect) {
     prospect.outreach = await prepareAndLogOutreach(prospect, "balanced", "SEQUENCE_GENERATION", {
       source: "agent:personalize-outreach"
     });
-    prospect.status = "outreach_ready";
+    prospect.status = statusAfterOutreachPlan(prospect.outreach);
     return {
       summary: `${prospect.outreach.messages.length} messages and ${prospect.outreach.linkedinVariations.length} LinkedIn variations prepared.`,
       outreach: prospect.outreach
@@ -4091,12 +4111,15 @@ async function prepareAndLogOutreach(prospect, profile, taskType = "SEQUENCE_GEN
   };
   prospect.nextActionPlan = nextActionPlan;
   prospect.salesCadence = salesCadence;
+  const reviewRequired = statusAfterOutreachPlan(enrichedOutreach) === "review";
   const metadata = personalizationActivityMetadata(prospect, enrichedOutreach, taskType, context);
   const { interaction } = await logAutomaticSalesActivity(prospect, {
-    type: "outreach_prepared",
+    type: reviewRequired ? "research_review_required" : "outreach_prepared",
     channel: enrichedOutreach.recommendedChannel || "ai",
-    outcome: "prepared",
-    note: `Personalized outreach prepared for ${prospect.name} using ${enrichedOutreach.productName || product.name}.`,
+    outcome: reviewRequired ? "review" : "prepared",
+    note: reviewRequired
+      ? `Product-fit review required for ${prospect.name} before outreach using ${enrichedOutreach.productName || product.name}.`
+      : `Personalized outreach prepared for ${prospect.name} using ${enrichedOutreach.productName || product.name}.`,
     crmNote: buildPersonalizationCrmNote(prospect, enrichedOutreach, context),
     source: context.source || "outbound-os",
     metadata
@@ -4111,8 +4134,10 @@ async function prepareAndLogOutreach(prospect, profile, taskType = "SEQUENCE_GEN
     }
   };
   recordLeadResearch(prospect, {
-    stage: "outreach_prepared",
-    summary: `${finalOutreach.messages.length} channel drafts prepared and a LinkedIn acceptance check was scheduled.`,
+    stage: reviewRequired ? "fit_review_required" : "outreach_prepared",
+    summary: reviewRequired
+      ? "Outreach held until company/product fit evidence is verified."
+      : `${finalOutreach.messages.length} channel drafts prepared and a LinkedIn acceptance check was scheduled.`,
     analysis: finalOutreach.analysis,
     outreach: finalOutreach,
     modelUsed: finalOutreach.modelUsed,
@@ -4120,6 +4145,11 @@ async function prepareAndLogOutreach(prospect, profile, taskType = "SEQUENCE_GEN
     warnings: finalOutreach.fallbackReason ? [`OpenRouter fallback used: ${finalOutreach.fallbackReason}`] : []
   });
   return finalOutreach;
+}
+
+function statusAfterOutreachPlan(outreach = {}) {
+  if (outreach.recommendedChannel === "manual_research" || outreach.modelUsed === "product-fit-guard") return "review";
+  return "outreach_ready";
 }
 
 async function logAutomaticSalesActivity(prospect, input) {
@@ -4186,13 +4216,16 @@ function personalizationActivityMetadata(prospect, outreach, taskType, context) 
 }
 
 function buildPersonalizationCrmNote(prospect, outreach, context = {}) {
+  const reviewRequired = statusAfterOutreachPlan(outreach) === "review";
   const contactSummary = contactCandidatesForCrm(prospect)
     .map((candidate) => `${titleCaseServer(candidate.type)}: ${candidate.value} (${candidate.status})`)
     .join("; ");
   const messageChannels = (outreach.messages || []).map((message) => message.channel).filter(Boolean).join(", ");
   const nextAction = outreach.actions?.[0]?.label || analyzeLead(prospect).recommendedAction;
   return [
-    `Outbound OS prepared personalized outreach for ${prospect.name} at ${prospect.company || "unknown company"}.`,
+    reviewRequired
+      ? `Outbound OS held outreach for ${prospect.name} at ${prospect.company || "unknown company"} until product-fit research is verified.`
+      : `Outbound OS prepared personalized outreach for ${prospect.name} at ${prospect.company || "unknown company"}.`,
     `Product: ${outreach.productName || currentProduct().name}.`,
     `Source: ${context.source || "outbound-os"}.`,
     `Recommended channel: ${outreach.recommendedChannel || "review"}.`,
@@ -6075,7 +6108,7 @@ async function executeAssistantStep(step, defaults) {
       prospect.outreach = await prepareAndLogOutreach(prospect, "balanced", "SEQUENCE_GENERATION", {
         source: "ai-operator:prepare-outreach"
       });
-      prospect.status = "outreach_ready";
+      prospect.status = statusAfterOutreachPlan(prospect.outreach);
       prospect.updatedAt = new Date().toISOString();
     }
     return { results: [{ type: "prepare_outreach", message: `Prepared outreach for ${selected.length} leads.` }], warnings: prospects.length > 10 ? ["Limited live AI writing to 10 leads for this run."] : [] };
@@ -6811,6 +6844,7 @@ function normalizeInteraction(prospectId, input) {
 
 function statusFromInteraction(type, currentStatus) {
   if (type === "meeting_booked") return "meeting_booked";
+  if (type === "research_review_required") return "review";
   if (type === "outreach_prepared" || type === "personalization_requested") return "outreach_ready";
   if (type === "contact_enriched" || type === "research_completed") return "enriched";
   if (type === "linkedin_reply" || type === "email_opened" || type === "linkedin_invite_accepted" || type === "linkedin_connected") return "engaged";
