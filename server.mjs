@@ -2431,9 +2431,19 @@ function analyzeProductContextLocally(text, selectedProduct) {
 }
 
 function findProductForTeaching(analysis, selectedProduct, preferSelected = false) {
-  if (preferSelected && selectedProduct) return selectedProduct;
   const slug = slugify(analysis.name);
   const analysisName = analysis.name.toLowerCase();
+  if (preferSelected && selectedProduct) {
+    const selectedName = selectedProduct.name.toLowerCase();
+    const selectedId = selectedProduct.id.toLowerCase();
+    const matchesSelected = !analysisName
+      || selectedName === analysisName
+      || selectedId === slug
+      || selectedProduct.id === analysis.id
+      || (analysisName.includes(selectedName) && selectedName.length > 4)
+      || (selectedName.includes(analysisName) && analysisName.length > 4);
+    if (matchesSelected) return selectedProduct;
+  }
   return state.products.find((product) => {
     const productName = product.name.toLowerCase();
     return product.id === analysis.id
@@ -2785,13 +2795,19 @@ function analyzeLead(prospect, product = currentProduct()) {
   const productFit = productFitForProspect(prospect, product);
   const companyProfile = prospect.companyProfile || prospect.leadIntelligence?.company_context || buildCompanyProfile(prospect, product);
   const contactConfidence = bestContactConfidenceServer(prospect);
+  const isBlackAffiliate = isBlackAffiliateProduct(product);
+  const blackAffiliateEvidence = isBlackAffiliate ? blackAffiliateFitEvidence(prospect) : null;
   const seniorityScore = /chief|ceo|founder|owner|president/i.test(prospect.title) ? 18
     : /vp|head|director/i.test(prospect.title) ? 15
       : /manager|lead|growth|sales|revenue|marketing|operations|ua|acquisition/i.test(prospect.title) ? 10
         : prospect.title ? 6 : 1;
-  const fitScore = productFit.label === "high" ? 24 : productFit.label === "medium" ? 14 : 2;
+  const fitScore = isBlackAffiliate
+    ? productFit.label === "high" ? 24 : productFit.label === "medium" && blackAffiliateEvidence?.hasCompanyEvidence ? 13 : productFit.label === "medium" ? 8 : 0
+    : productFit.label === "high" ? 24 : productFit.label === "medium" ? 14 : 2;
   const companyScore = clampNumber(Math.round((companyProfile.confidence || 0) * 0.22), 0, 18, 6);
-  const triggerScore = publicLeadNote(prospect.notes) || prospect.contactDiscovery?.scraperNote ? 12 : 3;
+  const triggerScore = isBlackAffiliate
+    ? blackAffiliateEvidence?.companySignalCount >= 2 ? 12 : blackAffiliateEvidence?.companySignalCount >= 1 ? 8 : blackAffiliateEvidence?.roleSignals ? 5 : 2
+    : publicLeadNote(prospect.notes) || prospect.contactDiscovery?.scraperNote ? 12 : 3;
   const contactScore = Math.round(Math.min(14, contactConfidence * 0.14));
   const engagementScore = Math.min(12, interactions.reduce((sum, interaction) => {
     const lift = state.historicalOutcomes.byInteraction[interaction.type] ?? state.historicalOutcomes.byInteraction[interaction.outcome] ?? { reach: 0, close: 0 };
@@ -2803,16 +2819,19 @@ function analyzeLead(prospect, product = currentProduct()) {
     !prospect.title,
     !prospect.website,
     !companyProfile.description || /unknown|needs research/i.test(companyProfile.description || ""),
-    contactConfidence < 55
+    contactConfidence < 55,
+    isBlackAffiliate && !blackAffiliateEvidence?.hasCompanyEvidence
   ].filter(Boolean).length * 4;
-  const sensitivePenalty = isBlackAffiliateProduct(product)
+  const sensitivePenalty = isBlackAffiliate
     ? (/health|clinic|medical|adult|children|kids/i.test(`${prospect.company} ${prospect.notes}`) ? 6 : 0)
     : (/health|clinic|medical|casino|gambl|adult|children|kids/i.test(`${prospect.company} ${prospect.notes}`) ? 6 : 0);
   const mismatchPenalty = shouldHoldForProductFitReview(prospect, product, productFit) ? 24 : 0;
   const readinessRaw = clampNumber(Math.round(seniorityScore + fitScore + companyScore + triggerScore + contactScore + engagementScore + completenessScore - missingPenalty - sensitivePenalty - mismatchPenalty), 0, 100, 45);
   const reachProbability = clampProbability(0.12 + contactScore / 100 + engagementScore / 100 + triggerScore / 180 + (prospect.linkedin ? 0.08 : 0) - missingPenalty / 260);
   const closeProbability = clampProbability(0.04 + readinessRaw / 500 + (productFit.label === "high" ? 0.07 : productFit.label === "medium" ? 0.03 : 0) + engagementScore / 220 - sensitivePenalty / 260 - mismatchPenalty / 300);
-  const score = clampNumber(Math.round(readinessRaw * 0.55 + reachProbability * 28 + closeProbability * 17), 0, 94, 45);
+  let score = clampNumber(Math.round(readinessRaw * 0.55 + reachProbability * 28 + closeProbability * 17), 0, 94, 45);
+  if (isBlackAffiliate && productFit.label === "medium" && !blackAffiliateEvidence?.hasCompanyEvidence) score = Math.min(score, 64);
+  if (isBlackAffiliate && productFit.label === "developing") score = Math.min(score, 48);
   const recommendedAction = recommendedActionFor(prospect, interactions, reachProbability, closeProbability, productFit, product);
 
   return {
@@ -2836,9 +2855,10 @@ function analyzeLead(prospect, product = currentProduct()) {
     reasoning: [
       `Company context confidence is ${companyProfile.confidence || 0}%; low confidence reduces the score.`,
       `${product.name} fit is ${productFit.label} because ${productFit.reason}.`,
+      isBlackAffiliate ? `Black Affiliate company evidence: ${blackAffiliateEvidence?.companySummary || "not checked"}. Role evidence: ${blackAffiliateEvidence?.roleSummary || "not checked"}.` : "",
       contactConfidence ? `Best contact evidence is ${contactConfidence}% confidence.` : "No verified direct contact evidence yet.",
       interactions.length ? `${interactions.length} logged interaction${interactions.length === 1 ? "" : "s"} affects reach.` : "No meaningful prior touches logged yet."
-    ]
+    ].filter(Boolean)
   };
 }
 
@@ -2849,11 +2869,13 @@ function sentenceCase(value) {
 
 function buildCompanyProfile(prospect, product = currentProduct()) {
   const text = `${prospect.company} ${prospect.title} ${prospect.notes} ${prospect.website}`.toLowerCase();
+  const companyOnlyText = `${prospect.company} ${prospect.notes} ${prospect.website} ${prospect.companyProfile?.category || ""} ${prospect.companyProfile?.description || ""}`.toLowerCase();
   const knownNotes = publicLeadNote(prospect.notes);
-  const category = companyCategoryFromText(text);
+  const categorySource = isBlackAffiliateProduct(product) ? stripNegativeBlackAffiliateEvidence(companyOnlyText) : text;
+  const category = companyCategoryFromText(categorySource);
   const sizeEstimate = companySizeEstimate(text);
-  const audience = companyAudienceFromText(text, category);
-  const businessModel = companyBusinessModelFromText(text, category);
+  const audience = companyAudienceFromText(categorySource, category);
+  const businessModel = companyBusinessModelFromText(categorySource, category);
   const techStack = ["hubspot", "salesforce", "snowflake", "apollo", "zoominfo", "adjust", "appsflyer", "singular"]
     .filter((tool) => text.includes(tool))
     .map((tool) => tool.charAt(0).toUpperCase() + tool.slice(1));
@@ -2904,6 +2926,10 @@ function buildCompanyProfile(prospect, product = currentProduct()) {
 }
 
 function companyCategoryFromText(text) {
+  if (/\bigaming\b|\bi-gaming\b|\bcasino\b|\bsportsbook\b|\bbookmaker\b|\bbetting\b|\bgambling\b/.test(text)) return "iGaming operator or affiliate market";
+  if (/\baffiliate network\b|\btraffic partners?\b|\bpartner network\b/.test(text)) return "Affiliate network";
+  if (/\bmedia buying\b|\bpaid media\b|\bperformance marketing\b|\buser acquisition\b|\bua\b/.test(text)) return "Performance marketing";
+  if (/\bwebview\b|\bpwa\b|\bapp funnel\b|\bapp distribution\b/.test(text)) return "App/WebView acquisition";
   if (/analytics|data|snowflake|intelligence/.test(text)) return "Analytics software";
   if (/logistics|supply|freight|transport/.test(text)) return "Logistics";
   if (/clinic|health|medical|care/.test(text)) return "Healthcare services";
@@ -2923,6 +2949,9 @@ function companySizeEstimate(text) {
 }
 
 function companyAudienceFromText(text, category) {
+  if (/igaming|casino|sportsbook|betting|gambling|affiliate network/.test(text) || /iGaming|Affiliate network/.test(category)) return "players, bettors, affiliates, traffic partners, or performance marketing teams - verify";
+  if (/media buying|paid media|performance marketing|user acquisition/.test(text) || category === "Performance marketing") return "advertisers, operators, affiliate teams, or traffic buyers - verify";
+  if (/webview|pwa|app funnel|app distribution/.test(text) || category === "App/WebView acquisition") return "mobile/app users, traffic partners, and acquisition teams - verify";
   if (/logistics|freight|supply/.test(text)) return "operations, shippers, logistics buyers, or transportation partners";
   if (/clinic|health|medical/.test(text)) return "patients and local healthcare consumers; avoid sensitive assumptions";
   if (/game|gaming|app/.test(text)) return "mobile users, players, or app customers";
@@ -2932,6 +2961,10 @@ function companyAudienceFromText(text, category) {
 }
 
 function companyBusinessModelFromText(text, category) {
+  if (/igaming|casino|sportsbook|betting|gambling/.test(text) || /iGaming/.test(category)) return "gaming revenue, affiliate revenue share, CPA, media buying, or operator economics - verify";
+  if (/affiliate network|traffic partners?/.test(text) || category === "Affiliate network") return "affiliate commission, CPA, rev-share, or traffic arbitrage - verify";
+  if (/media buying|paid media|performance marketing|user acquisition/.test(text) || category === "Performance marketing") return "performance marketing, paid acquisition, agency, or traffic-buying economics - verify";
+  if (/webview|pwa|app funnel|app distribution/.test(text) || category === "App/WebView acquisition") return "app funnel, webview, PWA, acquisition, or partner distribution economics - verify";
   if (/software|saas|analytics|crm/.test(text)) return "likely subscription/software revenue - verify";
   if (/clinic|health/.test(text)) return "service delivery / appointments - verify";
   if (/logistics/.test(text)) return "service or managed operations - verify";
@@ -2943,9 +2976,13 @@ function companyBusinessModelFromText(text, category) {
 function companyPrioritiesFor(prospect, product, category) {
   const note = publicLeadNote(prospect.notes);
   const base = [];
-  if (/outbound|pipeline|sales|revenue|sdr/i.test(`${prospect.title} ${prospect.notes}`)) base.push("pipeline efficiency");
-  if (/hubspot|crm|snowflake|data/i.test(prospect.notes)) base.push("data quality and workflow automation");
-  if (/hiring|series|growth|expansion/i.test(prospect.notes)) base.push("scaling repeatable go-to-market motion");
+  const isBlackAffiliate = isBlackAffiliateProduct(product);
+  if (isBlackAffiliate && /igaming|casino|sportsbook|betting|gambling|affiliate/i.test(`${prospect.company} ${prospect.notes} ${category}`)) base.push("verify affiliate traffic, app funnel, GEO, and tracking fit");
+  if (isBlackAffiliate && /media buying|paid media|performance marketing|acquisition|ua/i.test(`${prospect.title} ${prospect.notes} ${category}`)) base.push("understand acquisition source quality and measurable event flow");
+  if (isBlackAffiliate && /webview|pwa|app|mobile/i.test(`${prospect.notes} ${category}`)) base.push("check app/WebView readiness and moderation/tracking constraints");
+  if (!isBlackAffiliate && /outbound|pipeline|sales|revenue|sdr/i.test(`${prospect.title} ${prospect.notes}`)) base.push("pipeline efficiency");
+  if (!isBlackAffiliate && /hubspot|crm|snowflake|data/i.test(prospect.notes)) base.push("data quality and workflow automation");
+  if (!isBlackAffiliate && /hiring|series|growth|expansion/i.test(prospect.notes)) base.push("scaling repeatable go-to-market motion");
   if (category.includes("Mobile")) base.push("user acquisition performance and quality");
   if (!base.length && note) base.push("evaluate current growth/process priorities");
   if (!base.length) base.push(`verify whether ${lowerSalesPhrase(product.useCases?.[0] || product.name)} is a real priority`);
@@ -4016,6 +4053,15 @@ async function prepareOutreachWithAi(prospect, profile, taskType = "SEQUENCE_GEN
   }
 
   try {
+    const blackAffiliateRules = isBlackAffiliateProduct(product)
+      ? [
+        "Write as Black Affiliate / iGaming affiliate acquisition context, not as RevOps, CRM, sales automation, or outbound research software.",
+        "Do not use these phrases: RevOps, CRM workflow, outbound research, go-to-market motion, rep-by-rep process, quick demo, book a demo.",
+        "If company evidence is weak, make the first message a short fit-check question instead of a pitch.",
+        "Do not claim guaranteed deposits, ROI, conversion lift, moderation safety, or verified contact data unless provided in sources.",
+        "Primary flow is LinkedIn first: view profile, optionally like/comment if natural, send invite, then follow up in 2-3 days if accepted."
+      ]
+      : [];
     const { data, run } = await callOpenRouterJson({
       model: outreachModelForProfile(profile),
       taskType,
@@ -4057,6 +4103,7 @@ async function prepareOutreachWithAi(prospect, profile, taskType = "SEQUENCE_GEN
               ]
             },
             product: productForPrompt(product),
+            productCopyRules: blackAffiliateRules,
             outreachExamples: (product.examples || []).slice(0, 5),
             learningMemory: learningContextForProduct(product.id),
             prospect: prospectForPrompt(prospect),
@@ -4074,7 +4121,7 @@ async function prepareOutreachWithAi(prospect, profile, taskType = "SEQUENCE_GEN
         }
       ]
     });
-    return normalizeAiOutreachPlan(fallbackPlan, data, run);
+    return normalizeAiOutreachPlan(fallbackPlan, data, run, product);
   } catch (error) {
     const fallbackReason = error instanceof Error ? error.message : "generation failed";
     addEvent("provider", `OpenRouter outreach fallback: ${fallbackReason}`);
@@ -4149,6 +4196,7 @@ async function prepareAndLogOutreach(prospect, profile, taskType = "SEQUENCE_GEN
 
 function statusAfterOutreachPlan(outreach = {}) {
   if (outreach.recommendedChannel === "manual_research" || outreach.modelUsed === "product-fit-guard") return "review";
+  if ((outreach.qualityWarnings || []).some((warning) => /company fit evidence is weak/i.test(warning))) return "review";
   return "outreach_ready";
 }
 
@@ -4313,11 +4361,214 @@ function shortOutreachTopic(rolePain, product) {
   return "sales workflow quality";
 }
 
+function blackAffiliateBuyerLane(prospect = {}) {
+  const title = `${prospect.title || ""} ${prospect.notes || ""}`.toLowerCase();
+  if (/affiliate|partner/.test(title)) {
+    return {
+      lane: "affiliate",
+      roleLabel: "affiliate or partnerships work",
+      question: "are app funnels something your affiliates already use as a traffic or retention layer, or is that not relevant there?",
+      followUp: "we usually only continue the conversation when affiliate ownership, GEOs, app flow, and tracking are already part of the discussion"
+    };
+  }
+  if (/media buyer|paid media|acquisition|ua|growth|performance marketing/.test(title)) {
+    return {
+      lane: "acquisition",
+      roleLabel: "acquisition or paid media work",
+      question: "are app funnels part of your acquisition stack, or do you keep that traffic on web flows?",
+      followUp: "we usually only continue the conversation when the team already cares about source quality, GEO, tracking, and app traffic"
+    };
+  }
+  if (/commercial|business development|bd|sales|revenue|cmo|marketing/.test(title)) {
+    return {
+      lane: "commercial",
+      roleLabel: "commercial growth work",
+      question: "is app-based affiliate acquisition relevant for your side of the business, or should I park this?",
+      followUp: "we usually only continue the conversation when there is a clear owner for affiliates, acquisition, GEOs, and tracking"
+    };
+  }
+  return {
+    lane: "fit-check",
+    roleLabel: "growth work",
+    question: "is app-based affiliate acquisition relevant at your company, or should I park this?",
+    followUp: "we usually only continue the conversation after fit is verified"
+  };
+}
+
+function blackAffiliateEvidenceLine(prospect, evidence = blackAffiliateFitEvidence(prospect)) {
+  if (evidence.companyLabels?.length) return evidence.companyLabels.slice(0, 2).join(" and ");
+  if (evidence.roleLabels?.length) return evidence.roleLabels.slice(0, 2).join(" and ");
+  return "your profile and company context";
+}
+
+function buildBlackAffiliateOutreachPlan(prospect, profile, route, product, analysis) {
+  const channel = chooseBestChannel(prospect);
+  const companyProfile = prospect.companyProfile || prospect.leadIntelligence?.company_context || buildCompanyProfile(prospect, product);
+  const evidence = blackAffiliateFitEvidence(prospect);
+  const firstName = prospect.name.split(/\s+/)[0] || prospect.name || "there";
+  const company = prospect.company || "your company";
+  const companyPossessive = company.endsWith("s") ? `${company}'` : `${company}'s`;
+  const lane = blackAffiliateBuyerLane(prospect);
+  const evidenceLine = blackAffiliateEvidenceLine(prospect, evidence);
+  const companySummary = companyProfile?.description && !/needs company research|unknown/i.test(companyProfile.description)
+    ? cleanOutboundSignal(companyProfile.description)
+    : `${company} still needs stronger company research before any confident pitch`;
+  const directPhoneOk = hasReviewedPhoneCandidate(prospect);
+  const messengerHold = "Use only after the phone source, identity match, messenger presence, and permission are reviewed.";
+  const fitCheck = analysis.productFit === "high"
+    ? `saw ${evidenceLine} around ${company}. Quick question: ${lane.question}`
+    : `saw your ${lane.roleLabel} at ${company}. Quick fit check: ${lane.question}`;
+  const followUpReason = `${firstName}, thanks for connecting. The reason I asked: Black Affiliate is only relevant when app-based acquisition, affiliate traffic, GEOs, and tracking are real topics. ${sentenceCase(lane.followUp)}.`;
+
+  return {
+    preparedAt: new Date().toISOString(),
+    profile,
+    productId: product.id,
+    productName: product.name,
+    modelUsed: route.ok ? route.modelUsed : "black-affiliate-local-v2",
+    provider: route.ok ? route.provider : "local",
+    recommendedChannel: channel,
+    analysis,
+    qualification: {
+      score: analysis.score,
+      fit: analysis.productFit,
+      rationale: `${prospect.title || "This role"} at ${company} maps to ${lane.roleLabel}. Company evidence: ${evidence.companyLabels?.length ? evidence.companyLabels.join(", ") : "needs verification"}.`
+    },
+    messages: [
+      {
+        channel: "linkedin_invite",
+        body: trimMessage(`Hi ${firstName}, ${fitCheck} Open to connecting?`, 260),
+        personalization_basis: [company, prospect.title, evidenceLine].filter(Boolean)
+      },
+      {
+        channel: "linkedin_follow_up",
+        body: trimMessage(`${followUpReason} Is this something you own, or is there someone else who handles affiliates/acquisition?`, 520),
+        personalization_basis: [lane.roleLabel, evidenceLine, "LinkedIn accepted connection"].filter(Boolean)
+      },
+      {
+        channel: "email",
+        subject: `${company}: app traffic fit check`,
+        body: trimWords(`Hi ${firstName},\n\n${companySummary}.\n\nI am not assuming this is relevant, so the short question is: ${lane.question}\n\nIf yes, I would ask one more thing before sharing anything: who owns affiliate/acquisition tests, GEOs, app flow, and tracking quality on your side?\n\nIf it is not relevant, no worries - I will leave it.`, 105),
+        personalization_basis: [companySummary, lane.question, evidenceLine].filter(Boolean)
+      },
+      {
+        channel: "sms",
+        body: directPhoneOk
+          ? trimWords(`Hi ${firstName}, quick fit check for ${company}: are app funnels relevant for affiliate or paid traffic, or not your area?`, 30)
+          : "Do not use SMS until a verified phone, identity match, and permission review exist.",
+        personalization_basis: [directPhoneOk ? "verified phone candidate" : "phone not verified", company].filter(Boolean)
+      },
+      {
+        channel: "whatsapp",
+        body: directPhoneOk
+          ? trimWords(`Hi ${firstName}, is app-based affiliate acquisition something you touch at ${company}, or should I speak with whoever owns traffic/GEOs?`, 30)
+          : messengerHold,
+        personalization_basis: [directPhoneOk ? "verified phone candidate" : "messenger hold", company].filter(Boolean)
+      },
+      {
+        channel: "telegram",
+        body: directPhoneOk
+          ? trimWords(`Hi ${firstName}, is affiliate/app traffic your area at ${company}, or should I park this?`, 22)
+          : messengerHold,
+        personalization_basis: [directPhoneOk ? "verified phone candidate" : "messenger hold", company].filter(Boolean)
+      },
+      {
+        channel: "call",
+        body: `Open with: "I may be early, so I wanted to verify fit before pitching. Does ${companyPossessive} team use app funnels for affiliate or paid traffic, or is that not relevant?" Then ask who owns GEOs, tracking, app flow, and quality review.`,
+        personalization_basis: [lane.roleLabel, evidenceLine].filter(Boolean)
+      }
+    ],
+    actions: [
+      {
+        type: "review_contact_data",
+        label: "Review contact candidates and source confidence",
+        due: "today",
+        priority: "high"
+      },
+      {
+        type: "linkedin_profile_viewed",
+        label: "Open LinkedIn and verify role, company, and recent public activity",
+        due: "today",
+        priority: "high"
+      },
+      {
+        type: "linkedin_post_liked",
+        label: "Like one relevant public post only if it is natural",
+        due: "today",
+        priority: "medium"
+      },
+      {
+        type: "linkedin_invite_sent",
+        label: "Send the short LinkedIn fit-check invitation",
+        due: "today",
+        priority: "high"
+      },
+      {
+        type: "follow_up_scheduled",
+        label: "Check in 2-3 days: if accepted, send the Black Affiliate follow-up; if not, review email path",
+        due: "2-3 days",
+        priority: "high"
+      }
+    ],
+    complianceChecks: [
+      "No guaranteed ROI, deposit, moderation, or conversion claims.",
+      "Direct phone, WhatsApp, and Telegram require source and permission review.",
+      "If company evidence is weak, use a fit-check question instead of a pitch."
+    ],
+    warmupActions: buildWarmupActions(prospect),
+    linkedinVariations: buildBlackAffiliateLinkedInOutreach(prospect, product, profile, analysis).variations,
+    qualityWarnings: evidence.companyLabels?.length ? [] : ["Company fit evidence is weak; keep first touch as a fit-check question."]
+  };
+}
+
+function buildBlackAffiliateLinkedInOutreach(prospect, product = currentProduct(), profile = "balanced", analysis = null) {
+  const firstName = prospect.name.split(/\s+/)[0] || prospect.name || "there";
+  const company = prospect.company || "your company";
+  const lane = blackAffiliateBuyerLane(prospect);
+  const evidence = blackAffiliateFitEvidence(prospect);
+  const evidenceLine = blackAffiliateEvidenceLine(prospect, evidence);
+  const fit = analysis || analyzeLead(prospect, product);
+  const cautiousPrefix = fit.productFit === "high" ? `saw ${evidenceLine} around ${company}` : `saw your ${lane.roleLabel} at ${company}`;
+
+  return {
+    productId: product.id,
+    productName: product.name,
+    preparedAt: new Date().toISOString(),
+    analysis: fit,
+    examplesUsed: (product.examples || []).filter((example) => example.channel === "linkedin").slice(0, 3).map((example) => example.id),
+    variations: [
+      {
+        label: "connection invite",
+        channel: "linkedin",
+        body: trimMessage(`Hi ${firstName}, ${cautiousPrefix}. Quick question: ${lane.question} Open to connecting?`, 260)
+      },
+      {
+        label: "fit check",
+        channel: "linkedin",
+        body: trimMessage(`${firstName}, I may be early here. Is app-based affiliate acquisition something your team actually uses, or should I park this?`, 360)
+      },
+      {
+        label: "after accept",
+        channel: "linkedin",
+        body: trimMessage(`${firstName}, thanks for connecting. Black Affiliate is usually only relevant when affiliates/acquisition already care about app flow, GEOs, tracking, and traffic quality. Is that in your world?`, 520)
+      },
+      {
+        label: profile === "premium" ? "strategic" : "direct",
+        channel: "linkedin",
+        body: trimMessage(`If ${company} has someone owning affiliate traffic or app funnels, I would rather ask them one fit question than send a pitch. Is that you?`, 420)
+      }
+    ]
+  };
+}
+
 function buildOutreachPlan(prospect, profile, route, product = currentProduct()) {
   const channel = chooseBestChannel(prospect);
   const analysis = analyzeLead(prospect, product);
   if (shouldHoldForProductFitReview(prospect, product, analysis)) {
     return buildFitReviewOutreachPlan(prospect, profile, route, product, analysis);
+  }
+  if (isBlackAffiliateProduct(product)) {
+    return buildBlackAffiliateOutreachPlan(prospect, profile, route, product, analysis);
   }
   const useCase = bestUseCaseFor(prospect, product);
   const companyProfile = prospect.companyProfile || prospect.leadIntelligence?.company_context || buildCompanyProfile(prospect, product);
@@ -5556,12 +5807,12 @@ function bestContactConfidenceServer(prospect) {
   return candidates.length ? Math.max(...candidates.map((candidate) => Number(candidate.confidence) || 0)) : 0;
 }
 
-function normalizeAiOutreachPlan(fallbackPlan, data, run) {
+function normalizeAiOutreachPlan(fallbackPlan, data, run, product = currentProduct()) {
   const messages = normalizeAiMessages(data?.messages, fallbackPlan.messages);
   const linkedinVariations = normalizeAiLinkedInVariations(data?.linkedinVariations, fallbackPlan.linkedinVariations);
   const actions = normalizeOutreachActions(data?.actions, fallbackPlan.actions || []);
 
-  return {
+  const plan = {
     ...fallbackPlan,
     modelUsed: run.modelUsed,
     provider: run.provider,
@@ -5576,6 +5827,42 @@ function normalizeAiOutreachPlan(fallbackPlan, data, run) {
     warmupActions: normalizeWarmupActions(data?.warmupActions, fallbackPlan.warmupActions || []),
     run
   };
+  return sanitizeOutreachPlanForProduct(plan, fallbackPlan, product);
+}
+
+function sanitizeOutreachPlanForProduct(plan, fallbackPlan, product = currentProduct()) {
+  if (!isBlackAffiliateProduct(product)) return plan;
+  const warnings = [];
+  const fallbackMessages = new Map((fallbackPlan.messages || []).map((message) => [String(message.channel || "").toLowerCase(), message]));
+  const sanitizedMessages = (plan.messages || []).map((message) => {
+    const text = `${message.subject || ""} ${message.body || ""}`;
+    if (!blackAffiliateCopyLeak(text)) return message;
+    const replacement = fallbackMessages.get(String(message.channel || "").toLowerCase());
+    warnings.push(`${message.channel || "message"} replaced because it drifted into generic sales-platform language.`);
+    return replacement || message;
+  });
+  const fallbackVariations = fallbackPlan.linkedinVariations || [];
+  const sanitizedVariations = (plan.linkedinVariations || []).map((variation, index) => {
+    if (!blackAffiliateCopyLeak(variation.body || "")) return variation;
+    const replacement = fallbackVariations[index] || fallbackVariations[0];
+    warnings.push(`${variation.label || "LinkedIn variation"} replaced because it was not Black Affiliate specific.`);
+    return replacement || variation;
+  });
+  const recommendedChannel = plan.recommendedChannel === "email" && fallbackPlan.analysis?.productFit !== "high"
+    ? "linkedin"
+    : plan.recommendedChannel;
+
+  return {
+    ...plan,
+    recommendedChannel,
+    messages: sanitizedMessages,
+    linkedinVariations: sanitizedVariations,
+    qualityWarnings: mergeStringLists(plan.qualityWarnings || [], warnings).slice(0, 8)
+  };
+}
+
+function blackAffiliateCopyLeak(value) {
+  return /\b(revops|revenue operations|crm hygiene|crm workflow|outbound research|sales automation|sales workflow|go-to-market motion|rep-by-rep|quick revops|sdr workflow|sequence review|pipeline efficiency|prospecting workflow)\b/i.test(String(value || ""));
 }
 
 function normalizeOutreachActions(actions, fallback) {
@@ -5633,6 +5920,9 @@ function normalizeWarmupActions(actions, fallback) {
 
 function buildLinkedInOutreach(prospect, product = currentProduct(), profile = "balanced") {
   const analysis = analyzeLead(prospect, product);
+  if (isBlackAffiliateProduct(product)) {
+    return buildBlackAffiliateLinkedInOutreach(prospect, product, profile, analysis);
+  }
   const firstName = prospect.name.split(/\s+/)[0] || prospect.name;
   const company = prospect.company || "your team";
   const useCase = bestUseCaseFor(prospect, product);
@@ -6908,11 +7198,14 @@ function productFitForProspect(prospect, product) {
   if (isBlackAffiliateProduct(product)) {
     const evidence = blackAffiliateFitEvidence(prospect);
     const persona = bestPersonaMatch(prospect, product);
-    if (evidence.strongSignals >= 2 || (evidence.strongSignals >= 1 && evidence.roleSignals >= 1)) {
-      return { label: "high", reason: `${persona} has ${evidence.summary}` };
+    if (evidence.companySignalCount >= 2 && evidence.roleSignals >= 1) {
+      return { label: "high", reason: `${persona} has company evidence (${evidence.companySummary}) and role evidence (${evidence.roleSummary})` };
     }
-    if (evidence.strongSignals >= 1 || evidence.roleSignals >= 1) {
-      return { label: "medium", reason: `${persona} has partial Black Affiliate evidence: ${evidence.summary}` };
+    if ((evidence.companySignalCount >= 1 && evidence.roleSignals >= 1) || evidence.companySignalCount >= 2) {
+      return { label: "medium", reason: `${persona} has promising but incomplete Black Affiliate evidence: ${evidence.summary}` };
+    }
+    if (evidence.roleSignals >= 1 || evidence.companySignalCount >= 1) {
+      return { label: "medium", reason: `${persona} has partial Black Affiliate evidence, but company context still needs verification: ${evidence.summary}` };
     }
     return {
       label: "developing",
@@ -6940,34 +7233,44 @@ function isBlackAffiliateProduct(product = {}) {
   return /black[-\s]*affiliate|white[-\s]*label app|casino|sportsbook|igaming/i.test(`${product.id || ""} ${product.name || ""} ${product.category || ""} ${product.positioning || ""}`);
 }
 
+function stripNegativeBlackAffiliateEvidence(value) {
+  return String(value || "")
+    .replace(/\b(no|not|without|lacks?|missing|absent|unverified)\b[^.\n;]*(igaming|i-gaming|casino|sportsbook|bookmaker|betting|gambling|affiliate|traffic|media buying|paid media|performance marketing|webview|pwa|app funnel|app distribution|geo|geos|ftd|deposit|registration|postback|tracking)[^.\n;]*/gi, " ")
+    .replace(/\b(no|not|without|lacks?|missing|absent|unverified)\b[^.\n;]*(gaming|app|mobile)[^.\n;]*/gi, " ");
+}
+
 function blackAffiliateFitEvidence(prospect = {}) {
-  const text = `${prospect.title || ""} ${prospect.company || ""} ${prospect.notes || ""} ${prospect.website || ""} ${prospect.companyProfile?.category || ""} ${prospect.companyProfile?.description || ""}`.toLowerCase();
-  const strongPatterns = [
-    /\bigaming\b|\bi-gaming\b|\bgambling\b|\bgaming\b/,
-    /\bcasino\b|\bsportsbook\b|\bbookmaker\b|\bbetting\b|\bbets\b/,
-    /\baffiliate\b|\baffiliates\b|\baffiliate network\b|\bpartnership network\b/,
-    /\btraffic\b|\bmedia buying\b|\bpaid media\b|\bperformance marketing\b/,
-    /\bandroid app\b|\bios app\b|\bmobile app\b|\bapp distribution\b|\bwebview\b|\bpwa\b/,
-    /\bgeo\b|\bgeos\b|\bdeposits\b|\bregistrations\b|\bftd\b/
-  ];
-  const rolePatterns = [
-    /\bhead of affiliates\b|\baffiliate manager\b|\baffiliate lead\b/,
-    /\bmedia buyer\b|\bpaid media\b|\bacquisition\b|\bua\b|\bgrowth\b/,
-    /\bpartnerships?\b|\bbusiness development\b|\bcommercial\b/
-  ];
-  const strongSignals = strongPatterns.filter((pattern) => pattern.test(text)).length;
-  const roleSignals = rolePatterns.filter((pattern) => pattern.test(text)).length;
-  const labels = [
-    /\bigaming\b|\bcasino\b|\bsportsbook\b|\bbetting\b|\bgambling\b/.test(text) ? "iGaming/casino market" : "",
-    /\baffiliate\b|\bpartnership network\b/.test(text) ? "affiliate or partner-network context" : "",
-    /\btraffic\b|\bmedia buying\b|\bpaid media\b|\bperformance marketing\b/.test(text) ? "traffic or performance marketing context" : "",
-    /\bandroid app\b|\bios app\b|\bmobile app\b|\bapp distribution\b|\bwebview\b|\bpwa\b/.test(text) ? "app-distribution context" : "",
-    /\bgeo\b|\bdeposits\b|\bregistrations\b|\bftd\b/.test(text) ? "iGaming funnel language" : ""
+  const titleText = `${prospect.title || ""}`.toLowerCase();
+  const companyText = stripNegativeBlackAffiliateEvidence(`${prospect.company || ""} ${prospect.notes || ""} ${prospect.website || ""} ${prospect.companyProfile?.category || ""} ${prospect.companyProfile?.description || ""}`).toLowerCase();
+  const allText = `${titleText} ${companyText}`.toLowerCase();
+  const companyLabels = [
+    /\bigaming\b|\bi-gaming\b|\bgambling\b|\bcasino\b|\bsportsbook\b|\bbookmaker\b|\bbetting\b|\bbets\b/.test(companyText) ? "iGaming/casino market" : "",
+    /\baffiliate network\b|\baffiliates?\b|\bpartner network\b|\btraffic partners?\b/.test(companyText) ? "affiliate or partner-network context" : "",
+    /\btraffic\b|\bmedia buying\b|\bpaid media\b|\bperformance marketing\b|\buser acquisition\b|\bua\b/.test(companyText) ? "traffic or performance marketing context" : "",
+    /\bandroid app\b|\bios app\b|\bmobile app\b|\bapp distribution\b|\bwebview\b|\bpwa\b|\bapp funnel\b/.test(companyText) ? "app-distribution context" : "",
+    /\bgeo\b|\bgeos\b|\bdeposits\b|\bregistrations\b|\bftd\b|\bpostback\b|\btracking\b/.test(companyText) ? "iGaming funnel language" : ""
   ].filter(Boolean);
+  const roleLabels = [
+    /\bhead of affiliates\b|\baffiliate manager\b|\baffiliate lead\b|\baffiliate director\b/.test(titleText) ? "affiliate ownership role" : "",
+    /\bmedia buyer\b|\bpaid media\b|\bacquisition\b|\bua\b|\bgrowth\b|\bperformance marketing\b/.test(titleText) ? "acquisition or media-buying role" : "",
+    /\bpartnerships?\b|\bbusiness development\b|\bcommercial\b/.test(titleText) ? "partnerships or commercial role" : ""
+  ].filter(Boolean);
+  const companySignalCount = companyLabels.length;
+  const roleSignals = roleLabels.length;
+  const strongSignals = companySignalCount + roleSignals;
+  const labels = [...companyLabels, ...roleLabels];
   return {
     strongSignals,
     roleSignals,
-    summary: labels.length ? labels.join(", ") : "no Black Affiliate ICP signal"
+    companySignalCount,
+    companyLabels,
+    roleLabels,
+    hasCompanyEvidence: companySignalCount > 0,
+    hasRoleEvidence: roleSignals > 0,
+    companySummary: companyLabels.length ? companyLabels.join(", ") : "no company market signal",
+    roleSummary: roleLabels.length ? roleLabels.join(", ") : "no buyer-role signal",
+    summary: labels.length ? labels.join(", ") : "no Black Affiliate ICP signal",
+    rawSignalText: allText.slice(0, 500)
   };
 }
 
@@ -6993,6 +7296,7 @@ function bestUseCaseFor(prospect, product) {
 function recommendedActionFor(prospect, interactions, reachProbability, closeProbability, productFit = null, product = currentProduct()) {
   const types = new Set(interactions.map((interaction) => interaction.type));
   if (shouldHoldForProductFitReview(prospect, product, productFit)) return "Do not contact yet. Verify iGaming/affiliate/app-distribution fit and company context first.";
+  if (isBlackAffiliateProduct(product) && (productFit?.label || productFit?.productFit) === "medium" && !blackAffiliateFitEvidence(prospect).hasCompanyEvidence) return "Verify company iGaming/affiliate/app-distribution fit before sending. If still unclear, use only the LinkedIn fit-check invite.";
   if (types.has("meeting_booked")) return "Prepare meeting notes, evidence, and product-specific discovery questions.";
   if (types.has("linkedin_reply")) return "Reply with a concise product-specific question and offer a short working session.";
   if (!prospect.contactDiscovery) return "Run contact discovery before drafting outreach.";

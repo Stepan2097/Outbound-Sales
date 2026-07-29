@@ -1283,6 +1283,12 @@ function outreachRows(prospect) {
   const fallbackWarning = outreach.fallbackReason
     ? `<div class="outreach-warning"><i data-lucide="triangle-alert"></i><span>Live AI fallback used. ${escapeHtml(outreach.fallbackReason)}</span></div>`
     : "";
+  const qualityWarnings = (outreach.qualityWarnings || [])
+    .map((warning) => `<span>${escapeHtml(warning)}</span>`)
+    .join("");
+  const qualityWarningBlock = qualityWarnings
+    ? `<div class="outreach-warning"><i data-lucide="shield-alert"></i><div>${qualityWarnings}</div></div>`
+    : "";
 
   return `
     <div class="qualification-strip">
@@ -1291,6 +1297,7 @@ function outreachRows(prospect) {
       <div><span>Channel</span><strong>${escapeHtml(outreach.recommendedChannel)}</strong></div>
     </div>
     ${fallbackWarning}
+    ${qualityWarningBlock}
     <div class="message-list">${messages}</div>
     <div class="message-list">${variations}</div>
     ${warmupActions ? `<div class="warmup-list">${warmupActions}</div>` : ""}
