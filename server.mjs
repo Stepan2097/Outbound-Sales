@@ -1378,11 +1378,15 @@ function publicState() {
     mcpSync: state.mcpSync,
     prospects: state.prospects.map((prospect) => {
       const analysis = analyzeLead(prospect, selectedProduct);
+      const outreach = publicOutreachForProspect(prospect, selectedProduct, analysis);
+      const publicStatus = outreach && statusAfterOutreachPlan(outreach) === "review" ? "review" : prospect.status;
       return {
         ...prospect,
+        status: publicStatus,
         score: analysis.score,
         companyProfile: prospect.companyProfile || prospect.leadIntelligence?.company_context || buildCompanyProfile(prospect, selectedProduct),
         interactions: interactionsForProspect(prospect.id),
+        outreach,
         analysis
       };
     }),
@@ -1392,6 +1396,40 @@ function publicState() {
     usage: state.usage,
     usageSummary,
     events: state.events.slice(0, 12)
+  };
+}
+
+function publicOutreachForProspect(prospect, product = currentProduct(), analysis = null) {
+  const outreach = prospect.outreach || null;
+  if (!outreach || !isBlackAffiliateProduct(product)) return outreach;
+  const savedCopy = [
+    ...(outreach.messages || []).map((message) => `${message.subject || ""} ${message.body || ""}`),
+    ...(outreach.linkedinVariations || []).map((variation) => variation.body || "")
+  ].join("\n");
+  const needsReplacement = blackAffiliateCopyLeak(savedCopy);
+  if (!needsReplacement) {
+    return {
+      ...outreach,
+      qualityWarnings: mergeStringLists(outreach.qualityWarnings || [], []).slice(0, 8)
+    };
+  }
+
+  const profile = outreach.profile || "balanced";
+  const route = localFallbackRun("SEQUENCE_GENERATION", profile);
+  const corrected = shouldHoldForProductFitReview(prospect, product, analysis || analyzeLead(prospect, product))
+    ? buildFitReviewOutreachPlan(prospect, profile, route, product, analysis || analyzeLead(prospect, product))
+    : buildBlackAffiliateOutreachPlan(prospect, profile, route, product, analysis || analyzeLead(prospect, product));
+  return {
+    ...outreach,
+    ...corrected,
+    preparedAt: outreach.preparedAt || corrected.preparedAt,
+    modelUsed: outreach.modelUsed || corrected.modelUsed,
+    provider: outreach.provider || corrected.provider,
+    run: outreach.run || corrected.run,
+    crmActivity: outreach.crmActivity,
+    qualityWarnings: mergeStringLists(corrected.qualityWarnings || [], [
+      "Old saved Black Affiliate draft was replaced in the UI because it used generic sales-platform language."
+    ]).slice(0, 8)
   };
 }
 
