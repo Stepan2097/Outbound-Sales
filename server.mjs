@@ -602,6 +602,33 @@ async function handleApi(request, response, url) {
     example.signals = await analyzeLearningExample(example, product);
     state.learning.examples.unshift(example);
     state.learning.examples = state.learning.examples.slice(0, 250);
+    product.knowledge ??= [];
+    const knowledgeItem = normalizeProductKnowledge({
+      type: body.assetType || body.channel || "lesson",
+      title: body.title || `${titleCaseServer(body.assetType || body.channel || "Knowledge")} update`,
+      text,
+      notes: text,
+      screenshot: body.screenshot,
+      tags: body.tags || "knowledge,inbox,context",
+      priority: body.assetType === "approved_claim" || body.assetType === "case_study" ? 92 : body.assetType === "bad_outreach" ? 88 : 78
+    });
+    if (knowledgeItem) {
+      product.knowledge.unshift(knowledgeItem);
+      product.knowledge = product.knowledge
+        .sort((left, right) => Number(right.priority || 0) - Number(left.priority || 0) || new Date(right.createdAt) - new Date(left.createdAt))
+        .slice(0, 120);
+    }
+    if (text && /winning_outreach|bad_outreach/i.test(body.assetType || body.channel || "")) {
+      product.examples ??= [];
+      product.examples.unshift(normalizeOutreachExample({
+        channel: body.outreachChannel || "linkedin",
+        quality: /bad_outreach/i.test(body.assetType || body.channel || "") ? "bad" : "winning",
+        persona: body.persona || "general",
+        message: text,
+        outcome: /bad_outreach/i.test(body.assetType || body.channel || "") ? "Bad example from knowledge inbox" : "Winning example from knowledge inbox"
+      }));
+      product.examples = product.examples.slice(0, 50);
+    }
     await rebuildLearningPlaybook();
     state.learning.lastInboxAnalysis = {
       id: example.id,
@@ -1377,14 +1404,21 @@ function publicState() {
     selectedProduct,
     mcpSync: state.mcpSync,
     prospects: state.prospects.map((prospect) => {
-      const analysis = analyzeLead(prospect, selectedProduct);
-      const outreach = publicOutreachForProspect(prospect, selectedProduct, analysis);
-      const publicStatus = outreach && statusAfterOutreachPlan(outreach) === "review" ? "review" : prospect.status;
+      const hasResearchForProduct = hasProductResearchForProspect(prospect, selectedProduct);
+      const analysis = hasResearchForProduct
+        ? analyzeLead(prospect, selectedProduct)
+        : productResearchPendingAnalysis(prospect, selectedProduct);
+      const outreach = hasResearchForProduct ? publicOutreachForProspect(prospect, selectedProduct, analysis) : null;
+      const publicStatus = !hasResearchForProduct
+        ? "product_research_needed"
+        : outreach && statusAfterOutreachPlan(outreach) === "review" ? "review" : prospect.status;
       return {
         ...prospect,
         status: publicStatus,
         score: analysis.score,
-        companyProfile: prospect.companyProfile || prospect.leadIntelligence?.company_context || buildCompanyProfile(prospect, selectedProduct),
+        companyProfile: hasResearchForProduct
+          ? prospect.companyProfile || prospect.leadIntelligence?.company_context || buildCompanyProfile(prospect, selectedProduct)
+          : prospect.companyProfile || prospect.leadIntelligence?.company_context || productResearchPendingCompanyProfile(prospect, selectedProduct),
         interactions: interactionsForProspect(prospect.id),
         outreach,
         analysis
@@ -1396,6 +1430,63 @@ function publicState() {
     usage: state.usage,
     usageSummary,
     events: state.events.slice(0, 12)
+  };
+}
+
+function hasProductResearchForProspect(prospect, product = currentProduct()) {
+  const productId = product?.id || "";
+  if (!productId) return false;
+  if (prospect.outreach?.productId === productId) return true;
+  if (prospect.nextActionPlan?.productId === productId || prospect.salesCadence?.productId === productId) return true;
+  return (prospect.researchHistory || []).some((record) =>
+    record.productId === productId
+      && !["linkedin_target_added", "contact_enriched"].includes(record.stage)
+  );
+}
+
+function productResearchPendingAnalysis(prospect, product = currentProduct()) {
+  return {
+    score: 0,
+    reachProbability: 0,
+    closeProbability: 0,
+    productFit: "not researched",
+    persona: bestPersonaMatch(prospect, product),
+    recommendedAction: `Run Research for ${product.name} before scoring, outreach, or next actions.`,
+    scoreInputs: {
+      seniority: 0,
+      fit: 0,
+      companyContext: 0,
+      trigger: 0,
+      contactEvidence: 0,
+      engagement: 0,
+      completeness: 0,
+      penalty: 0,
+      readiness: 0
+    },
+    reasoning: [
+      `This lead has not been researched for ${product.name} yet.`,
+      "Changing product context does not automatically recompute fit; click Run Research to create a product-specific analysis."
+    ]
+  };
+}
+
+function productResearchPendingCompanyProfile(prospect, product = currentProduct()) {
+  return {
+    company_name: prospect.company || "Unknown company",
+    description: `${prospect.company || "This account"} has not been researched for ${product.name} yet.`,
+    category: "Needs research",
+    size_estimate: "unknown - run research",
+    audience: "unknown - run research",
+    business_model: "unknown - run research",
+    likely_priorities: [`Run Research to evaluate ${product.name} fit.`],
+    growth_signals: [],
+    tech_stack: [],
+    why_relevant: "No product-specific research has been run for the selected product.",
+    unknowns: ["official website", "company activity", "audience", "buyer fit", "current trigger"],
+    confidence: 0,
+    research_links: companyResearchLinks(prospect),
+    source_ids: [],
+    claim_type: "needs_research"
   };
 }
 
@@ -2147,6 +2238,8 @@ function normalizeProspect(input) {
     nextActionPlan: input.nextActionPlan || null,
     salesCadence: input.salesCadence || null,
     companyProfile: input.companyProfile || null,
+    publicCompanyResearch: input.publicCompanyResearch || null,
+    publicSocialResearch: input.publicSocialResearch || null,
     isIcpSeed: Boolean(input.isIcpSeed),
     agentResults: input.agentResults || {},
     crmSource: input.crmSource || null
@@ -2708,7 +2801,7 @@ function normalizeProductKnowledge(input) {
 
 function normalizeKnowledgeType(value) {
   const normalized = cleanText(value).toLowerCase().replace(/[\s-]+/g, "_");
-  return ["link", "lesson", "product_context_update", "platform_note", "screenshot", "faq", "case_study", "objection", "competitor"].includes(normalized)
+  return ["link", "lesson", "product_context_update", "product_knowledge", "offer", "deliverable", "icp", "icp_note", "geo", "pricing", "approved_claim", "proof", "case_study", "winning_outreach", "bad_outreach", "market_note", "platform_note", "platform_screenshot", "screenshot", "faq", "objection", "competitor", "competitor_note"].includes(normalized)
     ? normalized
     : "lesson";
 }
@@ -2727,13 +2820,17 @@ function titleFromKnowledge(url, text, screenshot) {
 }
 
 function normalizeOutreachExample(input) {
+  const quality = ["winning", "bad", "neutral"].includes(cleanText(input.quality || "").toLowerCase())
+    ? cleanText(input.quality).toLowerCase()
+    : /bad|avoid|do not|don't|negative|poor/i.test(`${input.outcome || ""} ${input.label || ""}`) ? "bad" : "winning";
   return {
     id: input.id || `example-${randomBytes(6).toString("hex")}`,
     channel: cleanText(input.channel || "linkedin").toLowerCase(),
     persona: cleanText(input.persona || ""),
-    label: cleanText(input.label || ""),
+    label: cleanText(input.label || quality),
+    quality,
     message: cleanText(input.message || ""),
-    outcome: cleanText(input.outcome || ""),
+    outcome: cleanText(input.outcome || (quality === "bad" ? "Bad example - avoid this style" : "Winning example - imitate this style")),
     createdAt: input.createdAt || new Date().toISOString()
   };
 }
@@ -2906,8 +3003,9 @@ function sentenceCase(value) {
 }
 
 function buildCompanyProfile(prospect, product = currentProduct()) {
-  const text = `${prospect.company} ${prospect.title} ${prospect.notes} ${prospect.website}`.toLowerCase();
-  const companyOnlyText = `${prospect.company} ${prospect.notes} ${prospect.website} ${prospect.companyProfile?.category || ""} ${prospect.companyProfile?.description || ""}`.toLowerCase();
+  const publicResearchText = `${prospect.publicCompanyResearch?.title || ""} ${prospect.publicCompanyResearch?.description || ""} ${prospect.publicCompanyResearch?.snippet || ""}`;
+  const text = `${prospect.company} ${prospect.title} ${prospect.notes} ${prospect.website} ${publicResearchText}`.toLowerCase();
+  const companyOnlyText = `${prospect.company} ${prospect.notes} ${prospect.website} ${publicResearchText} ${prospect.companyProfile?.category || ""} ${prospect.companyProfile?.description || ""}`.toLowerCase();
   const knownNotes = publicLeadNote(prospect.notes);
   const categorySource = isBlackAffiliateProduct(product) ? stripNegativeBlackAffiliateEvidence(companyOnlyText) : text;
   const category = companyCategoryFromText(categorySource);
@@ -2941,7 +3039,9 @@ function buildCompanyProfile(prospect, product = currentProduct()) {
     88,
     40
   );
-  const description = category === "Unknown"
+  const description = prospect.publicCompanyResearch?.description
+    ? `${prospect.company || "This account"} public web context: ${sentenceCase(prospect.publicCompanyResearch.description)}.`
+    : category === "Unknown"
     ? `${prospect.company || "This account"} needs company research before confident outreach.`
     : `${prospect.company || "This account"} appears to be ${articleFor(category)} ${category.toLowerCase()} company.${knownNotes ? ` CRM context: ${sentenceCase(knownNotes)}.` : ""}`;
   return {
@@ -3151,12 +3251,16 @@ function isRecentContactDiscovery(prospect, minutes = 20) {
 }
 
 async function enrichProspectContacts(prospect) {
+  const publicCandidates = await enrichPublicWebSignals(prospect);
   const discovery = buildContactDiscovery(prospect);
+  discovery.candidates = mergeContactCandidates([...publicCandidates, ...discovery.candidates]);
   const apifyConfigured = state.apifyVault && state.integrations.apify.configured;
   if (!apifyConfigured) {
     discovery.candidates = mergeContactCandidates(addMessengerLinkCandidates(discovery.candidates));
-    discovery.scraperStatus = "mock_public_search";
-    discovery.scraperNote = "Configure Apify token and actor IDs to run Apollo, ZoomInfo, LinkedIn, or contact-finder scrapers.";
+    discovery.scraperStatus = publicCandidates.length ? "public_web_discovery" : "mock_public_search";
+    discovery.scraperNote = publicCandidates.length
+      ? `${publicCandidates.length} public web candidate${publicCandidates.length === 1 ? "" : "s"} found. Configure Apify actor IDs for phone/email enrichment.`
+      : "Configure Apify token and actor IDs to run Apollo, ZoomInfo, LinkedIn, or contact-finder scrapers.";
     return discovery;
   }
 
@@ -3212,6 +3316,221 @@ async function enrichProspectContacts(prospect) {
   state.integrations.apify.lastRunAt = new Date().toISOString();
   state.integrations.apify.status = discovery.scraperStatus;
   return discovery;
+}
+
+async function enrichPublicWebSignals(prospect) {
+  if (!prospect.company) return [];
+  if (isRecentPublicWebResearch(prospect)) return publicCandidatesFromResearch(prospect.publicCompanyResearch, prospect.publicSocialResearch);
+  const candidates = [];
+  const companyResults = await publicSearchResults(`${prospect.company} official website`, 6);
+  const official = chooseOfficialWebsiteResult(prospect.company, companyResults);
+  if (official) {
+    const officialUrl = originUrlForPublicResult(official.url) || official.url;
+    const domain = normalizeDomain(officialUrl);
+    if (domain && !prospect.website) prospect.website = domain;
+    const page = await fetchPublicPageSummary(officialUrl);
+    prospect.publicCompanyResearch = {
+      checkedAt: new Date().toISOString(),
+      url: officialUrl,
+      domain,
+      title: page.title || official.title,
+      description: page.description || official.snippet,
+      snippet: official.snippet,
+      source: "public_web_search",
+      confidence: official.confidence
+    };
+    candidates.push({
+      type: "website",
+      value: officialUrl,
+      confidence: official.confidence,
+      source: "public web search",
+      status: "review",
+      evidence: [official.title, official.snippet].filter(Boolean).slice(0, 2)
+    });
+  }
+
+  const socialResults = await publicSearchResults(`${prospect.name} ${prospect.company} Facebook`, 6);
+  const facebook = socialResults.find((result) => /(^|\.)facebook\.com$/i.test(hostnameForUrl(result.url)) && !/\/search\//i.test(result.url));
+  prospect.publicSocialResearch = {
+    checkedAt: new Date().toISOString(),
+    facebookUrl: facebook?.url || "",
+    facebookTitle: facebook?.title || "",
+    facebookSnippet: facebook?.snippet || "",
+    source: "public_web_search",
+    confidence: facebook ? 54 : 0
+  };
+  if (facebook) {
+    candidates.push({
+      type: "facebook_match",
+      value: facebook.url,
+      confidence: 54,
+      source: "public web search",
+      status: "suggested_profile_review",
+      evidence: [facebook.title, facebook.snippet, "requires_manual_identity_review"].filter(Boolean).slice(0, 3)
+    });
+  }
+  return candidates;
+}
+
+function isRecentPublicWebResearch(prospect, days = 14) {
+  const timestamp = prospect.publicCompanyResearch?.checkedAt || prospect.publicSocialResearch?.checkedAt;
+  if (!timestamp) return false;
+  const ageMs = Date.now() - new Date(timestamp).getTime();
+  return Number.isFinite(ageMs) && ageMs >= 0 && ageMs <= days * 86_400_000;
+}
+
+function publicCandidatesFromResearch(companyResearch = {}, socialResearch = {}) {
+  const candidates = [];
+  if (companyResearch.url) {
+    candidates.push({
+      type: "website",
+      value: companyResearch.url,
+      confidence: Number(companyResearch.confidence || 64),
+      source: companyResearch.source || "public web search",
+      status: "review",
+      evidence: [companyResearch.title, companyResearch.description].filter(Boolean).slice(0, 2)
+    });
+  }
+  if (socialResearch.facebookUrl) {
+    candidates.push({
+      type: "facebook_match",
+      value: socialResearch.facebookUrl,
+      confidence: Number(socialResearch.confidence || 54),
+      source: socialResearch.source || "public web search",
+      status: "suggested_profile_review",
+      evidence: [socialResearch.facebookTitle, socialResearch.facebookSnippet, "requires_manual_identity_review"].filter(Boolean).slice(0, 3)
+    });
+  }
+  return candidates;
+}
+
+async function publicSearchResults(query, limit = 6) {
+  const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 6500);
+  try {
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 OutboundSalesOS/0.1 public-research",
+        "Accept": "text/html,application/xhtml+xml"
+      },
+      signal: controller.signal
+    });
+    if (!response.ok) return [];
+    const html = await response.text();
+    return parseDuckDuckGoResults(html).slice(0, limit);
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function parseDuckDuckGoResults(html) {
+  const results = [];
+  const blocks = String(html || "").split(/<div class="result/gi).slice(1, 12);
+  for (const block of blocks) {
+    const href = block.match(/href="([^"]+)"/i)?.[1] || "";
+    const titleHtml = block.match(/class="result__a"[^>]*>([\s\S]*?)<\/a>/i)?.[1] || "";
+    const snippetHtml = block.match(/class="result__snippet"[^>]*>([\s\S]*?)<\/a>|class="result__snippet"[^>]*>([\s\S]*?)<\/div>/i);
+    const url = normalizeSearchResultUrl(decodeHtml(href));
+    if (!url || !/^https?:\/\//i.test(url)) continue;
+    results.push({
+      url,
+      title: cleanText(stripHtml(decodeHtml(titleHtml))),
+      snippet: cleanText(stripHtml(decodeHtml(snippetHtml?.[1] || snippetHtml?.[2] || "")))
+    });
+  }
+  return results;
+}
+
+function normalizeSearchResultUrl(value) {
+  try {
+    const parsed = new URL(value, "https://duckduckgo.com");
+    const uddg = parsed.searchParams.get("uddg");
+    return uddg ? decodeURIComponent(uddg) : parsed.href;
+  } catch {
+    return "";
+  }
+}
+
+function chooseOfficialWebsiteResult(company, results) {
+  const tokens = companyTokens(company);
+  const blocked = /(^|\.)((linkedin|facebook|instagram|x|twitter|youtube|crunchbase|apollo|zoominfo|glassdoor|wikipedia|duckduckgo|google|bing)\.com|netlify\.app|sslip\.io)$/i;
+  let best = null;
+  for (const result of results) {
+    const host = hostnameForUrl(result.url);
+    if (!host || blocked.test(host)) continue;
+    const haystack = `${host} ${result.title} ${result.snippet}`.toLowerCase();
+    const tokenHits = tokens.filter((token) => haystack.includes(token)).length;
+    const score = 48 + tokenHits * 16 + (tokens.some((token) => host.includes(token)) ? 18 : 0);
+    if (tokenHits && (!best || score > best.confidence)) best = { ...result, confidence: clampNumber(score, 45, 86, 58) };
+  }
+  return best;
+}
+
+function companyTokens(company) {
+  return slugify(company)
+    .split("-")
+    .filter((token) => token.length > 2 && !["ltd", "llc", "inc", "group", "company", "partners", "digital"].includes(token))
+    .slice(0, 5);
+}
+
+async function fetchPublicPageSummary(url) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+  try {
+    const response = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0 OutboundSalesOS/0.1 public-research" },
+      signal: controller.signal
+    });
+    if (!response.ok) return {};
+    const html = (await response.text()).slice(0, 120000);
+    return {
+      title: cleanText(stripHtml(decodeHtml(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || ""))).slice(0, 180),
+      description: cleanText(stripHtml(decodeHtml(
+        html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i)?.[1]
+          || html.match(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i)?.[1]
+          || ""
+      ))).slice(0, 360)
+    };
+  } catch {
+    return {};
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function hostnameForUrl(value) {
+  try {
+    return new URL(value).hostname.replace(/^www\./i, "").toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function originUrlForPublicResult(value) {
+  try {
+    const parsed = new URL(value);
+    return `${parsed.protocol}//${parsed.hostname.replace(/^www\./i, "")}`;
+  } catch {
+    return "";
+  }
+}
+
+function stripHtml(value) {
+  return String(value || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function decodeHtml(value) {
+  return String(value || "")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)));
 }
 
 function leadDatabaseScraperInput(prospect) {
@@ -4113,7 +4432,7 @@ async function prepareOutreachWithAi(prospect, profile, taskType = "SEQUENCE_GEN
         {
           role: "user",
           content: JSON.stringify({
-            instruction: "Create a product-specific outbound strategy for this exact lead. Start from company context, likely priorities, unknowns, contact evidence, product knowledge, and learning memory. Write messages that feel like a researched note from one professional to another. Do not use broad claims. If company data is weak, make the first touch a research-based question and add a research gap instead of pretending. Include concise LinkedIn invite, LinkedIn follow-up, email, SMS, WhatsApp, Telegram, call opener, four LinkedIn variations, and practical next actions. SMS and messenger drafts must be short and only used after contact/permission review.",
+            instruction: "Create a product-specific outbound strategy for this exact lead. Start from company context, likely priorities, unknowns, contact evidence, product knowledge, and learning memory. Treat outreach examples with quality='winning' as style guidance, and quality='bad' as patterns to avoid. Write messages that feel like a researched note from one professional to another. Do not use broad claims. If company data is weak, make the first touch a research-based question and add a research gap instead of pretending. Include concise LinkedIn invite, LinkedIn follow-up, email, SMS, WhatsApp, Telegram, call opener, four LinkedIn variations, and practical next actions. SMS and messenger drafts must be short and only used after contact/permission review.",
             requiredJsonShape: {
               recommendedChannel: "linkedin | email | sms | whatsapp | telegram | manual_research",
               qualificationRationale: "short rationale",
@@ -7022,7 +7341,7 @@ function valueFromKeys(row, keys) {
 }
 
 function prospectStatuses() {
-  return ["new", "enriched", "intelligence_ready", "linkedin_ready", "outreach_ready", "contacted", "engaged", "call_analyzed", "follow_up_due", "meeting_booked", "review"];
+  return ["new", "product_research_needed", "enriched", "intelligence_ready", "linkedin_ready", "outreach_ready", "contacted", "engaged", "call_analyzed", "follow_up_due", "meeting_booked", "review"];
 }
 
 function normalizeProspectStatus(value) {

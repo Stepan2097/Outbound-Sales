@@ -539,7 +539,13 @@
                     <span>Data type</span>
                     <select id="knowledgeInboxTypeInput">
                       <option value="product_knowledge">Product knowledge</option>
+                      <option value="offer">Offer / deliverables</option>
+                      <option value="icp">ICP / GEO / buyer</option>
+                      <option value="pricing">Pricing / commercial model</option>
+                      <option value="approved_claim">Approved claim</option>
+                      <option value="case_study">Proof / case study</option>
                       <option value="winning_outreach">Winning outreach</option>
+                      <option value="bad_outreach">Bad outreach / avoid</option>
                       <option value="market_note">Market note</option>
                       <option value="objection">Objection</option>
                       <option value="icp_note">ICP note</option>
@@ -718,6 +724,35 @@
                   <span>Plain text product training</span>
                   <textarea id="productContextInput" class="product-context-textarea" rows="14" placeholder="Paste the full product context here. Include product name, what it does, ICP, who buys it, pain points, use cases, proof, pricing logic, objections, claims to avoid, how to sell it, message tone, competitors, and what makes a lead high or low fit. The system will analyze this text, create/update the product, segment the knowledge, and use it for outreach."></textarea>
                 </label>
+                <details class="structured-product-fields" open>
+                  <summary><span>Structured context</span><i data-lucide="chevron-down"></i></summary>
+                  <div class="structured-product-grid">
+                    <label>
+                      <span>Offer + deliverables</span>
+                      <textarea id="productOfferInput" rows="5" placeholder="What exactly do we sell, what is delivered, how onboarding works, what is included."></textarea>
+                    </label>
+                    <label>
+                      <span>ICP, buyers + GEOs</span>
+                      <textarea id="productIcpInput" rows="5" placeholder="Ideal companies, buyer personas, countries/GEOs, high-fit and low-fit signals."></textarea>
+                    </label>
+                    <label>
+                      <span>Pricing / commercial model</span>
+                      <textarea id="productPricingInput" rows="4" placeholder="Pricing, rev-share, CPA, retainers, test budgets, minimums, commercial rules."></textarea>
+                    </label>
+                    <label>
+                      <span>Proof, cases + approved claims</span>
+                      <textarea id="productProofInput" rows="4" placeholder="Case studies, proof points, exact claims we are allowed to make."></textarea>
+                    </label>
+                    <label>
+                      <span>Winning outreach examples</span>
+                      <textarea id="productWinningExamplesInput" rows="5" placeholder="Paste winning LinkedIn/SMS/email examples and notes on why they worked."></textarea>
+                    </label>
+                    <label>
+                      <span>Bad examples + claims to avoid</span>
+                      <textarea id="productBadExamplesInput" rows="5" placeholder="Paste bad messages, salesy phrases, false assumptions, disallowed claims, compliance limits."></textarea>
+                    </label>
+                  </div>
+                </details>
                 <button class="primary-button" id="productTeachBtn" type="submit"><i data-lucide="brain-circuit"></i><span>Analyze & Save Product</span></button>
               </form>
             </section>
@@ -753,7 +788,18 @@
                     <select id="exampleChannelInput">
                       <option value="linkedin">LinkedIn</option>
                       <option value="email">Email</option>
+                      <option value="sms">SMS</option>
+                      <option value="whatsapp">WhatsApp</option>
+                      <option value="telegram">Telegram</option>
                       <option value="call">Call</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Example type</span>
+                    <select id="exampleQualityInput">
+                      <option value="winning">Winning / use this style</option>
+                      <option value="bad">Bad / avoid this style</option>
+                      <option value="neutral">Neutral note</option>
                     </select>
                   </label>
                   <label>

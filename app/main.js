@@ -2058,18 +2058,51 @@ document.getElementById("newProductBtn")?.addEventListener("click", () => {
 document.getElementById("productForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const input = document.getElementById("productContextInput");
+  const structuredText = structuredProductTrainingText();
   await runUiAction("product", "Analyzing product text and updating system memory...", async () => {
     state = await api("/api/products/teach", {
       method: "POST",
       body: JSON.stringify({
         productId: state.selectedProductId,
-        text: input.value
+        text: structuredText
       })
     });
-    input.value = "";
+    clearStructuredProductTrainingFields();
   });
   creatingNewProduct = false;
 });
+
+function structuredProductTrainingText() {
+  const sections = [
+    ["General product context", document.getElementById("productContextInput").value],
+    ["Offer and deliverables", document.getElementById("productOfferInput")?.value],
+    ["ICP, buyers, and GEOs", document.getElementById("productIcpInput")?.value],
+    ["Pricing and commercial model", document.getElementById("productPricingInput")?.value],
+    ["Proof, cases, and approved claims", document.getElementById("productProofInput")?.value],
+    ["Winning outreach examples to imitate", document.getElementById("productWinningExamplesInput")?.value],
+    ["Bad outreach examples and claims to avoid", document.getElementById("productBadExamplesInput")?.value]
+  ];
+  return sections
+    .map(([label, value]) => [label, String(value || "").trim()])
+    .filter(([, value]) => value)
+    .map(([label, value]) => `${label}:\n${value}`)
+    .join("\n\n");
+}
+
+function clearStructuredProductTrainingFields() {
+  [
+    "productContextInput",
+    "productOfferInput",
+    "productIcpInput",
+    "productPricingInput",
+    "productProofInput",
+    "productWinningExamplesInput",
+    "productBadExamplesInput"
+  ].forEach((id) => {
+    const element = document.getElementById(id);
+    if (element) element.value = "";
+  });
+}
 
 document.getElementById("exampleForm").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -2082,6 +2115,7 @@ document.getElementById("exampleForm").addEventListener("submit", async (event) 
     body: JSON.stringify({
       productId: state.selectedProductId,
       channel: document.getElementById("exampleChannelInput").value,
+      quality: document.getElementById("exampleQualityInput").value,
       persona: document.getElementById("examplePersonaInput").value,
       message: document.getElementById("exampleMessageInput").value,
       outcome: document.getElementById("exampleOutcomeInput").value

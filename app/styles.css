@@ -2470,6 +2470,38 @@ dialog {
   margin-top: 14px;
 }
 
+.structured-product-fields {
+  border: 1px solid rgba(143, 177, 207, 0.18);
+  border-radius: 8px;
+  background: rgba(4, 16, 29, 0.34);
+  padding: 10px;
+}
+
+.structured-product-fields summary {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  color: #dcecff;
+  font-weight: 800;
+}
+
+.structured-product-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.structured-product-grid label {
+  min-width: 0;
+}
+
+.structured-product-grid textarea {
+  min-height: 112px;
+}
+
 .knowledge-inbox-card {
   display: grid;
   gap: 10px;
@@ -2844,7 +2876,7 @@ dialog {
 
 .lead-workbench-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 400px);
   gap: 18px;
   align-items: start;
 }
@@ -2881,6 +2913,7 @@ dialog {
   height: calc(100vh - 134px);
   overflow: auto;
   padding-right: 2px;
+  min-width: 0;
 }
 
 .quick-action-panel button,
@@ -3065,6 +3098,43 @@ dialog {
 
 .lead-side-rail .prospect-list {
   max-height: 330px;
+}
+
+.lead-side-rail .prospect-queue-row {
+  grid-template-columns: minmax(0, 1fr) 40px;
+}
+
+.lead-side-rail .prospect-card {
+  grid-template-columns: 38px minmax(0, 1fr) 44px;
+  gap: 10px;
+  padding: 9px;
+  overflow: hidden;
+}
+
+.lead-side-rail .prospect-card > div:not(.avatar) {
+  min-width: 0;
+}
+
+.lead-side-rail .prospect-card strong,
+.lead-side-rail .prospect-card span,
+.lead-side-rail .prospect-card small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lead-side-rail .prospect-card span,
+.lead-side-rail .prospect-card small {
+  white-space: nowrap;
+}
+
+.lead-side-rail .prospect-card b {
+  width: 38px;
+  height: 38px;
+  font-size: 11px;
+}
+
+.lead-side-rail .queue-remove {
+  width: 40px;
 }
 
 .lead-side-rail .filter-row {
@@ -3375,6 +3445,10 @@ dialog {
   .knowledge-inbox-form .compact-drop,
   .knowledge-inbox-form .screenshot-preview {
     grid-column: 1;
+  }
+
+  .structured-product-grid {
+    grid-template-columns: 1fr;
   }
 
   .lead-side-rail {
