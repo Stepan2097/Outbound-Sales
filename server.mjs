@@ -3583,24 +3583,19 @@ function companyPeopleScraperInput(prospect) {
     "Sales Director"
   ];
   return compactObject({
-    company,
-    organization: company,
-    companyName: company,
-    currentCompany: company,
-    domain,
-    website: domain ? `https://${domain}` : prospect.website,
-    linkedinUrl: prospect.linkedin,
-    leadName: prospect.name,
-    leadTitle: prospect.title,
-    search: `${company} (${roleFilters.slice(0, 6).join(" OR ")}) site:linkedin.com/in`,
-    keywords: [company, ...roleFilters.slice(0, 8)].filter(Boolean),
-    personTitleIncludes: roleFilters,
-    companyKeywordIncludes: companyTokens(company),
-    companyDomainIncludes: domain ? [domain] : [],
-    companyMatchMode: "strict",
     totalResults: 12,
-    limit: 12,
-    maxResults: 12,
+    companyNameIncludes: company ? [company] : [],
+    companyDomainIncludes: domain ? [domain] : [],
+    personTitleIncludes: roleFilters,
+    includeTitleVariants: true,
+    roleMatchMode: "any",
+    hasEmail: false,
+    hasPhone: false,
+    companyMatchMode: "any",
+    companyKeywordMode: "broad",
+    companyDomainMatchMode: domain ? "strict" : "broad",
+    resetProgress: false,
+    countOnly: false,
     dontSaveProgress: true
   });
 }
@@ -3687,7 +3682,8 @@ async function runApifyActor(actorId, input, maxChargeUsd) {
       signal: controller.signal
     });
     if (!response.ok) {
-      throw new Error(`Apify actor ${actorId} returned HTTP ${response.status}.`);
+      const detail = cleanText(stripHtml(decodeHtml(await response.text().catch(() => "")))).slice(0, 280);
+      throw new Error(`Apify actor ${actorId} returned HTTP ${response.status}${detail ? `: ${detail}` : ""}.`);
     }
     const data = await response.json();
     return Array.isArray(data) ? data : [];
