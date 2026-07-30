@@ -846,7 +846,7 @@ function accountSignalRows(prospect) {
 function buyingCommitteeRows(prospect) {
   if (!prospect) return `<div class="empty-state">Open a lead to map the buying committee</div>`;
   const committee = committeeForProspect(prospect);
-  return committee.map((member) => `
+  return `${companyPeopleDirectoryCard(prospect)}${committee.map((member) => `
     <article class="committee-card">
       <div class="avatar">${initials(member.name)}</div>
       <div>
@@ -855,7 +855,25 @@ function buyingCommitteeRows(prospect) {
       </div>
       <span class="pill">${escapeHtml(member.confidence ? `${member.confidence}%` : titleCase(member.role))}</span>
     </article>
-  `).join("");
+  `).join("")}`;
+}
+
+function companyPeopleDirectoryCard(prospect) {
+  const url = companyLinkedInPeopleUrlForProspect(prospect);
+  if (!url) return "";
+  const storedSource = prospect.publicCompanyResearch?.linkedinCompanySource || "";
+  const source = storedSource === "inferred_company_slug" || (!prospect.publicCompanyResearch?.linkedinPeopleUrl && !prospect.companyLinkedin)
+    ? "inferred from company name"
+    : "company LinkedIn";
+  return `
+    <article class="committee-directory-card">
+      <div>
+        <strong>LinkedIn company people</strong>
+        <span>${escapeHtml(source)} · open to review employees and choose 1-2 relevant targets</span>
+      </div>
+      <a class="mini-button" href="${escapeAttr(url)}" target="_blank" rel="noreferrer"><i data-lucide="external-link"></i><span>Open People</span></a>
+    </article>
+  `;
 }
 
 function committeeForProspect(prospect) {
@@ -1654,6 +1672,40 @@ function linkIfUrl(value) {
     return `<a href="${escapeAttr(text)}" target="_blank" rel="noreferrer">${escapeHtml(shortUrl(text))}</a>`;
   }
   return escapeHtml(text);
+}
+
+function companyLinkedInPeopleUrlForProspect(prospect = {}) {
+  return prospect.publicCompanyResearch?.linkedinPeopleUrl
+    || linkedInCompanyPeopleUrl(prospect.companyLinkedin)
+    || linkedInCompanyPeopleUrl(inferredLinkedInCompanyUrl(prospect.company));
+}
+
+function inferredLinkedInCompanyUrl(company) {
+  const slug = String(company || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug ? `https://www.linkedin.com/company/${slug}/` : "";
+}
+
+function normalizeLinkedInCompanyUrl(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  try {
+    const parsed = new URL(/^https?:\/\//i.test(text) ? text : `https://${text}`);
+    if (!/(^|\.)linkedin\.com$/i.test(parsed.hostname)) return "";
+    const parts = parsed.pathname.split("/").filter(Boolean);
+    const companyIndex = parts.indexOf("company");
+    if (companyIndex < 0 || !parts[companyIndex + 1]) return "";
+    return `https://www.linkedin.com/company/${parts[companyIndex + 1]}/`;
+  } catch {
+    return "";
+  }
+}
+
+function linkedInCompanyPeopleUrl(value) {
+  const companyUrl = normalizeLinkedInCompanyUrl(value);
+  return companyUrl ? `${companyUrl}people/` : "";
 }
 
 function shortUrl(value) {

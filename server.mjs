@@ -2228,6 +2228,7 @@ function normalizeProspect(input) {
     location: cleanText(input.location || input.city || ""),
     website,
     linkedin: cleanText(input.linkedin || input.linkedIn || ""),
+    companyLinkedin: normalizeLinkedInCompanyUrl(input.companyLinkedin || input.companyLinkedIn || input.companyLinkedinUrl || input.companyLinkedInUrl || input.linkedinCompany || input.companyLinkedInProfile || ""),
     email: cleanText(input.email || ""),
     phone: cleanText(input.phone || ""),
     notes: cleanText(input.notes || input.context || ""),
@@ -3135,8 +3136,11 @@ function companyPrioritiesFor(prospect, product, category) {
 function companyResearchLinks(prospect) {
   const query = encodeURIComponent([prospect.company, prospect.website].filter(Boolean).join(" "));
   const peopleQuery = encodeURIComponent([prospect.company, "leadership"].filter(Boolean).join(" "));
+  const linkedinPeopleUrl = companyLinkedInPeopleUrlForProspect(prospect);
   return [
     prospect.website ? { label: "Company website", url: `https://${normalizeDomain(prospect.website)}` } : null,
+    linkedinPeopleUrl ? { label: "LinkedIn company people", url: linkedinPeopleUrl } : null,
+    prospect.companyLinkedin ? { label: "Company LinkedIn", url: prospect.companyLinkedin } : null,
     prospect.company ? { label: "Company web search", url: `https://www.google.com/search?q=${query}` } : null,
     prospect.company ? { label: "Leadership search", url: `https://www.google.com/search?q=${peopleQuery}` } : null,
     prospect.linkedin ? { label: "Lead LinkedIn", url: prospect.linkedin } : null
@@ -3335,7 +3339,10 @@ async function enrichProspectContacts(prospect) {
 
 async function enrichPublicWebSignals(prospect) {
   if (!prospect.company) return [];
-  if (isRecentPublicWebResearch(prospect)) return publicCandidatesFromResearch(prospect.publicCompanyResearch, prospect.publicSocialResearch);
+  if (isRecentPublicWebResearch(prospect)) {
+    ensureCompanyLinkedInResearch(prospect);
+    return publicCandidatesFromResearch(prospect.publicCompanyResearch, prospect.publicSocialResearch);
+  }
   const candidates = [];
   const companyResults = await publicSearchResults(`${prospect.company} official website`, 6);
   const official = chooseOfficialWebsiteResult(prospect.company, companyResults);
@@ -3361,6 +3368,20 @@ async function enrichPublicWebSignals(prospect) {
       source: "public web search",
       status: "review",
       evidence: [official.title, official.snippet].filter(Boolean).slice(0, 2)
+    });
+  }
+
+  const linkedinResults = await publicSearchResults(`${prospect.company} LinkedIn company`, 6);
+  const linkedinCompany = chooseLinkedInCompanyResult(prospect.company, linkedinResults);
+  const linkedinDirectory = ensureCompanyLinkedInResearch(prospect, linkedinCompany);
+  if (linkedinDirectory?.peopleUrl) {
+    candidates.push({
+      type: "linkedin_company_people",
+      value: linkedinDirectory.peopleUrl,
+      confidence: linkedinDirectory.confidence,
+      source: linkedinDirectory.source,
+      status: linkedinDirectory.source === "inferred_company_slug" ? "inferred_review" : "review",
+      evidence: linkedinDirectory.evidence
     });
   }
 
@@ -3404,6 +3425,16 @@ function publicCandidatesFromResearch(companyResearch = {}, socialResearch = {})
       source: companyResearch.source || "public web search",
       status: "review",
       evidence: [companyResearch.title, companyResearch.description].filter(Boolean).slice(0, 2)
+    });
+  }
+  if (companyResearch.linkedinPeopleUrl) {
+    candidates.push({
+      type: "linkedin_company_people",
+      value: companyResearch.linkedinPeopleUrl,
+      confidence: Number(companyResearch.linkedinCompanyConfidence || 48),
+      source: companyResearch.linkedinCompanySource || "inferred_company_slug",
+      status: companyResearch.linkedinCompanySource === "inferred_company_slug" ? "inferred_review" : "review",
+      evidence: [companyResearch.linkedinCompanyTitle, companyResearch.linkedinCompanySnippet, "Open LinkedIn people to review other employees."].filter(Boolean).slice(0, 3)
     });
   }
   if (socialResearch.facebookUrl) {
@@ -3482,6 +3513,80 @@ function chooseOfficialWebsiteResult(company, results) {
     if (tokenHits && (!best || score > best.confidence)) best = { ...result, confidence: clampNumber(score, 45, 86, 58) };
   }
   return best;
+}
+
+function chooseLinkedInCompanyResult(company, results) {
+  const tokens = companyTokens(company);
+  let best = null;
+  for (const result of results) {
+    const companyUrl = normalizeLinkedInCompanyUrl(result.url);
+    if (!companyUrl) continue;
+    const haystack = `${companyUrl} ${result.title} ${result.snippet}`.toLowerCase();
+    const tokenHits = tokens.filter((token) => haystack.includes(token)).length;
+    const score = 46 + tokenHits * 14;
+    if (tokenHits && (!best || score > best.confidence)) best = { ...result, url: companyUrl, confidence: clampNumber(score, 45, 82, 58) };
+  }
+  return best;
+}
+
+function ensureCompanyLinkedInResearch(prospect, linkedinCompany = null) {
+  const importedCompanyUrl = normalizeLinkedInCompanyUrl(prospect.companyLinkedin || "");
+  const foundCompanyUrl = normalizeLinkedInCompanyUrl(linkedinCompany?.url || "");
+  const inferredCompanyUrl = inferredLinkedInCompanyUrl(prospect.company);
+  const companyUrl = foundCompanyUrl || importedCompanyUrl || inferredCompanyUrl;
+  const peopleUrl = linkedInCompanyPeopleUrl(companyUrl);
+  if (!peopleUrl) return null;
+  const source = foundCompanyUrl ? "public_web_search" : importedCompanyUrl ? "uploaded_profile" : "inferred_company_slug";
+  const confidence = foundCompanyUrl ? Number(linkedinCompany.confidence || 62) : importedCompanyUrl ? 72 : 48;
+  prospect.companyLinkedin = companyUrl;
+  prospect.publicCompanyResearch = {
+    checkedAt: new Date().toISOString(),
+    ...(prospect.publicCompanyResearch || {}),
+    linkedinCompanyUrl: companyUrl,
+    linkedinPeopleUrl: peopleUrl,
+    linkedinCompanyTitle: linkedinCompany?.title || prospect.publicCompanyResearch?.linkedinCompanyTitle || "",
+    linkedinCompanySnippet: linkedinCompany?.snippet || prospect.publicCompanyResearch?.linkedinCompanySnippet || "",
+    linkedinCompanySource: source,
+    linkedinCompanyConfidence: confidence
+  };
+  return {
+    companyUrl,
+    peopleUrl,
+    source,
+    confidence,
+    evidence: [linkedinCompany?.title, linkedinCompany?.snippet, source === "inferred_company_slug" ? "LinkedIn company slug inferred from company name." : "LinkedIn company page found."].filter(Boolean).slice(0, 3)
+  };
+}
+
+function companyLinkedInPeopleUrlForProspect(prospect = {}) {
+  return prospect.publicCompanyResearch?.linkedinPeopleUrl
+    || linkedInCompanyPeopleUrl(prospect.companyLinkedin)
+    || linkedInCompanyPeopleUrl(inferredLinkedInCompanyUrl(prospect.company));
+}
+
+function inferredLinkedInCompanyUrl(company) {
+  const slug = slugify(company);
+  return slug ? `https://www.linkedin.com/company/${slug}/` : "";
+}
+
+function normalizeLinkedInCompanyUrl(value) {
+  const text = cleanText(value);
+  if (!text) return "";
+  try {
+    const parsed = new URL(/^https?:\/\//i.test(text) ? text : `https://${text}`);
+    if (!/(^|\.)linkedin\.com$/i.test(parsed.hostname)) return "";
+    const parts = parsed.pathname.split("/").filter(Boolean);
+    const companyIndex = parts.indexOf("company");
+    if (companyIndex < 0 || !parts[companyIndex + 1]) return "";
+    return `https://www.linkedin.com/company/${parts[companyIndex + 1]}/`;
+  } catch {
+    return "";
+  }
+}
+
+function linkedInCompanyPeopleUrl(value) {
+  const companyUrl = normalizeLinkedInCompanyUrl(value);
+  return companyUrl ? `${companyUrl}people/` : "";
 }
 
 function companyTokens(company) {

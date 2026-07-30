@@ -2978,6 +2978,7 @@ dialog {
 }
 
 .research-signal,
+.committee-directory-card,
 .committee-card,
 .source-row,
 .next-action-card,
@@ -3030,6 +3031,38 @@ dialog {
   grid-template-columns: 34px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
+}
+
+.committee-directory-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  background: linear-gradient(135deg, rgba(40, 212, 191, 0.13), rgba(79, 140, 255, 0.1));
+}
+
+.committee-directory-card strong,
+.committee-directory-card span {
+  display: block;
+}
+
+.committee-directory-card span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.committee-directory-card .mini-button {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(101, 240, 219, 0.28);
+  border-radius: 8px;
+  padding: 0 12px;
+  color: #65f0db;
+  text-decoration: none;
+  font-weight: 800;
+  white-space: nowrap;
 }
 
 .committee-card a {
