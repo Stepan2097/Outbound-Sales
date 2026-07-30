@@ -85,16 +85,16 @@
               </div>
             </section>
 
-            <nav class="lead-section-nav" aria-label="Lead workspace sections">
-              <a href="#dashboard-overview">Overview</a>
-              <a href="#dashboard-intelligence">Intelligence</a>
-              <a href="#dashboard-account">Research</a>
-              <a href="#dashboard-buying">Committee</a>
-              <a href="#dashboard-contact">Contacts</a>
-              <a href="#dashboard-score">Scoring</a>
-              <a href="#dashboard-outreach">Outreach</a>
-              <a href="#dashboard-followup">Tasks</a>
-              <a href="#dashboard-next">Next Action</a>
+            <nav class="lead-section-nav" aria-label="Lead workspace sections" role="tablist">
+              <button type="button" role="tab" data-lead-tab="dashboard-account">Company</button>
+              <button type="button" role="tab" data-lead-tab="dashboard-intelligence">Brief</button>
+              <button type="button" role="tab" data-lead-tab="dashboard-buying">Committee</button>
+              <button type="button" role="tab" data-lead-tab="dashboard-contact">Contacts</button>
+              <button type="button" role="tab" data-lead-tab="dashboard-score">Scoring</button>
+              <button type="button" role="tab" data-lead-tab="dashboard-outreach">Messages</button>
+              <button type="button" role="tab" data-lead-tab="dashboard-followup">Tasks</button>
+              <button type="button" role="tab" data-lead-tab="dashboard-next">Next Action</button>
+              <button type="button" role="tab" data-lead-tab="dashboard-cycle">Sales Cycle</button>
             </nav>
 
             <div class="lead-workbench-grid">
@@ -898,6 +898,8 @@
                   <input id="facebookProfileActorInput" type="text" placeholder="Facebook/person match actor id" />
                   <input id="emailPhoneFinderActorInput" type="text" placeholder="Email and phone finder actor id" />
                   <input id="phoneMessengerCheckActorInput" type="text" placeholder="WhatsApp/Telegram phone check actor id" />
+                  <input id="companyPeopleActorInput" type="text" placeholder="Company people actor id" />
+                  <textarea id="companyPeopleInputTemplate" rows="5" spellcheck="false" placeholder='{"company":"{{company}}","domain":"{{domain}}","personTitleIncludes":["Founder","Head of Affiliates"],"totalResults":12}'></textarea>
                 </details>
                 <input id="apifyMaxChargeInput" type="number" min="0.05" step="0.05" />
                 <button class="primary-button" type="submit"><i data-lucide="save"></i><span>Save Apify</span></button>

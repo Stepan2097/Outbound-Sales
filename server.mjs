@@ -143,10 +143,12 @@ const state = {
         zoominfo: "",
         facebookProfile: "",
         emailPhoneFinder: "",
-        phoneMessengerCheck: ""
+        phoneMessengerCheck: "",
+        companyPeople: "kVYdvNOefemtiDXO5"
       },
       actorInputTemplates: {
-        leadDatabase: ""
+        leadDatabase: "",
+        companyPeople: ""
       },
       maxChargeUsd: 1.5,
       status: "not_configured",
@@ -702,11 +704,13 @@ async function handleApi(request, response, url) {
       zoominfo: normalizeApifyActorId(body.zoominfoActorId || state.integrations.apify.actorIds.zoominfo),
       facebookProfile: normalizeApifyActorId(body.facebookProfileActorId || state.integrations.apify.actorIds.facebookProfile),
       emailPhoneFinder: normalizeApifyActorId(body.emailPhoneFinderActorId || state.integrations.apify.actorIds.emailPhoneFinder),
-      phoneMessengerCheck: normalizeApifyActorId(body.phoneMessengerCheckActorId || state.integrations.apify.actorIds.phoneMessengerCheck)
+      phoneMessengerCheck: normalizeApifyActorId(body.phoneMessengerCheckActorId || state.integrations.apify.actorIds.phoneMessengerCheck),
+      companyPeople: normalizeApifyActorId(body.companyPeopleActorId || state.integrations.apify.actorIds.companyPeople)
     };
     state.integrations.apify.actorInputTemplates = {
       ...state.integrations.apify.actorInputTemplates,
-      leadDatabase: cleanLongText(body.leadDatabaseInputTemplate || state.integrations.apify.actorInputTemplates?.leadDatabase || "")
+      leadDatabase: cleanLongText(body.leadDatabaseInputTemplate || state.integrations.apify.actorInputTemplates?.leadDatabase || ""),
+      companyPeople: cleanLongText(body.companyPeopleInputTemplate || state.integrations.apify.actorInputTemplates?.companyPeople || "")
     };
     state.integrations.apify.maxChargeUsd = clampNumber(body.maxChargeUsd, 0.05, 50, state.integrations.apify.maxChargeUsd);
     if (typeof body.apiToken === "string" && body.apiToken.trim()) {
@@ -2240,6 +2244,7 @@ function normalizeProspect(input) {
     companyProfile: input.companyProfile || null,
     publicCompanyResearch: input.publicCompanyResearch || null,
     publicSocialResearch: input.publicSocialResearch || null,
+    companyPeople: normalizeCompanyPeopleList(input.companyPeople || []),
     isIcpSeed: Boolean(input.isIcpSeed),
     agentResults: input.agentResults || {},
     crmSource: input.crmSource || null
@@ -3272,7 +3277,8 @@ async function enrichProspectContacts(prospect) {
     ["zoominfo", state.integrations.apify.actorIds.zoominfo, { name: prospect.name, company: prospect.company, linkedinUrl: prospect.linkedin }],
     ["facebookProfile", state.integrations.apify.actorIds.facebookProfile, { name: prospect.name, company: prospect.company, location: prospect.location, linkedinUrl: prospect.linkedin }],
     ["emailPhoneFinder", state.integrations.apify.actorIds.emailPhoneFinder, { name: prospect.name, company: prospect.company, domain: prospect.website, linkedinUrl: prospect.linkedin }],
-    ["phoneMessengerCheck", state.integrations.apify.actorIds.phoneMessengerCheck, { name: prospect.name, company: prospect.company, phones: knownPhoneCandidates(prospect), linkedinUrl: prospect.linkedin }]
+    ["phoneMessengerCheck", state.integrations.apify.actorIds.phoneMessengerCheck, { name: prospect.name, company: prospect.company, phones: knownPhoneCandidates(prospect), linkedinUrl: prospect.linkedin }],
+    ["companyPeople", state.integrations.apify.actorIds.companyPeople || "kVYdvNOefemtiDXO5", companyPeopleScraperInput(prospect)]
   ].filter(([, actorId]) => actorId);
 
   if (!actorInputs.length) {
@@ -3283,6 +3289,7 @@ async function enrichProspectContacts(prospect) {
   }
 
   const apifyCandidates = [];
+  const companyPeople = [];
   let actorsRun = 0;
   let skippedForTemplate = false;
   const actorResults = await Promise.all(actorInputs.map(async ([source, actorId, input]) => {
@@ -3303,13 +3310,21 @@ async function enrichProspectContacts(prospect) {
       continue;
     }
     actorsRun += 1;
+    if (result.source === "companyPeople") {
+      companyPeople.push(...peopleFromScraperItems(result.items || [], result.source, prospect));
+      continue;
+    }
     apifyCandidates.push(...(result.items || []).flatMap((item) => candidatesFromScraperItem(item, result.source)));
   }
 
+  if (companyPeople.length) {
+    prospect.companyPeople = mergeCompanyPeople([...(prospect.companyPeople || []), ...companyPeople]).slice(0, 12);
+    discovery.companyPeople = prospect.companyPeople;
+  }
   discovery.candidates = mergeContactCandidates(addMessengerLinkCandidates([...apifyCandidates, ...discovery.candidates]));
-  discovery.scraperStatus = apifyCandidates.length ? "apify_enriched" : skippedForTemplate ? "configured_needs_template" : "apify_no_results";
+  discovery.scraperStatus = apifyCandidates.length || companyPeople.length ? "apify_enriched" : skippedForTemplate ? "configured_needs_template" : "apify_no_results";
   discovery.scraperNote = actorsRun
-    ? `${apifyCandidates.length} candidates returned from ${actorsRun} Apify actor${actorsRun === 1 ? "" : "s"}.`
+    ? `${apifyCandidates.length} contact candidates and ${companyPeople.length} company people returned from ${actorsRun} Apify actor${actorsRun === 1 ? "" : "s"}.`
     : skippedForTemplate
       ? "Apify is connected. Add the lead database input template before running the paid scraper."
       : "No Apify actors ran.";
@@ -3550,6 +3565,46 @@ function leadDatabaseScraperInput(prospect) {
   };
 }
 
+function companyPeopleScraperInput(prospect) {
+  const company = prospect.company || "";
+  const domain = normalizeDomain(prospect.website);
+  const roleFilters = [
+    "Founder",
+    "CEO",
+    "CMO",
+    "Head of Affiliates",
+    "Affiliate Manager",
+    "Partnerships Manager",
+    "Head of Growth",
+    "Paid Media Buyer",
+    "User Acquisition",
+    "Marketing Director",
+    "Revenue Operations",
+    "Sales Director"
+  ];
+  return compactObject({
+    company,
+    organization: company,
+    companyName: company,
+    currentCompany: company,
+    domain,
+    website: domain ? `https://${domain}` : prospect.website,
+    linkedinUrl: prospect.linkedin,
+    leadName: prospect.name,
+    leadTitle: prospect.title,
+    search: `${company} (${roleFilters.slice(0, 6).join(" OR ")}) site:linkedin.com/in`,
+    keywords: [company, ...roleFilters.slice(0, 8)].filter(Boolean),
+    personTitleIncludes: roleFilters,
+    companyKeywordIncludes: companyTokens(company),
+    companyDomainIncludes: domain ? [domain] : [],
+    companyMatchMode: "strict",
+    totalResults: 12,
+    limit: 12,
+    maxResults: 12,
+    dontSaveProgress: true
+  });
+}
+
 function apifyInputFor(source, prospect, fallbackInput) {
   const template = state.integrations.apify.actorInputTemplates?.[source] || "";
   if (!template) {
@@ -3701,6 +3756,116 @@ function collectContactValues(value, values) {
     return;
   }
   values.push(value);
+}
+
+function peopleFromScraperItems(items, source, prospect) {
+  return (items || [])
+    .flatMap((item) => normalizeCompanyPeopleItem(item, source, prospect))
+    .filter((person) => person.name && person.name.toLowerCase() !== prospect.name?.toLowerCase());
+}
+
+function normalizeCompanyPeopleList(items) {
+  const list = Array.isArray(items) ? items : [items].filter(Boolean);
+  return mergeCompanyPeople(list.flatMap((item) => normalizeCompanyPeopleItem(item, item.source || "saved", {}))).slice(0, 12);
+}
+
+function normalizeCompanyPeopleItem(item, source, prospect = {}) {
+  if (!item) return [];
+  if (Array.isArray(item)) return item.flatMap((child) => normalizeCompanyPeopleItem(child, source, prospect));
+  if (typeof item !== "object") return [];
+  const nestedPeople = [
+    item.people,
+    item.contacts,
+    item.results,
+    item.items,
+    item.employees,
+    item.profiles
+  ].filter(Array.isArray);
+  const ownPerson = personFromCompanyPeopleObject(item, source, prospect);
+  return [
+    ...(ownPerson ? [ownPerson] : []),
+    ...nestedPeople.flatMap((group) => group.flatMap((child) => normalizeCompanyPeopleItem(child, source, prospect)))
+  ];
+}
+
+function personFromCompanyPeopleObject(item, source, prospect = {}) {
+  const name = scraperText(item, ["name", "fullName", "personName", "full_name", "profileName", "titleText"]) || cleanText([item.firstName, item.lastName].filter(Boolean).join(" "));
+  const title = scraperText(item, ["title", "jobTitle", "position", "headline", "currentTitle", "role"]);
+  const company = scraperText(item, ["company", "currentCompany", "organization", "companyName", "employer"]);
+  const linkedin = normalizeLinkedInProfileUrl(extractContactValues(item, ["linkedin", "linkedinUrl", "linkedin_url", "linkedinProfile", "profileUrl", "profile_url", "url", "profile"])[0]);
+  if (!name || (!title && !linkedin)) return null;
+  const companyMatches = company && prospect.company && (
+    company.toLowerCase().includes(String(prospect.company).toLowerCase())
+    || String(prospect.company).toLowerCase().includes(company.toLowerCase())
+  );
+  const role = committeeRoleServer(title);
+  const confidence = clampNumber(
+    scraperConfidence(item, 56) + (companyMatches ? 18 : 0) + (linkedin ? 10 : 0) + (role !== "influencer" ? 6 : 0),
+    35,
+    92,
+    62
+  );
+  return {
+    id: cleanText(item.id || item.profileId || item.urn || linkedin || `${name}-${title}`),
+    name,
+    title: title || "Unknown title",
+    company: company || prospect.company || "",
+    linkedin,
+    location: scraperText(item, ["location", "geo", "city", "country"]),
+    role,
+    context: scraperText(item, ["context", "reason", "whyTarget"]) || (companyMatches ? "found by company scrape" : "company scrape - review match"),
+    confidence,
+    source: source.startsWith("apify:") ? source : `apify:${source}`,
+    verified: Boolean(linkedin || companyMatches)
+  };
+}
+
+function scraperText(item, keys) {
+  const values = [];
+  for (const key of keys) collectScraperText(item?.[key], values);
+  return cleanText(values.find((value) => String(value || "").trim() && String(value) !== "[object Object]") || "");
+}
+
+function collectScraperText(value, values) {
+  if (!value) return;
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectScraperText(item, values));
+    return;
+  }
+  if (typeof value === "object") {
+    for (const key of ["name", "fullName", "title", "jobTitle", "headline", "value", "text", "label"]) {
+      collectScraperText(value[key], values);
+    }
+    return;
+  }
+  values.push(value);
+}
+
+function scraperConfidence(item, fallback) {
+  const raw = Number(item.confidence ?? item.score ?? item.matchScore ?? fallback);
+  if (!Number.isFinite(raw)) return fallback;
+  return raw > 0 && raw <= 1 ? Math.round(raw * 100) : raw;
+}
+
+function normalizeLinkedInProfileUrl(value) {
+  const text = cleanText(value);
+  if (!text) return "";
+  if (/^https?:\/\/(www\.)?linkedin\.com\/in\//i.test(text)) return text;
+  if (/^(www\.)?linkedin\.com\/in\//i.test(text)) return `https://${text.replace(/^www\./i, "www.")}`;
+  return "";
+}
+
+function mergeCompanyPeople(people) {
+  const byKey = new Map();
+  for (const person of people || []) {
+    if (!person?.name) continue;
+    const key = person.linkedin?.toLowerCase() || `${person.name}:${person.title}:${person.company}`.toLowerCase();
+    const existing = byKey.get(key);
+    if (!existing || Number(person.confidence || 0) > Number(existing.confidence || 0)) {
+      byKey.set(key, person);
+    }
+  }
+  return [...byKey.values()].sort((left, right) => Number(right.confidence || 0) - Number(left.confidence || 0));
 }
 
 function knownPhoneCandidates(prospect) {
@@ -5891,15 +6056,26 @@ function geosForProspect(prospect) {
 }
 
 function recommendedContactsForIntelligence(prospect, sourceIds) {
-  return committeeForProspectServer(prospect).slice(0, 3).map((member, index) => ({ contact_id: member.id || "", full_name: member.verified ? member.name : "", target_role: member.verified ? "" : member.name, role: member.title, persona: member.role, why_target: member.context, order: index + 1, confidence: member.verified ? 78 : 45, verification_status: member.verified ? "verified_from_queue" : "role_slot", source_ids: member.verified ? ["src-crm-profile"].filter((id) => sourceIds.includes(id)) : [] }));
+  return committeeForProspectServer(prospect).slice(0, 3).map((member, index) => ({ contact_id: member.id || "", full_name: member.verified ? member.name : "", target_role: member.verified ? "" : member.name, role: member.title, persona: member.role, why_target: member.context, order: index + 1, confidence: member.confidence || (member.verified ? 78 : 45), verification_status: member.verified ? member.source || "verified_from_queue" : "role_slot", source_ids: member.verified ? ["src-crm-profile"].filter((id) => sourceIds.includes(id)) : [] }));
 }
 
 function committeeForProspectServer(prospect) {
   const sameCompany = (state.prospects || []).filter((item) => item.company?.toLowerCase() === prospect.company?.toLowerCase());
   const known = sameCompany.length ? sameCompany : [prospect];
-  const rows = known.map((item) => ({ id: item.id, name: item.name, title: item.title || "Unknown title", role: committeeRoleServer(item.title), context: item.id === prospect.id ? "Current contact has known CRM/import context." : "Known contact in the same account queue.", verified: true }));
+  const rows = known.map((item) => ({ id: item.id, name: item.name, title: item.title || "Unknown title", role: committeeRoleServer(item.title), context: item.id === prospect.id ? "Current contact has known CRM/import context." : "Known contact in the same account queue.", linkedin: item.linkedin, confidence: 78, source: "verified_from_queue", verified: true }));
+  rows.push(...(prospect.companyPeople || []).map((person) => ({ ...person, context: person.context || "Found by company scrape.", verified: true })));
   rows.push({ id: "", name: profileSuggestedRole(prospect), title: "Unresolved buying-committee role slot", role: "role_slot", context: "Find this person before escalating the account.", verified: false });
-  return rows;
+  return mergeCommitteeRowsServer(rows);
+}
+
+function mergeCommitteeRowsServer(rows) {
+  const byKey = new Map();
+  for (const row of rows) {
+    const key = row.linkedin?.toLowerCase() || `${row.name}:${row.title}`.toLowerCase();
+    const existing = byKey.get(key);
+    if (!existing || Number(row.confidence || 0) > Number(existing.confidence || 0)) byKey.set(key, row);
+  }
+  return [...byKey.values()];
 }
 
 function committeeRoleServer(title) {
@@ -7947,10 +8123,14 @@ function initializeRuntimeConfigFromEnv() {
       zoominfo: normalizeApifyActorId(process.env.APIFY_ZOOMINFO_ACTOR_ID || state.integrations.apify.actorIds.zoominfo),
       facebookProfile: normalizeApifyActorId(process.env.APIFY_FACEBOOK_PROFILE_ACTOR_ID || state.integrations.apify.actorIds.facebookProfile),
       emailPhoneFinder: normalizeApifyActorId(process.env.APIFY_EMAIL_PHONE_FINDER_ACTOR_ID || state.integrations.apify.actorIds.emailPhoneFinder),
-      phoneMessengerCheck: normalizeApifyActorId(process.env.APIFY_PHONE_MESSENGER_CHECK_ACTOR_ID || state.integrations.apify.actorIds.phoneMessengerCheck)
+      phoneMessengerCheck: normalizeApifyActorId(process.env.APIFY_PHONE_MESSENGER_CHECK_ACTOR_ID || state.integrations.apify.actorIds.phoneMessengerCheck),
+      companyPeople: normalizeApifyActorId(process.env.APIFY_COMPANY_PEOPLE_ACTOR_ID || state.integrations.apify.actorIds.companyPeople || "kVYdvNOefemtiDXO5")
     };
     if (process.env.APIFY_LEAD_DATABASE_INPUT_TEMPLATE?.trim()) {
       state.integrations.apify.actorInputTemplates.leadDatabase = cleanLongText(process.env.APIFY_LEAD_DATABASE_INPUT_TEMPLATE);
+    }
+    if (process.env.APIFY_COMPANY_PEOPLE_INPUT_TEMPLATE?.trim()) {
+      state.integrations.apify.actorInputTemplates.companyPeople = cleanLongText(process.env.APIFY_COMPANY_PEOPLE_INPUT_TEMPLATE);
     }
     state.integrations.apify.maxChargeUsd = clampNumber(process.env.APIFY_MAX_CHARGE_USD, 0.01, 50, state.integrations.apify.maxChargeUsd);
     state.integrations.apify.keyMetadata = {

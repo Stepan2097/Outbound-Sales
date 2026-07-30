@@ -8,6 +8,7 @@ let uiNotice = "";
 let pendingProductKnowledgeScreenshot = null;
 let pendingLearningScreenshot = null;
 let pendingKnowledgeInboxScreenshot = null;
+let activeLeadSectionId = "dashboard-account";
 
 const views = [...document.querySelectorAll(".view")];
 const navItems = [...document.querySelectorAll(".nav-item")];
@@ -167,6 +168,8 @@ function renderIntegrations() {
   document.getElementById("facebookProfileActorInput").value = apify?.actorIds?.facebookProfile || "";
   document.getElementById("emailPhoneFinderActorInput").value = apify?.actorIds?.emailPhoneFinder || "";
   document.getElementById("phoneMessengerCheckActorInput").value = apify?.actorIds?.phoneMessengerCheck || "";
+  document.getElementById("companyPeopleActorInput").value = apify?.actorIds?.companyPeople || "kVYdvNOefemtiDXO5";
+  document.getElementById("companyPeopleInputTemplate").value = apify?.actorInputTemplates?.companyPeople || "";
   document.getElementById("apifyMaxChargeInput").value = apify?.maxChargeUsd || 1.5;
 
   document.getElementById("mcpBaseUrlInput").value = state.mcpSync?.baseUrl || "";
@@ -689,7 +692,23 @@ function renderLeadWorkspaceExtras(prospect) {
   setHtml("salesCycleList", salesCycleRows(prospect));
   setHtml("intelligenceContent", intelligenceRows(prospect));
   setText("intelligenceStatusPill", intelligenceStatusLabel(prospect));
+  renderLeadSectionTabs();
   updateQuickCopies(prospect);
+}
+
+function renderLeadSectionTabs() {
+  const sections = [...document.querySelectorAll(".lead-main-stack .lead-section")];
+  if (!sections.some((section) => section.id === activeLeadSectionId)) activeLeadSectionId = "dashboard-account";
+  document.querySelectorAll("[data-lead-tab]").forEach((button) => {
+    const active = button.dataset.leadTab === activeLeadSectionId;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  sections.forEach((section) => {
+    const active = section.id === activeLeadSectionId;
+    section.classList.toggle("active", active);
+    section.setAttribute("aria-hidden", active ? "false" : "true");
+  });
 }
 
 function renderLeadsPage() {
@@ -831,10 +850,10 @@ function buyingCommitteeRows(prospect) {
     <article class="committee-card">
       <div class="avatar">${initials(member.name)}</div>
       <div>
-        <strong>${escapeHtml(member.name)}</strong>
+        <strong>${member.linkedin ? `<a href="${escapeAttr(member.linkedin)}" target="_blank" rel="noreferrer">${escapeHtml(member.name)}</a>` : escapeHtml(member.name)}</strong>
         <span>${escapeHtml([member.title, member.context].filter(Boolean).join(" · "))}</span>
       </div>
-      <span class="pill">${escapeHtml(titleCase(member.role))}</span>
+      <span class="pill">${escapeHtml(member.confidence ? `${member.confidence}%` : titleCase(member.role))}</span>
     </article>
   `).join("");
 }
@@ -847,10 +866,31 @@ function committeeForProspect(prospect) {
     name: item.name,
     title: item.title || "Unknown title",
     role: committeeRole(item.title),
-    context: item.id === prospect.id ? "current lead" : "known in queue"
+    context: item.id === prospect.id ? "current lead" : "known in queue",
+    linkedin: item.linkedin || "",
+    confidence: item.id === prospect.id ? 88 : 78
   }));
-  rows.push({ name: "RevOps or Sales leader", title: "Suggested next person to research", role: "suggested", context: "not found yet" });
-  return rows.slice(0, 5);
+  rows.push(...(prospect.companyPeople || []).map((person) => ({
+    name: person.name,
+    title: person.title || "Unknown title",
+    role: person.role || committeeRole(person.title),
+    context: person.context || "found by company scrape",
+    linkedin: person.linkedin || "",
+    confidence: person.confidence || 64
+  })));
+  rows.push({ name: "RevOps or Sales leader", title: "Suggested next person to research", role: "suggested", context: "not found yet", confidence: 45 });
+  return mergeCommitteeRows(rows).slice(0, 8);
+}
+
+function mergeCommitteeRows(rows) {
+  const byKey = new Map();
+  for (const row of rows) {
+    if (!row.name) continue;
+    const key = row.linkedin?.toLowerCase() || `${row.name}:${row.title}`.toLowerCase();
+    const existing = byKey.get(key);
+    if (!existing || Number(row.confidence || 0) > Number(existing.confidence || 0)) byKey.set(key, row);
+  }
+  return [...byKey.values()].sort((left, right) => Number(right.confidence || 0) - Number(left.confidence || 0));
 }
 
 function committeeRole(title) {
@@ -1766,6 +1806,7 @@ function moveSelectedProspect(direction) {
   const currentIndex = Math.max(0, prospects.findIndex((prospect) => prospect.id === selectedProspectId));
   const nextIndex = (currentIndex + direction + prospects.length) % prospects.length;
   selectedProspectId = prospects[nextIndex].id;
+  activeLeadSectionId = "dashboard-account";
   render();
   scrollLeadWorkspaceToTop();
 }
@@ -1837,9 +1878,19 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  const leadTab = event.target.closest("[data-lead-tab]");
+  if (leadTab) {
+    activeLeadSectionId = leadTab.dataset.leadTab || "dashboard-account";
+    renderLeadSectionTabs();
+    document.querySelector(".lead-section-nav")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    refreshIcons();
+    return;
+  }
+
   const openProspect = event.target.closest("[data-open-prospect-id]");
   if (openProspect) {
     selectedProspectId = openProspect.dataset.openProspectId;
+    activeLeadSectionId = "dashboard-account";
     setView("prospects");
     render();
     scrollLeadWorkspaceToTop();
@@ -1894,6 +1945,7 @@ document.addEventListener("click", async (event) => {
   const prospectCardButton = event.target.closest("[data-prospect-id]");
   if (prospectCardButton) {
     selectedProspectId = prospectCardButton.dataset.prospectId;
+    activeLeadSectionId = "dashboard-account";
     renderProspects();
     renderLeadWorkspaceExtras(state.prospects?.find((prospect) => prospect.id === selectedProspectId));
     refreshIcons();
@@ -2169,6 +2221,8 @@ document.getElementById("apifyConfigForm").addEventListener("submit", async (eve
       facebookProfileActorId: document.getElementById("facebookProfileActorInput").value,
       emailPhoneFinderActorId: document.getElementById("emailPhoneFinderActorInput").value,
       phoneMessengerCheckActorId: document.getElementById("phoneMessengerCheckActorInput").value,
+      companyPeopleActorId: document.getElementById("companyPeopleActorInput").value,
+      companyPeopleInputTemplate: document.getElementById("companyPeopleInputTemplate").value,
       maxChargeUsd: Number(document.getElementById("apifyMaxChargeInput").value)
     })
   });
@@ -2422,6 +2476,7 @@ document.getElementById("prepareOutreachBtn").addEventListener("click", async ()
 
 async function analyzeLeadIntelligence(force = false) {
   if (!selectedProspectId) return;
+  activeLeadSectionId = "dashboard-intelligence";
   state = await api("/api/prospects/intelligence/analyze", {
     method: "POST",
     body: JSON.stringify({
@@ -2431,7 +2486,7 @@ async function analyzeLeadIntelligence(force = false) {
     })
   });
   render();
-  document.getElementById("dashboard-intelligence")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  document.querySelector(".lead-section-nav")?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 async function researchAndPrepareSelected() {
@@ -2453,6 +2508,7 @@ async function researchAndPrepareSelected() {
     method: "POST",
     body: JSON.stringify({ prospectId: selectedProspectId, profile, useIntelligenceAi: true })
   });
+  activeLeadSectionId = "dashboard-account";
   render();
 }
 

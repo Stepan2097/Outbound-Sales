@@ -2856,22 +2856,39 @@ dialog {
   backdrop-filter: blur(14px);
 }
 
-.lead-section-nav a {
+.lead-section-nav button {
   flex: 0 0 auto;
   min-height: 30px;
   display: inline-flex;
   align-items: center;
+  border: 1px solid transparent;
   border-radius: 8px;
   padding: 0 10px;
+  background: transparent;
   color: #b7cbe0;
-  text-decoration: none;
   font-weight: 800;
   font-size: 12px;
+  cursor: pointer;
 }
 
-.lead-section-nav a:hover {
+.lead-section-nav button:hover,
+.lead-section-nav button.active {
   color: #f6fbff;
   background: rgba(40, 212, 191, 0.12);
+}
+
+.lead-section-nav button.active {
+  border-color: rgba(101, 240, 219, 0.38);
+  color: #65f0db;
+  box-shadow: inset 0 0 0 1px rgba(101, 240, 219, 0.12);
+}
+
+.lead-main-stack .lead-section {
+  display: none;
+}
+
+.lead-main-stack .lead-section.active {
+  display: block;
 }
 
 .lead-workbench-grid {
@@ -3013,6 +3030,15 @@ dialog {
   grid-template-columns: 34px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
+}
+
+.committee-card a {
+  color: #f6fbff;
+  text-decoration: none;
+}
+
+.committee-card a:hover {
+  color: #65f0db;
 }
 
 .next-action-card {
