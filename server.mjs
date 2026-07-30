@@ -3585,7 +3585,6 @@ function companyPeopleScraperInput(prospect) {
   return compactObject({
     totalResults: 12,
     companyNameIncludes: company ? [company] : [],
-    companyDomainIncludes: domain ? [domain] : [],
     personTitleIncludes: roleFilters,
     includeTitleVariants: true,
     roleMatchMode: "any",
@@ -3593,7 +3592,6 @@ function companyPeopleScraperInput(prospect) {
     hasPhone: false,
     companyMatchMode: "any",
     companyKeywordMode: "broad",
-    companyDomainMatchMode: domain ? "strict" : "broad",
     resetProgress: false,
     countOnly: false,
     dontSaveProgress: true
