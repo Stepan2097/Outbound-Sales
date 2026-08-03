@@ -15,6 +15,9 @@ const openRouterDefaults = {
   analysisModel: "anthropic/claude-haiku-4.5",
   writingModel: "anthropic/claude-sonnet-5"
 };
+const defaultCompanyPeopleActorId = "scraper-engine/linkedin-company-employees-scraper";
+const defaultContactFinderActorId = "delicious_zebu/contact-info-scraper";
+const legacyPipelineLabsActorId = "kVYdvNOefemtiDXO5";
 
 const taskTypes = [
   "ICP_ANALYSIS",
@@ -138,13 +141,13 @@ const state = {
       actorIds: {
         leadDatabase: "",
         linkedinProfile: "",
-        contactFinder: "",
+        contactFinder: defaultContactFinderActorId,
         apollo: "",
         zoominfo: "",
         facebookProfile: "",
         emailPhoneFinder: "",
         phoneMessengerCheck: "",
-        companyPeople: "kVYdvNOefemtiDXO5"
+        companyPeople: defaultCompanyPeopleActorId
       },
       actorInputTemplates: {
         leadDatabase: "",
@@ -1151,10 +1154,28 @@ async function handleApi(request, response, url) {
       return;
     }
 
-    const interaction = normalizeInteraction(prospect.id, body);
-    state.interactions.unshift(interaction);
-    prospect.status = statusFromInteraction(interaction.type, prospect.status);
-    prospect.updatedAt = new Date().toISOString();
+    let interaction;
+    if (body.syncCrm === false) {
+      interaction = normalizeInteraction(prospect.id, body);
+      state.interactions.unshift(interaction);
+      prospect.status = statusFromInteraction(interaction.type, prospect.status);
+      prospect.updatedAt = new Date().toISOString();
+    } else {
+      const logged = await logAutomaticSalesActivity(prospect, {
+        type: body.type,
+        channel: body.channel,
+        outcome: body.outcome,
+        note: body.note,
+        crmNote: body.crmNote || body.note,
+        source: body.source || "ui-action",
+        metadata: {
+          ...(body.metadata && typeof body.metadata === "object" ? body.metadata : {}),
+          productId: state.selectedProductId,
+          productName: currentProduct().name
+        }
+      });
+      interaction = logged.interaction;
+    }
     addEvent("interaction", `${interaction.type} logged for ${prospect.name}.`);
     await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
@@ -3276,14 +3297,18 @@ async function enrichProspectContacts(prospect) {
   const actorInputs = [
     ["leadDatabase", state.integrations.apify.actorIds.leadDatabase, leadDatabaseScraperInput(prospect)],
     ["linkedinProfile", state.integrations.apify.actorIds.linkedinProfile, { linkedinUrl: prospect.linkedin, name: prospect.name, company: prospect.company }],
-    ["contactFinder", state.integrations.apify.actorIds.contactFinder, { name: prospect.name, company: prospect.company, domain: prospect.website }],
+    ["contactFinder", state.integrations.apify.actorIds.contactFinder, contactFinderScraperInput(prospect)],
     ["apollo", state.integrations.apify.actorIds.apollo, { name: prospect.name, company: prospect.company, linkedinUrl: prospect.linkedin }],
     ["zoominfo", state.integrations.apify.actorIds.zoominfo, { name: prospect.name, company: prospect.company, linkedinUrl: prospect.linkedin }],
     ["facebookProfile", state.integrations.apify.actorIds.facebookProfile, { name: prospect.name, company: prospect.company, location: prospect.location, linkedinUrl: prospect.linkedin }],
     ["emailPhoneFinder", state.integrations.apify.actorIds.emailPhoneFinder, { name: prospect.name, company: prospect.company, domain: prospect.website, linkedinUrl: prospect.linkedin }],
     ["phoneMessengerCheck", state.integrations.apify.actorIds.phoneMessengerCheck, { name: prospect.name, company: prospect.company, phones: knownPhoneCandidates(prospect), linkedinUrl: prospect.linkedin }],
     ["companyPeople", state.integrations.apify.actorIds.companyPeople || "kVYdvNOefemtiDXO5", companyPeopleScraperInput(prospect)]
-  ].filter(([, actorId]) => actorId);
+  ].filter(([source, actorId, input]) => {
+    if (!actorId) return false;
+    if (source === "contactFinder" && !input?.Urls?.length) return false;
+    return true;
+  });
 
   if (!actorInputs.length) {
     discovery.candidates = mergeContactCandidates(addMessengerLinkCandidates(discovery.candidates));
@@ -3670,9 +3695,37 @@ function leadDatabaseScraperInput(prospect) {
   };
 }
 
+function contactFinderScraperInput(prospect) {
+  const websiteUrl = websiteUrlForContactSearch(prospect);
+  return compactObject({
+    Urls: [websiteUrl].filter(Boolean),
+    Depth: 1,
+    Total_num: 35,
+    Lock_domain: true,
+    Concurrency: 3,
+    Max_urls_per_depth: 10,
+    url_include_patterns: ["contact", "about", "team", "people", "leadership", "company"],
+    url_exclude_patterns: ["blog", "news", "login", "signup", "cart", "privacy", "terms"],
+    name: prospect.name,
+    company: prospect.company,
+    domain: normalizeDomain(prospect.website || prospect.publicCompanyResearch?.domain),
+    website: websiteUrl
+  });
+}
+
+function websiteUrlForContactSearch(prospect = {}) {
+  const researchedUrl = normalizeUrl(prospect.publicCompanyResearch?.url || "");
+  if (researchedUrl) return researchedUrl;
+  const domain = normalizeDomain(prospect.website || prospect.publicCompanyResearch?.domain);
+  return domain ? `https://${domain}` : "";
+}
+
 function companyPeopleScraperInput(prospect) {
   const company = prospect.company || "";
   const domain = normalizeDomain(prospect.website);
+  const companyUrl = normalizeLinkedInCompanyUrl(prospect.companyLinkedin || prospect.publicCompanyResearch?.linkedinCompanyUrl || "");
+  const peopleUrl = companyLinkedInPeopleUrlForProspect(prospect);
+  const target = companyUrl || peopleUrl || company || domain;
   const roleFilters = [
     "Founder",
     "CEO",
@@ -3688,9 +3741,25 @@ function companyPeopleScraperInput(prospect) {
     "Sales Director"
   ];
   return compactObject({
+    leadTargets: [target].filter(Boolean),
+    maxLeadsPerCompany: 12,
+    jobTitleKeywords: roleFilters,
+    excludeJobTitleKeywords: ["intern", "student", "assistant"],
+    includeOnlyDecisionMakers: false,
+    enableAiLeadScoring: false,
+    connectionProxy: {
+      useApifyProxy: true,
+      apifyProxyGroups: ["RESIDENTIAL"],
+      apifyProxyCountry: "US"
+    },
     totalResults: 12,
     companyNameIncludes: company ? [company] : [],
     personTitleIncludes: roleFilters,
+    company: company,
+    domain,
+    companyUrl: companyUrl || "",
+    linkedinCompanyUrl: companyUrl || "",
+    linkedinPeopleUrl: peopleUrl || "",
     includeTitleVariants: true,
     roleMatchMode: "any",
     hasEmail: false,
@@ -3809,7 +3878,7 @@ function candidatesFromScraperItem(item, source) {
   const candidates = [];
   const fields = {
     email: extractContactValues(item, ["email", "emails", "workEmail", "businessEmail", "emailAddress", "primaryEmail"]),
-    phone: extractContactValues(item, ["phone", "phones", "phoneNumbers", "mobilePhone", "directPhone", "phoneNumber", "mobile", "primaryPhone"]),
+    phone: extractContactValues(item, ["phone", "phones", "phoneNumbers", "phone_numbers", "uncertain_phone_numbers", "mobilePhone", "directPhone", "phoneNumber", "mobile", "primaryPhone"]),
     linkedin: extractContactValues(item, ["linkedin", "linkedinUrl", "linkedinProfile", "profileUrl"]),
     facebook: extractContactValues(item, ["facebook", "facebookUrl", "facebookProfile", "fbUrl"]),
     website: extractContactValues(item, ["website", "companyWebsite", "domain"]),
@@ -3888,18 +3957,22 @@ function normalizeCompanyPeopleItem(item, source, prospect = {}) {
 }
 
 function personFromCompanyPeopleObject(item, source, prospect = {}) {
-  const name = scraperText(item, ["name", "fullName", "personName", "full_name", "profileName", "titleText"]) || cleanText([item.firstName, item.lastName].filter(Boolean).join(" "));
-  const title = scraperText(item, ["title", "jobTitle", "position", "headline", "currentTitle", "role"]);
-  const company = scraperText(item, ["company", "currentCompany", "organization", "companyName", "employer"]);
-  const linkedin = normalizeLinkedInProfileUrl(extractContactValues(item, ["linkedin", "linkedinUrl", "linkedin_url", "linkedinProfile", "profileUrl", "profile_url", "url", "profile"])[0]);
+  const name = scraperText(item, ["name", "fullName", "fullname", "personName", "full_name", "profileName", "titleText"])
+    || cleanText([item.firstName || item.first_name, item.lastName || item.last_name].filter(Boolean).join(" "));
+  const title = scraperText(item, ["title", "jobTitle", "position", "headline", "currentTitle", "role", "departmentGuess", "aiDepartment"]);
+  const company = scraperText(item, ["company", "currentCompany", "current_company", "organization", "companyName", "employer"]);
+  const linkedin = normalizeLinkedInProfileUrl(extractContactValues(item, ["linkedin", "linkedinUrl", "linkedin_url", "linkedinProfile", "profileUrl", "profile_url", "profileURL", "profile", "url", "public_identifier"])[0]);
   if (!name || (!title && !linkedin)) return null;
   const companyMatches = company && prospect.company && (
     company.toLowerCase().includes(String(prospect.company).toLowerCase())
     || String(prospect.company).toLowerCase().includes(company.toLowerCase())
   );
-  const role = committeeRoleServer(title);
+  const seniority = scraperText(item, ["seniorityTier", "aiSeniority"]);
+  const role = item.isDecisionMaker || /owner|founder|c-level|vp|director/i.test(seniority)
+    ? committeeRoleServer(`${title} ${seniority}`)
+    : committeeRoleServer(title);
   const confidence = clampNumber(
-    scraperConfidence(item, 56) + (companyMatches ? 18 : 0) + (linkedin ? 10 : 0) + (role !== "influencer" ? 6 : 0),
+    scraperConfidence(item, 56) + (companyMatches ? 18 : 0) + (linkedin ? 10 : 0) + (role !== "influencer" ? 6 : 0) + (item.isDecisionMaker ? 5 : 0),
     35,
     92,
     62
@@ -3912,7 +3985,7 @@ function personFromCompanyPeopleObject(item, source, prospect = {}) {
     linkedin,
     location: scraperText(item, ["location", "geo", "city", "country"]),
     role,
-    context: scraperText(item, ["context", "reason", "whyTarget"]) || (companyMatches ? "found by company scrape" : "company scrape - review match"),
+    context: scraperText(item, ["context", "reason", "whyTarget", "decisionMakerReason", "aiReasoning"]) || (companyMatches ? "found by company scrape" : "company scrape - review match"),
     confidence,
     source: source.startsWith("apify:") ? source : `apify:${source}`,
     verified: Boolean(linkedin || companyMatches)
@@ -3932,7 +4005,7 @@ function collectScraperText(value, values) {
     return;
   }
   if (typeof value === "object") {
-    for (const key of ["name", "fullName", "title", "jobTitle", "headline", "value", "text", "label"]) {
+    for (const key of ["name", "fullName", "fullname", "full_name", "title", "jobTitle", "headline", "value", "text", "label", "full", "city", "country"]) {
       collectScraperText(value[key], values);
     }
     return;
@@ -3951,6 +4024,7 @@ function normalizeLinkedInProfileUrl(value) {
   if (!text) return "";
   if (/^https?:\/\/(www\.)?linkedin\.com\/in\//i.test(text)) return text;
   if (/^(www\.)?linkedin\.com\/in\//i.test(text)) return `https://${text.replace(/^www\./i, "www.")}`;
+  if (/^\/?in\/[a-z0-9_%.-]+\/?$/i.test(text)) return `https://www.linkedin.com/${text.replace(/^\/+/, "")}`;
   return "";
 }
 
@@ -3990,14 +4064,14 @@ function evidenceFromScraperItem(item, source) {
   if (item.companyMatch || item.sameCompany) evidence.push("company_match");
   if (item.nameMatch || item.profileNameMatch) evidence.push("name_match");
   if (item.mutualConnections) evidence.push("mutual_connections");
-  if (item.sourceUrl) evidence.push(String(item.sourceUrl).slice(0, 180));
+  if (item.sourceUrl || item.current_url || item.start_url || item.referrer_url) evidence.push(String(item.sourceUrl || item.current_url || item.start_url || item.referrer_url).slice(0, 180));
   if (!evidence.length && source === "facebookProfile") evidence.push("requires_manual_profile_review");
   return evidence;
 }
 
 function phoneAppSignalsFromScraperItem(item, source) {
   const candidates = [];
-  const phone = extractContactValues(item, ["phone", "phones", "phoneNumbers", "mobilePhone", "directPhone", "phoneNumber", "mobile"])[0];
+  const phone = extractContactValues(item, ["phone", "phones", "phoneNumbers", "phone_numbers", "uncertain_phone_numbers", "mobilePhone", "directPhone", "phoneNumber", "mobile"])[0];
   const signals = [
     ["whatsapp_presence", item.whatsappExists ?? item.hasWhatsapp ?? item.isWhatsapp],
     ["telegram_presence", item.telegramExists ?? item.hasTelegram ?? item.isTelegram]
@@ -7593,6 +7667,7 @@ function crmActivityContent(prospect, input, metadata = {}) {
     `Lead: ${prospect.name}${prospect.company ? `, ${prospect.company}` : ""}`,
     metadata.productName ? `Product: ${metadata.productName}` : "",
     metadata.recommendedChannel ? `Channel: ${metadata.recommendedChannel}` : input.channel ? `Channel: ${input.channel}` : "",
+    metadata.messagePreview ? `Message preview: ${metadata.messagePreview}` : "",
     metadata.localInteractionId ? `Outbound OS interaction: ${metadata.localInteractionId}` : ""
   ].filter(Boolean).join("\n")).slice(0, 1800);
 }
@@ -7637,9 +7712,16 @@ function normalizeInteractionType(value) {
     "linkedin_invite_accepted",
     "linkedin_connected",
     "linkedin_reply",
+    "linkedin_message_copied",
     "sms_sent",
+    "sms_message_copied",
     "whatsapp_sent",
+    "whatsapp_message_copied",
     "telegram_sent",
+    "telegram_message_copied",
+    "email_message_copied",
+    "phone_script_copied",
+    "outreach_message_copied",
     "follow_up_scheduled",
     "research_completed",
     "contact_enriched",
@@ -7768,6 +7850,7 @@ function statusFromInteraction(type, currentStatus) {
   if (type === "meeting_booked") return "meeting_booked";
   if (type === "research_review_required") return "review";
   if (type === "outreach_prepared" || type === "personalization_requested") return "outreach_ready";
+  if (type.endsWith("_message_copied") || type === "phone_script_copied") return currentStatus || "outreach_ready";
   if (type === "contact_enriched" || type === "research_completed") return "enriched";
   if (type === "linkedin_reply" || type === "email_opened" || type === "linkedin_invite_accepted" || type === "linkedin_connected") return "engaged";
   if (["email_sent", "linkedin_invite_sent", "sms_sent", "whatsapp_sent", "telegram_sent"].includes(type)) return "contacted";
@@ -7789,6 +7872,7 @@ function channelFromType(type) {
 
 function outcomeFromType(type) {
   if (type === "outreach_prepared" || type === "personalization_requested") return "prepared";
+  if (type.endsWith("_message_copied") || type === "phone_script_copied") return "copied";
   if (type === "linkedin_reply" || type === "meeting_booked" || type === "linkedin_invite_accepted" || type === "linkedin_connected") return "positive";
   if (type === "email_opened") return "opened";
   if (type === "no_reply") return "neutral";
@@ -8217,14 +8301,17 @@ function initializeRuntimeConfigFromEnv() {
       ...state.integrations.apify.actorIds,
       leadDatabase: normalizeApifyActorId(process.env.APIFY_LEAD_DATABASE_ACTOR_ID || state.integrations.apify.actorIds.leadDatabase),
       linkedinProfile: normalizeApifyActorId(process.env.APIFY_LINKEDIN_PROFILE_ACTOR_ID || state.integrations.apify.actorIds.linkedinProfile),
-      contactFinder: normalizeApifyActorId(process.env.APIFY_CONTACT_FINDER_ACTOR_ID || state.integrations.apify.actorIds.contactFinder),
+      contactFinder: normalizeApifyActorId(process.env.APIFY_CONTACT_FINDER_ACTOR_ID || state.integrations.apify.actorIds.contactFinder || defaultContactFinderActorId),
       apollo: normalizeApifyActorId(process.env.APIFY_APOLLO_ACTOR_ID || state.integrations.apify.actorIds.apollo),
       zoominfo: normalizeApifyActorId(process.env.APIFY_ZOOMINFO_ACTOR_ID || state.integrations.apify.actorIds.zoominfo),
       facebookProfile: normalizeApifyActorId(process.env.APIFY_FACEBOOK_PROFILE_ACTOR_ID || state.integrations.apify.actorIds.facebookProfile),
       emailPhoneFinder: normalizeApifyActorId(process.env.APIFY_EMAIL_PHONE_FINDER_ACTOR_ID || state.integrations.apify.actorIds.emailPhoneFinder),
       phoneMessengerCheck: normalizeApifyActorId(process.env.APIFY_PHONE_MESSENGER_CHECK_ACTOR_ID || state.integrations.apify.actorIds.phoneMessengerCheck),
-      companyPeople: normalizeApifyActorId(process.env.APIFY_COMPANY_PEOPLE_ACTOR_ID || state.integrations.apify.actorIds.companyPeople || "kVYdvNOefemtiDXO5")
+      companyPeople: normalizeApifyActorId(process.env.APIFY_COMPANY_PEOPLE_ACTOR_ID || state.integrations.apify.actorIds.companyPeople || defaultCompanyPeopleActorId)
     };
+    if (!process.env.APIFY_COMPANY_PEOPLE_ACTOR_ID && state.integrations.apify.actorIds.companyPeople === legacyPipelineLabsActorId) {
+      state.integrations.apify.actorIds.companyPeople = defaultCompanyPeopleActorId;
+    }
     if (process.env.APIFY_LEAD_DATABASE_INPUT_TEMPLATE?.trim()) {
       state.integrations.apify.actorInputTemplates.leadDatabase = cleanLongText(process.env.APIFY_LEAD_DATABASE_INPUT_TEMPLATE);
     }

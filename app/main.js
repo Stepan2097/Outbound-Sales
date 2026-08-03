@@ -162,13 +162,13 @@ function renderIntegrations() {
   document.getElementById("leadDatabaseActorInput").value = apify?.actorIds?.leadDatabase || "";
   document.getElementById("leadDatabaseInputTemplate").value = apify?.actorInputTemplates?.leadDatabase || "";
   document.getElementById("linkedinActorInput").value = apify?.actorIds?.linkedinProfile || "";
-  document.getElementById("contactFinderActorInput").value = apify?.actorIds?.contactFinder || "";
+  document.getElementById("contactFinderActorInput").value = apify?.actorIds?.contactFinder || "delicious_zebu/contact-info-scraper";
   document.getElementById("apolloActorInput").value = apify?.actorIds?.apollo || "";
   document.getElementById("zoominfoActorInput").value = apify?.actorIds?.zoominfo || "";
   document.getElementById("facebookProfileActorInput").value = apify?.actorIds?.facebookProfile || "";
   document.getElementById("emailPhoneFinderActorInput").value = apify?.actorIds?.emailPhoneFinder || "";
   document.getElementById("phoneMessengerCheckActorInput").value = apify?.actorIds?.phoneMessengerCheck || "";
-  document.getElementById("companyPeopleActorInput").value = apify?.actorIds?.companyPeople || "kVYdvNOefemtiDXO5";
+  document.getElementById("companyPeopleActorInput").value = apify?.actorIds?.companyPeople || "scraper-engine/linkedin-company-employees-scraper";
   document.getElementById("companyPeopleInputTemplate").value = apify?.actorInputTemplates?.companyPeople || "";
   document.getElementById("apifyMaxChargeInput").value = apify?.maxChargeUsd || 1.5;
 
@@ -1116,7 +1116,7 @@ function intelligenceRows(prospect) {
       <div class="message-heading">
         <span class="pill">${escapeHtml(titleCase(message.channel || "draft"))}</span>
         ${message.subject ? `<strong>${escapeHtml(message.subject)}</strong>` : ""}
-        <button data-copy-text="${escapeAttr(message.body || "")}" title="Copy" aria-label="Copy"><i data-lucide="copy"></i></button>
+        <button data-copy-text="${escapeAttr(message.body || "")}" data-copy-channel="${escapeAttr(message.channel || "draft")}" data-copy-label="Intelligence message" title="Copy" aria-label="Copy"><i data-lucide="copy"></i></button>
       </div>
       <pre>${escapeHtml(message.body || "")}</pre>
       <small>${escapeHtml((message.personalization_basis || []).slice(0, 3).join(" · "))}</small>
@@ -1191,11 +1191,11 @@ function preferredChannel(prospect) {
 function updateQuickCopies(prospect) {
   const messages = prospect?.outreach?.messages || [];
   const variations = prospect?.outreach?.linkedinVariations || [];
-  setCopyText("copyLinkedinQuick", messages.find((message) => /linkedin_invite/i.test(message.channel))?.body || variations[0]?.body || messages.find((message) => /linkedin/i.test(message.channel))?.body || "");
-  setCopyText("copyEmailQuick", messages.find((message) => /email/i.test(message.channel))?.body || "");
-  setCopyText("copySmsQuick", messages.find((message) => /^sms$/i.test(message.channel))?.body || "");
-  setCopyText("copyWhatsappQuick", messages.find((message) => /whatsapp/i.test(message.channel))?.body || "");
-  setCopyText("copyTelegramQuick", messages.find((message) => /telegram/i.test(message.channel))?.body || "");
+  setCopyText("copyLinkedinQuick", messages.find((message) => /linkedin_invite/i.test(message.channel))?.body || variations[0]?.body || messages.find((message) => /linkedin/i.test(message.channel))?.body || "", "linkedin", "LinkedIn quick copy");
+  setCopyText("copyEmailQuick", messages.find((message) => /email/i.test(message.channel))?.body || "", "email", "Email quick copy");
+  setCopyText("copySmsQuick", messages.find((message) => /^sms$/i.test(message.channel))?.body || "", "sms", "SMS quick copy");
+  setCopyText("copyWhatsappQuick", messages.find((message) => /whatsapp/i.test(message.channel))?.body || "", "whatsapp", "WhatsApp quick copy");
+  setCopyText("copyTelegramQuick", messages.find((message) => /telegram/i.test(message.channel))?.body || "", "telegram", "Telegram quick copy");
 }
 
 function analyticsRows(prospect) {
@@ -1261,7 +1261,7 @@ function contactRows(prospect) {
           </div>
           <div class="confidence">
             <span>${candidate.confidence}%</span>
-            <button data-copy-text="${escapeAttr(candidate.value)}" title="Copy" aria-label="Copy"><i data-lucide="copy"></i></button>
+            <button data-copy-text="${escapeAttr(candidate.value)}" data-copy-channel="${escapeAttr(candidate.type || "contact")}" data-copy-label="Contact data" title="Copy" aria-label="Copy"><i data-lucide="copy"></i></button>
           </div>
         </article>
       `
@@ -1289,7 +1289,7 @@ function outreachRows(prospect) {
           <div class="message-heading">
             <span class="pill">${escapeHtml(message.channel)}</span>
             ${message.subject ? `<strong>${escapeHtml(message.subject)}</strong>` : ""}
-            <button data-copy-text="${escapeAttr(message.body)}" title="Copy" aria-label="Copy"><i data-lucide="copy"></i></button>
+            <button data-copy-text="${escapeAttr(message.body)}" data-copy-channel="${escapeAttr(message.channel || "draft")}" data-copy-label="Outreach message" title="Copy" aria-label="Copy"><i data-lucide="copy"></i></button>
           </div>
           <pre>${escapeHtml(message.body)}</pre>
           ${basis ? `<small class="message-basis">${escapeHtml(basis)}</small>` : ""}
@@ -1306,7 +1306,7 @@ function outreachRows(prospect) {
           <div class="message-heading">
             <span class="pill">${escapeHtml(variation.label)}</span>
             <strong>LinkedIn variation</strong>
-            <button data-copy-text="${escapeAttr(variation.body)}" title="Copy" aria-label="Copy"><i data-lucide="copy"></i></button>
+            <button data-copy-text="${escapeAttr(variation.body)}" data-copy-channel="linkedin" data-copy-label="LinkedIn variation" title="Copy" aria-label="Copy"><i data-lucide="copy"></i></button>
           </div>
           <pre>${escapeHtml(variation.body)}</pre>
         </article>
@@ -1479,7 +1479,7 @@ function callAnalysisRows(prospect) {
           <div class="message-heading">
             <span class="pill">${escapeHtml(template.channel)}</span>
             <strong>${escapeHtml(template.label)}</strong>
-            <button data-copy-text="${escapeAttr(template.body)}" title="Copy" aria-label="Copy"><i data-lucide="copy"></i></button>
+            <button data-copy-text="${escapeAttr(template.body)}" data-copy-channel="${escapeAttr(template.channel || "follow_up")}" data-copy-label="${escapeAttr(template.label || "Follow-up template")}" title="Copy" aria-label="Copy"><i data-lucide="copy"></i></button>
           </div>
           <pre>${escapeHtml(template.body)}</pre>
         </article>
@@ -1558,10 +1558,12 @@ function setHtml(id, html) {
   if (element) element.innerHTML = html;
 }
 
-function setCopyText(id, value) {
+function setCopyText(id, value, channel = "", label = "") {
   const element = document.getElementById(id);
   if (!element) return;
   element.dataset.copyText = value || "";
+  if (channel) element.dataset.copyChannel = channel;
+  if (label) element.dataset.copyLabel = label;
   element.disabled = !value;
 }
 
@@ -2005,11 +2007,13 @@ document.addEventListener("click", async (event) => {
 
   const copyButton = event.target.closest("[data-copy-text]");
   if (copyButton) {
-    await navigator.clipboard.writeText(copyButton.dataset.copyText || "");
+    const copiedText = copyButton.dataset.copyText || "";
+    await navigator.clipboard.writeText(copiedText);
     const originalHtml = copyButton.dataset.copyDefaultHtml || copyButton.innerHTML;
     copyButton.dataset.copyDefaultHtml = originalHtml;
     copyButton.innerHTML = `<i data-lucide="check"></i><span>Copied</span>`;
     refreshIcons();
+    void logCopiedActivity(copyButton, copiedText);
     window.setTimeout(() => {
       copyButton.innerHTML = originalHtml;
       refreshIcons();
@@ -2585,6 +2589,71 @@ async function logInteraction(type) {
       body: JSON.stringify({ prospectId: selectedProspectId, type })
     });
   });
+}
+
+async function logCopiedActivity(button, copiedText) {
+  if (!selectedProspectId || !String(copiedText || "").trim()) return;
+  const channel = normalizeCopyChannel(button.dataset.copyChannel || inferCopyChannel(copiedText));
+  const type = copiedInteractionType(channel);
+  const label = button.dataset.copyLabel || "Copied outreach";
+  const preview = cleanCopyPreview(copiedText);
+  try {
+    state = await api("/api/prospects/interaction", {
+      method: "POST",
+      body: JSON.stringify({
+        prospectId: selectedProspectId,
+        type,
+        channel,
+        outcome: "copied",
+        note: `${label}: ${titleCase(channel)} copied in Outbound OS.`,
+        source: "copy-button",
+        metadata: {
+          uiLabel: label,
+          messagePreview: preview,
+          copiedLength: String(copiedText || "").length
+        }
+      })
+    });
+    renderLeadWorkspaceExtras(state.prospects?.find((prospect) => prospect.id === selectedProspectId));
+  } catch (error) {
+    console.warn("Copy activity was not logged", error);
+  }
+}
+
+function normalizeCopyChannel(value) {
+  const text = String(value || "").toLowerCase();
+  if (text.includes("linkedin")) return "linkedin";
+  if (text.includes("email")) return "email";
+  if (text.includes("whatsapp")) return "whatsapp";
+  if (text.includes("telegram")) return "telegram";
+  if (text.includes("sms") || text.includes("phone")) return text.includes("phone") ? "phone" : "sms";
+  if (text.includes("call")) return "phone";
+  if (text.includes("facebook")) return "facebook";
+  return "outreach";
+}
+
+function copiedInteractionType(channel) {
+  if (channel === "linkedin") return "linkedin_message_copied";
+  if (channel === "email") return "email_message_copied";
+  if (channel === "sms") return "sms_message_copied";
+  if (channel === "whatsapp") return "whatsapp_message_copied";
+  if (channel === "telegram") return "telegram_message_copied";
+  if (channel === "phone") return "phone_script_copied";
+  return "outreach_message_copied";
+}
+
+function inferCopyChannel(value) {
+  const text = String(value || "").toLowerCase();
+  if (/linkedin\.com|connect on linkedin|connection/.test(text)) return "linkedin";
+  if (/whatsapp|wa\.me/.test(text)) return "whatsapp";
+  if (/telegram|t\.me/.test(text)) return "telegram";
+  if (/@/.test(text)) return "email";
+  if (/\+?\d[\d\s().-]{7,}/.test(text)) return "phone";
+  return "outreach";
+}
+
+function cleanCopyPreview(value) {
+  return String(value || "").replace(/\s+/g, " ").trim().slice(0, 500);
 }
 
 async function removeProspectById(prospectId = selectedProspectId) {

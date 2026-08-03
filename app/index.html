@@ -285,11 +285,11 @@
                   </div>
                   <button class="primary-button" id="prepareOutreachBtn" type="button"><i data-lucide="wand-sparkles"></i><span>Run Research</span></button>
                   <button id="analyzeIntelligenceQuick" type="button"><i data-lucide="brain-circuit"></i><span>Analyze Brief</span></button>
-                  <button id="copyLinkedinQuick" type="button" data-copy-text=""><i data-lucide="send"></i><span>Copy LinkedIn</span></button>
-                  <button id="copyEmailQuick" type="button" data-copy-text=""><i data-lucide="mail"></i><span>Copy Email</span></button>
-                  <button id="copySmsQuick" type="button" data-copy-text=""><i data-lucide="message-square-text"></i><span>Copy SMS</span></button>
-                  <button id="copyWhatsappQuick" type="button" data-copy-text=""><i data-lucide="message-circle"></i><span>Copy WhatsApp</span></button>
-                  <button id="copyTelegramQuick" type="button" data-copy-text=""><i data-lucide="send"></i><span>Copy Telegram</span></button>
+                  <button id="copyLinkedinQuick" type="button" data-copy-text="" data-copy-channel="linkedin" data-copy-label="LinkedIn quick copy"><i data-lucide="send"></i><span>Copy LinkedIn</span></button>
+                  <button id="copyEmailQuick" type="button" data-copy-text="" data-copy-channel="email" data-copy-label="Email quick copy"><i data-lucide="mail"></i><span>Copy Email</span></button>
+                  <button id="copySmsQuick" type="button" data-copy-text="" data-copy-channel="sms" data-copy-label="SMS quick copy"><i data-lucide="message-square-text"></i><span>Copy SMS</span></button>
+                  <button id="copyWhatsappQuick" type="button" data-copy-text="" data-copy-channel="whatsapp" data-copy-label="WhatsApp quick copy"><i data-lucide="message-circle"></i><span>Copy WhatsApp</span></button>
+                  <button id="copyTelegramQuick" type="button" data-copy-text="" data-copy-channel="telegram" data-copy-label="Telegram quick copy"><i data-lucide="send"></i><span>Copy Telegram</span></button>
                   <button id="saveCrmQuick" type="button" data-interaction-type="outreach_prepared"><i data-lucide="database"></i><span>Log to CRM</span></button>
                   <button class="danger-button" id="removeLeadQuick" type="button"><i data-lucide="trash-2"></i><span>Remove Lead</span></button>
                   <button class="primary-button" id="nextLeadRailBtn" type="button"><i data-lucide="chevrons-right"></i><span>Next Lead</span></button>
@@ -892,14 +892,14 @@
                 <details class="optional-fields">
                   <summary>Specialist actors</summary>
                   <input id="linkedinActorInput" type="text" placeholder="LinkedIn actor id, e.g. user~linkedin-profile" />
-                  <input id="contactFinderActorInput" type="text" placeholder="Contact finder actor id" />
+                  <input id="contactFinderActorInput" type="text" placeholder="delicious_zebu/contact-info-scraper" />
                   <input id="apolloActorInput" type="text" placeholder="Apollo actor id" />
                   <input id="zoominfoActorInput" type="text" placeholder="ZoomInfo actor id" />
                   <input id="facebookProfileActorInput" type="text" placeholder="Facebook/person match actor id" />
                   <input id="emailPhoneFinderActorInput" type="text" placeholder="Email and phone finder actor id" />
                   <input id="phoneMessengerCheckActorInput" type="text" placeholder="WhatsApp/Telegram phone check actor id" />
-                  <input id="companyPeopleActorInput" type="text" placeholder="Company people actor id" />
-                  <textarea id="companyPeopleInputTemplate" rows="5" spellcheck="false" placeholder='{"company":"{{company}}","domain":"{{domain}}","personTitleIncludes":["Founder","Head of Affiliates"],"totalResults":12}'></textarea>
+                  <input id="companyPeopleActorInput" type="text" placeholder="scraper-engine/linkedin-company-employees-scraper" />
+                  <textarea id="companyPeopleInputTemplate" rows="5" spellcheck="false" placeholder='{"leadTargets":["{{linkedinPeopleUrl}}"],"maxLeadsPerCompany":12,"jobTitleKeywords":["Founder","Head of Affiliates"],"includeOnlyDecisionMakers":false}'></textarea>
                 </details>
                 <input id="apifyMaxChargeInput" type="number" min="0.05" step="0.05" />
                 <button class="primary-button" type="submit"><i data-lucide="save"></i><span>Save Apify</span></button>
