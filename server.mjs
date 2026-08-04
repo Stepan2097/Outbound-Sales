@@ -17,6 +17,8 @@ const openRouterDefaults = {
 };
 const defaultCompanyPeopleActorId = "scraper-engine/linkedin-company-employees-scraper";
 const defaultContactFinderActorId = "delicious_zebu/contact-info-scraper";
+const defaultWhatsappCheckerActorId = "vtrdev/whatsapp-number-validator";
+const defaultTelegramCheckerActorId = "akula.marketing/telegram-get-phone-info";
 const legacyPipelineLabsActorId = "kVYdvNOefemtiDXO5";
 
 const taskTypes = [
@@ -147,6 +149,8 @@ const state = {
         facebookProfile: "",
         emailPhoneFinder: "",
         phoneMessengerCheck: "",
+        whatsappChecker: defaultWhatsappCheckerActorId,
+        telegramChecker: defaultTelegramCheckerActorId,
         companyPeople: defaultCompanyPeopleActorId
       },
       actorInputTemplates: {
@@ -453,7 +457,10 @@ async function handleApi(request, response, url) {
       return;
     }
 
-    const result = await teachProductFromText(text, cleanText(body.productId || state.selectedProductId));
+    const result = await teachProductFromText(text, cleanText(body.productId || state.selectedProductId), {
+      forceSelected: Boolean(body.forceSelectedProduct),
+      createNew: Boolean(body.createNewProduct)
+    });
     state.selectedProductId = result.product.id;
     addEvent("product", `${result.product.name} studied and saved from product context text.`);
     await writePersistentWorkspaceState();
@@ -486,6 +493,29 @@ async function handleApi(request, response, url) {
     }
     state.selectedProductId = product.id;
     addEvent("product", `${product.name} ${existing ? "updated" : "added"}.`);
+    await writePersistentWorkspaceState();
+    sendJson(response, 200, publicState());
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/products/delete") {
+    const body = await readJson(request);
+    const productId = cleanText(body.productId || state.selectedProductId);
+    const product = state.products.find((item) => item.id === productId);
+    if (!product) {
+      sendJson(response, 404, { error: "Product not found." });
+      return;
+    }
+    if (state.products.length <= 1) {
+      sendJson(response, 400, { error: "At least one product must remain in the workspace." });
+      return;
+    }
+
+    state.products = state.products.filter((item) => item.id !== product.id);
+    if (state.selectedProductId === product.id) {
+      state.selectedProductId = state.products[0]?.id || "";
+    }
+    addEvent("product", `${product.name} deleted from product memory.`);
     await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
@@ -708,6 +738,8 @@ async function handleApi(request, response, url) {
       facebookProfile: normalizeApifyActorId(body.facebookProfileActorId || state.integrations.apify.actorIds.facebookProfile),
       emailPhoneFinder: normalizeApifyActorId(body.emailPhoneFinderActorId || state.integrations.apify.actorIds.emailPhoneFinder),
       phoneMessengerCheck: normalizeApifyActorId(body.phoneMessengerCheckActorId || state.integrations.apify.actorIds.phoneMessengerCheck),
+      whatsappChecker: normalizeApifyActorId(body.whatsappCheckerActorId || state.integrations.apify.actorIds.whatsappChecker),
+      telegramChecker: normalizeApifyActorId(body.telegramCheckerActorId || state.integrations.apify.actorIds.telegramChecker),
       companyPeople: normalizeApifyActorId(body.companyPeopleActorId || state.integrations.apify.actorIds.companyPeople)
     };
     state.integrations.apify.actorInputTemplates = {
@@ -2347,9 +2379,9 @@ function normalizeProductScoring(scoring) {
   })).filter((item) => item.label);
 }
 
-async function teachProductFromText(text, selectedProductId = "") {
+async function teachProductFromText(text, selectedProductId = "", options = {}) {
   const explicitProduct = selectedProductId ? state.products.find((product) => product.id === selectedProductId) : null;
-  const selectedProduct = explicitProduct || currentProduct();
+  const selectedProduct = options.createNew ? null : explicitProduct || currentProduct();
   const localAnalysis = analyzeProductContextLocally(text, selectedProduct);
   let analysis = localAnalysis;
   let source = "local";
@@ -2364,9 +2396,15 @@ async function teachProductFromText(text, selectedProductId = "") {
     }
   }
 
+  if (options.forceSelected) {
+    const explicitName = explicitProductNameFromText(text);
+    if (explicitName) analysis.name = explicitName;
+  }
   analysis.name = cleanText(analysis.name || localAnalysis.name || selectedProduct?.name || "Untitled Product");
   analysis.id = cleanText(analysis.id || slugify(analysis.name));
-  const existing = findProductForTeaching(analysis, selectedProduct, Boolean(explicitProduct));
+  const existing = options.forceSelected && explicitProduct
+    ? explicitProduct
+    : findProductForTeaching(analysis, selectedProduct, Boolean(explicitProduct));
   const now = new Date().toISOString();
   const contextItem = normalizeProductKnowledge({
     type: "product_context_update",
@@ -2377,10 +2415,11 @@ async function teachProductFromText(text, selectedProductId = "") {
   });
   const previousKnowledge = Array.isArray(existing?.knowledge) ? existing.knowledge : [];
   const previousExamples = Array.isArray(existing?.examples) ? existing.examples : [];
+  const shouldRenameExisting = options.forceSelected && existing && analysis.name && analysis.name !== "Untitled Product";
   const product = normalizeProduct({
     ...(existing || {}),
     id: existing?.id || analysis.id,
-    name: existing?.name || analysis.name,
+    name: shouldRenameExisting ? analysis.name : existing?.name || analysis.name,
     category: analysis.category || existing?.category || "Product",
     analysisProfileId: analysis.analysisProfileId || existing?.analysisProfileId || inferAnalysisProfileId(analysis.name, analysis.category || ""),
     positioning: analysis.positioning || existing?.positioning || "",
@@ -2632,6 +2671,11 @@ function extractProductName(text, selectedProduct) {
   const firstLine = text.split(/\n/).map((line) => cleanProductName(line.replace(/^#+\s*/, ""))).find(Boolean) || "";
   if (firstLine && firstLine.length <= 80 && !/^(context|sales|positioning|target|persona|we |our |this product|update)/i.test(firstLine)) return firstLine;
   return selectedProduct?.name || "Untitled Product";
+}
+
+function explicitProductNameFromText(text) {
+  const explicit = String(text || "").match(/(?:^|\n)\s*(?:product|product name|name|offer|продукт|назва|название)\s*[:\-]\s*([^\n]+)/i);
+  return explicit?.[1] ? cleanProductName(explicit[1]) : "";
 }
 
 function cleanProductName(value) {
@@ -3302,8 +3346,7 @@ async function enrichProspectContacts(prospect) {
     ["zoominfo", state.integrations.apify.actorIds.zoominfo, { name: prospect.name, company: prospect.company, linkedinUrl: prospect.linkedin }],
     ["facebookProfile", state.integrations.apify.actorIds.facebookProfile, { name: prospect.name, company: prospect.company, location: prospect.location, linkedinUrl: prospect.linkedin }],
     ["emailPhoneFinder", state.integrations.apify.actorIds.emailPhoneFinder, { name: prospect.name, company: prospect.company, domain: prospect.website, linkedinUrl: prospect.linkedin }],
-    ["phoneMessengerCheck", state.integrations.apify.actorIds.phoneMessengerCheck, { name: prospect.name, company: prospect.company, phones: knownPhoneCandidates(prospect), linkedinUrl: prospect.linkedin }],
-    ["companyPeople", state.integrations.apify.actorIds.companyPeople || "kVYdvNOefemtiDXO5", companyPeopleScraperInput(prospect)]
+    ["companyPeople", state.integrations.apify.actorIds.companyPeople || defaultCompanyPeopleActorId, companyPeopleScraperInput(prospect)]
   ].filter(([source, actorId, input]) => {
     if (!actorId) return false;
     if (source === "contactFinder" && !input?.Urls?.length) return false;
@@ -3346,6 +3389,12 @@ async function enrichProspectContacts(prospect) {
     apifyCandidates.push(...(result.items || []).flatMap((item) => candidatesFromScraperItem(item, result.source)));
   }
 
+  const messengerSeedCandidates = mergeContactCandidates([...apifyCandidates, ...discovery.candidates]);
+  const messengerResult = await runPhoneMessengerChecks(prospect, messengerSeedCandidates);
+  if (messengerResult.warnings.length) discovery.warnings.push(...messengerResult.warnings);
+  if (messengerResult.candidates.length) apifyCandidates.push(...messengerResult.candidates);
+  actorsRun += messengerResult.actorsRun;
+
   if (companyPeople.length) {
     prospect.companyPeople = mergeCompanyPeople([...(prospect.companyPeople || []), ...companyPeople]).slice(0, 12);
     discovery.companyPeople = prospect.companyPeople;
@@ -3360,6 +3409,65 @@ async function enrichProspectContacts(prospect) {
   state.integrations.apify.lastRunAt = new Date().toISOString();
   state.integrations.apify.status = discovery.scraperStatus;
   return discovery;
+}
+
+async function runPhoneMessengerChecks(prospect, candidates = []) {
+  const phoneDigits = [...new Set(knownPhoneCandidates({ ...prospect, contactDiscovery: { candidates } })
+    .map((phone) => normalizedPhoneDigits(phone))
+    .filter(Boolean))]
+    .slice(0, 3);
+  if (!phoneDigits.length) return { candidates: [], actorsRun: 0, warnings: [] };
+
+  const actorRuns = [];
+  if (state.integrations.apify.actorIds.phoneMessengerCheck) {
+    actorRuns.push([
+      "phoneMessengerCheck",
+      state.integrations.apify.actorIds.phoneMessengerCheck,
+      phoneMessengerCheckInput(prospect, phoneDigits)
+    ]);
+  }
+  if (state.integrations.apify.actorIds.whatsappChecker) {
+    actorRuns.push([
+      "whatsappChecker",
+      state.integrations.apify.actorIds.whatsappChecker,
+      { phone_numbers: phoneDigits }
+    ]);
+  }
+  if (state.integrations.apify.actorIds.telegramChecker) {
+    for (const digits of phoneDigits) {
+      actorRuns.push([
+        "telegramChecker",
+        state.integrations.apify.actorIds.telegramChecker,
+        { phone: `+${digits}` }
+      ]);
+    }
+  }
+
+  const output = [];
+  const warnings = [];
+  let actorsRun = 0;
+  for (const [source, actorId, input] of actorRuns) {
+    try {
+      const items = await runApifyActor(actorId, input, state.integrations.apify.maxChargeUsd);
+      actorsRun += 1;
+      output.push(...(items || []).flatMap((item) => candidatesFromScraperItem(item, source)));
+    } catch (error) {
+      warnings.push(`${source} scraper failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  return { candidates: output, actorsRun, warnings };
+}
+
+function phoneMessengerCheckInput(prospect, phoneDigits) {
+  return {
+    name: prospect.name,
+    company: prospect.company,
+    phones: phoneDigits.map((digits) => `+${digits}`),
+    phoneNumbers: phoneDigits,
+    numbers: phoneDigits,
+    linkedinUrl: prospect.linkedin
+  };
 }
 
 async function enrichPublicWebSignals(prospect) {
@@ -3878,7 +3986,7 @@ function candidatesFromScraperItem(item, source) {
   const candidates = [];
   const fields = {
     email: extractContactValues(item, ["email", "emails", "workEmail", "businessEmail", "emailAddress", "primaryEmail"]),
-    phone: extractContactValues(item, ["phone", "phones", "phoneNumbers", "phone_numbers", "uncertain_phone_numbers", "mobilePhone", "directPhone", "phoneNumber", "mobile", "primaryPhone"]),
+    phone: extractContactValues(item, ["phone", "phones", "phoneNumbers", "phone_numbers", "phone_number", "uncertain_phone_numbers", "number", "mobilePhone", "directPhone", "phoneNumber", "mobile", "primaryPhone"]),
     linkedin: extractContactValues(item, ["linkedin", "linkedinUrl", "linkedinProfile", "profileUrl"]),
     facebook: extractContactValues(item, ["facebook", "facebookUrl", "facebookProfile", "fbUrl"]),
     website: extractContactValues(item, ["website", "companyWebsite", "domain"]),
@@ -4045,7 +4153,7 @@ function knownPhoneCandidates(prospect) {
   const phones = [];
   if (prospect.phone) phones.push(prospect.phone);
   for (const candidate of prospect.contactDiscovery?.candidates || []) {
-    if (candidate.type === "phone") phones.push(candidate.value);
+    if (String(candidate.type || "").includes("phone")) phones.push(candidate.value);
   }
   return [...new Set(phones.map((phone) => String(phone).trim()).filter(Boolean))];
 }
@@ -4071,23 +4179,35 @@ function evidenceFromScraperItem(item, source) {
 
 function phoneAppSignalsFromScraperItem(item, source) {
   const candidates = [];
-  const phone = extractContactValues(item, ["phone", "phones", "phoneNumbers", "phone_numbers", "uncertain_phone_numbers", "mobilePhone", "directPhone", "phoneNumber", "mobile"])[0];
+  const phone = extractContactValues(item, ["phone", "phones", "phoneNumbers", "phone_numbers", "phone_number", "uncertain_phone_numbers", "number", "mobilePhone", "directPhone", "phoneNumber", "mobile"])[0];
+  const links = messengerLinksForPhone(phone);
   const signals = [
-    ["whatsapp_presence", item.whatsappExists ?? item.hasWhatsapp ?? item.isWhatsapp],
-    ["telegram_presence", item.telegramExists ?? item.hasTelegram ?? item.isTelegram]
+    ["whatsapp_link", item.whatsappExists ?? item.hasWhatsapp ?? item.isWhatsapp ?? item.valid ?? item.exists, links?.whatsapp],
+    ["telegram_link", item.telegramExists ?? item.hasTelegram ?? item.isTelegram ?? (source === "telegramChecker" ? item.registered : undefined), links?.telegram]
   ];
-  for (const [type, value] of signals) {
+  for (const [type, value, link] of signals) {
     if (value === undefined || value === null || value === "") continue;
+    if (!link) continue;
+    const available = messengerPresenceAvailable(value);
     candidates.push({
       type,
-      value: `${phone || "phone"}:${Boolean(value) ? "possible" : "not_found"}`,
-      confidence: Number(item.confidence || item.score || (Boolean(value) ? 68 : 45)),
+      value: link,
+      confidence: Math.max(scraperConfidence(item, available ? 88 : 76), available ? 88 : 76),
       source: `apify:${source}`,
-      status: "messenger_presence_review",
-      evidence: evidenceFromScraperItem(item, source)
+      status: available ? "verified_presence" : "not_found",
+      evidence: [...evidenceFromScraperItem(item, source), available ? "messenger_presence_confirmed" : "messenger_presence_not_found"]
     });
   }
   return candidates;
+}
+
+function messengerPresenceAvailable(value) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value > 0;
+  const text = String(value || "").trim().toLowerCase();
+  if (!text) return false;
+  if (["false", "no", "not_found", "not found", "invalid", "0", "none"].includes(text)) return false;
+  return true;
 }
 
 function addMessengerLinkCandidates(candidates) {
@@ -8307,6 +8427,8 @@ function initializeRuntimeConfigFromEnv() {
       facebookProfile: normalizeApifyActorId(process.env.APIFY_FACEBOOK_PROFILE_ACTOR_ID || state.integrations.apify.actorIds.facebookProfile),
       emailPhoneFinder: normalizeApifyActorId(process.env.APIFY_EMAIL_PHONE_FINDER_ACTOR_ID || state.integrations.apify.actorIds.emailPhoneFinder),
       phoneMessengerCheck: normalizeApifyActorId(process.env.APIFY_PHONE_MESSENGER_CHECK_ACTOR_ID || state.integrations.apify.actorIds.phoneMessengerCheck),
+      whatsappChecker: normalizeApifyActorId(process.env.APIFY_WHATSAPP_CHECKER_ACTOR_ID || state.integrations.apify.actorIds.whatsappChecker || defaultWhatsappCheckerActorId),
+      telegramChecker: normalizeApifyActorId(process.env.APIFY_TELEGRAM_CHECKER_ACTOR_ID || state.integrations.apify.actorIds.telegramChecker || defaultTelegramCheckerActorId),
       companyPeople: normalizeApifyActorId(process.env.APIFY_COMPANY_PEOPLE_ACTOR_ID || state.integrations.apify.actorIds.companyPeople || defaultCompanyPeopleActorId)
     };
     if (!process.env.APIFY_COMPANY_PEOPLE_ACTOR_ID && state.integrations.apify.actorIds.companyPeople === legacyPipelineLabsActorId) {

@@ -1001,6 +1001,22 @@ tbody tr:last-child td {
   line-height: 1.55;
 }
 
+.product-management-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto auto auto;
+  gap: 8px;
+  align-items: end;
+  margin: 12px 0;
+}
+
+.product-management-row label {
+  min-width: 0;
+}
+
+.product-management-row button {
+  min-height: 42px;
+}
+
 .product-teach-panel,
 .product-intelligence-panel {
   min-width: 0;
@@ -2370,6 +2386,7 @@ dialog {
   .ai-layout,
   .product-context-grid,
   .product-studio-layout,
+  .product-management-row,
   .knowledge-form,
   .knowledge-list,
   .product-memory-segments,
@@ -3504,6 +3521,10 @@ dialog {
   .knowledge-inbox-form .compact-drop,
   .knowledge-inbox-form .screenshot-preview {
     grid-column: 1;
+  }
+
+  .product-management-row {
+    grid-template-columns: 1fr;
   }
 
   .structured-product-grid {

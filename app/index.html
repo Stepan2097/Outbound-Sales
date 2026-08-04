@@ -719,6 +719,15 @@
                   <span class="pill" id="productStudioSelected">selected</span>
                 </div>
               </div>
+              <div class="product-management-row">
+                <label>
+                  <span>Product</span>
+                  <select id="productStudioProductSelect" aria-label="Product to edit"></select>
+                </label>
+                <button id="editProductBtn" type="button"><i data-lucide="file-pen-line"></i><span>Edit</span></button>
+                <button id="newProductBtn" type="button"><i data-lucide="plus"></i><span>New</span></button>
+                <button class="danger-button" id="deleteProductBtn" type="button"><i data-lucide="trash-2"></i><span>Delete</span></button>
+              </div>
               <form class="product-form" id="productForm">
                 <label>
                   <span>Plain text product training</span>
@@ -898,6 +907,8 @@
                   <input id="facebookProfileActorInput" type="text" placeholder="Facebook/person match actor id" />
                   <input id="emailPhoneFinderActorInput" type="text" placeholder="Email and phone finder actor id" />
                   <input id="phoneMessengerCheckActorInput" type="text" placeholder="WhatsApp/Telegram phone check actor id" />
+                  <input id="whatsappCheckerActorInput" type="text" placeholder="vtrdev/whatsapp-number-validator" />
+                  <input id="telegramCheckerActorInput" type="text" placeholder="akula.marketing/telegram-get-phone-info" />
                   <input id="companyPeopleActorInput" type="text" placeholder="scraper-engine/linkedin-company-employees-scraper" />
                   <textarea id="companyPeopleInputTemplate" rows="5" spellcheck="false" placeholder='{"leadTargets":["{{linkedinPeopleUrl}}"],"maxLeadsPerCompany":12,"jobTitleKeywords":["Founder","Head of Affiliates"],"includeOnlyDecisionMakers":false}'></textarea>
                 </details>

@@ -84,7 +84,15 @@ function renderProductStudio() {
   const product = creatingNewProduct ? emptyProductDraft() : state.selectedProduct;
   if (!product) return;
 
+  const studioSelect = document.getElementById("productStudioProductSelect");
+  if (studioSelect) fillSelect(studioSelect, state.products || [], (item) => item.id, (item) => item.name, state.selectedProductId);
   document.getElementById("productStudioSelected").textContent = product.name || "selected product";
+  const deleteButton = document.getElementById("deleteProductBtn");
+  if (deleteButton) deleteButton.disabled = creatingNewProduct || (state.products || []).length <= 1;
+  const editButton = document.getElementById("editProductBtn");
+  if (editButton) editButton.disabled = creatingNewProduct || !state.selectedProduct;
+  const teachButtonText = document.querySelector("#productTeachBtn span");
+  if (teachButtonText) teachButtonText.textContent = creatingNewProduct ? "Analyze & Create Product" : "Analyze & Update Product";
   renderProductMemory(product);
   document.getElementById("exampleList").innerHTML = (product.examples || []).length
     ? product.examples.map(exampleRow).join("")
@@ -168,6 +176,8 @@ function renderIntegrations() {
   document.getElementById("facebookProfileActorInput").value = apify?.actorIds?.facebookProfile || "";
   document.getElementById("emailPhoneFinderActorInput").value = apify?.actorIds?.emailPhoneFinder || "";
   document.getElementById("phoneMessengerCheckActorInput").value = apify?.actorIds?.phoneMessengerCheck || "";
+  document.getElementById("whatsappCheckerActorInput").value = apify?.actorIds?.whatsappChecker || "vtrdev/whatsapp-number-validator";
+  document.getElementById("telegramCheckerActorInput").value = apify?.actorIds?.telegramChecker || "akula.marketing/telegram-get-phone-info";
   document.getElementById("companyPeopleActorInput").value = apify?.actorIds?.companyPeople || "scraper-engine/linkedin-company-employees-scraper";
   document.getElementById("companyPeopleInputTemplate").value = apify?.actorInputTemplates?.companyPeople || "";
   document.getElementById("apifyMaxChargeInput").value = apify?.maxChargeUsd || 1.5;
@@ -1888,6 +1898,16 @@ document.getElementById("productSelect").addEventListener("change", async (event
   });
 });
 
+document.getElementById("productStudioProductSelect")?.addEventListener("change", async (event) => {
+  creatingNewProduct = false;
+  await runUiAction("product", "Switching product context...", async () => {
+    state = await api("/api/products/select", {
+      method: "POST",
+      body: JSON.stringify({ productId: event.target.value })
+    });
+  });
+});
+
 document.getElementById("syncMcpBtn").addEventListener("click", async () => {
   state = await api("/api/products/sync-mcp", { method: "POST", body: "{}" });
   render();
@@ -2159,20 +2179,43 @@ document.getElementById("runPipelineBtn").addEventListener("click", async () => 
 
 document.getElementById("newProductBtn")?.addEventListener("click", () => {
   creatingNewProduct = true;
+  clearStructuredProductTrainingFields();
   renderProductStudio();
   refreshIcons();
 });
 
+document.getElementById("editProductBtn")?.addEventListener("click", () => {
+  creatingNewProduct = false;
+  fillProductEditor(state.selectedProduct);
+  renderProductStudio();
+  refreshIcons();
+});
+
+document.getElementById("deleteProductBtn")?.addEventListener("click", async () => {
+  const product = state.selectedProduct;
+  if (!product) return;
+  if (!window.confirm(`Delete ${product.name}? This removes its product memory, knowledge, and examples from Outbound OS.`)) return;
+  await runUiAction("product", "Deleting product memory...", async () => {
+    state = await api("/api/products/delete", {
+      method: "POST",
+      body: JSON.stringify({ productId: product.id })
+    });
+    creatingNewProduct = false;
+    clearStructuredProductTrainingFields();
+  });
+});
+
 document.getElementById("productForm").addEventListener("submit", async (event) => {
   event.preventDefault();
-  const input = document.getElementById("productContextInput");
   const structuredText = structuredProductTrainingText();
   await runUiAction("product", "Analyzing product text and updating system memory...", async () => {
     state = await api("/api/products/teach", {
       method: "POST",
       body: JSON.stringify({
-        productId: state.selectedProductId,
-        text: structuredText
+        productId: creatingNewProduct ? "" : state.selectedProductId,
+        text: structuredText,
+        forceSelectedProduct: !creatingNewProduct,
+        createNewProduct: creatingNewProduct
       })
     });
     clearStructuredProductTrainingFields();
@@ -2210,6 +2253,32 @@ function clearStructuredProductTrainingFields() {
     const element = document.getElementById(id);
     if (element) element.value = "";
   });
+}
+
+function fillProductEditor(product) {
+  if (!product) return;
+  setFormValue("productContextInput", product.rawContext || product.positioning || "");
+  setFormValue("productOfferInput", [product.positioning, ...(product.useCases || [])].filter(Boolean).join("\n"));
+  setFormValue("productIcpInput", [
+    ...(product.targetPersonas || []).map((item) => `Persona: ${item}`),
+    ...((product.memory?.segments?.idealCustomers || []).map((item) => `Ideal customer: ${item}`))
+  ].join("\n"));
+  setFormValue("productPricingInput", product.memory?.segments?.pricing?.join("\n") || "");
+  setFormValue("productProofInput", (product.proofPoints || []).join("\n"));
+  setFormValue("productWinningExamplesInput", (product.examples || [])
+    .filter((example) => example.quality === "winning")
+    .slice(0, 6)
+    .map((example) => example.message)
+    .join("\n\n"));
+  setFormValue("productBadExamplesInput", [
+    ...(product.objections || []),
+    ...((product.examples || []).filter((example) => example.quality === "bad").slice(0, 6).map((example) => example.message))
+  ].filter(Boolean).join("\n\n"));
+}
+
+function setFormValue(id, value) {
+  const element = document.getElementById(id);
+  if (element) element.value = value || "";
 }
 
 document.getElementById("exampleForm").addEventListener("submit", async (event) => {
@@ -2277,6 +2346,8 @@ document.getElementById("apifyConfigForm").addEventListener("submit", async (eve
       facebookProfileActorId: document.getElementById("facebookProfileActorInput").value,
       emailPhoneFinderActorId: document.getElementById("emailPhoneFinderActorInput").value,
       phoneMessengerCheckActorId: document.getElementById("phoneMessengerCheckActorInput").value,
+      whatsappCheckerActorId: document.getElementById("whatsappCheckerActorInput").value,
+      telegramCheckerActorId: document.getElementById("telegramCheckerActorInput").value,
       companyPeopleActorId: document.getElementById("companyPeopleActorInput").value,
       companyPeopleInputTemplate: document.getElementById("companyPeopleInputTemplate").value,
       maxChargeUsd: Number(document.getElementById("apifyMaxChargeInput").value)
