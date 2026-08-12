@@ -3074,18 +3074,25 @@ function sentenceCase(value) {
 }
 
 function buildCompanyProfile(prospect, product = currentProduct()) {
-  const publicResearchText = `${prospect.publicCompanyResearch?.title || ""} ${prospect.publicCompanyResearch?.description || ""} ${prospect.publicCompanyResearch?.snippet || ""}`;
+  const enrichment = prospect.companyEnrichment || {};
+  const enrichmentText = `${(enrichment.industries || []).join(" ")} ${(enrichment.specialties || []).join(" ")} ${enrichment.description || ""}`;
+  const publicResearchText = `${prospect.publicCompanyResearch?.title || ""} ${prospect.publicCompanyResearch?.description || ""} ${prospect.publicCompanyResearch?.snippet || ""} ${enrichmentText}`;
   const text = `${prospect.company} ${prospect.title} ${prospect.notes} ${prospect.website} ${publicResearchText}`.toLowerCase();
   const companyOnlyText = `${prospect.company} ${prospect.notes} ${prospect.website} ${publicResearchText}`.toLowerCase();
   const knownNotes = publicLeadNote(prospect.notes);
   const categorySource = isBlackAffiliateProduct(product) ? stripNegativeBlackAffiliateEvidence(companyOnlyText) : companyOnlyText;
   const category = companyCategoryFromText(categorySource);
-  const sizeEstimate = companySizeEstimate(companyOnlyText);
+  const sizeEstimate = Number(enrichment.employeeEstimate || 0) > 1
+    ? `approximately ${Number(enrichment.employeeEstimate).toLocaleString("en-US")} employees in enrichment data - verify`
+    : companySizeEstimate(companyOnlyText);
   const audience = companyAudienceFromText(categorySource, category);
   const businessModel = companyBusinessModelFromText(categorySource, category);
-  const techStack = ["hubspot", "salesforce", "snowflake", "apollo", "zoominfo", "adjust", "appsflyer", "singular"]
-    .filter((tool) => text.includes(tool))
-    .map((tool) => tool.charAt(0).toUpperCase() + tool.slice(1));
+  const techStack = [...new Set([
+    ...["hubspot", "salesforce", "snowflake", "apollo", "zoominfo", "adjust", "appsflyer", "singular", "google play", "google analytics"]
+      .filter((tool) => text.includes(tool))
+      .map((tool) => tool.charAt(0).toUpperCase() + tool.slice(1)),
+    ...(enrichment.technologies || []).map((tool) => titleCaseServer(String(tool).replaceAll("_", " ")))
+  ])].slice(0, 8);
   const growthSignals = [
     /series\s+[abc]/i.test(prospect.notes) ? "funding or growth-stage note in CRM" : "",
     /hiring|sdr|sales team|roles/i.test(prospect.notes) ? "hiring or team expansion signal" : "",
@@ -3095,7 +3102,7 @@ function buildCompanyProfile(prospect, product = currentProduct()) {
     prospect.website ? "" : "company website/domain",
     knownNotes ? "" : "recent trigger",
     techStack.length ? "" : "verified tools/tech stack",
-    /employee|employees|team|series|funding|roles/i.test(prospect.notes) ? "" : "company size",
+    Number(enrichment.employeeEstimate || 0) > 1 || /employee|employees|team|series|funding|roles/i.test(prospect.notes) ? "" : "company size",
     "current vendor/incumbent"
   ].filter(Boolean);
   const confidence = clampNumber(
@@ -3105,13 +3112,17 @@ function buildCompanyProfile(prospect, product = currentProduct()) {
       + (knownNotes ? 18 : 0)
       + (category !== "Unknown" ? 10 : 0)
       + (techStack.length ? 8 : 0)
+      + (Number(enrichment.employeeEstimate || 0) > 1 ? 6 : 0)
+      + ((enrichment.industries || []).length ? 6 : 0)
       + (growthSignals.length * 4),
     15,
     88,
     40
   );
-  const description = prospect.publicCompanyResearch?.description
-    ? `${prospect.company || "This account"} public web context: ${sentenceCase(prospect.publicCompanyResearch.description)}.`
+  const publicDescription = prospect.publicCompanyResearch?.description || prospect.publicCompanyResearch?.snippet || prospect.publicCompanyResearch?.title;
+  const industrySummary = (enrichment.industries || []).slice(0, 4).join(", ");
+  const description = publicDescription
+    ? `${prospect.company || "This account"} public web context: ${sentenceCase(publicDescription)}.${industrySummary ? ` Company enrichment tags include ${industrySummary}.` : ""}`
     : category === "Unknown"
     ? `${prospect.company || "This account"} needs company research before confident outreach.`
     : `${prospect.company || "This account"} appears to be ${articleFor(category)} ${category.toLowerCase()} company.${knownNotes ? ` CRM context: ${sentenceCase(knownNotes)}.` : ""}`;
@@ -3129,7 +3140,7 @@ function buildCompanyProfile(prospect, product = currentProduct()) {
     unknowns,
     confidence,
     research_links: companyResearchLinks(prospect),
-    source_ids: ["src-crm-profile"].filter(Boolean),
+    source_ids: ["src-crm-profile", enrichment.checkedAt ? "src-company-enrichment" : ""].filter(Boolean),
     claim_type: confidence >= 65 ? "inference_from_workspace_data" : "needs_research"
   };
 }
@@ -3158,6 +3169,7 @@ function companySizeEstimate(text) {
 }
 
 function companyAudienceFromText(text, category) {
+  if (category === "Mobile app or gaming") return "mobile users, players, app customers, and user-acquisition or monetization teams";
   if (/igaming|casino|sportsbook|betting|gambling|affiliate network/.test(text) || /iGaming|Affiliate network/.test(category)) return "players, bettors, affiliates, traffic partners, or performance marketing teams - verify";
   if (/media buying|paid media|performance marketing|user acquisition/.test(text) || category === "Performance marketing") return "advertisers, operators, affiliate teams, or traffic buyers - verify";
   if (/webview|pwa|app funnel|app distribution/.test(text) || category === "App/WebView acquisition") return "mobile/app users, traffic partners, and acquisition teams - verify";
@@ -3170,6 +3182,7 @@ function companyAudienceFromText(text, category) {
 }
 
 function companyBusinessModelFromText(text, category) {
+  if (category === "Mobile app or gaming") return "mobile-app revenue through advertising, in-app purchases, subscriptions, or a mixed model - verify per title";
   if (/igaming|casino|sportsbook|betting|gambling/.test(text) || /iGaming/.test(category)) return "gaming revenue, affiliate revenue share, CPA, media buying, or operator economics - verify";
   if (/affiliate network|traffic partners?/.test(text) || category === "Affiliate network") return "affiliate commission, CPA, rev-share, or traffic arbitrage - verify";
   if (/media buying|paid media|performance marketing|user acquisition/.test(text) || category === "Performance marketing") return "performance marketing, paid acquisition, agency, or traffic-buying economics - verify";
@@ -3393,6 +3406,7 @@ async function enrichProspectContacts(prospect) {
       continue;
     }
     actorsRun += 1;
+    updateCompanyEnrichmentFromScraper(prospect, result.items || [], result.source);
     if (result.source === "companyPeople") {
       companyPeople.push(...peopleFromScraperItems(result.items || [], result.source, prospect));
       continue;
@@ -3958,7 +3972,7 @@ async function runApifyActor(actorId, input, maxChargeUsd) {
 
 function apifyTimeoutMs() {
   const envValue = Number(process.env.APIFY_ACTOR_TIMEOUT_MS || 0);
-  return Number.isFinite(envValue) && envValue >= 3000 ? envValue : 10000;
+  return Number.isFinite(envValue) && envValue >= 3000 ? envValue : 20000;
 }
 
 function candidatesFromScraperItem(item, source) {
@@ -3975,12 +3989,13 @@ function candidatesFromScraperItem(item, source) {
   for (const [type, values] of Object.entries(fields)) {
     for (const value of values) {
       if (!value) continue;
+      const isPersonalEmail = type === "email" && /@(gmail|yahoo|hotmail|outlook|icloud|protonmail|mail)\./i.test(String(value));
       candidates.push({
         type,
         value: String(value),
-        confidence: Number(item.confidence || item.score || 74),
+        confidence: isPersonalEmail ? Math.min(55, Number(item.confidence || item.score || 74)) : Number(item.confidence || item.score || 74),
         source: `apify:${source}`,
-        status: candidateStatusFor(type, item, source),
+        status: candidateStatusFor(type, item, source, value),
         evidence: evidenceFromScraperItem(item, source)
       });
     }
@@ -4017,6 +4032,47 @@ function peopleFromScraperItems(items, source, prospect) {
   return (items || [])
     .flatMap((item) => normalizeCompanyPeopleItem(item, source, prospect))
     .filter((person) => person.name && person.name.toLowerCase() !== prospect.name?.toLowerCase());
+}
+
+function updateCompanyEnrichmentFromScraper(prospect, items, source) {
+  if (!Array.isArray(items) || !items.length) return;
+  const domain = normalizeDomain(prospect.website || prospect.publicCompanyResearch?.domain);
+  const companyName = cleanText(prospect.company || "").toLowerCase();
+  const rows = items.filter((item) => {
+    if (!item || typeof item !== "object") return false;
+    const itemCompany = cleanText(item.companyName || item.company || item.currentCompany || item.organization || "").toLowerCase();
+    const itemDomain = normalizeDomain(item.companyDomain || item.companyWebsite || item.domain || "");
+    return Boolean((companyName && itemCompany && (itemCompany.includes(companyName) || companyName.includes(itemCompany))) || (domain && itemDomain === domain));
+  });
+  if (!rows.length) return;
+  const flattenedStrings = (key) => rows.flatMap((item) => Array.isArray(item[key]) ? item[key] : [item[key]]).map(cleanText).filter(Boolean);
+  const descriptions = flattenedStrings("companyDescription");
+  const employeeCounts = rows.map((item) => Number(item.companySize || item.employeeCount || item.employees || 0)).filter((value) => Number.isFinite(value) && value > 1);
+  const employeeEstimate = mostCommonNumber(employeeCounts) || 0;
+  prospect.companyEnrichment = {
+    ...(prospect.companyEnrichment || {}),
+    checkedAt: new Date().toISOString(),
+    source: `apify:${source}`,
+    employeeEstimate: employeeEstimate || prospect.companyEnrichment?.employeeEstimate || 0,
+    industries: [...new Set([...(prospect.companyEnrichment?.industries || []), ...flattenedStrings("companyIndustry")])].slice(0, 12),
+    specialties: [...new Set([...(prospect.companyEnrichment?.specialties || []), ...flattenedStrings("companySpecialties")])].slice(0, 12),
+    technologies: [...new Set([...(prospect.companyEnrichment?.technologies || []), ...flattenedStrings("technologies")])].slice(0, 16),
+    description: mostCommonString(descriptions) || prospect.companyEnrichment?.description || "",
+    companyLinkedinUrl: normalizeLinkedInCompanyUrl(flattenedStrings("companyLinkedinUrl")[0] || "") || prospect.companyEnrichment?.companyLinkedinUrl || "",
+    evidenceRows: rows.length
+  };
+}
+
+function mostCommonNumber(values = []) {
+  const counts = new Map();
+  for (const value of values) counts.set(value, (counts.get(value) || 0) + 1);
+  return [...counts.entries()].sort((left, right) => right[1] - left[1] || right[0] - left[0])[0]?.[0] || 0;
+}
+
+function mostCommonString(values = []) {
+  const counts = new Map();
+  for (const value of values) counts.set(value, (counts.get(value) || 0) + 1);
+  return [...counts.entries()].sort((left, right) => right[1] - left[1] || right[0].length - left[0].length)[0]?.[0] || "";
 }
 
 function normalizeCompanyPeopleList(items) {
@@ -4137,9 +4193,10 @@ function knownPhoneCandidates(prospect) {
   return [...new Set(phones.map((phone) => String(phone).trim()).filter(Boolean))];
 }
 
-function candidateStatusFor(type, item, source) {
-  if (type === "email" && (item.emailStatus === "verified" || item.verifiedEmail)) return "needs_permission_review";
-  if (type === "phone" && (item.phoneStatus === "verified" || item.verifiedPhone)) return "needs_permission_review";
+function candidateStatusFor(type, item, source, value = "") {
+  if (type === "email" && /@(gmail|yahoo|hotmail|outlook|icloud|protonmail|mail)\./i.test(String(value))) return "personal_address_review";
+  if (type === "email" && (/verified|deliverable/i.test(String(item.emailStatus || "")) || item.verifiedEmail)) return "deliverable_needs_permission_review";
+  if (type === "phone" && (/verified|valid/i.test(String(item.phoneStatus || "")) || item.verifiedPhone || item.phone)) return "needs_permission_review";
   if (type === "facebook") return source === "facebookProfile" ? "suggested_profile_review" : "review";
   if (type === "whatsapp" || type === "telegram" || type === "whatsapp_link" || type === "telegram_link") return "messenger_presence_review";
   return "review";
@@ -5376,7 +5433,7 @@ function adActionBuyerAngle(prospect = {}) {
   if (/user acquisition|\bua\b|growth|performance|marketing|acquisition/.test(title)) {
     return {
       focus: "incremental user acquisition outside the core auction channels",
-      question: "is value-exchange CPE already in your test mix, or has traffic quality kept it off the plan?"
+      question: "is value-exchange CPE already part of your test mix, or not a channel you are considering?"
     };
   }
   if (/product|lifecycle|retention/.test(title)) {
@@ -5397,13 +5454,15 @@ function buildAdActionOutreachPlan(prospect, profile, route, product, analysis) 
   const company = prospect.company || "your company";
   const buyerAngle = adActionBuyerAngle(prospect);
   const directPhoneOk = hasReviewedPhoneCandidate(prospect);
-  const verifiedCompanyContext = prospect.publicCompanyResearch?.description
-    ? trimWords(cleanOutboundSignal(prospect.publicCompanyResearch.description), 28)
+  const rolePhrase = lowerSalesPhrase(prospect.title || "growth").replace(/\s*\/\s*/g, " and ");
+  const companySiteContext = prospect.publicCompanyResearch?.description || prospect.publicCompanyResearch?.snippet || prospect.publicCompanyResearch?.title || "";
+  const verifiedCompanyContext = companySiteContext
+    ? trimWords(cleanOutboundSignal(companySiteContext), 28)
     : companyProfile.category !== "Unknown"
       ? `${company} appears to operate in ${companyProfile.category.toLowerCase()}`
       : `${company}'s app portfolio still needs verification`;
   const messengerHold = "Do not use until a reviewed phone, identity match, channel-presence result, and permission check exist.";
-  const invite = `Hi ${firstName}, saw your ${prospect.title || "growth remit"} at ${company}. ${sentenceCase(buyerAngle.question)} Open to connecting?`;
+  const invite = `Hi ${firstName}, saw your work in ${rolePhrase} at ${company}. ${sentenceCase(buyerAngle.question)} Open to connecting?`;
   const testFrame = "one Android title, 1-3 GEOs, one payable event, MMP attribution, and a separate natural quality KPI";
 
   return {
@@ -5434,8 +5493,8 @@ function buildAdActionOutreachPlan(prospect, profile, route, product, analysis) 
       {
         channel: "email",
         subject: `${company}: one controlled rewarded UA test`,
-        body: trimWords(`Hi ${firstName},\n\n${verifiedCompanyContext}. I saw your ${prospect.title || "role"} and wanted to test one assumption.\n\nAdAction's relevant route here is disclosed value-exchange acquisition, scoped to ${testFrame}. The paid event and the natural quality KPI stay separate, with written scale or stop rules.\n\n${sentenceCase(buyerAngle.question)}\n\nIf it belongs with someone else, who owns UA channel tests for a specific title?`, 110),
-        personalization_basis: [verifiedCompanyContext, prospect.title, testFrame].filter(Boolean)
+        body: trimWords(`Hi ${firstName},\n\n${verifiedCompanyContext}. I saw your work in ${rolePhrase} and wanted to test one assumption.\n\nAdAction's relevant route here is disclosed value-exchange acquisition, scoped to ${testFrame}. The paid event and the natural quality KPI stay separate, with written scale or stop rules.\n\n${sentenceCase(buyerAngle.question)}\n\nIf it belongs with someone else, who owns UA channel tests for a specific title?`, 110),
+        personalization_basis: [verifiedCompanyContext, rolePhrase, testFrame].filter(Boolean)
       },
       {
         channel: "sms",
@@ -5851,7 +5910,7 @@ function lowerSalesPhrase(value) {
 function hasReviewedPhoneCandidate(prospect) {
   if (prospect.phone) return true;
   return (prospect.contactDiscovery?.candidates || []).some((candidate) =>
-    candidate.type === "phone" && !String(candidate.status || "").includes("low_confidence")
+    candidate.type === "phone" && /verified_by_import|approved|reviewed/i.test(String(candidate.status || ""))
   );
 }
 
@@ -6292,9 +6351,9 @@ function normalizeLeadIntelligenceSnapshot(snapshot, fallback, profile) {
     executive_summary: cleanLongText(snapshot.executive_summary || fallback.executive_summary).slice(0, 1200),
     overall_confidence: clampNumber(snapshot.overall_confidence, 0, 100, fallback.overall_confidence),
     company_context: normalizeCompanyContext(snapshot.company_context, fallback.company_context),
-    scoring_inputs: normalizeScoringInputs(snapshot.scoring_inputs, fallback.scoring_inputs),
-    triggers: normalizeTriggerRows(snapshot.triggers, fallback.triggers),
-    recommended_contacts: normalizeRecommendedContacts(snapshot.recommended_contacts, fallback.recommended_contacts),
+    scoring_inputs: normalizeScoringInputs(fallback.scoring_inputs, fallback.scoring_inputs),
+    triggers: normalizeTriggerRows(fallback.triggers, fallback.triggers),
+    recommended_contacts: normalizeRecommendedContacts(fallback.recommended_contacts, fallback.recommended_contacts),
     objections: normalizeObjectionRows(snapshot.objections, fallback.objections),
     messages: normalizeIntelligenceMessages(snapshot.messages, fallback.messages, profile),
     discovery_questions: normalizeStringArray(snapshot.discovery_questions, fallback.discovery_questions).slice(0, 6),
@@ -6303,6 +6362,18 @@ function normalizeLeadIntelligenceSnapshot(snapshot, fallback, profile) {
     warnings: normalizeStringArray(snapshot.warnings, fallback.warnings).slice(0, 12),
     sources: fallback.sources,
     model: snapshot.model || fallback.model
+  };
+  normalized.company_context = {
+    ...normalized.company_context,
+    category: fallback.company_context.category,
+    size_estimate: fallback.company_context.size_estimate,
+    audience: fallback.company_context.audience,
+    business_model: fallback.company_context.business_model,
+    likely_priorities: fallback.company_context.likely_priorities,
+    tech_stack: fallback.company_context.tech_stack,
+    confidence: fallback.company_context.confidence,
+    research_links: fallback.company_context.research_links,
+    source_ids: fallback.company_context.source_ids
   };
   const scores = calculateIntelligenceScores(normalized.scoring_inputs, profile);
   normalized.fit_score = scores.fit_score;
@@ -6380,6 +6451,23 @@ function intelligenceSourcesForProspect(prospect, product) {
     { source_id: "src-crm-profile", url: prospect.linkedin || prospect.website || "", title: `${prospect.name} CRM/import profile`, publisher: "workspace CRM", source_type: "crm", published_at: "", retrieved_at: now, evidence_excerpt: [prospect.name, prospect.title, prospect.company, prospect.location].filter(Boolean).join(" · "), quality: prospect.crmSource ? "high" : "medium", claim_type: "fact" },
     { source_id: "src-product-context", url: "", title: `${product.name} product context`, publisher: "workspace product knowledge", source_type: "product_knowledge", published_at: "", retrieved_at: product.mcpContext?.lastSyncedAt || now, evidence_excerpt: product.positioning, quality: "high", claim_type: "company_claim" }
   ];
+  if (prospect.companyEnrichment?.checkedAt) {
+    sources.push({
+      source_id: "src-company-enrichment",
+      url: prospect.companyEnrichment.companyLinkedinUrl || prospect.companyLinkedin || "",
+      title: `${prospect.company || "Company"} company enrichment`,
+      publisher: prospect.companyEnrichment.source || "Apify company enrichment",
+      source_type: "company_enrichment",
+      published_at: "",
+      retrieved_at: prospect.companyEnrichment.checkedAt,
+      evidence_excerpt: [
+        prospect.companyEnrichment.employeeEstimate ? `employee estimate ${prospect.companyEnrichment.employeeEstimate}` : "",
+        ...(prospect.companyEnrichment.industries || []).slice(0, 5)
+      ].filter(Boolean).join(" · "),
+      quality: "review",
+      claim_type: "inference"
+    });
+  }
   (product.knowledge || []).slice(0, 8).forEach((item, index) => {
     sources.push({ source_id: `src-product-knowledge-${index + 1}`, url: item.url || "", title: item.title || "Product knowledge", publisher: "workspace product knowledge", source_type: item.type || "lesson", published_at: "", retrieved_at: item.createdAt || now, evidence_excerpt: cleanLongText(item.text || item.screenshot?.name || item.url || "").slice(0, 260), quality: Number(item.priority || 0) >= 85 ? "high" : "medium", claim_type: item.url ? "company_claim" : "inference" });
   });
@@ -6393,9 +6481,9 @@ function intelligenceSourcesForProspect(prospect, product) {
 }
 
 function buildIntelligenceScoringInputs(prospect, product, profile, sources) {
-  const text = `${prospect.title} ${prospect.notes} ${prospect.company}`.toLowerCase();
+  const text = `${prospect.title} ${prospect.notes} ${prospect.company} ${prospect.publicCompanyResearch?.title || ""} ${prospect.publicCompanyResearch?.description || ""} ${(prospect.companyEnrichment?.industries || []).join(" ")}`.toLowerCase();
   const contactConfidence = bestContactConfidenceServer(prospect);
-  const hasTrigger = Boolean(publicLeadNote(prospect.notes) || prospect.contactDiscovery?.scraperNote);
+  const hasTrigger = Boolean(publicLeadNote(prospect.notes));
   const fit = productFitForProspect(prospect, product);
   const isAdAction = profile.id.includes("adaction");
   const companyProfile = buildCompanyProfile(prospect, product);
@@ -6433,7 +6521,7 @@ function triggerForProspect(prospect, sources) {
   const sourceIds = sources.map((source) => source.source_id);
   const note = publicLeadNote(prospect.notes);
   const scraperNote = cleanText(prospect.contactDiscovery?.scraperNote || "");
-  const usefulScraperSignal = scraperNote && !/\b(failed|timed out|no apify|no actor|no results?|0 contact|0 company|404|configured|template missing)\b/i.test(scraperNote)
+  const usefulScraperSignal = scraperNote && /\b(funding|launch|hiring|expansion|acquisition|partnership|new market|new title)\b/i.test(scraperNote)
     ? scraperNote
     : "";
   const publicSignal = cleanText(prospect.publicCompanyResearch?.description || "");
@@ -6445,8 +6533,10 @@ function triggerForProspect(prospect, sources) {
 
 function selectedGameOrAppFor(prospect, product, profile) {
   if (!profile.id.includes("adaction")) return { name: prospect.company || "account-level offer", type: "not_applicable", rationale: `For ${product.name}, the account itself is the entry point rather than a mobile title.`, source_ids: ["src-crm-profile"], confidence: 55, verification_status: "inference" };
-  const explicitTitle = cleanText(`${prospect.notes || ""} ${prospect.publicCompanyResearch?.description || ""}`)
-    .match(/\b(?:app|game|title)\s*:\s*([^.;\n]{3,80})/i)?.[1];
+  const titleText = cleanText(`${prospect.notes || ""} ${prospect.publicCompanyResearch?.description || ""} ${prospect.publicCompanyResearch?.title || ""}`);
+  const explicitTitle = titleText.match(/\b(?:app|game|title)\s*:\s*([^.;\n]{3,80})/i)?.[1]
+    || titleText.match(/\bincluding\s+([^,.;\n]{3,80})/i)?.[1]
+    || titleText.match(/\bmakers?\s+of\s+([^|.;\n]{3,80})/i)?.[1];
   const name = cleanText(explicitTitle || "") || "unknown title";
   return { name, type: "mobile_game_or_app", rationale: name === "unknown title" ? "No specific title is verified yet; verify one active app-store title before a commercial pitch." : `${name} is named in available source context and still requires an app-store or company-source check.`, source_ids: ["src-crm-profile"], confidence: name === "unknown title" ? 30 : 62, verification_status: name === "unknown title" ? "unknown" : "needs_review" };
 }
@@ -6474,7 +6564,7 @@ function geosForProspect(prospect) {
 }
 
 function recommendedContactsForIntelligence(prospect, sourceIds) {
-  return committeeForProspectServer(prospect).slice(0, 3).map((member, index) => ({ contact_id: member.id || "", full_name: member.verified ? member.name : "", target_role: member.verified ? "" : member.name, role: member.title, persona: member.role, why_target: member.context, order: index + 1, confidence: member.confidence || (member.verified ? 78 : 45), verification_status: member.verified ? member.source || "verified_from_queue" : "role_slot", source_ids: member.verified ? ["src-crm-profile"].filter((id) => sourceIds.includes(id)) : [] }));
+  return committeeForProspectServer(prospect).slice(0, 3).map((member, index) => ({ contact_id: member.id || "", full_name: member.verified ? member.name : "", target_role: member.verified ? "" : member.name, role: member.title, persona: member.role, why_target: member.context, order: index + 1, confidence: member.confidence || (member.verified ? 78 : 45), verification_status: member.verified ? member.source || "verified_from_queue" : "role_slot", source_ids: member.verified ? [member.source?.startsWith("apify:") ? "src-company-enrichment" : "src-crm-profile"].filter((id) => sourceIds.includes(id)) : [] }));
 }
 
 function committeeForProspectServer(prospect) {
@@ -6483,7 +6573,20 @@ function committeeForProspectServer(prospect) {
   const rows = known.map((item) => ({ id: item.id, name: item.name, title: item.title || "Unknown title", role: committeeRoleServer(item.title), context: item.id === prospect.id ? "Current contact has known CRM/import context." : "Known contact in the same account queue.", linkedin: item.linkedin, confidence: 78, source: "verified_from_queue", verified: true }));
   rows.push(...(prospect.companyPeople || []).map((person) => ({ ...person, context: person.context || "Found by company scrape.", verified: true })));
   rows.push({ id: "", name: profileSuggestedRole(prospect), title: "Unresolved buying-committee role slot", role: "role_slot", context: "Find this person before escalating the account.", verified: false });
-  return mergeCommitteeRowsServer(rows);
+  return mergeCommitteeRowsServer(rows).sort((left, right) => committeePriorityScore(right, prospect) - committeePriorityScore(left, prospect));
+}
+
+function committeePriorityScore(member, prospect) {
+  const title = String(member.title || "").toLowerCase();
+  let score = member.id === prospect.id ? 120 : 0;
+  if (/user acquisition|\bua\b|growth|performance|paid media/.test(title)) score += 70;
+  if (/data|analytics|measurement|mmp/.test(title)) score += 58;
+  if (/product|monetization|retention|lifecycle/.test(title)) score += 52;
+  if (/chief|ceo|founder|owner|vp|head|director/.test(title)) score += 36;
+  if (/marketing|business development|commercial|strategy/.test(title)) score += 28;
+  if (String(member.source || "").startsWith("apify:")) score += 8;
+  score += Number(member.confidence || 0) / 20;
+  return score;
 }
 
 function mergeCommitteeRowsServer(rows) {
@@ -6555,7 +6658,9 @@ function researchGapsForIntelligence(prospect, product, profile, candidates, sou
   if (!candidates.some((candidate) => /^verified/.test(String(candidate.status || "")))) gaps.push(gapRow("verified contact data", "Messenger/email/phone channels require source and permission review.", "Verify LinkedIn identity first; enrich email/phone only through approved connectors.", "Apollo, ZoomInfo, Apify, CRM"));
   if (!sources.some((source) => source.source_type === "crm_activity")) gaps.push(gapRow("historical activity", "Past touches change cadence, channel choice, and close chance.", "Sync CRM activity/call notes for this contact/account.", "CRM"));
   if (profile.id.includes("adaction")) {
-    gaps.push(gapRow("specific app store title", "AdAction outreach must anchor on one verified game/app.", "Verify App Store or Google Play title before pitching.", "App Store / Google Play / company site"));
+    const selectedApp = selectedGameOrAppFor(prospect, product, profile);
+    if (selectedApp.name === "unknown title") gaps.push(gapRow("specific app store title", "AdAction outreach must anchor on one verified game/app.", "Verify App Store or Google Play title before pitching.", "App Store / Google Play / company site"));
+    else if (selectedApp.verification_status !== "verified") gaps.push(gapRow("app title verification", `${selectedApp.name} is named in available context but has not been verified against a live store listing.`, "Confirm the active App Store or Google Play listing before a commercial pitch.", "App Store / Google Play / company site"));
     gaps.push(gapRow("MMP and natural KPI", "Pilot design needs attribution and one natural quality KPI separate from payable event.", "Ask UA/analytics owner or inspect approved CRM notes.", "CRM call notes / discovery"));
   }
   if (!product.knowledge?.length) gaps.push(gapRow("product proof", "The model needs approved proof before making performance or quality claims.", "Upload product proof, case study, lesson, or screenshot in Products.", "Product Knowledge"));
@@ -6708,7 +6813,11 @@ function restrictedCategoryPenalty(prospect, profile) {
 
 function overallIntelligenceConfidence(scoringInputs, sources, gaps) {
   const scoringConfidence = scoringInputs.reduce((sum, input) => sum + Number(input.confidence || 0), 0) / Math.max(1, scoringInputs.length);
-  return Math.round(Math.max(20, Math.min(95, scoringConfidence + Math.min(12, sources.length * 2) - Math.min(24, gaps.length * 4))));
+  let confidence = Math.round(Math.max(20, Math.min(95, scoringConfidence + Math.min(12, sources.length * 2) - Math.min(24, gaps.length * 4))));
+  if (gaps.some((gap) => /specific app store title/i.test(gap.missing_field || ""))) confidence = Math.min(confidence, 74);
+  else if (gaps.some((gap) => /app title verification/i.test(gap.missing_field || ""))) confidence = Math.min(confidence, 80);
+  if (gaps.some((gap) => /verified contact data/i.test(gap.missing_field || ""))) confidence = Math.min(confidence, 70);
+  return confidence;
 }
 
 function executiveSummaryForIntelligence(prospect, product, scores, trigger) {
@@ -8189,7 +8298,7 @@ function productFitForProspect(prospect, product) {
     const directBuyer = /user acquisition|\bua\b|growth|performance|acquisition|paid media/.test(roleText);
     const qualityBuyer = /data|analytics|measurement|mmp|product|retention|lifecycle/.test(roleText);
     const seniorBuyer = /founder|ceo|chief|head|vp|director|business development|commercial|strategy|marketing/.test(roleText);
-    const mobileEvidence = /mobile game|mobile app|game developer|game publisher|gaming|gameplay|players?|app store|google play|android|ios/.test(companyText);
+    const mobileEvidence = /mobile games?|mobile apps?|game developer|game publisher|games?|gaming|gameplay|players?|app store|google play|android|ios/.test(companyText);
     if (mobileEvidence && directBuyer) return { label: "high", reason: "verified mobile-app or gaming company context aligns with a direct user-acquisition buyer role" };
     if (mobileEvidence && (qualityBuyer || seniorBuyer)) return { label: "high", reason: "verified mobile-app or gaming company context aligns with an analytics, product, or senior commercial stakeholder" };
     if (mobileEvidence) return { label: "medium", reason: "the company fits AdAction's mobile-app advertiser ICP, but buyer ownership needs verification" };
@@ -8455,12 +8564,17 @@ function cleanLongText(value) {
 function publicLeadNote(value) {
   const raw = String(value || "").trim();
   if (!raw) return "";
-  if (/\b(crm|folder|page\s+\d+|status|owner|imported|advantage|netlify|api token|api key|endpoint|uuid|id[:=])\b/i.test(raw)) return "";
-  return raw
+  const cleaned = raw
     .replace(/\bhttps?:\/\/\S+/gi, "")
     .replace(/\b[A-Fa-f0-9]{8}-[A-Fa-f0-9-]{13,}\b/g, "")
-    .trim()
-    .slice(0, 180);
+    .trim();
+  const usefulSentences = cleaned
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean)
+    .filter((sentence) => !/^(confirm|verify|research|check|review|import|sync|update)\b/i.test(sentence))
+    .filter((sentence) => !/\b(folder[_ ]?id|advantage-crm|netlify|api token|api key|endpoint|uuid|page\s+\d+)\b/i.test(sentence));
+  return usefulSentences.slice(0, 2).join(" ").slice(0, 260);
 }
 
 async function testSupabaseRest(url, apiKey) {
