@@ -731,22 +731,22 @@ async function handleApi(request, response, url) {
   if (request.method === "POST" && url.pathname === "/api/integrations/apify/configure") {
     const body = await readJson(request);
     state.integrations.apify.actorIds = {
-      leadDatabase: normalizeApifyActorId(body.leadDatabaseActorId || state.integrations.apify.actorIds.leadDatabase),
-      linkedinProfile: normalizeApifyActorId(body.linkedinProfileActorId || state.integrations.apify.actorIds.linkedinProfile),
-      contactFinder: normalizeApifyActorId(body.contactFinderActorId || state.integrations.apify.actorIds.contactFinder),
-      apollo: normalizeApifyActorId(body.apolloActorId || state.integrations.apify.actorIds.apollo),
-      zoominfo: normalizeApifyActorId(body.zoominfoActorId || state.integrations.apify.actorIds.zoominfo),
-      facebookProfile: normalizeApifyActorId(body.facebookProfileActorId || state.integrations.apify.actorIds.facebookProfile),
-      emailPhoneFinder: normalizeApifyActorId(body.emailPhoneFinderActorId || state.integrations.apify.actorIds.emailPhoneFinder),
-      phoneMessengerCheck: normalizeApifyActorId(body.phoneMessengerCheckActorId || state.integrations.apify.actorIds.phoneMessengerCheck),
-      whatsappChecker: normalizeApifyActorId(body.whatsappCheckerActorId || state.integrations.apify.actorIds.whatsappChecker),
-      telegramChecker: normalizeApifyActorId(body.telegramCheckerActorId || state.integrations.apify.actorIds.telegramChecker),
-      companyPeople: normalizeApifyActorId(body.companyPeopleActorId || state.integrations.apify.actorIds.companyPeople)
+      leadDatabase: configuredActorId(body, "leadDatabaseActorId", state.integrations.apify.actorIds.leadDatabase),
+      linkedinProfile: configuredActorId(body, "linkedinProfileActorId", state.integrations.apify.actorIds.linkedinProfile),
+      contactFinder: configuredActorId(body, "contactFinderActorId", state.integrations.apify.actorIds.contactFinder),
+      apollo: configuredActorId(body, "apolloActorId", state.integrations.apify.actorIds.apollo),
+      zoominfo: configuredActorId(body, "zoominfoActorId", state.integrations.apify.actorIds.zoominfo),
+      facebookProfile: configuredActorId(body, "facebookProfileActorId", state.integrations.apify.actorIds.facebookProfile),
+      emailPhoneFinder: configuredActorId(body, "emailPhoneFinderActorId", state.integrations.apify.actorIds.emailPhoneFinder),
+      phoneMessengerCheck: configuredActorId(body, "phoneMessengerCheckActorId", state.integrations.apify.actorIds.phoneMessengerCheck),
+      whatsappChecker: configuredActorId(body, "whatsappCheckerActorId", state.integrations.apify.actorIds.whatsappChecker),
+      telegramChecker: configuredActorId(body, "telegramCheckerActorId", state.integrations.apify.actorIds.telegramChecker),
+      companyPeople: configuredActorId(body, "companyPeopleActorId", state.integrations.apify.actorIds.companyPeople)
     };
     state.integrations.apify.actorInputTemplates = {
       ...state.integrations.apify.actorInputTemplates,
-      leadDatabase: cleanLongText(body.leadDatabaseInputTemplate || state.integrations.apify.actorInputTemplates?.leadDatabase || ""),
-      companyPeople: cleanLongText(body.companyPeopleInputTemplate || state.integrations.apify.actorInputTemplates?.companyPeople || "")
+      leadDatabase: Object.hasOwn(body, "leadDatabaseInputTemplate") ? cleanLongText(body.leadDatabaseInputTemplate) : state.integrations.apify.actorInputTemplates?.leadDatabase || "",
+      companyPeople: Object.hasOwn(body, "companyPeopleInputTemplate") ? cleanLongText(body.companyPeopleInputTemplate) : state.integrations.apify.actorInputTemplates?.companyPeople || ""
     };
     state.integrations.apify.maxChargeUsd = clampNumber(body.maxChargeUsd, 0.05, 50, state.integrations.apify.maxChargeUsd);
     if (typeof body.apiToken === "string" && body.apiToken.trim()) {
@@ -8526,6 +8526,10 @@ function normalizeApifyActorId(value) {
   } catch {
     return text;
   }
+}
+
+function configuredActorId(body, key, currentValue = "") {
+  return Object.hasOwn(body, key) ? normalizeApifyActorId(body[key]) : normalizeApifyActorId(currentValue);
 }
 
 function firstNameFor(name) {
