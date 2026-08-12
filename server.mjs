@@ -1360,6 +1360,28 @@ function applyPersistentWorkspaceState(saved = {}) {
       lastTrainedAt: saved.learning.lastTrainedAt || state.learning.lastTrainedAt
     };
   }
+  if (saved.integrationSettings?.apify && typeof saved.integrationSettings.apify === "object") {
+    state.integrations.apify = {
+      ...state.integrations.apify,
+      actorIds: {
+        ...state.integrations.apify.actorIds,
+        ...(saved.integrationSettings.apify.actorIds || {})
+      },
+      actorInputTemplates: {
+        ...state.integrations.apify.actorInputTemplates,
+        ...(saved.integrationSettings.apify.actorInputTemplates || {})
+      },
+      maxChargeUsd: clampNumber(saved.integrationSettings.apify.maxChargeUsd, 0.01, 50, state.integrations.apify.maxChargeUsd)
+    };
+  }
+  if (saved.integrationSettings?.mcp && typeof saved.integrationSettings.mcp === "object") {
+    state.mcpSync = { ...state.mcpSync, ...saved.integrationSettings.mcp };
+  }
+  for (const key of ["crm", "transcripts", "notifications", "supabase", "postgres"]) {
+    if (saved.integrationSettings?.[key] && typeof saved.integrationSettings[key] === "object") {
+      state.integrations[key] = { ...state.integrations[key], ...saved.integrationSettings[key] };
+    }
+  }
 }
 
 function mergeProductMemory(existing, product) {
@@ -1415,11 +1437,33 @@ async function writePersistentWorkspaceState() {
         playbook: state.learning.playbook,
         modelVersion: state.learning.modelVersion,
         lastTrainedAt: state.learning.lastTrainedAt
+      },
+      integrationSettings: {
+        apify: {
+          actorIds: state.integrations.apify.actorIds,
+          actorInputTemplates: state.integrations.apify.actorInputTemplates,
+          maxChargeUsd: state.integrations.apify.maxChargeUsd
+        },
+        mcp: {
+          baseUrl: state.mcpSync.baseUrl,
+          resourceNamespace: state.mcpSync.resourceNamespace,
+          status: state.mcpSync.status
+        },
+        crm: nonSecretIntegrationSettings(state.integrations.crm),
+        transcripts: nonSecretIntegrationSettings(state.integrations.transcripts),
+        notifications: nonSecretIntegrationSettings(state.integrations.notifications),
+        supabase: nonSecretIntegrationSettings(state.integrations.supabase),
+        postgres: nonSecretIntegrationSettings(state.integrations.postgres)
       }
     }, null, 2), "utf8");
   } catch (error) {
     console.error("Could not persist workspace memory:", error instanceof Error ? error.message : error);
   }
+}
+
+function nonSecretIntegrationSettings(settings = {}) {
+  const { keyMetadata, ...safeSettings } = settings;
+  return safeSettings;
 }
 
 function publicState() {
