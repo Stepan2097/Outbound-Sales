@@ -3874,9 +3874,14 @@ function renderApifyInputTemplate(template, prospect, fallbackInput) {
   }
   const variables = {
     ...fallbackInput,
+    name: prospect.name,
     firstName: firstNameFor(prospect.name),
     lastName: lastNameFor(prospect.name),
+    title: prospect.title,
+    company: prospect.company,
     domain: normalizeDomain(prospect.website),
+    website: prospect.website,
+    linkedinUrl: prospect.linkedin,
     phones: knownPhoneCandidates(prospect)
   };
   return compactApifyInput(replaceTemplateValues(parsed, variables));
