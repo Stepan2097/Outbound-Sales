@@ -19,7 +19,12 @@ const defaultCompanyPeopleActorId = "scraper-engine/linkedin-company-employees-s
 const defaultContactFinderActorId = "delicious_zebu/contact-info-scraper";
 const defaultWhatsappCheckerActorId = "vtrdev/whatsapp-number-validator";
 const defaultTelegramCheckerActorId = "akula.marketing/telegram-get-phone-info";
+const defaultSecondaryCompanyPeopleActorId = "harvestapi/linkedin-company-employees";
+const defaultPersonEnrichmentActorId = "ryanclinton/person-enrichment-lookup";
 const legacyPipelineLabsActorId = "kVYdvNOefemtiDXO5";
+const authAccessCookie = "outbound_os_access";
+const authRefreshCookie = "outbound_os_refresh";
+const authSessionCache = new Map();
 
 const taskTypes = [
   "ICP_ANALYSIS",
@@ -85,6 +90,7 @@ const state = {
   analysisProfiles: seedAnalysisProfiles(),
   intelligenceSnapshots: [],
   intelligenceJobs: [],
+  researchJobs: [],
   icp: {
     seedLeadIds: [],
     profile: {
@@ -151,13 +157,16 @@ const state = {
         phoneMessengerCheck: "",
         whatsappChecker: defaultWhatsappCheckerActorId,
         telegramChecker: defaultTelegramCheckerActorId,
-        companyPeople: defaultCompanyPeopleActorId
+        companyPeople: defaultCompanyPeopleActorId,
+        companyPeopleSecondary: defaultSecondaryCompanyPeopleActorId,
+        personEnrichment: defaultPersonEnrichmentActorId
       },
       actorInputTemplates: {
         leadDatabase: "",
         companyPeople: ""
       },
       maxChargeUsd: 1.5,
+      contactMaxChargeUsd: 0.2,
       status: "not_configured",
       lastRunAt: null,
       keyMetadata: null
@@ -213,6 +222,8 @@ const state = {
   followUpTasks: [],
   aiActions: [],
   historicalOutcomes: seedHistoricalOutcomes(),
+  scoringModel: seedScoringModel(),
+  users: [],
   usage: seedUsage(),
   events: [
     {
@@ -254,7 +265,7 @@ const server = createServer(async (request, response) => {
 
     await serveStatic(response, url.pathname);
   } catch (error) {
-    sendJson(response, 500, { error: error instanceof Error ? error.message : String(error) });
+    sendJson(response, Number(error?.statusCode || 500), { error: error instanceof Error ? error.message : String(error) });
   }
 });
 
@@ -273,8 +284,141 @@ async function handleApi(request, response, url) {
     return;
   }
 
+  if (request.method === "GET" && url.pathname === "/api/auth/status") {
+    const auth = await authenticateApiRequest(request, response, { optional: true });
+    sendJson(response, 200, publicAuthStatus(auth));
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/auth/bootstrap") {
+    if (state.users.some((user) => user.status !== "disabled")) {
+      sendJson(response, 409, { error: "The workspace owner already exists. Sign in instead." });
+      return;
+    }
+    const body = await readJson(request);
+    const result = await createWorkspaceUser(body, { role: "admin", bootstrap: true });
+    setAuthSessionCookies(request, response, result.session);
+    sendJson(response, 201, { auth: publicAuthStatus({ user: result.user, profile: result.profile }) });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/auth/login") {
+    const body = await readJson(request);
+    const result = await loginWorkspaceUser(body.email, body.password);
+    setAuthSessionCookies(request, response, result.session);
+    result.profile.lastLoginAt = new Date().toISOString();
+    await writePersistentWorkspaceState();
+    sendJson(response, 200, { auth: publicAuthStatus({ user: result.user, profile: result.profile }) });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/auth/logout") {
+    clearAuthSessionCookies(request, response);
+    sendJson(response, 200, { ok: true });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/auth/recover") {
+    const body = await readJson(request);
+    await requestPasswordRecovery(body.email, request);
+    sendJson(response, 200, { ok: true, message: "If the account exists, a password reset link has been requested." });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/auth/complete-recovery") {
+    const body = await readJson(request);
+    await updateSupabasePassword(cleanText(body.accessToken || ""), body.password);
+    sendJson(response, 200, { ok: true });
+    return;
+  }
+
+  if (url.pathname.startsWith("/api/webhooks/")) {
+    const suppliedToken = cleanText(request.headers["x-webhook-token"] || String(request.headers.authorization || "").replace(/^Bearer\s+/i, ""));
+    if (!state.transcriptVault || suppliedToken !== decryptSecret(state.transcriptVault)) {
+      sendJson(response, 401, { error: "Webhook authentication failed." });
+      return;
+    }
+  } else {
+    const auth = await authenticateApiRequest(request, response);
+    if (!auth) return;
+    request.auth = auth;
+  }
+
   if (request.method === "GET" && url.pathname === "/api/state") {
     sendJson(response, 200, publicState());
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/account/profile") {
+    const body = await readJson(request);
+    request.auth.profile.name = cleanText(body.name || request.auth.profile.name).slice(0, 120);
+    request.auth.profile.title = cleanText(body.title || request.auth.profile.title).slice(0, 120);
+    request.auth.profile.updatedAt = new Date().toISOString();
+    await writePersistentWorkspaceState();
+    sendJson(response, 200, publicState());
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/account/password") {
+    const body = await readJson(request);
+    await updateSupabasePassword(request.auth.accessToken, body.password);
+    sendJson(response, 200, { ok: true });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/account/linkedin") {
+    const body = await readJson(request);
+    const account = normalizeLinkedinIdentity(body);
+    if (!account.name || !account.url) {
+      sendJson(response, 400, { error: "LinkedIn account name and profile URL are required." });
+      return;
+    }
+    request.auth.profile.linkedinAccounts ??= [];
+    const existing = request.auth.profile.linkedinAccounts.find((item) => item.id === account.id || item.url.toLowerCase() === account.url.toLowerCase());
+    if (existing) Object.assign(existing, account, { id: existing.id, updatedAt: new Date().toISOString() });
+    else request.auth.profile.linkedinAccounts.push(account);
+    if (!request.auth.profile.activeLinkedinAccountId) request.auth.profile.activeLinkedinAccountId = (existing || account).id;
+    request.auth.profile.updatedAt = new Date().toISOString();
+    await writePersistentWorkspaceState();
+    sendJson(response, 200, publicState());
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/account/linkedin/active") {
+    const body = await readJson(request);
+    const account = (request.auth.profile.linkedinAccounts || []).find((item) => item.id === body.accountId);
+    if (!account) {
+      sendJson(response, 404, { error: "LinkedIn identity not found." });
+      return;
+    }
+    request.auth.profile.activeLinkedinAccountId = account.id;
+    request.auth.profile.updatedAt = new Date().toISOString();
+    await writePersistentWorkspaceState();
+    sendJson(response, 200, publicState());
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/account/linkedin/delete") {
+    const body = await readJson(request);
+    request.auth.profile.linkedinAccounts = (request.auth.profile.linkedinAccounts || []).filter((item) => item.id !== body.accountId);
+    if (request.auth.profile.activeLinkedinAccountId === body.accountId) {
+      request.auth.profile.activeLinkedinAccountId = request.auth.profile.linkedinAccounts[0]?.id || "";
+    }
+    request.auth.profile.updatedAt = new Date().toISOString();
+    await writePersistentWorkspaceState();
+    sendJson(response, 200, publicState());
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/account/users") {
+    if (request.auth.profile.role !== "admin") {
+      sendJson(response, 403, { error: "Only a workspace administrator can add users." });
+      return;
+    }
+    const body = await readJson(request);
+    const result = await createWorkspaceUser(body, { role: body.role === "admin" ? "admin" : "seller" });
+    await writePersistentWorkspaceState();
+    sendJson(response, 201, { user: publicUserProfile(result.profile), state: publicState() });
     return;
   }
 
@@ -741,7 +885,9 @@ async function handleApi(request, response, url) {
       phoneMessengerCheck: configuredActorId(body, "phoneMessengerCheckActorId", state.integrations.apify.actorIds.phoneMessengerCheck),
       whatsappChecker: configuredActorId(body, "whatsappCheckerActorId", state.integrations.apify.actorIds.whatsappChecker),
       telegramChecker: configuredActorId(body, "telegramCheckerActorId", state.integrations.apify.actorIds.telegramChecker),
-      companyPeople: configuredActorId(body, "companyPeopleActorId", state.integrations.apify.actorIds.companyPeople)
+      companyPeople: configuredActorId(body, "companyPeopleActorId", state.integrations.apify.actorIds.companyPeople),
+      companyPeopleSecondary: configuredActorId(body, "companyPeopleSecondaryActorId", state.integrations.apify.actorIds.companyPeopleSecondary),
+      personEnrichment: configuredActorId(body, "personEnrichmentActorId", state.integrations.apify.actorIds.personEnrichment)
     };
     state.integrations.apify.actorInputTemplates = {
       ...state.integrations.apify.actorInputTemplates,
@@ -749,6 +895,7 @@ async function handleApi(request, response, url) {
       companyPeople: Object.hasOwn(body, "companyPeopleInputTemplate") ? cleanLongText(body.companyPeopleInputTemplate) : state.integrations.apify.actorInputTemplates?.companyPeople || ""
     };
     state.integrations.apify.maxChargeUsd = clampNumber(body.maxChargeUsd, 0.05, 50, state.integrations.apify.maxChargeUsd);
+    state.integrations.apify.contactMaxChargeUsd = clampNumber(body.contactMaxChargeUsd, 0.05, 5, state.integrations.apify.contactMaxChargeUsd);
     if (typeof body.apiToken === "string" && body.apiToken.trim()) {
       state.apifyVault = encryptSecret(body.apiToken.trim());
       state.integrations.apify.keyMetadata = {
@@ -889,6 +1036,7 @@ async function handleApi(request, response, url) {
       linkedinField: cleanText(body.linkedinField || "")
     });
     state.aiActions.unshift(action);
+    state.scoringModel = learnScoringModelFromWorkspace();
     await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
@@ -1072,6 +1220,92 @@ async function handleApi(request, response, url) {
     return;
   }
 
+  if (request.method === "POST" && url.pathname === "/api/research/jobs") {
+    const body = await readJson(request);
+    const prospect = findProspect(body.prospectId);
+    if (!prospect) {
+      sendJson(response, 404, { error: "Prospect not found." });
+      return;
+    }
+    const existing = state.researchJobs.find((job) => job.prospectId === prospect.id && ["queued", "running"].includes(job.status));
+    if (existing) {
+      sendJson(response, 202, { job: publicResearchJob(existing) });
+      return;
+    }
+    const job = createResearchJob(prospect, body.profile, actorContextForRequest(request));
+    state.researchJobs.unshift(job);
+    state.researchJobs = state.researchJobs.slice(0, 100);
+    await writePersistentWorkspaceState();
+    void runResearchJob(job);
+    sendJson(response, 202, { job: publicResearchJob(job) });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname.startsWith("/api/research/jobs/")) {
+    const jobId = decodeURIComponent(url.pathname.slice("/api/research/jobs/".length));
+    const job = state.researchJobs.find((item) => item.id === jobId);
+    if (!job) {
+      sendJson(response, 404, { error: "Research job not found." });
+      return;
+    }
+    sendJson(response, 200, { job: publicResearchJob(job) });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/prospects/contacts/approval") {
+    const body = await readJson(request);
+    const prospect = findProspect(body.prospectId);
+    if (!prospect) {
+      sendJson(response, 404, { error: "Prospect not found." });
+      return;
+    }
+    const decision = body.decision === "approved" ? "approved" : body.decision === "rejected" ? "rejected" : "";
+    const candidate = (prospect.contactDiscovery?.candidates || []).find((item) =>
+      item.type === body.type && String(item.value || "").toLowerCase() === String(body.value || "").toLowerCase()
+    );
+    if (!candidate || !decision) {
+      sendJson(response, 400, { error: "Choose a valid contact and approval decision." });
+      return;
+    }
+    if (decision === "approved" && !contactCandidateCanBeApproved(candidate)) {
+      sendJson(response, 409, { error: "This contact still needs verification evidence before it can be approved for outreach." });
+      return;
+    }
+    const actor = actorContextForRequest(request);
+    candidate.approvalStatus = decision;
+    candidate.approvedAt = decision === "approved" ? new Date().toISOString() : null;
+    candidate.approvedBy = decision === "approved" ? actor : null;
+    candidate.reviewedAt = new Date().toISOString();
+    candidate.reviewedBy = actor;
+    if (decision === "approved" && candidate.type === "phone" && state.integrations.apify.configured) {
+      const checked = await runPhoneMessengerChecks(prospect, [candidate]);
+      prospect.contactDiscovery.candidates = mergeContactCandidates([
+        ...prospect.contactDiscovery.candidates,
+        ...checked.candidates.map((item) => ({ ...item, approvalStatus: "pending" }))
+      ]);
+      prospect.contactDiscovery.warnings = mergeStringLists(prospect.contactDiscovery.warnings || [], checked.warnings || []);
+    }
+    const interaction = normalizeInteraction(prospect.id, {
+      type: "contact_approval_reviewed",
+      channel: candidate.type,
+      outcome: decision,
+      note: `${titleCaseServer(candidate.type)} contact ${decision} for use.`,
+      actor
+    });
+    state.interactions.unshift(interaction);
+    prospect.updatedAt = new Date().toISOString();
+    await writePersistentWorkspaceState();
+    sendJson(response, 200, publicState());
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/scoring/retrain") {
+    state.scoringModel = learnScoringModelFromWorkspace();
+    await writePersistentWorkspaceState();
+    sendJson(response, 200, publicState());
+    return;
+  }
+
   if (request.method === "POST" && url.pathname === "/api/prospects/linkedin-target") {
     const body = await readJson(request);
     const linkedinUrl = cleanText(body.linkedinUrl || "");
@@ -1142,7 +1376,8 @@ async function handleApi(request, response, url) {
 
     const profile = body.profile === "premium" || body.profile === "economy" ? body.profile : "balanced";
     prospect.outreach = await prepareAndLogOutreach(prospect, profile, "SEQUENCE_GENERATION", {
-      source: "manual-prepare"
+      source: "manual-prepare",
+      actor: actorContextForRequest(request)
     });
     prospect.status = statusAfterOutreachPlan(prospect.outreach);
     prospect.updatedAt = new Date().toISOString();
@@ -1193,7 +1428,7 @@ async function handleApi(request, response, url) {
 
     let interaction;
     if (body.syncCrm === false) {
-      interaction = normalizeInteraction(prospect.id, body);
+      interaction = normalizeInteraction(prospect.id, { ...body, actor: actorContextForRequest(request) });
       state.interactions.unshift(interaction);
       prospect.status = statusFromInteraction(interaction.type, prospect.status);
       prospect.updatedAt = new Date().toISOString();
@@ -1209,11 +1444,15 @@ async function handleApi(request, response, url) {
           ...(body.metadata && typeof body.metadata === "object" ? body.metadata : {}),
           productId: state.selectedProductId,
           productName: currentProduct().name
-        }
+        },
+        actor: actorContextForRequest(request)
       });
       interaction = logged.interaction;
     }
     addEvent("interaction", `${interaction.type} logged for ${prospect.name}.`);
+    if (/reply|meeting|won|lost|no_reply|opportunit/i.test(`${interaction.type} ${interaction.outcome} ${interaction.note}`)) {
+      state.scoringModel = learnScoringModelFromWorkspace();
+    }
     await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
@@ -1235,7 +1474,8 @@ async function handleApi(request, response, url) {
         type: task.type || "follow_up_scheduled",
         channel: task.channel || "manual",
         outcome: "completed",
-        note: `Completed task: ${task.label}`
+        note: `Completed task: ${task.label}`,
+        actor: actorContextForRequest(request)
       });
       state.interactions.unshift(interaction);
       prospect.updatedAt = new Date().toISOString();
@@ -1291,6 +1531,291 @@ async function handleApi(request, response, url) {
   }
 
   sendJson(response, 404, { error: "Not found." });
+}
+
+function apiError(message, statusCode = 400) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+}
+
+function supabaseAuthConfig() {
+  if (!state.integrations.supabase.url || !state.supabaseVault) {
+    throw apiError("Supabase Auth is not configured on the server yet.", 503);
+  }
+  return {
+    url: state.integrations.supabase.url.replace(/\/+$/, ""),
+    apiKey: decryptSecret(state.supabaseVault)
+  };
+}
+
+async function supabaseAuthRequest(pathname, options = {}) {
+  const config = supabaseAuthConfig();
+  const response = await fetch(`${config.url}/auth/v1/${pathname.replace(/^\/+/, "")}`, {
+    method: options.method || "GET",
+    headers: {
+      apikey: config.apiKey,
+      Authorization: `Bearer ${options.bearer || config.apiKey}`,
+      "Content-Type": "application/json",
+      ...(options.headers || {})
+    },
+    body: options.body === undefined ? undefined : JSON.stringify(options.body)
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw apiError(cleanText(data.msg || data.message || data.error_description || data.error || `Supabase Auth HTTP ${response.status}`), response.status === 401 ? 401 : 400);
+  }
+  return data;
+}
+
+async function createWorkspaceUser(input = {}, options = {}) {
+  const email = cleanText(input.email || "").toLowerCase();
+  const password = String(input.password || "");
+  const name = cleanText(input.name || email.split("@")[0] || "Seller").slice(0, 120);
+  const title = cleanText(input.title || "").slice(0, 120);
+  const role = options.role === "admin" ? "admin" : "seller";
+  if (!/^\S+@\S+\.\S+$/.test(email)) throw apiError("Enter a valid work email address.");
+  if (password.length < 10) throw apiError("Password must contain at least 10 characters.");
+
+  let user;
+  try {
+    const created = await supabaseAuthRequest("admin/users", {
+      method: "POST",
+      body: { email, password, email_confirm: true, user_metadata: { name, title, role } }
+    });
+    user = created.user || created;
+  } catch (error) {
+    if (!options.bootstrap) throw error;
+    const signedUp = await supabaseAuthRequest("signup", {
+      method: "POST",
+      body: { email, password, data: { name, title, role } }
+    });
+    user = signedUp.user;
+  }
+  if (!user?.id) throw apiError("Supabase did not return a user account.", 502);
+  const profile = ensureWorkspaceUserProfile(user, { name, title, role });
+  const session = options.bootstrap ? (await loginWorkspaceUser(email, password)).session : null;
+  return { user, profile, session };
+}
+
+async function loginWorkspaceUser(emailValue, passwordValue) {
+  const email = cleanText(emailValue || "").toLowerCase();
+  const password = String(passwordValue || "");
+  if (!email || !password) throw apiError("Enter your email and password.");
+  const session = await supabaseAuthRequest("token?grant_type=password", {
+    method: "POST",
+    body: { email, password }
+  });
+  const user = session.user || await verifySupabaseAccessToken(session.access_token);
+  const profile = ensureWorkspaceUserProfile(user);
+  if (profile.status === "disabled") throw apiError("This workspace account is disabled.", 403);
+  cacheAuthSession(session.access_token, user);
+  return { session, user, profile };
+}
+
+async function authenticateApiRequest(request, response, options = {}) {
+  if (process.env.AUTH_DEV_BYPASS === "1") {
+    const user = { id: "dev-user", email: "developer@localhost", user_metadata: { name: "Local Tester", role: "admin" } };
+    return { user, profile: ensureWorkspaceUserProfile(user, { role: "admin" }), accessToken: "dev-bypass" };
+  }
+  if (!state.users.some((user) => user.status !== "disabled")) {
+    if (options.optional) return null;
+    sendJson(response, 401, { error: "Create the first workspace owner account.", bootstrapRequired: true });
+    return null;
+  }
+  const cookies = parseCookies(request.headers.cookie || "");
+  let accessToken = cookies[authAccessCookie] || "";
+  const refreshToken = cookies[authRefreshCookie] || "";
+  let user = accessToken ? cachedAuthUser(accessToken) : null;
+  try {
+    if (!user && accessToken) user = await verifySupabaseAccessToken(accessToken);
+  } catch {
+    accessToken = "";
+  }
+
+  if (!user && refreshToken) {
+    try {
+      const session = await supabaseAuthRequest("token?grant_type=refresh_token", {
+        method: "POST",
+        body: { refresh_token: refreshToken }
+      });
+      accessToken = session.access_token;
+      user = session.user || await verifySupabaseAccessToken(accessToken);
+      cacheAuthSession(accessToken, user);
+      setAuthSessionCookies(request, response, session);
+    } catch {
+      user = null;
+    }
+  }
+
+  if (!user) {
+    if (options.optional) return null;
+    clearAuthSessionCookies(request, response);
+    sendJson(response, 401, { error: "Your session has expired. Sign in again." });
+    return null;
+  }
+  const profile = ensureWorkspaceUserProfile(user);
+  if (profile.status === "disabled") {
+    if (options.optional) return null;
+    sendJson(response, 403, { error: "This workspace account is disabled." });
+    return null;
+  }
+  return { user, profile, accessToken };
+}
+
+async function verifySupabaseAccessToken(accessToken) {
+  const user = await supabaseAuthRequest("user", { bearer: accessToken });
+  cacheAuthSession(accessToken, user);
+  return user;
+}
+
+function cacheAuthSession(accessToken, user) {
+  if (!accessToken || !user?.id) return;
+  let expiresAt = Date.now() + 45 * 60 * 1000;
+  try {
+    const payload = JSON.parse(Buffer.from(accessToken.split(".")[1] || "", "base64url").toString("utf8"));
+    if (payload.exp) expiresAt = Number(payload.exp) * 1000;
+  } catch {
+    // Supabase remains the source of truth when the token cannot be decoded.
+  }
+  authSessionCache.set(createHash("sha256").update(accessToken).digest("hex"), { user, expiresAt });
+}
+
+function cachedAuthUser(accessToken) {
+  const key = createHash("sha256").update(accessToken).digest("hex");
+  const cached = authSessionCache.get(key);
+  if (!cached || cached.expiresAt <= Date.now() + 15_000) {
+    authSessionCache.delete(key);
+    return null;
+  }
+  return cached.user;
+}
+
+function ensureWorkspaceUserProfile(user, defaults = {}) {
+  let profile = state.users.find((item) => item.id === user.id || item.email === String(user.email || "").toLowerCase());
+  if (!profile) {
+    const metadata = user.user_metadata || {};
+    profile = {
+      id: user.id,
+      email: cleanText(user.email || "").toLowerCase(),
+      name: cleanText(defaults.name || metadata.name || user.email?.split("@")[0] || "Seller"),
+      title: cleanText(defaults.title || metadata.title || ""),
+      role: defaults.role === "admin" || metadata.role === "admin" || !state.users.length ? "admin" : "seller",
+      status: "active",
+      linkedinAccounts: [],
+      activeLinkedinAccountId: "",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      lastLoginAt: null
+    };
+    state.users.push(profile);
+    persistWorkspaceState();
+  } else if (profile.id !== user.id) {
+    profile.id = user.id;
+  }
+  return profile;
+}
+
+function normalizeLinkedinIdentity(input = {}) {
+  const url = cleanText(input.url || input.linkedin || "");
+  if (!/^https?:\/\/(?:[a-z]{2,3}\.)?linkedin\.com\/in\//i.test(url)) return { name: cleanText(input.name || ""), url: "" };
+  return {
+    id: cleanText(input.id || `linkedin-${randomBytes(5).toString("hex")}`),
+    name: cleanText(input.name || "LinkedIn account").slice(0, 100),
+    url,
+    createdAt: input.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+}
+
+function publicUserProfile(profile = {}) {
+  return {
+    id: profile.id,
+    email: profile.email,
+    name: profile.name,
+    title: profile.title || "",
+    role: profile.role || "seller",
+    status: profile.status || "active",
+    linkedinAccounts: (profile.linkedinAccounts || []).map((item) => ({ ...item })),
+    activeLinkedinAccountId: profile.activeLinkedinAccountId || "",
+    createdAt: profile.createdAt,
+    lastLoginAt: profile.lastLoginAt || null
+  };
+}
+
+function publicAuthStatus(auth = null) {
+  const profile = auth?.profile || null;
+  return {
+    configured: Boolean(state.integrations.supabase.url && state.supabaseVault),
+    bootstrapRequired: !state.users.some((user) => user.status !== "disabled"),
+    authenticated: Boolean(profile),
+    user: profile ? publicUserProfile(profile) : null,
+    team: profile?.role === "admin" ? state.users.map(publicUserProfile) : [],
+    provider: "supabase"
+  };
+}
+
+function actorContextForRequest(request) {
+  const profile = request?.auth?.profile;
+  if (!profile) return null;
+  const linkedin = (profile.linkedinAccounts || []).find((item) => item.id === profile.activeLinkedinAccountId) || null;
+  return {
+    userId: profile.id,
+    name: profile.name,
+    email: profile.email,
+    role: profile.role,
+    linkedinAccount: linkedin ? { id: linkedin.id, name: linkedin.name, url: linkedin.url } : null
+  };
+}
+
+function parseCookies(header) {
+  return Object.fromEntries(String(header || "").split(";").map((part) => part.trim()).filter(Boolean).map((part) => {
+    const index = part.indexOf("=");
+    const key = index >= 0 ? part.slice(0, index) : part;
+    const value = index >= 0 ? part.slice(index + 1) : "";
+    try { return [key, decodeURIComponent(value)]; } catch { return [key, value]; }
+  }));
+}
+
+function authCookieSecure(request) {
+  return String(request.headers["x-forwarded-proto"] || "").toLowerCase() === "https";
+}
+
+function setAuthSessionCookies(request, response, session = {}) {
+  const secure = authCookieSecure(request) ? "; Secure" : "";
+  const accessMaxAge = Math.max(300, Number(session.expires_in || 3600));
+  const refreshMaxAge = 60 * 60 * 24 * 30;
+  response.setHeader("Set-Cookie", [
+    `${authAccessCookie}=${encodeURIComponent(session.access_token || "")}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${accessMaxAge}${secure}`,
+    `${authRefreshCookie}=${encodeURIComponent(session.refresh_token || "")}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${refreshMaxAge}${secure}`
+  ]);
+}
+
+function clearAuthSessionCookies(request, response) {
+  const secure = authCookieSecure(request) ? "; Secure" : "";
+  response.setHeader("Set-Cookie", [
+    `${authAccessCookie}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`,
+    `${authRefreshCookie}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`
+  ]);
+}
+
+async function requestPasswordRecovery(emailValue, request) {
+  const email = cleanText(emailValue || "").toLowerCase();
+  if (!email) return;
+  const protocol = String(request.headers["x-forwarded-proto"] || "http").split(",")[0].trim();
+  const host = cleanText(request.headers["x-forwarded-host"] || request.headers.host || "");
+  const redirectTo = `${protocol}://${host}/?recovery=1`;
+  await supabaseAuthRequest(`recover?redirect_to=${encodeURIComponent(redirectTo)}`, {
+    method: "POST",
+    body: { email }
+  }).catch(() => null);
+}
+
+async function updateSupabasePassword(accessToken, passwordValue) {
+  const password = String(passwordValue || "");
+  if (!accessToken) throw apiError("The password reset link is missing or expired.", 401);
+  if (password.length < 10) throw apiError("Password must contain at least 10 characters.");
+  await supabaseAuthRequest("user", { method: "PUT", bearer: accessToken, body: { password } });
 }
 
 async function serveStatic(response, pathname) {
@@ -1351,6 +1876,32 @@ function applyPersistentWorkspaceState(saved = {}) {
   }
   if (Array.isArray(saved.interactions)) state.interactions = saved.interactions.slice(0, 2000);
   if (Array.isArray(saved.followUpTasks)) state.followUpTasks = saved.followUpTasks.slice(0, 1000);
+  if (Array.isArray(saved.users)) {
+    state.users = saved.users
+      .filter((user) => user && user.id && user.email)
+      .map((user) => ({
+        ...user,
+        email: cleanText(user.email).toLowerCase(),
+        linkedinAccounts: Array.isArray(user.linkedinAccounts) ? user.linkedinAccounts.map(normalizeLinkedinIdentity).filter((account) => account.url) : []
+      }))
+      .slice(0, 200);
+  }
+  if (saved.historicalOutcomes && typeof saved.historicalOutcomes === "object") state.historicalOutcomes = saved.historicalOutcomes;
+  if (saved.scoringModel && typeof saved.scoringModel === "object") {
+    state.scoringModel = { ...seedScoringModel(), ...saved.scoringModel };
+  }
+  if (Array.isArray(saved.researchJobs)) {
+    state.researchJobs = saved.researchJobs.slice(0, 100).map((job) => {
+      if (!["queued", "running"].includes(job.status)) return job;
+      return {
+        ...job,
+        status: "failed",
+        error: "Research was interrupted by a server restart. Run it again to resume from saved data.",
+        completedAt: new Date().toISOString(),
+        stages: (job.stages || []).map((stage) => stage.status === "running" ? { ...stage, status: "failed" } : stage)
+      };
+    });
+  }
   if (saved.learning && typeof saved.learning === "object") {
     state.learning = {
       ...state.learning,
@@ -1371,7 +1922,8 @@ function applyPersistentWorkspaceState(saved = {}) {
         ...state.integrations.apify.actorInputTemplates,
         ...(saved.integrationSettings.apify.actorInputTemplates || {})
       },
-      maxChargeUsd: clampNumber(saved.integrationSettings.apify.maxChargeUsd, 0.01, 50, state.integrations.apify.maxChargeUsd)
+      maxChargeUsd: clampNumber(saved.integrationSettings.apify.maxChargeUsd, 0.01, 50, state.integrations.apify.maxChargeUsd),
+      contactMaxChargeUsd: clampNumber(saved.integrationSettings.apify.contactMaxChargeUsd, 0.01, 5, state.integrations.apify.contactMaxChargeUsd)
     };
   }
   if (saved.integrationSettings?.mcp && typeof saved.integrationSettings.mcp === "object") {
@@ -1432,6 +1984,10 @@ async function writePersistentWorkspaceState() {
       prospects: state.prospects.slice(0, 1000),
       interactions: state.interactions.slice(0, 2000),
       followUpTasks: state.followUpTasks.slice(0, 1000),
+      users: state.users.slice(0, 200),
+      historicalOutcomes: state.historicalOutcomes,
+      scoringModel: state.scoringModel,
+      researchJobs: state.researchJobs.slice(0, 100),
       learning: {
         examples: state.learning.examples.slice(0, 500),
         playbook: state.learning.playbook,
@@ -1442,7 +1998,8 @@ async function writePersistentWorkspaceState() {
         apify: {
           actorIds: state.integrations.apify.actorIds,
           actorInputTemplates: state.integrations.apify.actorInputTemplates,
-          maxChargeUsd: state.integrations.apify.maxChargeUsd
+          maxChargeUsd: state.integrations.apify.maxChargeUsd,
+          contactMaxChargeUsd: state.integrations.apify.contactMaxChargeUsd
         },
         mcp: {
           baseUrl: state.mcpSync.baseUrl,
@@ -1503,6 +2060,8 @@ function publicState() {
     agentRuns: state.agentRuns.slice(0, 30),
     analysisProfiles: state.analysisProfiles,
     intelligenceJobs: state.intelligenceJobs.slice(0, 20),
+    researchJobs: state.researchJobs.slice(0, 30),
+    scoringModel: state.scoringModel,
     icp: publicIcpState(),
     learning: publicLearningState(),
     products,
@@ -2315,6 +2874,96 @@ function seedHistoricalOutcomes() {
   };
 }
 
+function seedScoringModel() {
+  return {
+    version: "crm-outcome-v1",
+    status: "insufficient_data",
+    trainedAt: null,
+    sampleSize: 0,
+    positiveOutcomes: 0,
+    negativeOutcomes: 0,
+    minimumSamples: 20,
+    featureMultipliers: {
+      seniority: 1,
+      fit: 1,
+      companyContext: 1,
+      trigger: 1,
+      contactEvidence: 1,
+      engagement: 1,
+      completeness: 1
+    },
+    notes: ["The model activates after at least 20 leads have a reply, meeting, won, lost, or no-reply outcome."],
+    source: "workspace CRM outcomes"
+  };
+}
+
+function learnScoringModelFromWorkspace() {
+  const rows = [];
+  for (const prospect of state.prospects) {
+    const activityText = [
+      ...(interactionsForProspect(prospect.id) || []).flatMap((item) => [item.type, item.outcome, item.note]),
+      JSON.stringify(prospect.crmSource || {})
+    ].join(" ").toLowerCase();
+    const positive = /meeting_booked|opportunit|qualified|won|closed won|linkedin_reply|replied|positive reply/.test(activityText);
+    const negative = /lost|closed lost|disqualified|no_reply|no reply|unresponsive/.test(activityText);
+    if (!positive && !negative) continue;
+    rows.push({ label: positive ? 1 : 0, features: learningFeatureVector(prospect) });
+  }
+  const positives = rows.filter((row) => row.label === 1);
+  const negatives = rows.filter((row) => row.label === 0);
+  const featureKeys = Object.keys(seedScoringModel().featureMultipliers);
+  const featureMultipliers = {};
+  for (const key of featureKeys) {
+    const positiveAverage = average(positives.map((row) => row.features[key]));
+    const negativeAverage = average(negatives.map((row) => row.features[key]));
+    featureMultipliers[key] = clampNumber(1 + (positiveAverage - negativeAverage) * 0.55, 0.75, 1.35, 1);
+  }
+  const minimumSamples = 20;
+  return {
+    version: `crm-outcome-v${Math.max(1, rows.length)}`,
+    status: rows.length >= minimumSamples && positives.length >= 4 && negatives.length >= 4 ? "trained" : "insufficient_data",
+    trainedAt: new Date().toISOString(),
+    sampleSize: rows.length,
+    positiveOutcomes: positives.length,
+    negativeOutcomes: negatives.length,
+    minimumSamples,
+    featureMultipliers,
+    notes: rows.length >= minimumSamples
+      ? ["Weights learned from saved CRM replies, meetings, opportunities, wins, losses, and no-reply outcomes.", "Every score still exposes its component inputs and evidence confidence."]
+      : [`${minimumSamples - rows.length} more resolved CRM lead outcomes are required before learned weights affect live scores.`],
+    source: "workspace CRM outcomes"
+  };
+}
+
+function learningFeatureVector(prospect) {
+  const company = prospect.companyProfile || {};
+  const contacts = prospect.contactDiscovery?.candidates || [];
+  const role = String(prospect.title || "").toLowerCase();
+  return {
+    seniority: /chief|ceo|founder|owner|president|vp|head|director/.test(role) ? 1 : role ? 0.55 : 0.15,
+    fit: prospect.outreach?.analysis?.productFit === "high" || prospect.leadIntelligence?.fit_label === "high" ? 1 : 0.55,
+    companyContext: clampNumber(Number(company.confidence || prospect.leadIntelligence?.company_context?.confidence || 0) / 100, 0, 1, 0.2),
+    trigger: prospect.publicCompanyResearch?.description || prospect.appPortfolio?.apps?.length ? 0.9 : prospect.notes ? 0.55 : 0.15,
+    contactEvidence: clampNumber(Math.max(0, ...contacts.map((item) => Number(item.confidence || 0))) / 100, 0, 1, 0),
+    engagement: Math.min(1, interactionsForProspect(prospect.id).filter((item) => /reply|accepted|meeting|opened|connected/.test(`${item.type} ${item.outcome}`)).length / 3),
+    completeness: [prospect.name, prospect.company, prospect.title, prospect.website, prospect.linkedin].filter(Boolean).length / 5
+  };
+}
+
+function average(values = []) {
+  const valid = values.filter((value) => Number.isFinite(value));
+  return valid.length ? valid.reduce((sum, value) => sum + value, 0) / valid.length : 0.5;
+}
+
+function calibratedReadiness(rawReadiness, inputs) {
+  if (state.scoringModel?.status !== "trained") return rawReadiness;
+  const multipliers = state.scoringModel.featureMultipliers || {};
+  const positiveKeys = ["seniority", "fit", "companyContext", "trigger", "contactEvidence", "engagement", "completeness"];
+  const unweighted = positiveKeys.reduce((sum, key) => sum + Number(inputs[key] || 0), 0);
+  const weighted = positiveKeys.reduce((sum, key) => sum + Number(inputs[key] || 0) * Number(multipliers[key] || 1), 0);
+  return clampNumber(Math.round(rawReadiness + weighted - unweighted), 0, 100, rawReadiness);
+}
+
 function normalizeProspect(input) {
   const now = new Date().toISOString();
   const name = cleanText(input.name || input.fullName || input.person || "");
@@ -2340,7 +2989,7 @@ function normalizeProspect(input) {
     createdAt: input.createdAt || now,
     updatedAt: input.updatedAt || now,
     accountKey: cleanText(input.accountKey || ""),
-    contactDiscovery: input.contactDiscovery || null,
+    contactDiscovery: normalizeSavedContactDiscovery(input.contactDiscovery),
     outreach: input.outreach || null,
     researchHistory: Array.isArray(input.researchHistory) ? input.researchHistory.slice(0, 12) : [],
     nextActionPlan: input.nextActionPlan || null,
@@ -2349,6 +2998,7 @@ function normalizeProspect(input) {
     companyEnrichment: input.companyEnrichment && typeof input.companyEnrichment === "object" ? input.companyEnrichment : null,
     publicCompanyResearch: input.publicCompanyResearch || null,
     publicSocialResearch: input.publicSocialResearch || null,
+    appPortfolio: input.appPortfolio && typeof input.appPortfolio === "object" ? input.appPortfolio : null,
     companyPeople: normalizeCompanyPeopleList(input.companyPeople || []),
     leadIntelligence: input.leadIntelligence && typeof input.leadIntelligence === "object" ? input.leadIntelligence : null,
     intelligenceSnapshotId: cleanText(input.intelligenceSnapshotId || ""),
@@ -2358,6 +3008,17 @@ function normalizeProspect(input) {
     crmSource: input.crmSource || null
   };
   return prospect;
+}
+
+function normalizeSavedContactDiscovery(discovery) {
+  if (!discovery || typeof discovery !== "object") return null;
+  return {
+    ...discovery,
+    candidates: (discovery.candidates || []).map((candidate) => {
+      const preserved = ["approved", "rejected"].includes(candidate.approvalStatus) ? candidate.approvalStatus : "";
+      return { ...candidate, approvalStatus: preserved || initialContactApprovalStatus(candidate) };
+    })
+  };
 }
 
 function normalizeProduct(input) {
@@ -3043,6 +3704,10 @@ function currentProduct() {
   return state.products.find((product) => product.id === state.selectedProductId) ?? state.products[0];
 }
 
+function productById(productId) {
+  return state.products.find((product) => product.id === productId) || currentProduct();
+}
+
 function interactionsForProspect(prospectId) {
   return state.interactions
     .filter((interaction) => interaction.prospectId === prospectId)
@@ -3086,7 +3751,17 @@ function analyzeLead(prospect, product = currentProduct()) {
     ? (/health|clinic|medical|adult|children|kids/i.test(`${prospect.company} ${prospect.notes}`) ? 6 : 0)
     : (/health|clinic|medical|casino|gambl|adult|children|kids/i.test(`${prospect.company} ${prospect.notes}`) ? 6 : 0);
   const mismatchPenalty = shouldHoldForProductFitReview(prospect, product, productFit) ? 24 : 0;
-  const readinessRaw = clampNumber(Math.round(seniorityScore + fitScore + companyScore + triggerScore + contactScore + engagementScore + completenessScore - missingPenalty - sensitivePenalty - mismatchPenalty), 0, 100, 45);
+  const scoreComponents = {
+    seniority: seniorityScore,
+    fit: fitScore,
+    companyContext: companyScore,
+    trigger: triggerScore,
+    contactEvidence: contactScore,
+    engagement: engagementScore,
+    completeness: completenessScore
+  };
+  const readinessBase = clampNumber(Math.round(Object.values(scoreComponents).reduce((sum, value) => sum + value, 0) - missingPenalty - sensitivePenalty - mismatchPenalty), 0, 100, 45);
+  const readinessRaw = calibratedReadiness(readinessBase, scoreComponents);
   const reachProbability = clampProbability(0.12 + contactScore / 100 + engagementScore / 100 + triggerScore / 180 + (prospect.linkedin ? 0.08 : 0) - missingPenalty / 260);
   const closeProbability = clampProbability(0.04 + readinessRaw / 500 + (productFit.label === "high" ? 0.07 : productFit.label === "medium" ? 0.03 : 0) + engagementScore / 220 - sensitivePenalty / 260 - mismatchPenalty / 300);
   let score = clampNumber(Math.round(readinessRaw * 0.55 + reachProbability * 28 + closeProbability * 17), 0, 94, 45);
@@ -3117,7 +3792,10 @@ function analyzeLead(prospect, product = currentProduct()) {
       `${product.name} fit is ${productFit.label} because ${productFit.reason}.`,
       isBlackAffiliate ? `Black Affiliate company evidence: ${blackAffiliateEvidence?.companySummary || "not checked"}. Role evidence: ${blackAffiliateEvidence?.roleSummary || "not checked"}.` : "",
       contactConfidence ? `Best contact evidence is ${contactConfidence}% confidence.` : "No verified direct contact evidence yet.",
-      interactions.length ? `${interactions.length} logged interaction${interactions.length === 1 ? "" : "s"} affects reach.` : "No meaningful prior touches logged yet."
+      interactions.length ? `${interactions.length} logged interaction${interactions.length === 1 ? "" : "s"} affects reach.` : "No meaningful prior touches logged yet.",
+      state.scoringModel?.status === "trained"
+        ? `CRM outcome weights are active from ${state.scoringModel.sampleSize} resolved leads.`
+        : `CRM learning is collecting outcomes (${state.scoringModel?.sampleSize || 0}/${state.scoringModel?.minimumSamples || 20}).`
     ].filter(Boolean)
   };
 }
@@ -3180,6 +3858,12 @@ function buildCompanyProfile(prospect, product = currentProduct()) {
     : category === "Unknown"
     ? `${prospect.company || "This account"} needs company research before confident outreach.`
     : `${prospect.company || "This account"} appears to be ${articleFor(category)} ${category.toLowerCase()} company.${knownNotes ? ` CRM context: ${sentenceCase(knownNotes)}.` : ""}`;
+  const companySourceIds = [
+    "src-crm-profile",
+    prospect.publicCompanyResearch?.url ? "src-company-website" : "",
+    enrichment.checkedAt ? "src-company-enrichment" : "",
+    ...(prospect.appPortfolio?.evidence || []).slice(0, 4).map((item) => item.source_id)
+  ].filter(Boolean);
   return {
     company_name: prospect.company || "Unknown company",
     description,
@@ -3193,8 +3877,17 @@ function buildCompanyProfile(prospect, product = currentProduct()) {
     why_relevant: productFitForProspect(prospect, product).reason,
     unknowns,
     confidence,
+    app_portfolio: prospect.appPortfolio || { apps: [], evidence: [], summary: "App portfolio research has not run yet." },
+    claim_evidence: [
+      { claim: "Company description", source_ids: companySourceIds.slice(0, 2), confidence: prospect.publicCompanyResearch?.confidence || confidence },
+      { claim: "Company size", source_ids: enrichment.checkedAt ? ["src-company-enrichment"] : ["src-crm-profile"], confidence: enrichment.employeeEstimate ? 74 : 38 },
+      { claim: "Audience and business model", source_ids: companySourceIds, confidence: category === "Unknown" ? 30 : 58 },
+      { claim: "Company category", source_ids: companySourceIds, confidence: category === "Unknown" ? 25 : 62 },
+      { claim: "Product relevance", source_ids: [...companySourceIds, "src-product-context"], confidence: confidence >= 65 ? 66 : 42 },
+      { claim: "App titles and releases", source_ids: (prospect.appPortfolio?.evidence || []).map((item) => item.source_id).slice(0, 8), confidence: prospect.appPortfolio?.apps?.length ? 82 : 20 }
+    ],
     research_links: companyResearchLinks(prospect),
-    source_ids: ["src-crm-profile", enrichment.checkedAt ? "src-company-enrichment" : ""].filter(Boolean),
+    source_ids: companySourceIds,
     claim_type: confidence >= 65 ? "inference_from_workspace_data" : "needs_research"
   };
 }
@@ -3382,7 +4075,7 @@ function buildContactDiscovery(prospect) {
     completedAt: now,
     updatedAt: now,
     policy: "public_business_contact_data_only",
-    candidates: mergeContactCandidates(addMessengerLinkCandidates(candidates)),
+    candidates: mergeContactCandidates(candidates),
     warnings: [
       "Review social profiles before use.",
       "Do not infer private contact data from personal social activity.",
@@ -3402,10 +4095,261 @@ function isRecentContactDiscovery(prospect, minutes = 20) {
   return Number.isFinite(ageMs) && ageMs >= 0 && ageMs <= minutes * 60 * 1000;
 }
 
-async function enrichProspectContacts(prospect) {
+const researchStageDefinitions = [
+  ["company", "Company and app portfolio"],
+  ["people", "Buying committee"],
+  ["contacts", "Verified contact enrichment"],
+  ["scoring", "Fit and opportunity scoring"],
+  ["writing", "Playbook message angles"],
+  ["crm", "CRM activity log"]
+];
+
+function createResearchJob(prospect, profileValue, actor) {
+  const now = new Date().toISOString();
+  return {
+    id: `research-${randomBytes(7).toString("hex")}`,
+    prospectId: prospect.id,
+    prospectName: prospect.name,
+    company: prospect.company,
+    productId: state.selectedProductId,
+    productName: currentProduct().name,
+    profile: ["economy", "premium"].includes(profileValue) ? profileValue : "balanced",
+    actor,
+    status: "queued",
+    progress: 0,
+    createdAt: now,
+    updatedAt: now,
+    stages: researchStageDefinitions.map(([id, label]) => ({ id, label, status: "pending" }))
+  };
+}
+
+function publicResearchJob(job = {}) {
+  return {
+    id: job.id,
+    prospectId: job.prospectId,
+    prospectName: job.prospectName,
+    company: job.company,
+    productId: job.productId,
+    productName: job.productName,
+    profile: job.profile,
+    status: job.status,
+    progress: job.progress || 0,
+    stages: job.stages || [],
+    currentStage: job.currentStage || "",
+    error: job.error || "",
+    actor: job.actor ? { name: job.actor.name, linkedinAccount: job.actor.linkedinAccount || null } : null,
+    createdAt: job.createdAt,
+    startedAt: job.startedAt || null,
+    completedAt: job.completedAt || null,
+    updatedAt: job.updatedAt
+  };
+}
+
+async function updateResearchJobStage(job, stageId, status, detail = "") {
+  const now = new Date().toISOString();
+  const stage = job.stages.find((item) => item.id === stageId);
+  if (stage) {
+    stage.status = status;
+    stage.detail = cleanText(detail).slice(0, 300);
+    if (status === "running") stage.startedAt = now;
+    if (["complete", "failed"].includes(status)) stage.completedAt = now;
+  }
+  job.currentStage = status === "running" ? stageId : job.currentStage;
+  job.updatedAt = now;
+  const complete = job.stages.filter((item) => item.status === "complete").length;
+  job.progress = Math.round((complete / job.stages.length) * 100);
+  await writePersistentWorkspaceState();
+}
+
+async function runResearchJob(job) {
+  const prospect = findProspect(job.prospectId);
+  if (!prospect) return;
+  const product = productById(job.productId);
+  job.status = "running";
+  job.startedAt = new Date().toISOString();
+  try {
+    await updateResearchJobStage(job, "company", "running", "Finding official company, store titles, releases, GEO and monetization evidence.");
+    await enrichPublicWebSignals(prospect);
+    await researchAppPortfolio(prospect, { force: true });
+    prospect.companyProfile = buildCompanyProfile(prospect, product);
+    await updateResearchJobStage(job, "company", "complete", `${prospect.appPortfolio?.apps?.length || 0} app or game titles found.`);
+
+    await updateResearchJobStage(job, "people", "running", "Searching two employee sources for relevant buyers.");
+    prospect.contactDiscovery = await enrichProspectContacts(prospect, { phase: "people" });
+    await updateResearchJobStage(job, "people", "complete", `${prospect.companyPeople?.length || 0} relevant company contacts stored.`);
+
+    await updateResearchJobStage(job, "contacts", "running", "Verifying work email and direct phone evidence.");
+    prospect.contactDiscovery = await enrichProspectContacts(prospect, { phase: "contacts" });
+    await updateResearchJobStage(job, "contacts", "complete", `${prospect.contactDiscovery?.candidates?.length || 0} contact candidates reviewed.`);
+
+    await updateResearchJobStage(job, "scoring", "running", "Calculating transparent fit, access and timing inputs.");
+    await ensureLeadIntelligenceSnapshot(prospect, { force: true, useAi: true, refreshReason: "background_research", product });
+    prospect.companyProfile = buildCompanyProfile(prospect, product);
+    const analysis = analyzeLead(prospect, product);
+    await updateResearchJobStage(job, "scoring", "complete", `Opportunity score ${analysis.score}; ${analysis.productFit} product fit.`);
+
+    await updateResearchJobStage(job, "writing", "running", "Writing and checking three distinct playbook angles.");
+    prospect.outreach = await prepareAndLogOutreach(prospect, job.profile, "SEQUENCE_GENERATION", {
+      source: "background-research",
+      actor: job.actor,
+      researchJobId: job.id,
+      product
+    });
+    prospect.status = statusAfterOutreachPlan(prospect.outreach);
+    await updateResearchJobStage(job, "writing", "complete", `${prospect.outreach.messageAngles?.length || 0} scored message angles prepared.`);
+
+    await updateResearchJobStage(job, "crm", "running", "Confirming research and personalization activity in CRM.");
+    const crmStatus = prospect.outreach?.crmActivity?.syncStatus || "not_synced";
+    await updateResearchJobStage(job, "crm", "complete", crmStatus === "synced" ? "CRM activity synced." : "Saved locally; CRM retry is available.");
+
+    recordLeadResearch(prospect, {
+      stage: "background_research_complete",
+      summary: `Company, people, contacts, score, three message angles, and CRM activity completed for ${job.productName}.`,
+      warnings: prospect.contactDiscovery?.warnings || [],
+      product
+    });
+    prospect.updatedAt = new Date().toISOString();
+    job.status = "complete";
+    job.progress = 100;
+    job.completedAt = new Date().toISOString();
+    job.updatedAt = job.completedAt;
+    addEvent("research", `${prospect.name} staged research completed.`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    job.status = "failed";
+    job.error = message;
+    job.completedAt = new Date().toISOString();
+    job.updatedAt = job.completedAt;
+    const active = job.stages.find((stage) => stage.status === "running");
+    if (active) {
+      active.status = "failed";
+      active.detail = cleanText(message).slice(0, 300);
+      active.completedAt = job.completedAt;
+    }
+    addEvent("research", `${prospect.name} research stopped: ${message}`);
+  }
+  await writePersistentWorkspaceState();
+}
+
+async function researchAppPortfolio(prospect, options = {}) {
+  const prior = prospect.appPortfolio;
+  const age = prior?.checkedAt ? Date.now() - new Date(prior.checkedAt).getTime() : Infinity;
+  if (!options.force && Number.isFinite(age) && age < 14 * 86_400_000) return prior;
+  const company = cleanText(prospect.company || "");
+  if (!company) return null;
+  const retrievedAt = new Date().toISOString();
+  const evidence = [];
+  const apps = [];
+  const searchTerm = encodeURIComponent(company);
+  try {
+    const response = await fetch(`https://itunes.apple.com/search?term=${searchTerm}&entity=software&limit=20`, {
+      headers: { "User-Agent": "OutboundSalesOS/1.0 app-research" },
+      signal: AbortSignal.timeout(7000)
+    });
+    if (response.ok) {
+      const data = await response.json();
+      for (const item of (data.results || []).filter((row) => appPublisherMatchesCompany(row, company)).slice(0, 10)) {
+        const url = cleanText(item.trackViewUrl || item.artistViewUrl || "");
+        const sourceId = `appstore-${createHash("sha1").update(url || `${item.trackName}-${item.sellerName}`).digest("hex").slice(0, 10)}`;
+        const monetization = appMonetizationFromStore(item);
+        apps.push({
+          title: cleanText(item.trackName || "Untitled app"),
+          os: "iOS",
+          geo: cleanText(item.country || prospect.location || "Store availability requires verification"),
+          monetization,
+          category: cleanText(item.primaryGenreName || ""),
+          recentRelease: cleanText(item.currentVersionReleaseDate || item.releaseDate || ""),
+          releaseNotes: cleanLongText(item.releaseNotes || "").slice(0, 420),
+          publisher: cleanText(item.sellerName || item.artistName || company),
+          evidenceSourceIds: [sourceId]
+        });
+        evidence.push({
+          source_id: sourceId,
+          title: `${item.trackName} on Apple App Store`,
+          url,
+          publisher: cleanText(item.sellerName || "Apple App Store"),
+          retrieved_at: retrievedAt,
+          evidence_excerpt: cleanText(`${item.primaryGenreName || "App"}; ${monetization}; version ${item.version || "unknown"}; released ${item.currentVersionReleaseDate || item.releaseDate || "unknown"}`),
+          source_type: "app_store"
+        });
+      }
+    }
+  } catch {
+    // Public web evidence below remains available when Apple search is unavailable.
+  }
+  const webQueries = [
+    `${company} games Google Play`,
+    `${company} latest game release`,
+    `${company} apps monetization markets GEO`
+  ];
+  const webGroups = await Promise.all(webQueries.map((query) => publicSearchResults(query, 5)));
+  for (const result of webGroups.flat()) {
+    const tokens = companyTokens(company).filter((token) => token.length >= 4);
+    const resultText = `${result.title} ${result.snippet} ${result.url}`.toLowerCase();
+    const matchedTokens = tokens.filter((token) => resultText.includes(token)).length;
+    if (!tokens.length || (tokens.length === 1 ? matchedTokens !== 1 : matchedTokens < Math.min(2, tokens.length))) continue;
+    const sourceId = `app-web-${createHash("sha1").update(result.url).digest("hex").slice(0, 10)}`;
+    if (!evidence.some((item) => item.url === result.url)) {
+      evidence.push({ source_id: sourceId, title: result.title || "App portfolio evidence", url: result.url, publisher: hostnameForUrl(result.url), retrieved_at: retrievedAt, evidence_excerpt: result.snippet, source_type: /play\.google/i.test(result.url) ? "google_play" : "public_web" });
+    }
+    if (/play\.google\.com\/store\/apps/i.test(result.url) && !apps.some((app) => (app.evidenceSourceIds || []).includes(sourceId))) {
+      apps.push({ title: cleanText(result.title.replace(/\s*[-–|].*$/, "")) || "Google Play title", os: "Android", geo: "Store availability requires verification", monetization: inferMonetizationFromText(result.snippet), category: "", recentRelease: "", releaseNotes: result.snippet, publisher: company, evidenceSourceIds: [sourceId] });
+    }
+  }
+  prospect.appPortfolio = {
+    checkedAt: retrievedAt,
+    company,
+    apps: dedupeAppPortfolio(apps).slice(0, 16),
+    evidence: evidence.slice(0, 30),
+    summary: apps.length ? `${dedupeAppPortfolio(apps).length} store title${dedupeAppPortfolio(apps).length === 1 ? "" : "s"} found with public evidence.` : "No confidently matched public app-store title was found; manual title confirmation is required."
+  };
+  return prospect.appPortfolio;
+}
+
+function appPublisherMatchesCompany(item, company) {
+  const haystack = `${item.sellerName || ""} ${item.artistName || ""} ${item.trackName || ""}`.toLowerCase();
+  const tokens = companyTokens(company).filter((token) => token.length >= 4);
+  if (!tokens.length) return false;
+  const matched = tokens.filter((token) => haystack.includes(token)).length;
+  return tokens.length === 1 ? matched === 1 : matched >= Math.min(2, tokens.length);
+}
+
+function appMonetizationFromStore(item = {}) {
+  const text = `${item.description || ""} ${item.features || ""}`.toLowerCase();
+  const methods = [];
+  if (Number(item.price || 0) > 0) methods.push("paid download");
+  if (/in-app purchase|subscription|subscribe/i.test(text)) methods.push("in-app purchases/subscription");
+  if (/advertis|contains ads|rewarded|interstitial/i.test(text)) methods.push("advertising");
+  if (!methods.length && Number(item.price || 0) === 0) methods.push("free; monetization not verified");
+  return methods.join(" + ") || "not verified";
+}
+
+function inferMonetizationFromText(value = "") {
+  const text = String(value).toLowerCase();
+  if (/in-app purchase|iap|subscription/.test(text)) return "in-app purchases/subscription";
+  if (/contains ads|advertis|rewarded/.test(text)) return "advertising";
+  if (/free/.test(text)) return "free; monetization not verified";
+  return "not verified";
+}
+
+function dedupeAppPortfolio(apps = []) {
+  const byKey = new Map();
+  for (const app of apps) {
+    const key = `${cleanText(app.title).toLowerCase()}:${app.os}`;
+    if (!byKey.has(key)) byKey.set(key, app);
+  }
+  return [...byKey.values()];
+}
+
+async function enrichProspectContacts(prospect, options = {}) {
+  const phase = ["people", "contacts"].includes(options.phase) ? options.phase : "all";
   const publicCandidates = await enrichPublicWebSignals(prospect);
   const discovery = buildContactDiscovery(prospect);
-  discovery.candidates = mergeContactCandidates([...publicCandidates, ...discovery.candidates]);
+  discovery.candidates = mergeContactCandidates([
+    ...(prospect.contactDiscovery?.candidates || []),
+    ...publicCandidates,
+    ...discovery.candidates
+  ]);
   const apifyConfigured = state.apifyVault && state.integrations.apify.configured;
   if (!apifyConfigured) {
     discovery.candidates = mergeContactCandidates(addMessengerLinkCandidates(discovery.candidates));
@@ -3416,7 +4360,7 @@ async function enrichProspectContacts(prospect) {
     return discovery;
   }
 
-  const actorInputs = [
+  const contactActorInputs = [
     ["leadDatabase", state.integrations.apify.actorIds.leadDatabase, leadDatabaseScraperInput(prospect)],
     ["linkedinProfile", state.integrations.apify.actorIds.linkedinProfile, { linkedinUrl: prospect.linkedin, name: prospect.name, company: prospect.company }],
     ["contactFinder", state.integrations.apify.actorIds.contactFinder, contactFinderScraperInput(prospect)],
@@ -3424,7 +4368,15 @@ async function enrichProspectContacts(prospect) {
     ["zoominfo", state.integrations.apify.actorIds.zoominfo, { name: prospect.name, company: prospect.company, linkedinUrl: prospect.linkedin }],
     ["facebookProfile", state.integrations.apify.actorIds.facebookProfile, { name: prospect.name, company: prospect.company, location: prospect.location, linkedinUrl: prospect.linkedin }],
     ["emailPhoneFinder", state.integrations.apify.actorIds.emailPhoneFinder, { name: prospect.name, company: prospect.company, domain: prospect.website, linkedinUrl: prospect.linkedin }],
-    ["companyPeople", state.integrations.apify.actorIds.companyPeople || defaultCompanyPeopleActorId, companyPeopleScraperInput(prospect)]
+    ["personEnrichment", state.integrations.apify.actorIds.personEnrichment || defaultPersonEnrichmentActorId, personEnrichmentInput(prospect)]
+  ];
+  const peopleActorInputs = [
+    ["companyPeople", state.integrations.apify.actorIds.companyPeople || defaultCompanyPeopleActorId, companyPeopleScraperInput(prospect)],
+    ["companyPeopleSecondary", state.integrations.apify.actorIds.companyPeopleSecondary || defaultSecondaryCompanyPeopleActorId, secondaryCompanyPeopleInput(prospect)]
+  ];
+  const actorInputs = [
+    ...(phase === "contacts" ? [] : peopleActorInputs),
+    ...(phase === "people" ? [] : contactActorInputs)
   ].filter(([source, actorId, input]) => {
     if (!actorId) return false;
     if (source === "contactFinder" && !input?.Urls?.length) return false;
@@ -3445,7 +4397,8 @@ async function enrichProspectContacts(prospect) {
   const actorResults = await Promise.all(actorInputs.map(async ([source, actorId, input]) => {
     try {
       const renderedInput = apifyInputFor(source, prospect, input);
-      const items = await runApifyActor(actorId, renderedInput, state.integrations.apify.maxChargeUsd);
+      const chargeLimit = source === "personEnrichment" ? state.integrations.apify.contactMaxChargeUsd : state.integrations.apify.maxChargeUsd;
+      const items = await runApifyActor(actorId, renderedInput, chargeLimit);
       return { source, items };
     } catch (error) {
       return { source, error };
@@ -3461,27 +4414,21 @@ async function enrichProspectContacts(prospect) {
     }
     actorsRun += 1;
     updateCompanyEnrichmentFromScraper(prospect, result.items || [], result.source);
-    if (result.source === "companyPeople") {
+    if (result.source.startsWith("companyPeople")) {
       companyPeople.push(...peopleFromScraperItems(result.items || [], result.source, prospect));
       continue;
     }
     apifyCandidates.push(...(result.items || []).flatMap((item) => candidatesFromScraperItem(item, result.source)));
   }
 
-  const messengerSeedCandidates = mergeContactCandidates([...apifyCandidates, ...discovery.candidates]);
-  const messengerResult = await runPhoneMessengerChecks(prospect, messengerSeedCandidates);
-  if (messengerResult.warnings.length) discovery.warnings.push(...messengerResult.warnings);
-  if (messengerResult.candidates.length) apifyCandidates.push(...messengerResult.candidates);
-  actorsRun += messengerResult.actorsRun;
-
   if (companyPeople.length) {
     prospect.companyPeople = mergeCompanyPeople([...(prospect.companyPeople || []), ...companyPeople]).slice(0, 12);
     discovery.companyPeople = prospect.companyPeople;
   }
-  discovery.candidates = mergeContactCandidates(addMessengerLinkCandidates([...apifyCandidates, ...discovery.candidates]));
+  discovery.candidates = mergeContactCandidates([...apifyCandidates, ...discovery.candidates]);
   discovery.scraperStatus = apifyCandidates.length || companyPeople.length ? "apify_enriched" : skippedForTemplate ? "configured_needs_template" : "apify_no_results";
   discovery.scraperNote = actorsRun
-    ? `${apifyCandidates.length} contact candidates and ${companyPeople.length} company people returned from ${actorsRun} Apify actor${actorsRun === 1 ? "" : "s"}.`
+    ? `${apifyCandidates.length} contact candidates and ${companyPeople.length} company people returned from ${actorsRun} Apify actor${actorsRun === 1 ? "" : "s"}. Direct channels remain locked until a seller approves the evidence.`
     : skippedForTemplate
       ? "Apify is connected. Add the lead database input template before running the paid scraper."
       : "No Apify actors ran.";
@@ -3922,6 +4869,38 @@ function companyPeopleScraperInput(prospect) {
   });
 }
 
+function secondaryCompanyPeopleInput(prospect) {
+  const companyUrl = normalizeLinkedInCompanyUrl(
+    prospect.companyLinkedin
+      || prospect.publicCompanyResearch?.linkedinCompanyUrl
+      || prospect.companyEnrichment?.companyLinkedinUrl
+      || companyLinkedInPeopleUrlForProspect(prospect)
+      || ""
+  );
+  return compactObject({
+    companies: [companyUrl].filter(Boolean),
+    maxItems: 10,
+    profileScraperMode: "Short ($4 per 1k)",
+    searchQuery: "user acquisition growth performance marketing monetization partnerships affiliate product marketing",
+    companyBatchMode: "all_at_once"
+  });
+}
+
+function personEnrichmentInput(prospect) {
+  return {
+    persons: [{
+      name: prospect.name,
+      company: prospect.company,
+      domain: normalizeDomain(prospect.website || prospect.publicCompanyResearch?.domain),
+      linkedinUrl: prospect.linkedin
+    }],
+    maxPersons: 1,
+    validateEmails: true,
+    useCompanyAliases: true,
+    includeMatchDebug: true
+  };
+}
+
 function apifyInputFor(source, prospect, fallbackInput) {
   const template = state.integrations.apify.actorInputTemplates?.[source] || "";
   if (!template) {
@@ -4032,7 +5011,7 @@ function apifyTimeoutMs() {
 function candidatesFromScraperItem(item, source) {
   const candidates = [];
   const fields = {
-    email: extractContactValues(item, ["email", "emails", "workEmail", "businessEmail", "emailAddress", "primaryEmail"]),
+    email: extractContactValues(item, ["email", "emails", "workEmail", "work_email", "businessEmail", "emailAddress", "primaryEmail", "personalEmail"]),
     phone: extractContactValues(item, ["phone", "phones", "phoneNumbers", "phone_numbers", "phone_number", "uncertain_phone_numbers", "number", "mobilePhone", "directPhone", "phoneNumber", "mobile", "primaryPhone"]),
     linkedin: extractContactValues(item, ["linkedin", "linkedinUrl", "linkedinProfile", "profileUrl"]),
     facebook: extractContactValues(item, ["facebook", "facebookUrl", "facebookProfile", "fbUrl"]),
@@ -4047,7 +5026,7 @@ function candidatesFromScraperItem(item, source) {
       candidates.push({
         type,
         value: String(value),
-        confidence: isPersonalEmail ? Math.min(55, Number(item.confidence || item.score || 74)) : Number(item.confidence || item.score || 74),
+        confidence: isPersonalEmail ? Math.min(55, scraperConfidence(item, 74)) : scraperConfidence(item, 74),
         source: `apify:${source}`,
         status: candidateStatusFor(type, item, source, value),
         evidence: evidenceFromScraperItem(item, source)
@@ -4249,6 +5228,11 @@ function knownPhoneCandidates(prospect) {
 
 function candidateStatusFor(type, item, source, value = "") {
   if (type === "email" && /@(gmail|yahoo|hotmail|outlook|icloud|protonmail|mail)\./i.test(String(value))) return "personal_address_review";
+  const matchConfidence = scraperConfidence(item, 0);
+  const validation = item.emailValidation || item.email_validation || item.validation || {};
+  const contactable = item.isContactable ?? item.contactable ?? true;
+  if (type === "email" && source === "personEnrichment" && contactable && matchConfidence >= 70 && (validation.mxValid || validation.deliverable || validation.status === "valid")) return "verified_work_email_pending_approval";
+  if (type === "phone" && source === "personEnrichment" && contactable && matchConfidence >= 70) return "verified_phone_pending_approval";
   if (type === "email" && (/verified|deliverable/i.test(String(item.emailStatus || "")) || item.verifiedEmail)) return "deliverable_needs_permission_review";
   if (type === "phone" && (/verified|valid/i.test(String(item.phoneStatus || "")) || item.verifiedPhone || item.phone)) return "needs_permission_review";
   if (type === "facebook") return source === "facebookProfile" ? "suggested_profile_review" : "review";
@@ -4360,13 +5344,43 @@ function facebookMatchSignalsFromScraperItem(item, source) {
 function mergeContactCandidates(candidates) {
   const byKey = new Map();
   for (const candidate of candidates) {
+    if (!candidate?.type || !candidate?.value) continue;
     const key = `${candidate.type}:${String(candidate.value).toLowerCase()}`;
     const existing = byKey.get(key);
-    if (!existing || candidate.confidence > existing.confidence) {
-      byKey.set(key, candidate);
+    const normalized = {
+      ...candidate,
+      approvalStatus: candidate.approvalStatus || initialContactApprovalStatus(candidate)
+    };
+    if (!existing) {
+      byKey.set(key, normalized);
+    } else if (Number(normalized.confidence || 0) > Number(existing.confidence || 0)) {
+      byKey.set(key, {
+        ...existing,
+        ...normalized,
+        approvalStatus: existing.approvalStatus || normalized.approvalStatus,
+        approvedAt: existing.approvedAt || normalized.approvedAt,
+        approvedBy: existing.approvedBy || normalized.approvedBy,
+        reviewedAt: existing.reviewedAt || normalized.reviewedAt,
+        reviewedBy: existing.reviewedBy || normalized.reviewedBy
+      });
     }
   }
   return [...byKey.values()].sort((left, right) => right.confidence - left.confidence);
+}
+
+function requiresContactApproval(type = "") {
+  return ["email", "phone", "sms", "whatsapp", "whatsapp_link", "telegram", "telegram_link"].includes(String(type).toLowerCase());
+}
+
+function contactCandidateCanBeApproved(candidate = {}) {
+  if (!requiresContactApproval(candidate.type)) return true;
+  return /verified|deliverable|presence_confirmed|needs_permission_review|verified_by_import/i.test(`${candidate.status || ""} ${(candidate.evidence || []).join(" ")}`)
+    && !/not_found|invalid/i.test(String(candidate.status || ""));
+}
+
+function initialContactApprovalStatus(candidate = {}) {
+  if (!requiresContactApproval(candidate.type)) return "not_required";
+  return contactCandidateCanBeApproved(candidate) ? "pending" : "verification_required";
 }
 
 function redactIntegration(integration) {
@@ -4930,8 +5944,8 @@ function topEntries(counts, limit) {
     .map(([key]) => key);
 }
 
-async function prepareOutreachWithAi(prospect, profile, taskType = "SEQUENCE_GENERATION") {
-  const product = currentProduct();
+async function prepareOutreachWithAi(prospect, profile, taskType = "SEQUENCE_GENERATION", productOverride = null) {
+  const product = productOverride || currentProduct();
   const canUseLiveAi = Boolean(state.vault && state.providerHealth.status === "healthy");
   const fallbackRoute = canUseLiveAi ? localFallbackRun(taskType, profile) : simulateRun(taskType, profile, "");
   const fallbackPlan = {
@@ -5060,13 +6074,21 @@ function outreachMaxTokensForProfile(profile = "balanced") {
 }
 
 async function prepareAndLogOutreach(prospect, profile, taskType = "SEQUENCE_GENERATION", context = {}) {
-  const outreach = await prepareOutreachWithAi(prospect, profile, taskType);
-  const product = currentProduct();
+  const product = context.product || currentProduct();
+  const outreach = await prepareOutreachWithAi(prospect, profile, taskType, product);
+  const messageAngles = buildAndScoreMessageAngles(prospect, product, outreach);
+  const evidenceMessages = (outreach.messages || []).map((message) => ({
+    ...message,
+    evidence: evidenceForOutreachMessage(prospect, product, message)
+  }));
   const nextActionPlan = buildNextActionPlan(prospect, outreach, product);
   const salesCadence = buildSalesCadence(prospect, outreach, product);
   const acceptanceTask = ensureAcceptanceFollowUpTask(prospect, product, nextActionPlan.followUp);
   const enrichedOutreach = {
     ...outreach,
+    messages: evidenceMessages,
+    messageAngles,
+    recommendedAngleId: messageAngles[0]?.id || "",
     nextActionPlan,
     salesCadence,
     followUpTaskId: acceptanceTask.id
@@ -5084,7 +6106,8 @@ async function prepareAndLogOutreach(prospect, profile, taskType = "SEQUENCE_GEN
       : `Personalized outreach prepared for ${prospect.name} using ${enrichedOutreach.productName || product.name}.`,
     crmNote: buildPersonalizationCrmNote(prospect, enrichedOutreach, context),
     source: context.source || "outbound-os",
-    metadata
+    metadata,
+    actor: context.actor || null
   });
 
   const finalOutreach = {
@@ -5104,9 +6127,119 @@ async function prepareAndLogOutreach(prospect, profile, taskType = "SEQUENCE_GEN
     outreach: finalOutreach,
     modelUsed: finalOutreach.modelUsed,
     provider: finalOutreach.provider,
-    warnings: finalOutreach.fallbackReason ? [`OpenRouter fallback used: ${finalOutreach.fallbackReason}`] : []
+    warnings: finalOutreach.fallbackReason ? [`OpenRouter fallback used: ${finalOutreach.fallbackReason}`] : [],
+    product
   });
   return finalOutreach;
+}
+
+function buildAndScoreMessageAngles(prospect, product, outreach = {}) {
+  const firstName = firstNameFor(prospect.name) || prospect.name || "there";
+  const company = prospect.company || "your team";
+  const app = prospect.appPortfolio?.apps?.[0] || null;
+  const appName = app?.title || "";
+  const appEvidence = app?.evidenceSourceIds || [];
+  const companyEvidence = prospect.publicCompanyResearch?.url ? ["src-company-website"] : ["src-crm-profile"];
+  const sourceIds = new Set(intelligenceSourcesForProspect(prospect, product).map((source) => source.source_id));
+  const isAdAction = isAdActionProduct(product);
+  const baseAngles = isAdAction ? [
+    {
+      id: "trigger-led",
+      label: "Title / release signal",
+      strategy: "Open with one verified product signal and ask how the team evaluates incremental acquisition.",
+      body: appName
+        ? `Hi ${firstName}, noticed ${appName} in ${company}'s app portfolio. When you test incremental acquisition for it, do you separate the payable event from a natural quality KPI? Asking because AdAction runs disclosed value-exchange tests around exactly that split.`
+        : `Hi ${firstName}, I was looking at ${company}'s app portfolio but could not confidently match the priority title. Which Android title is most relevant for incremental UA testing right now? AdAction runs disclosed value-exchange tests with payable and natural-quality events measured separately.`,
+      source_ids: appEvidence.length ? appEvidence : companyEvidence
+    },
+    {
+      id: "diagnostic",
+      label: "Diagnostic question",
+      strategy: "Lead with a practitioner-level measurement question instead of a product pitch.",
+      body: `Hi ${firstName}, a UA question given your role at ${company}: when a rewarded/value-exchange source clears the payable event but misses the downstream natural event, do you optimize the source or stop the cohort? Curious how you currently draw that line.`,
+      source_ids: ["src-crm-profile", "src-product-context"]
+    },
+    {
+      id: "controlled-test",
+      label: "Controlled test hypothesis",
+      strategy: "Offer a narrow, auditable test frame with no scale or performance promise.",
+      body: appName
+        ? `Hi ${firstName}, would a small Android test for ${appName} be worth pressure-testing: 1-3 agreed GEOs, one payable milestone, one natural quality KPI, MMP attribution, and written stop rules? AdAction would disclose the value-exchange traffic upfront.`
+        : `Hi ${firstName}, once the right ${company} title is confirmed, would a small Android test be worth pressure-testing: 1-3 agreed GEOs, one payable milestone, one natural quality KPI, MMP attribution, and written stop rules? AdAction would disclose the value-exchange traffic upfront.`,
+      source_ids: [...(appEvidence.length ? appEvidence : companyEvidence), "src-product-context"]
+    }
+  ] : [
+    {
+      id: "signal-led",
+      label: "Company signal",
+      strategy: "Open on verified company context.",
+      body: `Hi ${firstName}, I was reviewing ${company} and had one question about ${lowerSalesPhrase(product.useCases?.[0] || product.name)}. Is that currently owned by your team, or by someone else?`,
+      source_ids: companyEvidence
+    },
+    {
+      id: "diagnostic",
+      label: "Diagnostic question",
+      strategy: "Ask about the current process and friction.",
+      body: `Hi ${firstName}, how is ${company} handling ${lowerSalesPhrase(product.useCases?.[0] || "this workflow")} today? I am trying to understand whether the real constraint is process, data, or ownership.`,
+      source_ids: ["src-crm-profile", "src-product-context"]
+    },
+    {
+      id: "small-step",
+      label: "Small next step",
+      strategy: "Offer a low-pressure comparison.",
+      body: `Hi ${firstName}, I have a short ${product.name} comparison mapped to ${prospect.title || "your role"} at ${company}. Worth sharing here, or is there a better owner for it?`,
+      source_ids: ["src-crm-profile", "src-product-context"]
+    }
+  ];
+  return baseAngles
+    .map((angle) => {
+      const filteredSourceIds = [...new Set(angle.source_ids.filter((id) => sourceIds.has(id)))];
+      const scored = scoreMessageAngle(angle.body, filteredSourceIds, { isAdAction, appName });
+      return {
+        ...angle,
+        source_ids: filteredSourceIds,
+        evidence: evidenceRecordsForIds(prospect, product, filteredSourceIds),
+        score: scored.score,
+        playbookChecks: scored.checks,
+        scoreReason: scored.reason
+      };
+    })
+    .sort((left, right) => right.score - left.score);
+}
+
+function scoreMessageAngle(body, sourceIds, context = {}) {
+  const text = String(body || "");
+  const lower = text.toLowerCase();
+  const checks = [
+    { label: "Evidence attached", points: sourceIds.length ? 25 : 0, max: 25 },
+    { label: "Specific to account/title/role", points: context.appName && lower.includes(context.appName.toLowerCase()) ? 25 : /your role|given your role|your team|at /.test(lower) ? 16 : 8, max: 25 },
+    { label: "Traffic type disclosed", points: context.isAdAction ? (/value-exchange|rewarded/.test(lower) ? 15 : 0) : 15, max: 15 },
+    { label: "Low-friction diagnostic CTA", points: /\?|curious|worth|which|how /.test(lower) ? 15 : 5, max: 15 },
+    { label: "Claim safety", points: /guarantee|proven roi|increase (?:roas|revenue)|best-in-class|revolution|unlock|quick demo/.test(lower) ? 0 : 20, max: 20 }
+  ];
+  const score = checks.reduce((sum, check) => sum + check.points, 0);
+  return {
+    score,
+    checks,
+    reason: score >= 85 ? "Ready for seller review; specific, evidence-backed, and playbook-safe." : score >= 70 ? "Usable after reviewing the named evidence and CTA." : "Needs stronger verified evidence or a less promotional angle."
+  };
+}
+
+function evidenceForOutreachMessage(prospect, product, message = {}) {
+  const text = `${message.subject || ""} ${message.body || ""}`.toLowerCase();
+  const ids = ["src-crm-profile", "src-product-context"];
+  if (prospect.publicCompanyResearch?.url && text.includes(String(prospect.company || "").toLowerCase())) ids.push("src-company-website");
+  for (const app of prospect.appPortfolio?.apps || []) {
+    if (text.includes(String(app.title || "").toLowerCase())) ids.push(...(app.evidenceSourceIds || []));
+  }
+  return evidenceRecordsForIds(prospect, product, [...new Set(ids)]);
+}
+
+function evidenceRecordsForIds(prospect, product, ids = []) {
+  const idSet = new Set(ids);
+  return intelligenceSourcesForProspect(prospect, product)
+    .filter((source) => idSet.has(source.source_id))
+    .map((source) => ({ source_id: source.source_id, title: source.title, url: source.url || "", excerpt: source.evidence_excerpt || "" }));
 }
 
 function statusAfterOutreachPlan(outreach = {}) {
@@ -5121,7 +6254,8 @@ async function logAutomaticSalesActivity(prospect, input) {
     channel: input.channel || "ai",
     outcome: input.outcome || "prepared",
     note: input.note,
-    metadata: input.metadata
+    metadata: input.metadata,
+    actor: input.actor
   });
   state.interactions.unshift(interaction);
   prospect.status = statusFromInteraction(interaction.type, prospect.status);
@@ -5135,7 +6269,8 @@ async function logAutomaticSalesActivity(prospect, input) {
     metadata: {
       ...input.metadata,
       source: input.source || "outbound-os",
-      localInteractionId: interaction.id
+      localInteractionId: interaction.id,
+      actor: input.actor || null
     }
   });
   const pushed = Number(crmResult.results?.[0]?.pushed || 0);
@@ -5963,22 +7098,26 @@ function lowerSalesPhrase(value) {
 }
 
 function hasReviewedPhoneCandidate(prospect) {
-  if (prospect.phone) return true;
   return (prospect.contactDiscovery?.candidates || []).some((candidate) =>
-    candidate.type === "phone" && /verified_by_import|approved|reviewed/i.test(String(candidate.status || ""))
+    candidate.type === "phone" && candidate.approvalStatus === "approved"
   );
 }
 
 function contactAvailability(prospect) {
   const candidates = prospect.contactDiscovery?.candidates || [];
   const hasType = (type) => candidates.some((candidate) => candidate.type === type || candidate.type === `${type}_link` || candidate.type === `${type}_presence`);
+  const hasApproved = (type) => candidates.some((candidate) =>
+    (candidate.type === type || candidate.type === `${type}_link` || candidate.type === `${type}_presence`)
+      && candidate.approvalStatus === "approved"
+      && !/not_found|rejected/i.test(String(candidate.status || ""))
+  );
   return {
     linkedin: Boolean(prospect.linkedin || hasType("linkedin")),
-    email: Boolean(prospect.email || hasType("email")),
-    phone: Boolean(prospect.phone || hasType("phone")),
+    email: hasApproved("email"),
+    phone: hasApproved("phone"),
     facebook: hasType("facebook") || hasType("facebook_match"),
-    whatsapp: hasType("whatsapp"),
-    telegram: hasType("telegram")
+    whatsapp: hasApproved("whatsapp"),
+    telegram: hasApproved("telegram")
   };
 }
 
@@ -6174,7 +7313,7 @@ function ensureAcceptanceFollowUpTask(prospect, product, followUp = {}) {
 }
 
 function recordLeadResearch(prospect, input = {}) {
-  const product = currentProduct();
+  const product = input.product || currentProduct();
   const contactDiscovery = input.contactDiscovery || prospect.contactDiscovery || {};
   const analysis = input.analysis || analyzeLead(prospect, product);
   const record = {
@@ -6203,7 +7342,7 @@ function recordLeadResearch(prospect, input = {}) {
 }
 
 async function ensureLeadIntelligenceSnapshot(prospect, options = {}) {
-  const product = currentProduct();
+  const product = options.product || currentProduct();
   const profile = analysisProfileForProduct(product);
   const accountKey = accountKeyForProspect(prospect);
   const sources = intelligenceSourcesForProspect(prospect, product);
@@ -6506,6 +7645,28 @@ function intelligenceSourcesForProspect(prospect, product) {
     { source_id: "src-crm-profile", url: prospect.linkedin || prospect.website || "", title: `${prospect.name} CRM/import profile`, publisher: "workspace CRM", source_type: "crm", published_at: "", retrieved_at: now, evidence_excerpt: [prospect.name, prospect.title, prospect.company, prospect.location].filter(Boolean).join(" · "), quality: prospect.crmSource ? "high" : "medium", claim_type: "fact" },
     { source_id: "src-product-context", url: "", title: `${product.name} product context`, publisher: "workspace product knowledge", source_type: "product_knowledge", published_at: "", retrieved_at: product.mcpContext?.lastSyncedAt || now, evidence_excerpt: product.positioning, quality: "high", claim_type: "company_claim" }
   ];
+  if (prospect.publicCompanyResearch?.url) {
+    sources.push({
+      source_id: "src-company-website",
+      url: prospect.publicCompanyResearch.url,
+      title: prospect.publicCompanyResearch.title || `${prospect.company} official website`,
+      publisher: prospect.publicCompanyResearch.domain || hostnameForUrl(prospect.publicCompanyResearch.url),
+      source_type: "company_website",
+      published_at: "",
+      retrieved_at: prospect.publicCompanyResearch.checkedAt || now,
+      evidence_excerpt: cleanLongText(prospect.publicCompanyResearch.description || prospect.publicCompanyResearch.snippet || "").slice(0, 260),
+      quality: Number(prospect.publicCompanyResearch.confidence || 0) >= 70 ? "high" : "review",
+      claim_type: "fact"
+    });
+  }
+  for (const item of prospect.appPortfolio?.evidence || []) {
+    sources.push({
+      ...item,
+      published_at: item.published_at || "",
+      quality: item.quality || "high",
+      claim_type: item.claim_type || "fact"
+    });
+  }
   if (prospect.companyEnrichment?.checkedAt) {
     sources.push({
       source_id: "src-company-enrichment",
@@ -6588,6 +7749,21 @@ function triggerForProspect(prospect, sources) {
 
 function selectedGameOrAppFor(prospect, product, profile) {
   if (!profile.id.includes("adaction")) return { name: prospect.company || "account-level offer", type: "not_applicable", rationale: `For ${product.name}, the account itself is the entry point rather than a mobile title.`, source_ids: ["src-crm-profile"], confidence: 55, verification_status: "inference" };
+  const researchedApp = prospect.appPortfolio?.apps?.[0];
+  if (researchedApp) {
+    return {
+      name: researchedApp.title,
+      type: "mobile_game_or_app",
+      os: researchedApp.os,
+      geo: researchedApp.geo,
+      monetization: researchedApp.monetization,
+      recent_release: researchedApp.recentRelease,
+      rationale: `${researchedApp.title} is matched to ${researchedApp.publisher || prospect.company} in public store evidence.`,
+      source_ids: researchedApp.evidenceSourceIds || [],
+      confidence: 84,
+      verification_status: "verified_public_store"
+    };
+  }
   const titleText = cleanText(`${prospect.notes || ""} ${prospect.publicCompanyResearch?.description || ""} ${prospect.publicCompanyResearch?.title || ""}`);
   const explicitTitle = titleText.match(/\b(?:app|game|title)\s*:\s*([^.;\n]{3,80})/i)?.[1]
     || titleText.match(/\bincluding\s+([^,.;\n]{3,80})/i)?.[1]
@@ -8081,12 +9257,15 @@ function supabaseActivityType(input = {}) {
 }
 
 function crmActivityContent(prospect, input, metadata = {}) {
+  const actor = metadata.actor || input.actor || null;
   return cleanLongText([
     input.note || "Outbound OS activity",
     `Lead: ${prospect.name}${prospect.company ? `, ${prospect.company}` : ""}`,
     metadata.productName ? `Product: ${metadata.productName}` : "",
     metadata.recommendedChannel ? `Channel: ${metadata.recommendedChannel}` : input.channel ? `Channel: ${input.channel}` : "",
     metadata.messagePreview ? `Message preview: ${metadata.messagePreview}` : "",
+    actor?.name ? `Executed by: ${actor.name}${actor.email ? ` (${actor.email})` : ""}` : "",
+    actor?.linkedinAccount?.url ? `LinkedIn sender: ${actor.linkedinAccount.name || "Assigned account"} - ${actor.linkedinAccount.url}` : "",
     metadata.localInteractionId ? `Outbound OS interaction: ${metadata.localInteractionId}` : ""
   ].filter(Boolean).join("\n")).slice(0, 1800);
 }
@@ -8259,6 +9438,7 @@ function normalizeInteraction(prospectId, input) {
     note: cleanText(input.note || labelFromInteraction(type)).slice(0, 500),
     at: new Date().toISOString()
   };
+  if (input.actor && typeof input.actor === "object") interaction.actor = input.actor;
   if (input.metadata && typeof input.metadata === "object") {
     interaction.metadata = input.metadata;
   }
@@ -8754,7 +9934,9 @@ function initializeRuntimeConfigFromEnv() {
       phoneMessengerCheck: normalizeApifyActorId(process.env.APIFY_PHONE_MESSENGER_CHECK_ACTOR_ID || state.integrations.apify.actorIds.phoneMessengerCheck),
       whatsappChecker: normalizeApifyActorId(process.env.APIFY_WHATSAPP_CHECKER_ACTOR_ID || state.integrations.apify.actorIds.whatsappChecker || defaultWhatsappCheckerActorId),
       telegramChecker: normalizeApifyActorId(process.env.APIFY_TELEGRAM_CHECKER_ACTOR_ID || state.integrations.apify.actorIds.telegramChecker || defaultTelegramCheckerActorId),
-      companyPeople: normalizeApifyActorId(process.env.APIFY_COMPANY_PEOPLE_ACTOR_ID || state.integrations.apify.actorIds.companyPeople || defaultCompanyPeopleActorId)
+      companyPeople: normalizeApifyActorId(process.env.APIFY_COMPANY_PEOPLE_ACTOR_ID || state.integrations.apify.actorIds.companyPeople || defaultCompanyPeopleActorId),
+      companyPeopleSecondary: normalizeApifyActorId(process.env.APIFY_SECONDARY_COMPANY_PEOPLE_ACTOR_ID || state.integrations.apify.actorIds.companyPeopleSecondary || defaultSecondaryCompanyPeopleActorId),
+      personEnrichment: normalizeApifyActorId(process.env.APIFY_PERSON_ENRICHMENT_ACTOR_ID || state.integrations.apify.actorIds.personEnrichment || defaultPersonEnrichmentActorId)
     };
     if (!process.env.APIFY_COMPANY_PEOPLE_ACTOR_ID && state.integrations.apify.actorIds.companyPeople === legacyPipelineLabsActorId) {
       state.integrations.apify.actorIds.companyPeople = defaultCompanyPeopleActorId;
@@ -8766,6 +9948,7 @@ function initializeRuntimeConfigFromEnv() {
       state.integrations.apify.actorInputTemplates.companyPeople = cleanLongText(process.env.APIFY_COMPANY_PEOPLE_INPUT_TEMPLATE);
     }
     state.integrations.apify.maxChargeUsd = clampNumber(process.env.APIFY_MAX_CHARGE_USD, 0.01, 50, state.integrations.apify.maxChargeUsd);
+    state.integrations.apify.contactMaxChargeUsd = clampNumber(process.env.APIFY_CONTACT_MAX_CHARGE_USD, 0.05, 5, state.integrations.apify.contactMaxChargeUsd);
     state.integrations.apify.keyMetadata = {
       provider: "apify",
       keyVersion: 1,

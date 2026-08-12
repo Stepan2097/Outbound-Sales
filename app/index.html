@@ -9,7 +9,28 @@
     <script defer type="module" src="/main.js"></script>
   </head>
   <body>
-    <div class="app-shell">
+    <section class="auth-gate" id="authGate" hidden>
+      <div class="auth-brand">
+        <div class="brand-mark">OS</div>
+        <div><strong>Outbound Sales OS</strong><span>Team workspace</span></div>
+      </div>
+      <form class="auth-card" id="authForm">
+        <div>
+          <span class="eyebrow" id="authEyebrow">Secure workspace</span>
+          <h1 id="authTitle">Sign in</h1>
+          <p id="authDescription">Use your company account to continue.</p>
+        </div>
+        <label class="auth-name-field" hidden><span>Name</span><input id="authNameInput" type="text" autocomplete="name" /></label>
+        <label class="auth-email-field"><span>Work email</span><input id="authEmailInput" type="email" autocomplete="email" required /></label>
+        <label class="auth-password-field"><span>Password</span><input id="authPasswordInput" type="password" autocomplete="current-password" minlength="10" required /></label>
+        <label class="auth-confirm-field" hidden><span>Confirm password</span><input id="authConfirmInput" type="password" autocomplete="new-password" minlength="10" /></label>
+        <button class="primary-button" id="authSubmitBtn" type="submit"><i data-lucide="log-in"></i><span>Sign in</span></button>
+        <button class="text-button" id="authModeBtn" type="button">Forgot password?</button>
+        <p class="form-note" id="authMessage"></p>
+      </form>
+    </section>
+
+    <div class="app-shell" id="appShell" hidden>
       <aside class="sidebar">
         <div class="brand">
           <div class="brand-mark">OS</div>
@@ -24,6 +45,7 @@
           <button class="nav-item" data-view="ai"><i data-lucide="bot"></i><span>AI Operator</span></button>
           <button class="nav-item" data-view="database"><i data-lucide="book-open"></i><span>Knowledge Base</span></button>
           <button class="nav-item" data-view="products"><i data-lucide="package"></i><span>Products</span></button>
+          <button class="nav-item" data-view="account"><i data-lucide="circle-user-round"></i><span>Account</span></button>
           <button class="nav-item" data-view="integrations"><i data-lucide="settings"></i><span>Settings</span></button>
         </nav>
         <div class="sidebar-footer">
@@ -40,6 +62,8 @@
           </div>
           <div class="topbar-actions">
             <select id="productSelect" aria-label="Product for outreach"></select>
+            <select id="activeLinkedinSelect" aria-label="Active LinkedIn sender"><option value="">No LinkedIn sender</option></select>
+            <button class="icon-button" id="accountMenuBtn" type="button" title="Account" aria-label="Open account"><i data-lucide="circle-user-round"></i></button>
             <button class="primary-button" id="quickPrepareBtn"><i data-lucide="wand-sparkles"></i><span>Run Research</span></button>
             <button class="utility-hidden" id="syncMcpBtn"><i data-lucide="database-zap"></i><span>Sync MCP</span></button>
             <button class="icon-button utility-hidden" id="syncModelsBtn" title="Synchronize models" aria-label="Synchronize models">
@@ -67,6 +91,8 @@
               <button id="nextLeadBtn" type="button"><span>Next</span><i data-lucide="chevron-right"></i></button>
             </section>
 
+            <section class="panel research-progress-panel" id="researchProgressPanel" hidden aria-live="polite"></section>
+
             <section class="panel lead-hero" id="dashboard-overview">
               <div class="lead-avatar" id="selectedLeadAvatar">OS</div>
               <div class="lead-hero-main">
@@ -86,6 +112,17 @@
             </section>
 
             <nav class="lead-section-nav" aria-label="Lead workspace sections" role="tablist">
+              <select id="mobileLeadSectionSelect" aria-label="Lead workspace section">
+                <option value="dashboard-account">Company</option>
+                <option value="dashboard-intelligence">Brief</option>
+                <option value="dashboard-buying">Committee</option>
+                <option value="dashboard-contact">Contacts</option>
+                <option value="dashboard-score">Scoring</option>
+                <option value="dashboard-outreach">Messages</option>
+                <option value="dashboard-followup">Tasks</option>
+                <option value="dashboard-next">Next Action</option>
+                <option value="dashboard-cycle">Sales Cycle</option>
+              </select>
               <button type="button" role="tab" data-lead-tab="dashboard-account">Company</button>
               <button type="button" role="tab" data-lead-tab="dashboard-intelligence">Brief</button>
               <button type="button" role="tab" data-lead-tab="dashboard-buying">Committee</button>
@@ -370,6 +407,49 @@
                 </section>
               </aside>
             </div>
+          </div>
+        </section>
+
+        <section class="view" id="view-account">
+          <div class="account-layout">
+            <section class="panel">
+              <div class="panel-heading"><div><h2>Personal Account</h2><p>Your identity is attached to seller actions and CRM records</p></div><span class="pill" id="accountRolePill">seller</span></div>
+              <form class="integration-form" id="accountProfileForm">
+                <label><span>Name</span><input id="accountNameInput" type="text" autocomplete="name" required /></label>
+                <label><span>Job title</span><input id="accountTitleInput" type="text" autocomplete="organization-title" /></label>
+                <label><span>Email</span><input id="accountEmailInput" type="email" disabled /></label>
+                <button class="primary-button" type="submit"><i data-lucide="save"></i><span>Save Profile</span></button>
+              </form>
+            </section>
+            <section class="panel">
+              <div class="panel-heading"><div><h2>LinkedIn Senders</h2><p>Choose which account is performing outreach</p></div></div>
+              <form class="integration-form" id="linkedinIdentityForm">
+                <input id="linkedinIdentityNameInput" type="text" placeholder="Account name, e.g. Pavlo - main" required />
+                <input id="linkedinIdentityUrlInput" type="url" placeholder="https://www.linkedin.com/in/..." required />
+                <button type="submit"><i data-lucide="plus"></i><span>Add LinkedIn Account</span></button>
+              </form>
+              <div class="identity-list" id="linkedinIdentityList"></div>
+            </section>
+            <section class="panel">
+              <div class="panel-heading"><div><h2>Password</h2><p>Use at least 10 characters</p></div></div>
+              <form class="integration-form" id="accountPasswordForm">
+                <input id="accountPasswordInput" type="password" autocomplete="new-password" minlength="10" placeholder="New password" required />
+                <input id="accountPasswordConfirmInput" type="password" autocomplete="new-password" minlength="10" placeholder="Confirm new password" required />
+                <button type="submit"><i data-lucide="key-round"></i><span>Change Password</span></button>
+              </form>
+              <button class="danger-button" id="logoutBtn" type="button"><i data-lucide="log-out"></i><span>Sign out</span></button>
+            </section>
+            <section class="panel admin-team-panel" id="adminTeamPanel" hidden>
+              <div class="panel-heading"><div><h2>Team Accounts</h2><p>Create seller access and assign responsibilities</p></div></div>
+              <form class="integration-form" id="teamUserForm">
+                <input id="teamUserNameInput" type="text" placeholder="Seller name" required />
+                <input id="teamUserEmailInput" type="email" placeholder="Work email" required />
+                <input id="teamUserPasswordInput" type="password" minlength="10" placeholder="Temporary password" required />
+                <select id="teamUserRoleInput"><option value="seller">Seller</option><option value="admin">Administrator</option></select>
+                <button type="submit"><i data-lucide="user-plus"></i><span>Create User</span></button>
+              </form>
+              <div class="team-list" id="teamUserList"></div>
+            </section>
           </div>
         </section>
 
@@ -910,9 +990,12 @@
                   <input id="whatsappCheckerActorInput" type="text" placeholder="vtrdev/whatsapp-number-validator" />
                   <input id="telegramCheckerActorInput" type="text" placeholder="akula.marketing/telegram-get-phone-info" />
                   <input id="companyPeopleActorInput" type="text" placeholder="scraper-engine/linkedin-company-employees-scraper" />
+                  <input id="companyPeopleSecondaryActorInput" type="text" placeholder="harvestapi/linkedin-company-employees" />
+                  <input id="personEnrichmentActorInput" type="text" placeholder="ryanclinton/person-enrichment-lookup" />
                   <textarea id="companyPeopleInputTemplate" rows="5" spellcheck="false" placeholder='{"leadTargets":["{{linkedinPeopleUrl}}"],"maxLeadsPerCompany":12,"jobTitleKeywords":["Founder","Head of Affiliates"],"includeOnlyDecisionMakers":false}'></textarea>
                 </details>
                 <input id="apifyMaxChargeInput" type="number" min="0.05" step="0.05" />
+                <input id="apifyContactMaxChargeInput" type="number" min="0.05" max="5" step="0.05" aria-label="Maximum charge per verified contact run" />
                 <button class="primary-button" type="submit"><i data-lucide="save"></i><span>Save Apify</span></button>
               </form>
             </section>

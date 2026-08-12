@@ -1513,6 +1513,436 @@ output {
   }
 }
 
+[hidden] {
+  display: none !important;
+}
+
+.auth-gate {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(260px, 0.72fr) minmax(360px, 1fr);
+  align-items: stretch;
+  background: #061321;
+  color: #eff8ff;
+}
+
+.auth-brand {
+  padding: 48px;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  background: linear-gradient(145deg, #07182b, #0d3152 68%, #0c5361);
+  border-right: 1px solid rgba(143, 177, 207, 0.18);
+}
+
+.auth-brand strong,
+.auth-brand span {
+  display: block;
+}
+
+.auth-brand span {
+  margin-top: 4px;
+  color: #9fb9ce;
+}
+
+.auth-card {
+  width: min(440px, calc(100% - 40px));
+  align-self: center;
+  justify-self: center;
+  display: grid;
+  gap: 16px;
+  padding: 32px;
+  border: 1px solid rgba(143, 177, 207, 0.22);
+  border-radius: 8px;
+  background: rgba(8, 26, 46, 0.94);
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.32);
+}
+
+.auth-card h1 {
+  margin: 5px 0 6px;
+  font-size: 28px;
+}
+
+.auth-card p {
+  margin: 0;
+  color: #9fb2c5;
+}
+
+.auth-card .form-note {
+  min-height: 20px;
+  color: #ffd381;
+}
+
+.text-button {
+  border: 0;
+  background: transparent;
+  color: #65f0db;
+}
+
+.eyebrow {
+  color: #65f0db;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+#activeLinkedinSelect {
+  width: 190px;
+}
+
+#mobileLeadSectionSelect {
+  display: none;
+}
+
+.research-progress-panel {
+  display: grid;
+  gap: 12px;
+  border-color: rgba(101, 240, 219, 0.3);
+  background: linear-gradient(135deg, rgba(11, 44, 69, 0.97), rgba(7, 29, 52, 0.94));
+}
+
+.research-progress-heading,
+.message-angle-heading,
+.angle-footer,
+.identity-row,
+.team-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.research-progress-heading strong,
+.research-progress-heading span {
+  display: block;
+}
+
+.research-stage-list {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.research-stage {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid rgba(143, 177, 207, 0.16);
+  border-radius: 8px;
+  background: rgba(4, 16, 29, 0.48);
+}
+
+.research-stage strong,
+.research-stage span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.research-stage strong {
+  font-size: 12px;
+}
+
+.research-stage span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.3;
+}
+
+.research-stage.complete svg {
+  color: #65f0db;
+}
+
+.research-stage.running {
+  border-color: rgba(101, 240, 219, 0.45);
+}
+
+.research-stage.running svg,
+.is-loading svg {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.app-portfolio-section,
+.app-title-list,
+.message-angle-grid,
+.identity-list,
+.team-list,
+.account-layout {
+  display: grid;
+  gap: 12px;
+}
+
+.app-portfolio-section {
+  padding-top: 4px;
+}
+
+.app-title-row,
+.message-angle-card,
+.identity-row,
+.team-row,
+.scoring-learning-card {
+  border: 1px solid rgba(143, 177, 207, 0.18);
+  border-radius: 8px;
+  background: rgba(4, 16, 29, 0.5);
+  padding: 12px;
+}
+
+.app-title-row {
+  display: grid;
+  gap: 8px;
+}
+
+.app-title-row strong,
+.app-title-row span,
+.identity-row strong,
+.identity-row a,
+.team-row strong,
+.team-row span {
+  display: block;
+}
+
+.app-title-row span,
+.identity-row a,
+.team-row span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.app-facts,
+.evidence-links,
+.claim-evidence,
+.approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.app-facts span,
+.evidence-links a,
+.evidence-links > span,
+.evidence-missing,
+.approval-state {
+  border: 1px solid rgba(143, 177, 207, 0.2);
+  border-radius: 999px;
+  padding: 3px 7px;
+  background: rgba(15, 40, 66, 0.7);
+  color: #bcd0e2;
+  font-size: 10px;
+  text-decoration: none;
+}
+
+.evidence-links a:hover {
+  color: #65f0db;
+  border-color: rgba(101, 240, 219, 0.4);
+}
+
+.claim-evidence {
+  margin-top: 8px;
+  color: #7de6d5;
+}
+
+.approval-state.approved {
+  color: #65f0a0;
+  border-color: rgba(101, 240, 160, 0.35);
+}
+
+.approval-state.pending {
+  color: #ffd381;
+}
+
+.approval-state.rejected {
+  color: #ff9c9c;
+}
+
+.message-angle-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 12px 0 18px;
+}
+
+.message-angle-card {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+.message-angle-card.recommended {
+  border-color: rgba(101, 240, 219, 0.52);
+  background: linear-gradient(145deg, rgba(15, 65, 76, 0.62), rgba(5, 24, 43, 0.7));
+}
+
+.message-angle-card p,
+.message-angle-card pre,
+.angle-footer span {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: #c1d1e1;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.message-angle-card pre {
+  color: #f2f8ff;
+  font-family: inherit;
+}
+
+.angle-score {
+  color: #65f0db;
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.angle-footer {
+  align-items: flex-start;
+}
+
+.account-layout {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.identity-row.active {
+  border-color: rgba(101, 240, 219, 0.45);
+}
+
+.identity-row > div:last-child {
+  display: flex;
+  gap: 8px;
+}
+
+.scoring-learning-card {
+  grid-column: 1 / -1;
+}
+
+.scoring-learning-card p {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+@media (max-width: 1080px) {
+  .lead-side-rail {
+    display: none;
+  }
+
+  .message-angle-grid,
+  .research-stage-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .auth-gate {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-brand {
+    padding: 20px;
+    min-height: 92px;
+  }
+
+  .auth-card {
+    margin: 24px auto;
+    padding: 22px;
+  }
+
+  .sidebar {
+    position: fixed;
+    inset: auto 0 0 0;
+    z-index: 60;
+    display: block;
+    padding: 7px 8px max(7px, env(safe-area-inset-bottom));
+    border-right: 0;
+    border-top: 1px solid rgba(143, 177, 207, 0.22);
+  }
+
+  .sidebar .brand,
+  .sidebar-footer {
+    display: none;
+  }
+
+  .nav-list {
+    display: flex;
+    gap: 4px;
+    overflow-x: auto;
+  }
+
+  .nav-item {
+    flex: 0 0 76px;
+    min-height: 50px;
+    display: grid;
+    place-items: center;
+    gap: 2px;
+    padding: 4px;
+    font-size: 10px;
+  }
+
+  .nav-item span {
+    display: block;
+    width: 100%;
+    text-align: center;
+  }
+
+  .workspace {
+    padding-bottom: 88px;
+  }
+
+  .topbar-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  #productSelect,
+  #activeLinkedinSelect {
+    width: 100%;
+  }
+
+  #quickPrepareBtn {
+    grid-column: 1 / -1;
+  }
+
+  .lead-section-nav button[role="tab"] {
+    display: none;
+  }
+
+  #mobileLeadSectionSelect {
+    display: block;
+    width: 100%;
+  }
+
+  #quickPrepareBtn,
+  #accountMenuBtn {
+    display: none;
+  }
+
+  .message-angle-grid,
+  .research-stage-list,
+  .account-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .company-summary,
+  .company-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .contact-card,
+  .identity-row,
+  .team-row,
+  .research-progress-heading,
+  .message-angle-heading,
+  .angle-footer {
+    align-items: stretch;
+  }
+}
+
 /* Dark sales workspace */
 :root {
   --bg: #061322;
@@ -3606,5 +4036,71 @@ dialog {
 
   .source-row small {
     text-align: left;
+  }
+}
+
+/* Final responsive overrides for the seller workspace. */
+@media (max-width: 1080px) {
+  .lead-side-rail {
+    display: none;
+  }
+
+  .message-angle-grid,
+  .research-stage-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .sidebar {
+    position: fixed;
+    inset: auto 0 0 0;
+    z-index: 60;
+    display: block;
+    min-height: auto;
+    padding: 7px 8px max(7px, env(safe-area-inset-bottom));
+    border-right: 0;
+    border-top: 1px solid rgba(143, 177, 207, 0.22);
+  }
+
+  .sidebar .brand,
+  .sidebar-footer {
+    display: none;
+  }
+
+  .nav-list {
+    display: flex;
+    grid-template-columns: none;
+    gap: 4px;
+    overflow-x: auto;
+  }
+
+  .nav-item {
+    flex: 0 0 76px;
+    min-height: 50px;
+    display: grid;
+    place-items: center;
+    gap: 2px;
+    padding: 4px;
+    font-size: 10px;
+  }
+
+  .workspace {
+    padding-bottom: 88px;
+  }
+
+  .lead-section-nav button[role="tab"] {
+    display: none;
+  }
+
+  #mobileLeadSectionSelect {
+    display: block;
+    width: 100%;
+  }
+
+  .message-angle-grid,
+  .research-stage-list,
+  .account-layout {
+    grid-template-columns: 1fr;
   }
 }

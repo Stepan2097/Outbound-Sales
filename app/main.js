@@ -9,6 +9,9 @@ let pendingProductKnowledgeScreenshot = null;
 let pendingLearningScreenshot = null;
 let pendingKnowledgeInboxScreenshot = null;
 let activeLeadSectionId = "dashboard-account";
+let authState = null;
+let authMode = "login";
+let activeResearchJob = null;
 
 const views = [...document.querySelectorAll(".view")];
 const navItems = [...document.querySelectorAll(".nav-item")];
@@ -32,6 +35,10 @@ async function api(path, options = {}) {
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
+    if (response.status === 401 && path !== "/api/auth/status" && !path.startsWith("/api/auth/")) {
+      authState = { authenticated: false, bootstrapRequired: Boolean(body.bootstrapRequired) };
+      showAuthGate();
+    }
     throw new Error(body.error || `Request failed with ${response.status}`);
   }
   return response.json();
@@ -46,6 +53,7 @@ function render() {
   renderTopbar();
   renderProductContext();
   renderProductStudio();
+  renderAccount();
   renderLearningDatabase();
   renderIntegrations();
   renderProspects();
@@ -59,6 +67,7 @@ function render() {
   renderPrivacy();
   renderEvaluation();
   renderBusyState();
+  renderResearchProgress();
   refreshIcons();
 }
 
@@ -71,6 +80,93 @@ function renderTopbar() {
     ? `Key version ${state.keyMetadata.keyVersion} · ${state.keyMetadata.environment}`
     : "No key configured";
   fillSelect(document.getElementById("productSelect"), state.products, (product) => product.id, (product) => product.name, state.selectedProductId);
+  renderActiveLinkedinSelect();
+}
+
+async function bootApplication() {
+  const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  if (hash.get("type") === "recovery" && hash.get("access_token")) {
+    authMode = "reset";
+    window.sessionStorage.setItem("outboundRecoveryToken", hash.get("access_token"));
+  }
+  authState = await api("/api/auth/status");
+  if (!authState.authenticated) {
+    if (authState.bootstrapRequired) authMode = "bootstrap";
+    showAuthGate();
+    return;
+  }
+  await enterWorkspace();
+}
+
+function showAuthGate() {
+  document.getElementById("authGate").hidden = false;
+  document.getElementById("appShell").hidden = true;
+  renderAuthForm();
+  refreshIcons();
+}
+
+async function enterWorkspace() {
+  document.getElementById("authGate").hidden = true;
+  document.getElementById("appShell").hidden = false;
+  authState = await api("/api/auth/status");
+  await refresh();
+}
+
+function renderAuthForm() {
+  const bootstrap = authMode === "bootstrap";
+  const recover = authMode === "recover";
+  const reset = authMode === "reset";
+  setText("authEyebrow", bootstrap ? "Create workspace owner" : recover || reset ? "Account recovery" : "Secure workspace");
+  setText("authTitle", bootstrap ? "Set up Outbound OS" : recover ? "Recover password" : reset ? "Choose a new password" : "Sign in");
+  setText("authDescription", bootstrap ? "Create the first administrator account for your team." : recover ? "We will request a secure reset link from Supabase." : reset ? "Set a new password for your account." : "Use your company account to continue.");
+  document.querySelector(".auth-name-field").hidden = !bootstrap;
+  document.querySelector(".auth-email-field").hidden = reset;
+  document.querySelector(".auth-password-field").hidden = recover;
+  document.querySelector(".auth-confirm-field").hidden = !bootstrap && !reset;
+  document.getElementById("authEmailInput").required = !reset;
+  document.getElementById("authPasswordInput").required = !recover;
+  document.getElementById("authConfirmInput").required = bootstrap || reset;
+  document.getElementById("authNameInput").required = bootstrap;
+  document.getElementById("authPasswordInput").autocomplete = bootstrap || reset ? "new-password" : "current-password";
+  setText("authSubmitBtn", "");
+  document.getElementById("authSubmitBtn").innerHTML = `<i data-lucide="${recover ? "mail" : reset ? "key-round" : bootstrap ? "shield-check" : "log-in"}"></i><span>${recover ? "Send reset link" : reset ? "Save new password" : bootstrap ? "Create workspace" : "Sign in"}</span>`;
+  const modeButton = document.getElementById("authModeBtn");
+  modeButton.hidden = bootstrap || reset;
+  modeButton.textContent = recover ? "Back to sign in" : "Forgot password?";
+}
+
+function renderAccount() {
+  const user = authState?.user;
+  if (!user) return;
+  setText("accountRolePill", user.role || "seller");
+  document.getElementById("accountNameInput").value = user.name || "";
+  document.getElementById("accountTitleInput").value = user.title || "";
+  document.getElementById("accountEmailInput").value = user.email || "";
+  setHtml("linkedinIdentityList", (user.linkedinAccounts || []).length
+    ? user.linkedinAccounts.map((account) => `
+      <article class="identity-row ${account.id === user.activeLinkedinAccountId ? "active" : ""}">
+        <div><strong>${escapeHtml(account.name)}</strong><a href="${escapeAttr(account.url)}" target="_blank" rel="noreferrer">${escapeHtml(shortUrl(account.url))}</a></div>
+        <div>
+          <button type="button" data-activate-linkedin="${escapeAttr(account.id)}" ${account.id === user.activeLinkedinAccountId ? "disabled" : ""}><i data-lucide="check"></i><span>${account.id === user.activeLinkedinAccountId ? "Active" : "Use"}</span></button>
+          <button class="icon-button danger-button" type="button" data-delete-linkedin="${escapeAttr(account.id)}" title="Remove"><i data-lucide="trash-2"></i></button>
+        </div>
+      </article>`).join("")
+    : `<div class="empty-state">Add the LinkedIn account this seller will use.</div>`);
+  const adminPanel = document.getElementById("adminTeamPanel");
+  adminPanel.hidden = user.role !== "admin";
+  setHtml("teamUserList", (authState.team || []).map((member) => `
+    <article class="team-row"><div><strong>${escapeHtml(member.name)}</strong><span>${escapeHtml(member.email)}</span></div><span class="pill">${escapeHtml(member.role)}</span></article>
+  `).join(""));
+}
+
+function renderActiveLinkedinSelect() {
+  const select = document.getElementById("activeLinkedinSelect");
+  const user = authState?.user;
+  if (!select || !user) return;
+  const accounts = user.linkedinAccounts || [];
+  select.innerHTML = accounts.length
+    ? accounts.map((account) => `<option value="${escapeAttr(account.id)}" ${account.id === user.activeLinkedinAccountId ? "selected" : ""}>${escapeHtml(account.name)}</option>`).join("")
+    : `<option value="">No LinkedIn sender</option>`;
 }
 
 function renderProductContext() {
@@ -179,8 +275,11 @@ function renderIntegrations() {
   document.getElementById("whatsappCheckerActorInput").value = apify?.actorIds?.whatsappChecker || "vtrdev/whatsapp-number-validator";
   document.getElementById("telegramCheckerActorInput").value = apify?.actorIds?.telegramChecker || "akula.marketing/telegram-get-phone-info";
   document.getElementById("companyPeopleActorInput").value = apify?.actorIds?.companyPeople || "scraper-engine/linkedin-company-employees-scraper";
+  document.getElementById("companyPeopleSecondaryActorInput").value = apify?.actorIds?.companyPeopleSecondary || "harvestapi/linkedin-company-employees";
+  document.getElementById("personEnrichmentActorInput").value = apify?.actorIds?.personEnrichment || "ryanclinton/person-enrichment-lookup";
   document.getElementById("companyPeopleInputTemplate").value = apify?.actorInputTemplates?.companyPeople || "";
   document.getElementById("apifyMaxChargeInput").value = apify?.maxChargeUsd || 1.5;
+  document.getElementById("apifyContactMaxChargeInput").value = apify?.contactMaxChargeUsd || 0.2;
 
   document.getElementById("mcpBaseUrlInput").value = state.mcpSync?.baseUrl || "";
   document.getElementById("mcpNamespaceInput").value = state.mcpSync?.resourceNamespace || "";
@@ -719,6 +818,8 @@ function renderLeadSectionTabs() {
     section.classList.toggle("active", active);
     section.setAttribute("aria-hidden", active ? "false" : "true");
   });
+  const mobileSelect = document.getElementById("mobileLeadSectionSelect");
+  if (mobileSelect) mobileSelect.value = activeLeadSectionId;
 }
 
 function renderLeadsPage() {
@@ -788,6 +889,15 @@ function companyBriefRows(prospect) {
     const label = typeof item === "string" ? shortUrl(item) : item.label || item.title || shortUrl(item.url || "");
     return url ? `<a href="${escapeAttr(url)}" target="_blank" rel="noreferrer">${escapeHtml(label)}</a>` : "";
   }).filter(Boolean).join("");
+  const apps = profile.app_portfolio?.apps || prospect.appPortfolio?.apps || [];
+  const appEvidence = profile.app_portfolio?.evidence || prospect.appPortfolio?.evidence || [];
+  const appRows = apps.length ? apps.map((app) => `
+    <article class="app-title-row">
+      <div><strong>${escapeHtml(app.title)}</strong><span>${escapeHtml([app.os, app.category, app.publisher].filter(Boolean).join(" · "))}</span></div>
+      <div class="app-facts"><span>${escapeHtml(app.geo || "GEO not verified")}</span><span>${escapeHtml(app.monetization || "Monetization not verified")}</span><span>${escapeHtml(app.recentRelease ? new Date(app.recentRelease).toLocaleDateString() : "Release date unknown")}</span></div>
+      ${evidenceLinks(appEvidence.filter((source) => (app.evidenceSourceIds || []).includes(source.source_id)))}
+    </article>
+  `).join("") : `<div class="empty-state">No confidently matched store title yet. The research job records this as a gap instead of inventing one.</div>`;
 
   return `
     <div class="company-summary">
@@ -795,6 +905,7 @@ function companyBriefRows(prospect) {
         <article>
           <span>${escapeHtml(label)}</span>
           <strong>${escapeHtml(value)}</strong>
+          ${companyClaimEvidence(profile, label, prospect)}
         </article>
       `).join("")}
     </div>
@@ -816,11 +927,32 @@ function companyBriefRows(prospect) {
         <div class="cap-list">${unknowns}</div>
       </section>
     </div>
+    <section class="app-portfolio-section">
+      <div class="subpanel-heading"><h3>Apps and Recent Releases</h3><span>title · OS · GEO · monetization · evidence</span></div>
+      <div class="app-title-list">${appRows}</div>
+    </section>
     <div class="company-research-footer">
       <span>Company context confidence: ${confidence}%</span>
       <div>${links || `<span>No research links yet</span>`}</div>
     </div>
   `;
+}
+
+function companyClaimEvidence(profile, label, prospect) {
+  const mapping = { "What they do": "Company description", "Company size": "Company size", "Audience": "Audience and business model", "Business model": "Audience and business model", "Category": "Company category", "Why relevant": "Product relevance" };
+  const claim = (profile.claim_evidence || []).find((item) => item.claim === mapping[label]);
+  if (!claim) return "";
+  const sources = [...(prospect.leadIntelligence?.sources || []), ...(prospect.appPortfolio?.evidence || [])]
+    .filter((source) => (claim.source_ids || []).includes(source.source_id));
+  return `<div class="claim-evidence"><i data-lucide="link-2"></i><span>${Number(claim.confidence || 0)}%</span>${evidenceLinks(sources, true)}</div>`;
+}
+
+function evidenceLinks(sources = [], compact = false) {
+  const links = sources.slice(0, compact ? 2 : 5).map((source) => source.url
+    ? `<a href="${escapeAttr(source.url)}" target="_blank" rel="noreferrer" title="${escapeAttr(source.excerpt || source.evidence_excerpt || "")}">${escapeHtml(source.title || shortUrl(source.url))}</a>`
+    : `<span title="${escapeAttr(source.excerpt || source.evidence_excerpt || "")}">${escapeHtml(source.title || source.source_id || "Internal source")}</span>`
+  ).join("");
+  return links ? `<div class="evidence-links">${links}</div>` : `<span class="evidence-missing">Evidence pending</span>`;
 }
 
 function detailChipList(items, emptyText) {
@@ -945,13 +1077,20 @@ function scoreBreakdownRows(prospect) {
     ["Product fit", inputs.fit || 0, "driver"],
     ["Penalty", inputs.penalty || 0, "penalty"]
   ];
-  return rows.map(([label, value, type]) => `
+  const scoreRows = rows.map(([label, value, type]) => `
     <div>
       <span>${escapeHtml(label)}</span>
       <strong>${type === "penalty" ? `-${value}` : `${value}%`}</strong>
       <div class="meter compact ${type === "penalty" ? "penalty" : ""}"><span style="width:${Math.max(0, Math.min(100, Number(value) || 0))}%"></span></div>
     </div>
   `).join("");
+  const model = state.scoringModel || {};
+  return `${scoreRows}
+    <article class="scoring-learning-card">
+      <div><span>CRM outcome learning</span><strong>${escapeHtml(titleCase(model.status || "insufficient_data"))}</strong></div>
+      <p>${Number(model.sampleSize || 0)} of ${Number(model.minimumSamples || 20)} resolved leads · ${Number(model.positiveOutcomes || 0)} positive · ${Number(model.negativeOutcomes || 0)} negative</p>
+      <button type="button" id="retrainScoringBtn"><i data-lucide="refresh-cw"></i><span>Recalculate Weights</span></button>
+    </article>`;
 }
 
 function nextActionRows(prospect) {
@@ -1193,8 +1332,8 @@ function bestContactConfidence(prospect) {
 function preferredChannel(prospect) {
   const candidates = prospect?.contactDiscovery?.candidates || [];
   if (prospect?.linkedin || candidates.some((candidate) => candidate.type === "linkedin")) return "linkedin";
-  if (prospect?.email || candidates.some((candidate) => candidate.type === "email")) return "email";
-  if (prospect?.phone || candidates.some((candidate) => candidate.type === "phone")) return "phone";
+  if (approvedChannel(prospect || {}, "email")) return "email";
+  if (approvedChannel(prospect || {}, "phone")) return "phone";
   return "linkedin";
 }
 
@@ -1202,10 +1341,10 @@ function updateQuickCopies(prospect) {
   const messages = prospect?.outreach?.messages || [];
   const variations = prospect?.outreach?.linkedinVariations || [];
   setCopyText("copyLinkedinQuick", messages.find((message) => /linkedin_invite/i.test(message.channel))?.body || variations[0]?.body || messages.find((message) => /linkedin/i.test(message.channel))?.body || "", "linkedin", "LinkedIn quick copy");
-  setCopyText("copyEmailQuick", messages.find((message) => /email/i.test(message.channel))?.body || "", "email", "Email quick copy");
-  setCopyText("copySmsQuick", messages.find((message) => /^sms$/i.test(message.channel))?.body || "", "sms", "SMS quick copy");
-  setCopyText("copyWhatsappQuick", messages.find((message) => /whatsapp/i.test(message.channel))?.body || "", "whatsapp", "WhatsApp quick copy");
-  setCopyText("copyTelegramQuick", messages.find((message) => /telegram/i.test(message.channel))?.body || "", "telegram", "Telegram quick copy");
+  setCopyText("copyEmailQuick", approvedChannel(prospect || {}, "email") ? messages.find((message) => /email/i.test(message.channel))?.body || "" : "", "email", "Email quick copy");
+  setCopyText("copySmsQuick", approvedChannel(prospect || {}, "sms") ? messages.find((message) => /^sms$/i.test(message.channel))?.body || "" : "", "sms", "SMS quick copy");
+  setCopyText("copyWhatsappQuick", approvedChannel(prospect || {}, "whatsapp") ? messages.find((message) => /whatsapp/i.test(message.channel))?.body || "" : "", "whatsapp", "WhatsApp quick copy");
+  setCopyText("copyTelegramQuick", approvedChannel(prospect || {}, "telegram") ? messages.find((message) => /telegram/i.test(message.channel))?.body || "" : "", "telegram", "Telegram quick copy");
 }
 
 function analyticsRows(prospect) {
@@ -1261,20 +1400,28 @@ function contactRows(prospect) {
 
   const candidates = discovery.candidates
     .map(
-      (candidate) => `
+      (candidate) => {
+        const approvalRequired = contactApprovalRequired(candidate.type);
+        const approved = candidate.approvalStatus === "approved";
+        const rejected = candidate.approvalStatus === "rejected";
+        const canApprove = candidate.approvalStatus === "pending";
+        return `
         <article class="contact-card">
           <div>
             <span class="contact-type">${escapeHtml(candidate.type)}</span>
             <strong>${linkIfUrl(candidate.value)}</strong>
             <small>${escapeHtml(candidate.source)} · ${escapeHtml(candidate.status)}</small>
+            ${approvalRequired ? `<span class="approval-state ${escapeAttr(candidate.approvalStatus || "verification_required")}">${escapeHtml(approved ? "Approved for outreach" : rejected ? "Rejected" : canApprove ? "Seller approval required" : "Verification required")}</span>` : ""}
             ${candidate.evidence?.length ? `<div class="evidence-row">${candidate.evidence.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>` : ""}
           </div>
           <div class="confidence">
             <span>${candidate.confidence}%</span>
-            <button data-copy-text="${escapeAttr(candidate.value)}" data-copy-channel="${escapeAttr(candidate.type || "contact")}" data-copy-label="Contact data" title="Copy" aria-label="Copy"><i data-lucide="copy"></i></button>
+            ${approvalRequired && !approved ? `<div class="approval-actions">${canApprove ? `<button type="button" data-contact-decision="approved" data-contact-type="${escapeAttr(candidate.type)}" data-contact-value="${escapeAttr(candidate.value)}"><i data-lucide="check"></i><span>Approve</span></button>` : ""}<button class="icon-button danger-button" type="button" data-contact-decision="rejected" data-contact-type="${escapeAttr(candidate.type)}" data-contact-value="${escapeAttr(candidate.value)}" title="Reject"><i data-lucide="x"></i></button></div>` : ""}
+            <button data-copy-text="${approved || !approvalRequired ? escapeAttr(candidate.value) : ""}" data-copy-channel="${escapeAttr(candidate.type || "contact")}" data-copy-label="Contact data" title="${approved || !approvalRequired ? "Copy" : "Approve before use"}" aria-label="Copy" ${approved || !approvalRequired ? "" : "disabled"}><i data-lucide="copy"></i></button>
           </div>
         </article>
-      `
+      `;
+      }
     )
     .join("");
 
@@ -1282,6 +1429,20 @@ function contactRows(prospect) {
     .map((warning) => `<span class="warning-chip">${escapeHtml(warning)}</span>`)
     .join("");
   return `${candidates}<div class="warning-row">${warnings}</div>`;
+}
+
+function contactApprovalRequired(type = "") {
+  return ["email", "phone", "sms", "whatsapp", "whatsapp_link", "telegram", "telegram_link"].includes(String(type).toLowerCase());
+}
+
+function approvedChannel(prospect, channel) {
+  if (/linkedin/.test(channel)) return true;
+  const normalized = channel === "sms" || channel === "call" ? "phone" : channel;
+  return (prospect.contactDiscovery?.candidates || []).some((candidate) =>
+    (candidate.type === normalized || candidate.type === `${normalized}_link` || candidate.type === `${normalized}_presence`)
+      && candidate.approvalStatus === "approved"
+      && !/not_found|rejected/i.test(String(candidate.status || ""))
+  );
 }
 
 function outreachRows(prospect) {
@@ -1294,15 +1455,17 @@ function outreachRows(prospect) {
     .map(
       (message) => {
         const basis = (message.personalization_basis || message.basis || []).slice(0, 4).join(" · ");
+        const canUse = approvedChannel(prospect, message.channel || "");
         return `
         <article class="message-card">
           <div class="message-heading">
             <span class="pill">${escapeHtml(message.channel)}</span>
             ${message.subject ? `<strong>${escapeHtml(message.subject)}</strong>` : ""}
-            <button data-copy-text="${escapeAttr(message.body)}" data-copy-channel="${escapeAttr(message.channel || "draft")}" data-copy-label="Outreach message" title="Copy" aria-label="Copy"><i data-lucide="copy"></i></button>
+            <button data-copy-text="${canUse ? escapeAttr(message.body) : ""}" data-copy-channel="${escapeAttr(message.channel || "draft")}" data-copy-label="Outreach message" title="${canUse ? "Copy" : "Approve contact first"}" aria-label="Copy" ${canUse ? "" : "disabled"}><i data-lucide="${canUse ? "copy" : "lock-keyhole"}"></i></button>
           </div>
           <pre>${escapeHtml(message.body)}</pre>
           ${basis ? `<small class="message-basis">${escapeHtml(basis)}</small>` : ""}
+          ${evidenceLinks(message.evidence || [])}
         </article>
       `;
       }
@@ -1323,6 +1486,15 @@ function outreachRows(prospect) {
       `
     )
     .join("");
+  const angles = (outreach.messageAngles || []).map((angle, index) => `
+    <article class="message-angle-card ${index === 0 ? "recommended" : ""}">
+      <div class="message-angle-heading"><div><span class="pill">${index === 0 ? "Recommended" : escapeHtml(angle.label)}</span><strong>${escapeHtml(angle.label)}</strong></div><span class="angle-score">${Number(angle.score || 0)}/100</span></div>
+      <p>${escapeHtml(angle.strategy || "")}</p>
+      <pre>${escapeHtml(angle.body || "")}</pre>
+      <div class="angle-footer"><span>${escapeHtml(angle.scoreReason || "")}</span><button data-copy-text="${escapeAttr(angle.body || "")}" data-copy-channel="linkedin" data-copy-label="${escapeAttr(angle.label || "Message angle")}"><i data-lucide="copy"></i><span>Copy</span></button></div>
+      ${evidenceLinks(angle.evidence || [])}
+    </article>
+  `).join("");
 
   const actions = (outreach.actions || [])
     .map(
@@ -1366,6 +1538,7 @@ function outreachRows(prospect) {
     </div>
     ${fallbackWarning}
     ${qualityWarningBlock}
+    ${angles ? `<div class="message-angle-grid">${angles}</div>` : ""}
     <div class="message-list">${messages}</div>
     <div class="message-list">${variations}</div>
     ${warmupActions ? `<div class="warmup-list">${warmupActions}</div>` : ""}
@@ -1595,6 +1768,35 @@ function renderBusyState() {
   });
 }
 
+function renderResearchProgress() {
+  const panel = document.getElementById("researchProgressPanel");
+  if (!panel) return;
+  const savedJob = activeResearchJob || (state?.researchJobs || []).find((job) =>
+    job.prospectId === selectedProspectId && ["queued", "running", "failed"].includes(job.status)
+  );
+  if (!savedJob) {
+    panel.hidden = true;
+    panel.innerHTML = "";
+    return;
+  }
+  panel.hidden = false;
+  const stages = (savedJob.stages || []).map((stage) => `
+    <div class="research-stage ${escapeAttr(stage.status || "pending")}">
+      <i data-lucide="${stage.status === "complete" ? "check" : stage.status === "running" ? "loader-circle" : stage.status === "failed" ? "triangle-alert" : "circle"}"></i>
+      <div><strong>${escapeHtml(stage.label)}</strong><span>${escapeHtml(stage.detail || titleCase(stage.status || "pending"))}</span></div>
+    </div>
+  `).join("");
+  panel.innerHTML = `
+    <div class="research-progress-heading">
+      <div><span class="eyebrow">Background research</span><strong>${escapeHtml(savedJob.productName || "Selected product")} · ${escapeHtml(savedJob.prospectName || "Lead")}</strong></div>
+      <span class="pill">${Number(savedJob.progress || 0)}%</span>
+    </div>
+    <div class="meter"><span style="width:${Number(savedJob.progress || 0)}%"></span></div>
+    <div class="research-stage-list">${stages}</div>
+    ${savedJob.error ? `<div class="outreach-warning"><i data-lucide="triangle-alert"></i><span>${escapeHtml(savedJob.error)}</span></div>` : ""}
+  `;
+}
+
 function setBusyButton(id, actionName, activeText) {
   const button = document.getElementById(id);
   if (!button) return;
@@ -1646,6 +1848,7 @@ function setView(viewName) {
       ai: "AI Operator",
       database: "Knowledge Base",
       products: "Products",
+      account: "Account",
       integrations: "Settings",
       overview: "AI Orchestration Control",
       models: "Model Registry",
@@ -1881,6 +2084,133 @@ function scrollLeadWorkspaceToTop() {
 
 navItems.forEach((item) => {
   item.addEventListener("click", () => setView(item.dataset.view));
+});
+
+document.getElementById("mobileLeadSectionSelect").addEventListener("change", (event) => {
+  activeLeadSectionId = event.target.value || "dashboard-account";
+  renderLeadSectionTabs();
+  document.querySelector(".lead-section-nav")?.scrollIntoView({ behavior: "smooth", block: "start" });
+});
+
+document.getElementById("accountMenuBtn").addEventListener("click", () => setView("account"));
+
+document.getElementById("activeLinkedinSelect").addEventListener("change", async (event) => {
+  if (!event.target.value) return;
+  await api("/api/account/linkedin/active", { method: "POST", body: JSON.stringify({ accountId: event.target.value }) });
+  authState = await api("/api/auth/status");
+  render();
+});
+
+document.getElementById("authModeBtn").addEventListener("click", () => {
+  authMode = authMode === "recover" ? "login" : "recover";
+  setText("authMessage", "");
+  renderAuthForm();
+  refreshIcons();
+});
+
+document.getElementById("authForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const email = document.getElementById("authEmailInput").value;
+  const password = document.getElementById("authPasswordInput").value;
+  const confirmation = document.getElementById("authConfirmInput").value;
+  try {
+    if ((authMode === "bootstrap" || authMode === "reset") && password !== confirmation) throw new Error("Passwords do not match.");
+    if (authMode === "recover") {
+      const result = await api("/api/auth/recover", { method: "POST", body: JSON.stringify({ email }) });
+      setText("authMessage", result.message || "Reset link requested.");
+      return;
+    }
+    if (authMode === "reset") {
+      await api("/api/auth/complete-recovery", { method: "POST", body: JSON.stringify({ accessToken: window.sessionStorage.getItem("outboundRecoveryToken"), password }) });
+      window.sessionStorage.removeItem("outboundRecoveryToken");
+      window.history.replaceState({}, "", window.location.pathname);
+      authMode = "login";
+      setText("authMessage", "Password changed. Sign in with the new password.");
+      renderAuthForm();
+      return;
+    }
+    const endpoint = authMode === "bootstrap" ? "/api/auth/bootstrap" : "/api/auth/login";
+    const result = await api(endpoint, {
+      method: "POST",
+      body: JSON.stringify({ name: document.getElementById("authNameInput").value, email, password })
+    });
+    authState = result.auth;
+    await enterWorkspace();
+  } catch (error) {
+    setText("authMessage", error.message || "Could not sign in.");
+  }
+});
+
+document.getElementById("accountProfileForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await api("/api/account/profile", { method: "POST", body: JSON.stringify({ name: document.getElementById("accountNameInput").value, title: document.getElementById("accountTitleInput").value }) });
+  authState = await api("/api/auth/status");
+  render();
+});
+
+document.getElementById("linkedinIdentityForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await api("/api/account/linkedin", { method: "POST", body: JSON.stringify({ name: document.getElementById("linkedinIdentityNameInput").value, url: document.getElementById("linkedinIdentityUrlInput").value }) });
+  event.currentTarget.reset();
+  authState = await api("/api/auth/status");
+  render();
+});
+
+document.getElementById("accountPasswordForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const password = document.getElementById("accountPasswordInput").value;
+  if (password !== document.getElementById("accountPasswordConfirmInput").value) {
+    uiNotice = "Passwords do not match.";
+    renderTopbar();
+    return;
+  }
+  await api("/api/account/password", { method: "POST", body: JSON.stringify({ password }) });
+  event.currentTarget.reset();
+  uiNotice = "Password changed.";
+  renderTopbar();
+});
+
+document.getElementById("teamUserForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await api("/api/account/users", { method: "POST", body: JSON.stringify({ name: document.getElementById("teamUserNameInput").value, email: document.getElementById("teamUserEmailInput").value, password: document.getElementById("teamUserPasswordInput").value, role: document.getElementById("teamUserRoleInput").value }) });
+  event.currentTarget.reset();
+  authState = await api("/api/auth/status");
+  render();
+});
+
+document.getElementById("logoutBtn").addEventListener("click", async () => {
+  await api("/api/auth/logout", { method: "POST", body: "{}" });
+  authState = { authenticated: false, bootstrapRequired: false };
+  authMode = "login";
+  showAuthGate();
+});
+
+document.addEventListener("click", async (event) => {
+  const contactDecision = event.target.closest("[data-contact-decision]");
+  if (contactDecision && selectedProspectId) {
+    await runUiAction("contact-approval", "Reviewing contact evidence and channel access...", async () => {
+      state = await api("/api/prospects/contacts/approval", { method: "POST", body: JSON.stringify({ prospectId: selectedProspectId, type: contactDecision.dataset.contactType, value: contactDecision.dataset.contactValue, decision: contactDecision.dataset.contactDecision }) });
+    });
+    return;
+  }
+  const activate = event.target.closest("[data-activate-linkedin]");
+  if (activate) {
+    await api("/api/account/linkedin/active", { method: "POST", body: JSON.stringify({ accountId: activate.dataset.activateLinkedin }) });
+    authState = await api("/api/auth/status");
+    render();
+    return;
+  }
+  const remove = event.target.closest("[data-delete-linkedin]");
+  if (remove) {
+    await api("/api/account/linkedin/delete", { method: "POST", body: JSON.stringify({ accountId: remove.dataset.deleteLinkedin }) });
+    authState = await api("/api/auth/status");
+    render();
+    return;
+  }
+  if (event.target.closest("#retrainScoringBtn")) {
+    state = await api("/api/scoring/retrain", { method: "POST", body: "{}" });
+    render();
+  }
 });
 
 document.getElementById("chartMode").addEventListener("change", drawTrafficChart);
@@ -2349,8 +2679,11 @@ document.getElementById("apifyConfigForm").addEventListener("submit", async (eve
       whatsappCheckerActorId: document.getElementById("whatsappCheckerActorInput").value,
       telegramCheckerActorId: document.getElementById("telegramCheckerActorInput").value,
       companyPeopleActorId: document.getElementById("companyPeopleActorInput").value,
+      companyPeopleSecondaryActorId: document.getElementById("companyPeopleSecondaryActorInput").value,
+      personEnrichmentActorId: document.getElementById("personEnrichmentActorInput").value,
       companyPeopleInputTemplate: document.getElementById("companyPeopleInputTemplate").value,
-      maxChargeUsd: Number(document.getElementById("apifyMaxChargeInput").value)
+      maxChargeUsd: Number(document.getElementById("apifyMaxChargeInput").value),
+      contactMaxChargeUsd: Number(document.getElementById("apifyContactMaxChargeInput").value)
     })
   });
   document.getElementById("apifyTokenInput").value = "";
@@ -2619,22 +2952,28 @@ async function analyzeLeadIntelligence(force = false) {
 async function researchAndPrepareSelected() {
   if (!selectedProspectId) return;
   const profile = document.getElementById("outreachProfileSelect").value;
-  state = await api("/api/prospects/enrich", {
+  const payload = await api("/api/research/jobs", {
     method: "POST",
-    body: JSON.stringify({ prospectId: selectedProspectId, force: false })
+    body: JSON.stringify({ prospectId: selectedProspectId, profile })
   });
-  state = await api("/api/prospects/intelligence/analyze", {
-    method: "POST",
-    body: JSON.stringify({
-      prospectId: selectedProspectId,
-      force: true,
-      refreshReason: "run_research_pipeline"
-    })
-  });
-  state = await api("/api/prospects/prepare", {
-    method: "POST",
-    body: JSON.stringify({ prospectId: selectedProspectId, profile, useIntelligenceAi: true })
-  });
+  activeResearchJob = payload.job;
+  renderResearchProgress();
+  refreshIcons();
+  const deadline = Date.now() + 5 * 60 * 1000;
+  while (["queued", "running"].includes(activeResearchJob.status) && Date.now() < deadline) {
+    await new Promise((resolve) => window.setTimeout(resolve, 900));
+    const update = await api(`/api/research/jobs/${encodeURIComponent(activeResearchJob.id)}`);
+    activeResearchJob = update.job;
+    const runningStage = activeResearchJob.stages?.find((stage) => stage.status === "running");
+    busyMessage = runningStage ? `${runningStage.label} · ${activeResearchJob.progress}%` : `Research · ${activeResearchJob.progress}%`;
+    renderTopbar();
+    renderResearchProgress();
+    refreshIcons();
+  }
+  if (activeResearchJob.status !== "complete") {
+    throw new Error(activeResearchJob.error || "Research did not finish within five minutes.");
+  }
+  await refresh();
   activeLeadSectionId = "dashboard-account";
   render();
 }
@@ -2864,4 +3203,4 @@ document.getElementById("compareBtn").addEventListener("click", () => {
   renderEvaluation();
 });
 
-await refresh();
+await bootApplication();
