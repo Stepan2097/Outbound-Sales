@@ -5461,8 +5461,9 @@ function buildAdActionOutreachPlan(prospect, profile, route, product, analysis) 
   const directPhoneOk = hasReviewedPhoneCandidate(prospect);
   const rolePhrase = lowerSalesPhrase(prospect.title || "growth").replace(/\s*\/\s*/g, " and ");
   const companySiteContext = prospect.publicCompanyResearch?.description || prospect.publicCompanyResearch?.snippet || prospect.publicCompanyResearch?.title || "";
+  const companySiteSignal = cleanOutboundSignal(companySiteContext).split(/\s*\|\s*/).filter(Boolean).slice(-1)[0] || cleanOutboundSignal(companySiteContext);
   const verifiedCompanyContext = companySiteContext
-    ? trimWords(cleanOutboundSignal(companySiteContext), 28)
+    ? trimWords(`${company}'s public site describes it as ${companySiteSignal}`, 28)
     : companyProfile.category !== "Unknown"
       ? `${company} appears to operate in ${companyProfile.category.toLowerCase()}`
       : `${company}'s app portfolio still needs verification`;
@@ -6312,7 +6313,7 @@ async function synthesizeLeadIntelligenceWithAi(localSnapshot, prospect, product
       {
         role: "user",
         content: JSON.stringify({
-          instruction: "Improve this lead intelligence snapshot without removing required fields. Keep unsupported facts as unknown or research gaps. Draft messages remain human-approved and must not send anything.",
+          instruction: "Return a compact JSON patch, not the full snapshot. Include only executive_summary, objections, messages, discovery_questions, next_steps, and warnings. Keep unsupported facts unknown or in next steps. Draft messages remain human-approved and must not send anything. Do not return scores, triggers, contacts, company taxonomy, sources, or model metadata; those are deterministic and source-locked.",
           profile,
           product: productForPrompt(product),
           prospect: prospectForPrompt(prospect),
@@ -6517,7 +6518,7 @@ function calculateIntelligenceScores(inputs, profile) {
   const fit_score = Math.max(0, Math.min(100, positives - penalties));
   const call_difficulty = fit_score >= 85 ? 2 : fit_score >= 72 ? 3 : 4;
   const pilot_difficulty = penalties > 8 ? 4 : fit_score >= 82 ? 2 : 3;
-  const priority_score = Math.min(100, Math.round(fit_score * 0.7 + (6 - call_difficulty) * 3 + (6 - pilot_difficulty) * 4));
+  const priority_score = Math.min(100, Math.round(fit_score * 0.75 + (6 - call_difficulty) * 3 + (6 - pilot_difficulty) * 4));
   const thresholds = profile.waveThresholds || { wave1: 80, wave2: 74 };
   return { fit_score, priority_score, priority_wave: priority_score >= thresholds.wave1 ? "Wave 1" : priority_score >= thresholds.wave2 ? "Wave 2" : "Strategic / nurture", call_difficulty, pilot_difficulty, difficulty_rationale: `Call difficulty ${call_difficulty}/5 and pilot difficulty ${pilot_difficulty}/5 reflect role access, source confidence, and proof gaps.` };
 }
