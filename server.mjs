@@ -2999,7 +2999,7 @@ function analyzeLead(prospect, product = currentProduct()) {
   const interactions = interactionsForProspect(prospect.id);
   const persona = bestPersonaMatch(prospect, product);
   const productFit = productFitForProspect(prospect, product);
-  const companyProfile = prospect.companyProfile || prospect.leadIntelligence?.company_context || buildCompanyProfile(prospect, product);
+  const companyProfile = buildCompanyProfile(prospect, product);
   const contactConfidence = bestContactConfidenceServer(prospect);
   const isBlackAffiliate = isBlackAffiliateProduct(product);
   const blackAffiliateEvidence = isBlackAffiliate ? blackAffiliateFitEvidence(prospect) : null;
@@ -3013,7 +3013,7 @@ function analyzeLead(prospect, product = currentProduct()) {
   const companyScore = clampNumber(Math.round((companyProfile.confidence || 0) * 0.22), 0, 18, 6);
   const triggerScore = isBlackAffiliate
     ? blackAffiliateEvidence?.companySignalCount >= 2 ? 12 : blackAffiliateEvidence?.companySignalCount >= 1 ? 8 : blackAffiliateEvidence?.roleSignals ? 5 : 2
-    : publicLeadNote(prospect.notes) || prospect.contactDiscovery?.scraperNote ? 12 : 3;
+    : publicLeadNote(prospect.notes) ? 12 : prospect.publicCompanyResearch?.description ? 6 : 3;
   const contactScore = Math.round(Math.min(14, contactConfidence * 0.14));
   const engagementScore = Math.min(12, interactions.reduce((sum, interaction) => {
     const lift = state.historicalOutcomes.byInteraction[interaction.type] ?? state.historicalOutcomes.byInteraction[interaction.outcome] ?? { reach: 0, close: 0 };
@@ -3076,11 +3076,11 @@ function sentenceCase(value) {
 function buildCompanyProfile(prospect, product = currentProduct()) {
   const publicResearchText = `${prospect.publicCompanyResearch?.title || ""} ${prospect.publicCompanyResearch?.description || ""} ${prospect.publicCompanyResearch?.snippet || ""}`;
   const text = `${prospect.company} ${prospect.title} ${prospect.notes} ${prospect.website} ${publicResearchText}`.toLowerCase();
-  const companyOnlyText = `${prospect.company} ${prospect.notes} ${prospect.website} ${publicResearchText} ${prospect.companyProfile?.category || ""} ${prospect.companyProfile?.description || ""}`.toLowerCase();
+  const companyOnlyText = `${prospect.company} ${prospect.notes} ${prospect.website} ${publicResearchText}`.toLowerCase();
   const knownNotes = publicLeadNote(prospect.notes);
-  const categorySource = isBlackAffiliateProduct(product) ? stripNegativeBlackAffiliateEvidence(companyOnlyText) : text;
+  const categorySource = isBlackAffiliateProduct(product) ? stripNegativeBlackAffiliateEvidence(companyOnlyText) : companyOnlyText;
   const category = companyCategoryFromText(categorySource);
-  const sizeEstimate = companySizeEstimate(text);
+  const sizeEstimate = companySizeEstimate(companyOnlyText);
   const audience = companyAudienceFromText(categorySource, category);
   const businessModel = companyBusinessModelFromText(categorySource, category);
   const techStack = ["hubspot", "salesforce", "snowflake", "apollo", "zoominfo", "adjust", "appsflyer", "singular"]
@@ -3137,12 +3137,12 @@ function buildCompanyProfile(prospect, product = currentProduct()) {
 function companyCategoryFromText(text) {
   if (/\bigaming\b|\bi-gaming\b|\bcasino\b|\bsportsbook\b|\bbookmaker\b|\bbetting\b|\bgambling\b/.test(text)) return "iGaming operator or affiliate market";
   if (/\baffiliate network\b|\btraffic partners?\b|\bpartner network\b/.test(text)) return "Affiliate network";
+  if (/game|gaming|gameplay|player|app|mobile/.test(text)) return "Mobile app or gaming";
   if (/\bmedia buying\b|\bpaid media\b|\bperformance marketing\b|\buser acquisition\b|\bua\b/.test(text)) return "Performance marketing";
   if (/\bwebview\b|\bpwa\b|\bapp funnel\b|\bapp distribution\b/.test(text)) return "App/WebView acquisition";
   if (/analytics|data|snowflake|intelligence/.test(text)) return "Analytics software";
   if (/logistics|supply|freight|transport/.test(text)) return "Logistics";
   if (/clinic|health|medical|care/.test(text)) return "Healthcare services";
-  if (/game|gaming|casino|bet|app|mobile/.test(text)) return "Mobile app or gaming";
   if (/finance|lending|bank|insurance|fintech/.test(text)) return "Financial services";
   if (/energy|solar|grid|installer/.test(text)) return "Energy services";
   if (/software|saas|crm|revops|sales/.test(text)) return "B2B software";
@@ -3186,6 +3186,17 @@ function companyPrioritiesFor(prospect, product, category) {
   const note = publicLeadNote(prospect.notes);
   const base = [];
   const isBlackAffiliate = isBlackAffiliateProduct(product);
+  const isAdAction = isAdActionProduct(product);
+  const role = `${prospect.title || ""}`.toLowerCase();
+  if (isAdAction) {
+    if (/data|analytics|mmp|measurement/.test(role)) base.push("MMP event quality and cohort measurement");
+    if (/user acquisition|\bua\b|growth|performance|marketing|acquisition/.test(role)) base.push("incremental user acquisition outside core auction channels");
+    if (/product|lifecycle|retention/.test(role)) base.push("post-install retention and lifecycle value");
+    if (/founder|ceo|chief|strategy|business development|commercial/.test(role)) base.push("channel diversification with a controlled commercial test");
+    if (category === "Mobile app or gaming") base.push("one title-specific event ladder with a separate natural quality KPI");
+    base.push("transparent MMP attribution, source controls, and written scale or stop rules");
+    return [...new Set(base)].slice(0, 4);
+  }
   if (isBlackAffiliate && /igaming|casino|sportsbook|betting|gambling|affiliate/i.test(`${prospect.company} ${prospect.notes} ${category}`)) base.push("verify affiliate traffic, app funnel, GEO, and tracking fit");
   if (isBlackAffiliate && /media buying|paid media|performance marketing|acquisition|ua/i.test(`${prospect.title} ${prospect.notes} ${category}`)) base.push("understand acquisition source quality and measurable event flow");
   if (isBlackAffiliate && /webview|pwa|app|mobile/i.test(`${prospect.notes} ${category}`)) base.push("check app/WebView readiness and moderation/tracking constraints");
@@ -3834,49 +3845,12 @@ function companyPeopleScraperInput(prospect) {
   const companyUrl = normalizeLinkedInCompanyUrl(prospect.companyLinkedin || prospect.publicCompanyResearch?.linkedinCompanyUrl || "");
   const peopleUrl = companyLinkedInPeopleUrlForProspect(prospect);
   const target = companyUrl || peopleUrl || company || domain;
-  const roleFilters = [
-    "Founder",
-    "CEO",
-    "CMO",
-    "Head of Affiliates",
-    "Affiliate Manager",
-    "Partnerships Manager",
-    "Head of Growth",
-    "Paid Media Buyer",
-    "User Acquisition",
-    "Marketing Director",
-    "Revenue Operations",
-    "Sales Director"
-  ];
   return compactObject({
-    leadTargets: [target].filter(Boolean),
-    maxLeadsPerCompany: 12,
-    jobTitleKeywords: roleFilters,
-    excludeJobTitleKeywords: ["intern", "student", "assistant"],
-    includeOnlyDecisionMakers: false,
-    enableAiLeadScoring: false,
-    connectionProxy: {
-      useApifyProxy: true,
-      apifyProxyGroups: ["RESIDENTIAL"],
-      apifyProxyCountry: "US"
-    },
-    totalResults: 12,
-    companyNameIncludes: company ? [company] : [],
-    personTitleIncludes: roleFilters,
-    company: company,
-    domain,
-    companyUrl: companyUrl || "",
-    linkedinCompanyUrl: companyUrl || "",
-    linkedinPeopleUrl: peopleUrl || "",
-    includeTitleVariants: true,
-    roleMatchMode: "any",
-    hasEmail: false,
-    hasPhone: false,
-    companyMatchMode: "any",
-    companyKeywordMode: "broad",
-    resetProgress: false,
-    countOnly: false,
-    dontSaveProgress: true
+    targets: [target].filter(Boolean),
+    maxEmployees: 80,
+    sort_order: "relevance",
+    max_comments: 0,
+    proxyConfiguration: { useApifyProxy: false }
   });
 }
 
@@ -3948,7 +3922,7 @@ function isEmptyApifyValue(value) {
 
 async function runApifyActor(actorId, input, maxChargeUsd) {
   const token = decryptSecret(state.apifyVault);
-  const safeActorId = actorId.split("/").map(encodeURIComponent).join("/").replaceAll("%7E", "~");
+  const safeActorId = encodeURIComponent(String(actorId || "").replace("/", "~"));
   const timeoutMs = apifyTimeoutMs();
   const timeoutSeconds = Math.max(5, Math.ceil(timeoutMs / 1000));
   const url = `https://api.apify.com/v2/acts/${safeActorId}/run-sync-get-dataset-items?token=${encodeURIComponent(token)}&maxTotalChargeUsd=${encodeURIComponent(maxChargeUsd)}&clean=true&timeout=${timeoutSeconds}`;
@@ -4868,7 +4842,7 @@ async function prepareOutreachWithAi(prospect, profile, taskType = "SEQUENCE_GEN
   }
 
   try {
-    const blackAffiliateRules = isBlackAffiliateProduct(product)
+    const productCopyRules = isBlackAffiliateProduct(product)
       ? [
         "Write as Black Affiliate / iGaming affiliate acquisition context, not as RevOps, CRM, sales automation, or outbound research software.",
         "Do not use these phrases: RevOps, CRM workflow, outbound research, go-to-market motion, rep-by-rep process, quick demo, book a demo.",
@@ -4876,6 +4850,16 @@ async function prepareOutreachWithAi(prospect, profile, taskType = "SEQUENCE_GEN
         "Do not claim guaranteed deposits, ROI, conversion lift, moderation safety, or verified contact data unless provided in sources.",
         "Primary flow is LinkedIn first: view profile, optionally like/comment if natural, send invite, then follow up in 2-3 days if accepted."
       ]
+      : isAdActionProduct(product)
+        ? [
+          "Write as AdAction, using Qualume and Value Exchange Media context for advertiser user acquisition. Never write about RevOps, CRM workflows, outbound research, sales automation, or rep productivity.",
+          "For mobile-game and app advertisers, frame a controlled Android-first test: one title, one to three GEOs, one payable event, MMP attribution, and one separate natural quality KPI.",
+          "Say rewarded or value-exchange traffic plainly. Never disguise the traffic type or promise scale, retention, ROAS, fraud levels, or conversion lift.",
+          "Keep the LinkedIn invitation below 260 characters and make it a real question. Keep email below 110 words.",
+          "Do not invent a game title, MMP, campaign event, GEO, budget, case study, or company initiative. Put missing evidence into next actions.",
+          "Do not draft usable SMS, WhatsApp, or Telegram copy unless a reviewed phone and channel-presence signal are provided.",
+          "Primary flow is LinkedIn first: verify profile and company, engage with a relevant post only when natural, send an invitation, then check acceptance in 2-3 days."
+        ]
       : [];
     const { data, run } = await callOpenRouterJson({
       model: outreachModelForProfile(profile),
@@ -4918,7 +4902,7 @@ async function prepareOutreachWithAi(prospect, profile, taskType = "SEQUENCE_GEN
               ]
             },
             product: productForPrompt(product),
-            productCopyRules: blackAffiliateRules,
+            productCopyRules,
             outreachExamples: (product.examples || []).slice(0, 5),
             learningMemory: learningContextForProduct(product.id),
             prospect: prospectForPrompt(prospect),
@@ -5376,6 +5360,130 @@ function buildBlackAffiliateLinkedInOutreach(prospect, product = currentProduct(
   };
 }
 
+function adActionBuyerAngle(prospect = {}) {
+  const title = String(prospect.title || "").toLowerCase();
+  if (/data|analytics|measurement|mmp/.test(title)) {
+    return {
+      focus: "MMP event quality and post-install cohort performance",
+      question: "when you test a rewarded source, which natural KPI has to hold after the payable event?"
+    };
+  }
+  if (/user acquisition|\bua\b|growth|performance|marketing|acquisition/.test(title)) {
+    return {
+      focus: "incremental user acquisition outside the core auction channels",
+      question: "is value-exchange CPE already in your test mix, or has traffic quality kept it off the plan?"
+    };
+  }
+  if (/product|lifecycle|retention/.test(title)) {
+    return {
+      focus: "post-install retention from rewarded acquisition",
+      question: "would you judge a rewarded test on retention after the paid event, or on a different natural KPI?"
+    };
+  }
+  return {
+    focus: "a controlled additional acquisition channel",
+    question: "is a transparent rewarded UA test relevant this quarter, or does that sit with another owner?"
+  };
+}
+
+function buildAdActionOutreachPlan(prospect, profile, route, product, analysis) {
+  const companyProfile = buildCompanyProfile(prospect, product);
+  const firstName = firstNameFor(prospect.name) || "there";
+  const company = prospect.company || "your company";
+  const buyerAngle = adActionBuyerAngle(prospect);
+  const directPhoneOk = hasReviewedPhoneCandidate(prospect);
+  const verifiedCompanyContext = prospect.publicCompanyResearch?.description
+    ? trimWords(cleanOutboundSignal(prospect.publicCompanyResearch.description), 28)
+    : companyProfile.category !== "Unknown"
+      ? `${company} appears to operate in ${companyProfile.category.toLowerCase()}`
+      : `${company}'s app portfolio still needs verification`;
+  const messengerHold = "Do not use until a reviewed phone, identity match, channel-presence result, and permission check exist.";
+  const invite = `Hi ${firstName}, saw your ${prospect.title || "growth remit"} at ${company}. ${sentenceCase(buyerAngle.question)} Open to connecting?`;
+  const testFrame = "one Android title, 1-3 GEOs, one payable event, MMP attribution, and a separate natural quality KPI";
+
+  return {
+    preparedAt: new Date().toISOString(),
+    profile,
+    productId: product.id,
+    productName: product.name,
+    modelUsed: route.ok ? route.modelUsed : "adaction-local-v1",
+    provider: route.ok ? route.provider : "local",
+    recommendedChannel: chooseBestChannel(prospect),
+    analysis,
+    qualification: {
+      score: analysis.score,
+      fit: analysis.productFit,
+      rationale: `${prospect.title || "The role"} maps to ${buyerAngle.focus}. Company context confidence is ${companyProfile.confidence || 0}%; title, MMP, event, GEO, and quality thresholds remain discovery items.`
+    },
+    messages: [
+      {
+        channel: "linkedin_invite",
+        body: trimMessage(invite, 260),
+        personalization_basis: [prospect.title, company, buyerAngle.question].filter(Boolean)
+      },
+      {
+        channel: "linkedin_follow_up",
+        body: trimMessage(`${firstName}, thanks for connecting. I asked because AdAction runs disclosed value-exchange acquisition. The useful version is a capped test around ${testFrame}, rather than a broad traffic pitch. ${sentenceCase(buyerAngle.question)}`, 520),
+        personalization_basis: [buyerAngle.focus, testFrame, "AdAction product playbook"].filter(Boolean)
+      },
+      {
+        channel: "email",
+        subject: `${company}: one controlled rewarded UA test`,
+        body: trimWords(`Hi ${firstName},\n\n${verifiedCompanyContext}. I saw your ${prospect.title || "role"} and wanted to test one assumption.\n\nAdAction's relevant route here is disclosed value-exchange acquisition, scoped to ${testFrame}. The paid event and the natural quality KPI stay separate, with written scale or stop rules.\n\n${sentenceCase(buyerAngle.question)}\n\nIf it belongs with someone else, who owns UA channel tests for a specific title?`, 110),
+        personalization_basis: [verifiedCompanyContext, prospect.title, testFrame].filter(Boolean)
+      },
+      {
+        channel: "sms",
+        body: directPhoneOk
+          ? trimWords(`Hi ${firstName}, one question for ${company}: is a disclosed rewarded UA test relevant, or should I speak with the title's UA owner?`, 28)
+          : "Do not use SMS until a reviewed phone, identity match, and permission check exist.",
+        personalization_basis: [directPhoneOk ? "reviewed phone" : "phone hold", company]
+      },
+      {
+        channel: "whatsapp",
+        body: directPhoneOk
+          ? trimWords(`Hi ${firstName}, does your team test rewarded/value-exchange UA against a separate retention or payer KPI?`, 24)
+          : messengerHold,
+        personalization_basis: [directPhoneOk ? "reviewed phone" : "messenger hold", buyerAngle.focus]
+      },
+      {
+        channel: "telegram",
+        body: directPhoneOk
+          ? trimWords(`Hi ${firstName}, is rewarded UA testing in your scope at ${company}?`, 18)
+          : messengerHold,
+        personalization_basis: [directPhoneOk ? "reviewed phone" : "messenger hold", company]
+      },
+      {
+        channel: "call",
+        body: `Open with: "I am not calling with a broad traffic pitch. I wanted to check whether ${company} tests disclosed rewarded acquisition, and which natural KPI has to hold after the payable event." If relevant, qualify one title, Android supply, GEOs, MMP, event ladder, baseline KPI, and stop rule.`,
+        personalization_basis: [company, buyerAngle.focus, testFrame]
+      }
+    ],
+    actions: [
+      { type: "review_company_evidence", label: "Verify the company site, LinkedIn company page, and one active app title", due: "today", priority: "high" },
+      { type: "linkedin_profile_viewed", label: "Review the lead's role and recent public LinkedIn activity", due: "today", priority: "high" },
+      { type: "linkedin_post_liked", label: "Like or comment only when a recent post creates a natural AdAction angle", due: "today", priority: "medium" },
+      { type: "linkedin_invite_sent", label: "Send the short value-exchange fit question", due: "today", priority: "high" },
+      { type: "follow_up_scheduled", label: "Check acceptance in 2-3 days; send the controlled-test follow-up only after acceptance", due: "2-3 days", priority: "high" },
+      { type: "verify_test_inputs", label: "Before a commercial pitch, confirm title, OS, GEOs, MMP, payable event, and natural KPI", due: "before proposal", priority: "high" }
+    ],
+    complianceChecks: [
+      "Rewarded/value-exchange traffic is disclosed plainly.",
+      "No performance, scale, fraud, retention, or ROI claim is made without approved proof.",
+      "SMS and messenger channels require reviewed phone source, presence, identity, and permission.",
+      "The test keeps the payable event separate from the natural quality KPI."
+    ],
+    warmupActions: buildWarmupActions(prospect),
+    linkedinVariations: [
+      { label: "connection invite", channel: "linkedin", body: trimMessage(invite, 260) },
+      { label: "quality question", channel: "linkedin", body: trimMessage(`${firstName}, when ${company} tests a new UA source, which natural KPI has to hold after the paid event? I ask because AdAction runs disclosed value-exchange acquisition.`, 420) },
+      { label: "after accept", channel: "linkedin", body: trimMessage(`${firstName}, thanks for connecting. Would a capped Android test around one title, one event, MMP attribution, and a separate retention/payer KPI be worth qualifying, or is rewarded UA outside the plan?`, 520) },
+      { label: "route to owner", channel: "linkedin", body: trimMessage(`I may have the ownership wrong: who at ${company} evaluates incremental UA channels for a specific title?`, 280) }
+    ],
+    qualityWarnings: companyProfile.confidence < 65 ? ["Company evidence is incomplete; verify one active title before using the follow-up or email."] : []
+  };
+}
+
 function buildOutreachPlan(prospect, profile, route, product = currentProduct()) {
   const channel = chooseBestChannel(prospect);
   const analysis = analyzeLead(prospect, product);
@@ -5384,6 +5492,9 @@ function buildOutreachPlan(prospect, profile, route, product = currentProduct())
   }
   if (isBlackAffiliateProduct(product)) {
     return buildBlackAffiliateOutreachPlan(prospect, profile, route, product, analysis);
+  }
+  if (isAdActionProduct(product)) {
+    return buildAdActionOutreachPlan(prospect, profile, route, product, analysis);
   }
   const useCase = bestUseCaseFor(prospect, product);
   const companyProfile = prospect.companyProfile || prospect.leadIntelligence?.company_context || buildCompanyProfile(prospect, product);
@@ -6093,7 +6204,7 @@ function buildLocalLeadIntelligenceSnapshot(prospect, product, profile, sources,
     parent_and_control: { parent_company: "unknown", control_notes: "Unknown until public ownership or CRM account hierarchy is verified.", source_ids: [], confidence: 35 },
     selected_game_or_app: selectedGame,
     genre_and_monetization: genreAndMonetizationFor(prospect, profile),
-    target_os: profile.id.includes("adaction") ? "iOS" : "not_applicable",
+    target_os: isAdActionProduct(product) ? "Android first; verify OS-specific supply and measurement" : "not_applicable",
     target_geos: geosForProspect(prospect),
     triggers: [trigger],
     recommended_contacts: recommendedContactsForIntelligence(prospect, sourceIds),
@@ -6316,14 +6427,23 @@ function calculateIntelligenceScores(inputs, profile) {
 function triggerForProspect(prospect, sources) {
   const sourceIds = sources.map((source) => source.source_id);
   const note = publicLeadNote(prospect.notes);
-  const statement = cleanText(note || prospect.contactDiscovery?.scraperNote || `${prospect.company || prospect.name} has profile context, but no dated external trigger is verified yet`).replace(/[.!?]+$/, "");
-  return { statement, trigger_type: note ? "crm_note" : prospect.contactDiscovery?.scraperNote ? "contact_discovery" : "unknown", occurred_at: prospect.updatedAt || prospect.createdAt || new Date().toISOString(), source_ids: sourceIds.includes("src-crm-profile") ? ["src-crm-profile"] : [], confidence: note ? 72 : 45, claim_type: note ? "fact" : "inference" };
+  const scraperNote = cleanText(prospect.contactDiscovery?.scraperNote || "");
+  const usefulScraperSignal = scraperNote && !/\b(failed|timed out|no apify|no actor|no results?|0 contact|0 company|404|configured|template missing)\b/i.test(scraperNote)
+    ? scraperNote
+    : "";
+  const publicSignal = cleanText(prospect.publicCompanyResearch?.description || "");
+  const rawStatement = note || publicSignal || usefulScraperSignal || `${prospect.company || prospect.name} has company and profile context, but no dated external trigger is verified yet`;
+  const triggerType = note ? "crm_note" : publicSignal ? "public_company_context" : usefulScraperSignal ? "contact_discovery" : "unknown";
+  const confidence = note ? 72 : publicSignal ? Number(prospect.publicCompanyResearch?.confidence || 62) : usefulScraperSignal ? 50 : 35;
+  return { statement: trimWords(cleanText(rawStatement).replace(/[.!?]+$/, ""), 36), trigger_type: triggerType, occurred_at: prospect.updatedAt || prospect.createdAt || new Date().toISOString(), source_ids: sourceIds.includes("src-crm-profile") ? ["src-crm-profile"] : [], confidence, claim_type: note || publicSignal ? "fact" : "inference" };
 }
 
 function selectedGameOrAppFor(prospect, product, profile) {
   if (!profile.id.includes("adaction")) return { name: prospect.company || "account-level offer", type: "not_applicable", rationale: `For ${product.name}, the account itself is the entry point rather than a mobile title.`, source_ids: ["src-crm-profile"], confidence: 55, verification_status: "inference" };
-  const name = extractLikelyTitle(prospect.company) || "unknown title";
-  return { name, type: "mobile_game_or_app", rationale: name === "unknown title" ? "No specific title is verified yet; use this as a research gap before pitching." : `${name} is inferred from the account/company name and must be verified against app store or company sources.`, source_ids: ["src-crm-profile"], confidence: name === "unknown title" ? 30 : 48, verification_status: name === "unknown title" ? "unknown" : "needs_review" };
+  const explicitTitle = cleanText(`${prospect.notes || ""} ${prospect.publicCompanyResearch?.description || ""}`)
+    .match(/\b(?:app|game|title)\s*:\s*([^.;\n]{3,80})/i)?.[1];
+  const name = cleanText(explicitTitle || "") || "unknown title";
+  return { name, type: "mobile_game_or_app", rationale: name === "unknown title" ? "No specific title is verified yet; verify one active app-store title before a commercial pitch." : `${name} is named in available source context and still requires an app-store or company-source check.`, source_ids: ["src-crm-profile"], confidence: name === "unknown title" ? 30 : 62, verification_status: name === "unknown title" ? "unknown" : "needs_review" };
 }
 
 function extractLikelyTitle(company = "") {
@@ -6345,7 +6465,7 @@ function geosForProspect(prospect) {
   if (/united states|usa|austin|miami|chicago|new york|\bus\b/i.test(location)) geos.push("US");
   if (/uk|london|united kingdom/i.test(location)) geos.push("UK");
   if (/canada|toronto/i.test(location)) geos.push("CA");
-  return geos.length ? geos.slice(0, 3) : ["US"];
+  return geos.slice(0, 3);
 }
 
 function recommendedContactsForIntelligence(prospect, sourceIds) {
@@ -6395,7 +6515,7 @@ function objectionsForIntelligence(prospect, product, profile, sourceIds) {
 
 function campaignHypothesisForIntelligence(prospect, product, profile, selectedGame, sourceIds) {
   const isAdAction = profile.id.includes("adaction");
-  return { hypothesis: isAdAction ? `A capped value-exchange/rewarded test for ${selectedGame.name} can validate incremental reach if payable event quality and a separate natural KPI are tracked.` : `${product.name} can reduce manual prep and improve follow-up consistency for ${prospect.company || "this account"} if the first workflow is scoped tightly.`, product_or_offer: product.name, os: isAdAction ? "iOS" : "not_applicable", geos: geosForProspect(prospect), traffic_type: isAdAction ? "value-exchange/rewarded - disclosed" : "not_applicable", payable_milestone: isAdAction ? "verified install or qualified in-app event - select before launch" : "qualified meeting or workflow pilot", natural_quality_kpi: isAdAction ? "D1/D7 retention, payer rate, or ROAS quality KPI - choose one" : "reply quality and meeting conversion", attribution_and_mmp: isAdAction ? "MMP required; confirm Adjust/Appsflyer/Singular/other before test." : "CRM/source attribution from Outbound OS activity log.", incrementality_method: isAdAction ? "Holdout, geo split, or capped cohort comparison." : "Compare prepared vs manual outreach cohort response quality.", fraud_controls: isAdAction ? ["MMP fraud suite", "duplicate/device quality checks", "publisher/source review"] : ["human review before send", "source confidence review"], minimum_valid_cohort: isAdAction ? "Set with UA owner before pilot; unknown until CPI/event economics are confirmed." : "10-25 reviewed leads for first workflow proof.", stop_rules: isAdAction ? ["pause if fraud/invalid traffic exceeds agreed threshold", "pause if natural KPI trails baseline after valid cohort", "pause if MMP attribution is incomplete"] : ["pause if personalization is unsupported", "pause if contact source confidence is too low"], scale_rules: isAdAction ? ["scale only after payable event and natural KPI both clear threshold"] : ["scale after reply quality and CRM logging are verified"], assumptions: ["Human must verify unsupported facts before outreach.", "No message is sent automatically."], source_ids: ["src-product-context", "src-crm-profile"].filter((id) => sourceIds.includes(id)) };
+  return { hypothesis: isAdAction ? `A capped value-exchange/rewarded test for ${selectedGame.name} can validate incremental reach if payable event quality and a separate natural KPI are tracked.` : `${product.name} can reduce manual prep and improve follow-up consistency for ${prospect.company || "this account"} if the first workflow is scoped tightly.`, product_or_offer: product.name, os: isAdAction ? "Android first; verify iOS supply before proposing it" : "not_applicable", geos: geosForProspect(prospect), traffic_type: isAdAction ? "value-exchange/rewarded - disclosed" : "not_applicable", payable_milestone: isAdAction ? "verified install or qualified in-app event - select before launch" : "qualified meeting or workflow pilot", natural_quality_kpi: isAdAction ? "D1/D7 retention, payer rate, or ROAS quality KPI - choose one" : "reply quality and meeting conversion", attribution_and_mmp: isAdAction ? "MMP required; confirm Adjust/Appsflyer/Singular/other before test." : "CRM/source attribution from Outbound OS activity log.", incrementality_method: isAdAction ? "Holdout, geo split, or capped cohort comparison." : "Compare prepared vs manual outreach cohort response quality.", fraud_controls: isAdAction ? ["MMP fraud suite", "duplicate/device quality checks", "publisher/source review"] : ["human review before send", "source confidence review"], minimum_valid_cohort: isAdAction ? "Set with UA owner before pilot; unknown until CPI/event economics are confirmed." : "10-25 reviewed leads for first workflow proof.", stop_rules: isAdAction ? ["pause if fraud/invalid traffic exceeds agreed threshold", "pause if natural KPI trails baseline after valid cohort", "pause if MMP attribution is incomplete"] : ["pause if personalization is unsupported", "pause if contact source confidence is too low"], scale_rules: isAdAction ? ["scale only after payable event and natural KPI both clear threshold"] : ["scale after reply quality and CRM logging are verified"], assumptions: ["Human must verify unsupported facts before outreach.", "No message is sent automatically."], source_ids: ["src-product-context", "src-crm-profile"].filter((id) => sourceIds.includes(id)) };
 }
 
 function procurementForIntelligence(prospect, profile, sourceIds) {
@@ -6408,7 +6528,9 @@ function localIntelligenceMessages(prospect, product, profile, selectedGame, sou
   const company = prospect.company || "your team";
   const isAdAction = profile.id.includes("adaction");
   const cta = profile.messageRules.lowFrictionCta;
-  const trigger = (publicLeadNote(prospect.notes) || `${company} appears relevant to ${product.name}`).replace(/[.!?]+$/, "");
+  const trigger = (publicLeadNote(prospect.notes)
+    || trimWords(cleanOutboundSignal(prospect.publicCompanyResearch?.description || ""), 24)
+    || `your ${prospect.title || "role"} at ${company}`).replace(/[.!?]+$/, "");
   const companyContext = buildCompanyProfile(prospect, product);
   const priority = (companyContext.likely_priorities || [])[0] || lowerSalesPhrase(product.useCases?.[0] || "the workflow");
   const unknown = (companyContext.unknowns || [])[0] || "whether this is a current priority";
@@ -6425,7 +6547,7 @@ function localIntelligenceMessages(prospect, product, profile, selectedGame, sou
 function researchGapsForIntelligence(prospect, product, profile, candidates, sources) {
   const gaps = [];
   if (!prospect.website) gaps.push(gapRow("company website/domain", "Needed to verify company context and avoid relying only on CRM/import data.", "Add website from CRM, company page, or approved enrichment.", "CRM or Apify"));
-  if (!candidates.some((candidate) => candidate.status === "verified")) gaps.push(gapRow("verified contact data", "Messenger/email/phone channels require source and permission review.", "Verify LinkedIn identity first; enrich email/phone only through approved connectors.", "Apollo, ZoomInfo, Apify, CRM"));
+  if (!candidates.some((candidate) => /^verified/.test(String(candidate.status || "")))) gaps.push(gapRow("verified contact data", "Messenger/email/phone channels require source and permission review.", "Verify LinkedIn identity first; enrich email/phone only through approved connectors.", "Apollo, ZoomInfo, Apify, CRM"));
   if (!sources.some((source) => source.source_type === "crm_activity")) gaps.push(gapRow("historical activity", "Past touches change cadence, channel choice, and close chance.", "Sync CRM activity/call notes for this contact/account.", "CRM"));
   if (profile.id.includes("adaction")) {
     gaps.push(gapRow("specific app store title", "AdAction outreach must anchor on one verified game/app.", "Verify App Store or Google Play title before pitching.", "App Store / Google Play / company site"));
@@ -6657,24 +6779,28 @@ function normalizeAiOutreachPlan(fallbackPlan, data, run, product = currentProdu
 }
 
 function sanitizeOutreachPlanForProduct(plan, fallbackPlan, product = currentProduct()) {
-  if (!isBlackAffiliateProduct(product)) return plan;
+  const isBlackAffiliate = isBlackAffiliateProduct(product);
+  const isAdAction = isAdActionProduct(product);
+  if (!isBlackAffiliate && !isAdAction) return plan;
   const warnings = [];
   const fallbackMessages = new Map((fallbackPlan.messages || []).map((message) => [String(message.channel || "").toLowerCase(), message]));
   const sanitizedMessages = (plan.messages || []).map((message) => {
     const text = `${message.subject || ""} ${message.body || ""}`;
-    if (!blackAffiliateCopyLeak(text)) return message;
+    const leaked = isBlackAffiliate ? blackAffiliateCopyLeak(text) : adActionCopyLeak(text);
+    if (!leaked) return message;
     const replacement = fallbackMessages.get(String(message.channel || "").toLowerCase());
-    warnings.push(`${message.channel || "message"} replaced because it drifted into generic sales-platform language.`);
+    warnings.push(`${message.channel || "message"} replaced because it drifted outside ${product.name} context.`);
     return replacement || message;
   });
   const fallbackVariations = fallbackPlan.linkedinVariations || [];
   const sanitizedVariations = (plan.linkedinVariations || []).map((variation, index) => {
-    if (!blackAffiliateCopyLeak(variation.body || "")) return variation;
+    const leaked = isBlackAffiliate ? blackAffiliateCopyLeak(variation.body || "") : adActionCopyLeak(variation.body || "");
+    if (!leaked) return variation;
     const replacement = fallbackVariations[index] || fallbackVariations[0];
-    warnings.push(`${variation.label || "LinkedIn variation"} replaced because it was not Black Affiliate specific.`);
+    warnings.push(`${variation.label || "LinkedIn variation"} replaced because it was not ${product.name} specific.`);
     return replacement || variation;
   });
-  const recommendedChannel = plan.recommendedChannel === "email" && fallbackPlan.analysis?.productFit !== "high"
+  const recommendedChannel = isBlackAffiliate && plan.recommendedChannel === "email" && fallbackPlan.analysis?.productFit !== "high"
     ? "linkedin"
     : plan.recommendedChannel;
 
@@ -6689,6 +6815,10 @@ function sanitizeOutreachPlanForProduct(plan, fallbackPlan, product = currentPro
 
 function blackAffiliateCopyLeak(value) {
   return /\b(revops|revenue operations|crm hygiene|crm workflow|outbound research|sales automation|sales workflow|go-to-market motion|rep-by-rep|quick revops|sdr workflow|sequence review|pipeline efficiency|prospecting workflow)\b/i.test(String(value || ""));
+}
+
+function adActionCopyLeak(value) {
+  return /\b(revops|revenue operations|crm hygiene|crm workflow|outbound research|sales automation|sales workflow|go-to-market motion|rep-by-rep|quick revops|sdr workflow|sequence review|pipeline efficiency|prospecting workflow|sales reps?|lead research)\b/i.test(String(value || ""));
 }
 
 function normalizeOutreachActions(actions, fallback) {
@@ -8048,6 +8178,19 @@ function productFitForProspect(prospect, product) {
       reason: "no verified iGaming, affiliate, casino/sportsbook, traffic, app-distribution, or media-buying evidence is available yet"
     };
   }
+  if (isAdActionProduct(product)) {
+    const roleText = String(prospect.title || "").toLowerCase();
+    const companyText = `${prospect.company || ""} ${prospect.notes || ""} ${prospect.website || ""} ${prospect.publicCompanyResearch?.title || ""} ${prospect.publicCompanyResearch?.description || ""} ${prospect.publicCompanyResearch?.snippet || ""}`.toLowerCase();
+    const directBuyer = /user acquisition|\bua\b|growth|performance|acquisition|paid media/.test(roleText);
+    const qualityBuyer = /data|analytics|measurement|mmp|product|retention|lifecycle/.test(roleText);
+    const seniorBuyer = /founder|ceo|chief|head|vp|director|business development|commercial|strategy|marketing/.test(roleText);
+    const mobileEvidence = /mobile game|mobile app|game developer|game publisher|gaming|gameplay|players?|app store|google play|android|ios/.test(companyText);
+    if (mobileEvidence && directBuyer) return { label: "high", reason: "verified mobile-app or gaming company context aligns with a direct user-acquisition buyer role" };
+    if (mobileEvidence && (qualityBuyer || seniorBuyer)) return { label: "high", reason: "verified mobile-app or gaming company context aligns with an analytics, product, or senior commercial stakeholder" };
+    if (mobileEvidence) return { label: "medium", reason: "the company fits AdAction's mobile-app advertiser ICP, but buyer ownership needs verification" };
+    if (directBuyer || qualityBuyer) return { label: "medium", reason: "the role fits an AdAction buying-committee path, but the company/app portfolio still needs verification" };
+    return { label: "developing", reason: "mobile-app portfolio and AdAction buyer ownership are not yet verified" };
+  }
   const matchedUseCases = product.useCases.filter((useCase) =>
     useCase
       .toLowerCase()
@@ -8067,6 +8210,10 @@ function productFitForProspect(prospect, product) {
 
 function isBlackAffiliateProduct(product = {}) {
   return /black[-\s]*affiliate|white[-\s]*label app|casino|sportsbook|igaming/i.test(`${product.id || ""} ${product.name || ""} ${product.category || ""} ${product.positioning || ""}`);
+}
+
+function isAdActionProduct(product = {}) {
+  return /adaction|value exchange media|qualume|adgem/i.test(`${product.id || ""} ${product.name || ""} ${product.category || ""} ${product.positioning || ""}`);
 }
 
 function stripNegativeBlackAffiliateEvidence(value) {
@@ -8750,7 +8897,7 @@ async function parseOrRepairOpenRouterJson(content, context) {
       temperature: 0,
       max_tokens: 1400,
       response_format: { type: "json_object" }
-    }, { timeoutMs: 7000 });
+    }, { timeoutMs: 15000 });
     return parseJsonObject(repairPayload.choices?.[0]?.message?.content || "");
   }
 }
