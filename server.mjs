@@ -723,6 +723,7 @@ async function handleApi(request, response, url) {
     }
     state.mcpSync.status = state.mcpSync.baseUrl ? "configured" : "needs_url";
     addEvent("mcp", "MCP portal connection settings saved.");
+    await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
   }
@@ -759,6 +760,7 @@ async function handleApi(request, response, url) {
     state.integrations.apify.configured = Boolean(state.apifyVault);
     state.integrations.apify.status = state.integrations.apify.configured ? "configured" : "missing_token";
     addEvent("integration", "Apify scraper settings saved.");
+    await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
   }
@@ -788,6 +790,7 @@ async function handleApi(request, response, url) {
     state.integrations.crm.configured = Boolean(state.crmVault && state.integrations.crm.baseUrl);
     state.integrations.crm.status = state.integrations.crm.configured ? "configured" : "needs_credentials";
     addEvent("integration", `${state.integrations.crm.name} settings saved.`);
+    await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
   }
@@ -818,6 +821,7 @@ async function handleApi(request, response, url) {
     };
     state.integrations.notifications.status = state.integrations.notifications.channel;
     addEvent("integration", "Call transcript and follow-up notification settings saved.");
+    await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
   }
@@ -864,6 +868,7 @@ async function handleApi(request, response, url) {
     }
 
     addEvent("integration", "Supabase and Postgres connection settings checked.");
+    await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
   }
