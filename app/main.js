@@ -2172,9 +2172,12 @@ document.getElementById("accountPasswordForm").addEventListener("submit", async 
 
 document.getElementById("teamUserForm").addEventListener("submit", async (event) => {
   event.preventDefault();
-  await api("/api/account/users", { method: "POST", body: JSON.stringify({ name: document.getElementById("teamUserNameInput").value, email: document.getElementById("teamUserEmailInput").value, password: document.getElementById("teamUserPasswordInput").value, role: document.getElementById("teamUserRoleInput").value }) });
+  const result = await api("/api/account/users", { method: "POST", body: JSON.stringify({ name: document.getElementById("teamUserNameInput").value, email: document.getElementById("teamUserEmailInput").value, password: document.getElementById("teamUserPasswordInput").value, role: document.getElementById("teamUserRoleInput").value }) });
   event.currentTarget.reset();
   authState = await api("/api/auth/status");
+  uiNotice = result.existingAccount
+    ? "Existing company account added. The seller should use their current password or recover it."
+    : "Seller account created.";
   render();
 });
 

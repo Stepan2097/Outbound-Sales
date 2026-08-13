@@ -418,7 +418,11 @@ async function handleApi(request, response, url) {
     const body = await readJson(request);
     const result = await createWorkspaceUser(body, { role: body.role === "admin" ? "admin" : "seller" });
     await writePersistentWorkspaceState();
-    sendJson(response, 201, { user: publicUserProfile(result.profile), state: publicState() });
+    sendJson(response, 201, {
+      user: publicUserProfile(result.profile),
+      existingAccount: Boolean(result.existingAccount),
+      state: publicState()
+    });
     return;
   }
 
@@ -1578,6 +1582,7 @@ async function createWorkspaceUser(input = {}, options = {}) {
   if (password.length < 10) throw apiError("Password must contain at least 10 characters.");
 
   let user;
+  let existingAccount = false;
   try {
     const created = await supabaseAuthRequest("admin/users", {
       method: "POST",
@@ -1585,20 +1590,30 @@ async function createWorkspaceUser(input = {}, options = {}) {
     });
     user = created.user || created;
   } catch (error) {
-    if (!options.bootstrap) throw error;
-    const signedUp = await supabaseAuthRequest("signup", {
-      method: "POST",
-      body: { email, password, data: { name, title, role } }
-    });
-    user = signedUp.user;
+    user = await findSupabaseUserByEmail(email).catch(() => null);
+    if (!user) throw error;
+    existingAccount = true;
   }
   if (!user?.id) throw apiError("Supabase did not return a user account.", 502);
+  if (options.bootstrap) {
+    try {
+      const authenticated = await loginWorkspaceUser(email, password, {
+        allowUnregistered: true,
+        defaults: { name, title, role }
+      });
+      return { ...authenticated, existingAccount };
+    } catch (error) {
+      if (existingAccount && [400, 401].includes(Number(error?.statusCode || 0))) {
+        throw apiError("This email already exists. Enter its current password, or use a dedicated Outbound OS email.", 409);
+      }
+      throw error;
+    }
+  }
   const profile = ensureWorkspaceUserProfile(user, { name, title, role });
-  const session = options.bootstrap ? (await loginWorkspaceUser(email, password)).session : null;
-  return { user, profile, session };
+  return { user, profile, session: null, existingAccount };
 }
 
-async function loginWorkspaceUser(emailValue, passwordValue) {
+async function loginWorkspaceUser(emailValue, passwordValue, options = {}) {
   const email = cleanText(emailValue || "").toLowerCase();
   const password = String(passwordValue || "");
   if (!email || !password) throw apiError("Enter your email and password.");
@@ -1607,7 +1622,11 @@ async function loginWorkspaceUser(emailValue, passwordValue) {
     body: { email, password }
   });
   const user = session.user || await verifySupabaseAccessToken(session.access_token);
-  const profile = ensureWorkspaceUserProfile(user);
+  const existingProfile = findWorkspaceUserProfile(user);
+  if (!existingProfile && !options.allowUnregistered) {
+    throw apiError("This account has not been invited to the Outbound OS workspace.", 403);
+  }
+  const profile = existingProfile || ensureWorkspaceUserProfile(user, options.defaults || {});
   if (profile.status === "disabled") throw apiError("This workspace account is disabled.", 403);
   cacheAuthSession(session.access_token, user);
   return { session, user, profile };
@@ -1654,7 +1673,13 @@ async function authenticateApiRequest(request, response, options = {}) {
     sendJson(response, 401, { error: "Your session has expired. Sign in again." });
     return null;
   }
-  const profile = ensureWorkspaceUserProfile(user);
+  const profile = findWorkspaceUserProfile(user);
+  if (!profile) {
+    if (options.optional) return null;
+    clearAuthSessionCookies(request, response);
+    sendJson(response, 403, { error: "This account has not been invited to the Outbound OS workspace." });
+    return null;
+  }
   if (profile.status === "disabled") {
     if (options.optional) return null;
     sendJson(response, 403, { error: "This workspace account is disabled." });
@@ -1691,8 +1716,12 @@ function cachedAuthUser(accessToken) {
   return cached.user;
 }
 
+function findWorkspaceUserProfile(user) {
+  return state.users.find((item) => item.id === user.id || item.email === String(user.email || "").toLowerCase()) || null;
+}
+
 function ensureWorkspaceUserProfile(user, defaults = {}) {
-  let profile = state.users.find((item) => item.id === user.id || item.email === String(user.email || "").toLowerCase());
+  let profile = findWorkspaceUserProfile(user);
   if (!profile) {
     const metadata = user.user_metadata || {};
     profile = {
@@ -1714,6 +1743,13 @@ function ensureWorkspaceUserProfile(user, defaults = {}) {
     profile.id = user.id;
   }
   return profile;
+}
+
+async function findSupabaseUserByEmail(emailValue) {
+  const email = cleanText(emailValue || "").toLowerCase();
+  if (!email) return null;
+  const result = await supabaseAuthRequest("admin/users?page=1&per_page=1000");
+  return (result.users || []).find((user) => String(user.email || "").toLowerCase() === email) || null;
 }
 
 function normalizeLinkedinIdentity(input = {}) {
