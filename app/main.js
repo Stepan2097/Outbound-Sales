@@ -1021,7 +1021,7 @@ function companyPeopleDirectoryCard(prospect) {
 function committeeForProspect(prospect) {
   if (!prospect) return [];
   const sameCompany = (state.prospects || []).filter((item) => item.company?.toLowerCase() === prospect.company?.toLowerCase());
-  const known = sameCompany.length ? sameCompany : [prospect];
+  const known = sameCompany.filter((item) => isNamedPersonLead(item));
   const rows = known.map((item) => ({
     name: item.name,
     title: item.title || "Unknown title",
@@ -1038,7 +1038,12 @@ function committeeForProspect(prospect) {
     linkedin: person.linkedin || "",
     confidence: person.confidence || 64
   })));
-  rows.push({ name: "RevOps or Sales leader", title: "Suggested next person to research", role: "suggested", context: "not found yet", confidence: 45 });
+  const suggestedBuyer = /adaction/i.test(state.selectedProduct?.name || "")
+    ? "UA, Growth, Monetization or Product owner"
+    : /black affiliate/i.test(state.selectedProduct?.name || "")
+      ? "Affiliates, Partnerships or Acquisition owner"
+      : "Product-relevant buyer";
+  rows.push({ name: suggestedBuyer, title: "Suggested next person to research", role: "suggested", context: "not found yet", confidence: 45 });
   return mergeCommitteeRows(rows).slice(0, 8);
 }
 
@@ -1325,8 +1330,18 @@ function intelligenceRows(prospect) {
 }
 
 function bestContactConfidence(prospect) {
+  if (!isNamedPersonLead(prospect)) return 0;
   const candidates = prospect?.contactDiscovery?.candidates || [];
   return candidates.length ? Math.max(...candidates.map((candidate) => Number(candidate.confidence) || 0)) : 0;
+}
+
+function isNamedPersonLead(prospect = {}) {
+  const name = String(prospect?.name || "").trim();
+  const company = String(prospect?.company || "").trim();
+  const linkedin = String(prospect?.linkedin || "");
+  if (!name || (company && name.toLowerCase() === company.toLowerCase())) return false;
+  if (/linkedin\.com\/company\//i.test(linkedin)) return false;
+  return /linkedin\.com\/in\//i.test(linkedin) || name.split(/\s+/).filter(Boolean).length >= 2;
 }
 
 function preferredChannel(prospect) {

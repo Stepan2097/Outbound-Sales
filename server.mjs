@@ -3752,13 +3752,15 @@ function interactionsForProspect(prospectId) {
 
 function analyzeLead(prospect, product = currentProduct()) {
   const interactions = interactionsForProspect(prospect.id);
-  const persona = bestPersonaMatch(prospect, product);
+  const namedPerson = isNamedPersonProspect(prospect);
+  const persona = namedPerson ? bestPersonaMatch(prospect, product) : "Named buyer required";
   const productFit = productFitForProspect(prospect, product);
   const companyProfile = buildCompanyProfile(prospect, product);
-  const contactConfidence = bestContactConfidenceServer(prospect);
+  const contactConfidence = namedPerson ? bestContactConfidenceServer(prospect) : 0;
   const isBlackAffiliate = isBlackAffiliateProduct(product);
   const blackAffiliateEvidence = isBlackAffiliate ? blackAffiliateFitEvidence(prospect) : null;
-  const seniorityScore = /chief|ceo|founder|owner|president/i.test(prospect.title) ? 18
+  const seniorityScore = !namedPerson ? 0
+    : /chief|ceo|founder|owner|president/i.test(prospect.title) ? 18
     : /vp|head|director/i.test(prospect.title) ? 15
       : /manager|lead|growth|sales|revenue|marketing|operations|ua|acquisition/i.test(prospect.title) ? 10
         : prospect.title ? 6 : 1;
@@ -3798,12 +3800,19 @@ function analyzeLead(prospect, product = currentProduct()) {
   };
   const readinessBase = clampNumber(Math.round(Object.values(scoreComponents).reduce((sum, value) => sum + value, 0) - missingPenalty - sensitivePenalty - mismatchPenalty), 0, 100, 45);
   const readinessRaw = calibratedReadiness(readinessBase, scoreComponents);
-  const reachProbability = clampProbability(0.12 + contactScore / 100 + engagementScore / 100 + triggerScore / 180 + (prospect.linkedin ? 0.08 : 0) - missingPenalty / 260);
-  const closeProbability = clampProbability(0.04 + readinessRaw / 500 + (productFit.label === "high" ? 0.07 : productFit.label === "medium" ? 0.03 : 0) + engagementScore / 220 - sensitivePenalty / 260 - mismatchPenalty / 300);
+  let reachProbability = clampProbability(0.12 + contactScore / 100 + engagementScore / 100 + triggerScore / 180 + (namedPerson && prospect.linkedin ? 0.08 : 0) - missingPenalty / 260);
+  let closeProbability = clampProbability(0.04 + readinessRaw / 500 + (productFit.label === "high" ? 0.07 : productFit.label === "medium" ? 0.03 : 0) + engagementScore / 220 - sensitivePenalty / 260 - mismatchPenalty / 300);
   let score = clampNumber(Math.round(readinessRaw * 0.55 + reachProbability * 28 + closeProbability * 17), 0, 94, 45);
+  if (!namedPerson) {
+    score = Math.min(score, 35);
+    reachProbability = Math.min(reachProbability, 0.12);
+    closeProbability = Math.min(closeProbability, 0.08);
+  }
   if (isBlackAffiliate && productFit.label === "medium" && !blackAffiliateEvidence?.hasCompanyEvidence) score = Math.min(score, 64);
   if (isBlackAffiliate && productFit.label === "developing") score = Math.min(score, 48);
-  const recommendedAction = recommendedActionFor(prospect, interactions, reachProbability, closeProbability, productFit, product);
+  const recommendedAction = namedPerson
+    ? recommendedActionFor(prospect, interactions, reachProbability, closeProbability, productFit, product)
+    : "Find and verify a named product-relevant buyer before outreach.";
 
   return {
     score,
@@ -3824,8 +3833,11 @@ function analyzeLead(prospect, product = currentProduct()) {
       readiness: readinessRaw
     },
     reasoning: [
-      `Company context confidence is ${companyProfile.confidence || 0}%; low confidence reduces the score.`,
+      companyProfile.confidence >= 75
+        ? `Company context confidence is ${companyProfile.confidence}%; account evidence is strong enough for buyer research.`
+        : `Company context confidence is ${companyProfile.confidence || 0}%; incomplete company evidence reduces the score.`,
       `${product.name} fit is ${productFit.label} because ${productFit.reason}.`,
+      namedPerson ? "" : "No named person-level lead is selected; outreach and contact reach are capped until a buyer is verified.",
       isBlackAffiliate ? `Black Affiliate company evidence: ${blackAffiliateEvidence?.companySummary || "not checked"}. Role evidence: ${blackAffiliateEvidence?.roleSummary || "not checked"}.` : "",
       contactConfidence ? `Best contact evidence is ${contactConfidence}% confidence.` : "No verified direct contact evidence yet.",
       interactions.length ? `${interactions.length} logged interaction${interactions.length === 1 ? "" : "s"} affects reach.` : "No meaningful prior touches logged yet.",
@@ -4232,7 +4244,9 @@ async function runResearchJob(job) {
       product
     });
     prospect.status = statusAfterOutreachPlan(prospect.outreach);
-    await updateResearchJobStage(job, "writing", "complete", `${prospect.outreach.messageAngles?.length || 0} scored message angles prepared.`);
+    await updateResearchJobStage(job, "writing", "complete", isNamedPersonProspect(prospect)
+      ? `${prospect.outreach.messageAngles?.length || 0} scored message angles prepared.`
+      : "Outreach held until a named buyer is selected.");
 
     await updateResearchJobStage(job, "crm", "running", "Confirming research and personalization activity in CRM.");
     const crmStatus = prospect.outreach?.crmActivity?.syncStatus || "not_synced";
@@ -4328,8 +4342,9 @@ async function researchAppPortfolio(prospect, options = {}) {
     if (!evidence.some((item) => item.url === result.url)) {
       evidence.push({ source_id: sourceId, title: result.title || "App portfolio evidence", url: result.url, publisher: hostnameForUrl(result.url), retrieved_at: retrievedAt, evidence_excerpt: result.snippet, source_type: /play\.google/i.test(result.url) ? "google_play" : "public_web" });
     }
-    if (/play\.google\.com\/store\/apps/i.test(result.url) && !apps.some((app) => (app.evidenceSourceIds || []).includes(sourceId))) {
-      apps.push({ title: cleanText(result.title.replace(/\s*[-–|].*$/, "")) || "Google Play title", os: "Android", geo: "Store availability requires verification", monetization: inferMonetizationFromText(result.snippet), category: "", recentRelease: "", releaseNotes: result.snippet, publisher: company, evidenceSourceIds: [sourceId] });
+    const googlePlayTitle = googlePlayAppTitleFromResult(result);
+    if (googlePlayTitle && !apps.some((app) => (app.evidenceSourceIds || []).includes(sourceId))) {
+      apps.push({ title: googlePlayTitle, os: "Android", geo: "Store availability requires verification", monetization: inferMonetizationFromText(result.snippet), category: "", recentRelease: "", releaseNotes: result.snippet, publisher: company, evidenceSourceIds: [sourceId] });
     }
   }
   prospect.appPortfolio = {
@@ -4340,6 +4355,17 @@ async function researchAppPortfolio(prospect, options = {}) {
     summary: apps.length ? `${dedupeAppPortfolio(apps).length} store title${dedupeAppPortfolio(apps).length === 1 ? "" : "s"} found with public evidence.` : "No confidently matched public app-store title was found; manual title confirmation is required."
   };
   return prospect.appPortfolio;
+}
+
+function googlePlayAppTitleFromResult(result = {}) {
+  const url = cleanText(result.url || "");
+  if (!/play\.google\.com\/store\/apps\/details(?:\?|$)/i.test(url)) return "";
+  const title = cleanText(result.title || "")
+    .replace(/\s*[-–|]\s*(?:apps?|games?)\s+on\s+google\s+play.*$/i, "")
+    .replace(/\s*[-–|]\s*google\s+play.*$/i, "")
+    .trim();
+  if (!title || /^(?:google play|google play title|android apps?|apps?|games?)$/i.test(title)) return "";
+  return title;
 }
 
 function appPublisherMatchesCompany(item, company) {
@@ -5984,6 +6010,9 @@ async function prepareOutreachWithAi(prospect, profile, taskType = "SEQUENCE_GEN
   const product = productOverride || currentProduct();
   const canUseLiveAi = Boolean(state.vault && state.providerHealth.status === "healthy");
   const fallbackRoute = canUseLiveAi ? localFallbackRun(taskType, profile) : simulateRun(taskType, profile, "");
+  if (!isNamedPersonProspect(prospect)) {
+    return buildCompanyOnlyResearchPlan(prospect, profile, fallbackRoute, product, analyzeLead(prospect, product));
+  }
   const fallbackPlan = {
     ...buildOutreachPlan(prospect, profile, fallbackRoute, product),
     run: fallbackRoute
@@ -6119,7 +6148,7 @@ async function prepareAndLogOutreach(prospect, profile, taskType = "SEQUENCE_GEN
   }));
   const nextActionPlan = buildNextActionPlan(prospect, outreach, product);
   const salesCadence = buildSalesCadence(prospect, outreach, product);
-  const acceptanceTask = ensureAcceptanceFollowUpTask(prospect, product, nextActionPlan.followUp);
+  const acceptanceTask = isNamedPersonProspect(prospect) ? ensureAcceptanceFollowUpTask(prospect, product, nextActionPlan.followUp) : null;
   const enrichedOutreach = {
     ...outreach,
     messages: evidenceMessages,
@@ -6127,7 +6156,7 @@ async function prepareAndLogOutreach(prospect, profile, taskType = "SEQUENCE_GEN
     recommendedAngleId: messageAngles[0]?.id || "",
     nextActionPlan,
     salesCadence,
-    followUpTaskId: acceptanceTask.id
+    followUpTaskId: acceptanceTask?.id || ""
   };
   prospect.nextActionPlan = nextActionPlan;
   prospect.salesCadence = salesCadence;
@@ -6170,6 +6199,7 @@ async function prepareAndLogOutreach(prospect, profile, taskType = "SEQUENCE_GEN
 }
 
 function buildAndScoreMessageAngles(prospect, product, outreach = {}) {
+  if (!isNamedPersonProspect(prospect)) return [];
   const firstName = firstNameFor(prospect.name) || prospect.name || "there";
   const company = prospect.company || "your team";
   const app = prospect.appPortfolio?.apps?.[0] || null;
@@ -6774,6 +6804,41 @@ function buildAdActionOutreachPlan(prospect, profile, route, product, analysis) 
   };
 }
 
+function buildCompanyOnlyResearchPlan(prospect, profile, route, product, analysis) {
+  const company = prospect.company || prospect.name || "this account";
+  const buyerRoles = isAdActionProduct(product)
+    ? "UA, Growth, Performance Marketing, Monetization, Product, or Analytics owner"
+    : isBlackAffiliateProduct(product)
+      ? "Affiliates, Partnerships, Media Buying, or Acquisition owner"
+      : "relevant budget owner or workflow champion";
+  return {
+    preparedAt: new Date().toISOString(),
+    profile,
+    productId: product.id,
+    productName: product.name,
+    modelUsed: "company-research-guard",
+    provider: "local",
+    recommendedChannel: "manual_research",
+    analysis,
+    qualification: {
+      score: analysis.score,
+      fit: analysis.productFit,
+      rationale: `${company} is an account record, not a verified person. Select a named ${buyerRoles} before writing outreach.`
+    },
+    messages: [],
+    messageAngles: [],
+    linkedinVariations: [],
+    warmupActions: [],
+    actions: [
+      { type: "find_correct_buyer", label: `Find a named ${buyerRoles}`, due: "today", priority: "high" },
+      { type: "verify_linkedin_identity", label: "Open the employee profile and verify current company and role", due: "today", priority: "high" },
+      { type: "research_gap_logged", label: "Keep the account research and app evidence stored for the selected buyer", due: "today", priority: "medium" }
+    ],
+    qualityWarnings: ["Outreach is blocked because this record does not identify a person."],
+    complianceChecks: ["Do not address a company name as a person.", "Do not prepare seller-ready copy until a named buyer and role are verified."]
+  };
+}
+
 function buildOutreachPlan(prospect, profile, route, product = currentProduct()) {
   const channel = chooseBestChannel(prospect);
   const analysis = analyzeLead(prospect, product);
@@ -7162,6 +7227,31 @@ function buildNextActionPlan(prospect, outreach, product = currentProduct()) {
   const types = new Set(interactions.map((interaction) => interaction.type));
   const availability = contactAvailability(prospect);
   const analysis = analyzeLead(prospect, product);
+  if (!isNamedPersonProspect(prospect)) {
+    return {
+      createdAt: new Date().toISOString(),
+      productId: product.id,
+      productName: product.name,
+      primaryAction: "Select a named buyer before preparing outreach",
+      reason: `${prospect.company || prospect.name} is an account record. Its research is stored, but no person-level identity is verified yet.`,
+      bestChannel: "manual_research",
+      preTouchActions: [
+        "Open the company employee list.",
+        isAdActionProduct(product) ? "Choose a UA, Growth, Monetization, Product, or Analytics owner." : "Choose the product-relevant buyer.",
+        "Verify the employee's current role and LinkedIn profile.",
+        "Run person-level research before copying any message."
+      ],
+      followUp: {
+        label: "Review buyer candidates",
+        due: dueTomorrowIso(),
+        trigger: "When a named buyer is verified",
+        ifAccepted: "Not applicable before a person is selected.",
+        ifNotAccepted: "Not applicable before a person is selected."
+      },
+      channelOrder: ["company_people_research", "linkedin_profile_review"],
+      score: { reachProbability: analysis.reachProbability, closeProbability: analysis.closeProbability, contactConfidence: 0 }
+    };
+  }
   if (shouldHoldForProductFitReview(prospect, product, analysis)) {
     return {
       createdAt: new Date().toISOString(),
@@ -7242,6 +7332,18 @@ function buildSalesCadence(prospect, outreach, product = currentProduct()) {
   const due4 = dueInDaysIso(4);
   const availability = contactAvailability(prospect);
   const analysis = analyzeLead(prospect, product);
+  if (!isNamedPersonProspect(prospect)) {
+    return {
+      productId: product.id,
+      productName: product.name,
+      generatedAt: new Date().toISOString(),
+      steps: [
+        { day: "today", channel: "research", type: "find_correct_buyer", label: "Find and verify a named product-relevant buyer", messageRef: "" },
+        { day: "after verification", channel: "linkedin", type: "linkedin_profile_review", label: "Run person-level research before outreach", messageRef: "" }
+      ],
+      summary: `${prospect.company || prospect.name} remains in account research until a named buyer is verified.`
+    };
+  }
   if (shouldHoldForProductFitReview(prospect, product, analysis)) {
     return {
       productId: product.id,
@@ -9802,6 +9904,15 @@ function firstNameFor(name) {
   return cleanText(name).split(/\s+/).filter(Boolean)[0] || "";
 }
 
+function isNamedPersonProspect(prospect = {}) {
+  const name = cleanText(prospect.name || "");
+  const company = cleanText(prospect.company || "");
+  const linkedin = cleanText(prospect.linkedin || "");
+  if (!name || (company && name.toLowerCase() === company.toLowerCase())) return false;
+  if (/linkedin\.com\/company\//i.test(linkedin)) return false;
+  return /linkedin\.com\/in\//i.test(linkedin) || name.split(/\s+/).filter(Boolean).length >= 2;
+}
+
 function lastNameFor(name) {
   const parts = cleanText(name).split(/\s+/).filter(Boolean);
   return parts.length > 1 ? parts.at(-1) : "";
@@ -10250,7 +10361,11 @@ async function callOpenRouterJson({ model, taskType, profile, messages, maxToken
 
 function openRouterTimeoutFor(profile = "balanced", taskType = "") {
   const envValue = Number(process.env.OPENROUTER_CHAT_TIMEOUT_MS || 0);
-  if (Number.isFinite(envValue) && envValue >= 3000) return envValue;
+  if (Number.isFinite(envValue) && envValue >= 3000) {
+    return /SEQUENCE_GENERATION|ACCOUNT_QUALIFICATION|MCP_CONTEXT_SYNTHESIS/i.test(taskType)
+      ? Math.max(envValue, 24000)
+      : envValue;
+  }
   if (profile === "economy") return 12000;
   if (profile === "premium") return 36000;
   if (/SEQUENCE_GENERATION|ACCOUNT_QUALIFICATION/i.test(taskType)) return 24000;
