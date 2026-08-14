@@ -6205,6 +6205,9 @@ function buildAndScoreMessageAngles(prospect, product, outreach = {}) {
   const app = prospect.appPortfolio?.apps?.[0] || null;
   const appName = app?.title || "";
   const appEvidence = app?.evidenceSourceIds || [];
+  const controlledTestTarget = appName
+    ? app?.os === "Android" ? appName : `${appName}, after confirming an active Android build`
+    : "the right confirmed Android title";
   const companyEvidence = prospect.publicCompanyResearch?.url ? ["src-company-website"] : ["src-crm-profile"];
   const sourceIds = new Set(intelligenceSourcesForProspect(prospect, product).map((source) => source.source_id));
   const isAdAction = isAdActionProduct(product);
@@ -6229,9 +6232,7 @@ function buildAndScoreMessageAngles(prospect, product, outreach = {}) {
       id: "controlled-test",
       label: "Controlled test hypothesis",
       strategy: "Offer a narrow, auditable test frame with no scale or performance promise.",
-      body: appName
-        ? `Hi ${firstName}, would a small Android test for ${appName} be worth pressure-testing: 1-3 agreed GEOs, one payable milestone, one natural quality KPI, MMP attribution, and written stop rules? AdAction would disclose the value-exchange traffic upfront.`
-        : `Hi ${firstName}, once the right ${company} title is confirmed, would a small Android test be worth pressure-testing: 1-3 agreed GEOs, one payable milestone, one natural quality KPI, MMP attribution, and written stop rules? AdAction would disclose the value-exchange traffic upfront.`,
+      body: `Hi ${firstName}, would a small value-exchange test for ${controlledTestTarget} be worth pressure-testing: 1-3 agreed GEOs, one payable milestone, one natural quality KPI, MMP attribution, and written stop rules? AdAction would disclose the traffic type upfront.`,
       source_ids: [...(appEvidence.length ? appEvidence : companyEvidence), "src-product-context"]
     }
   ] : [

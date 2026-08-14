@@ -2088,6 +2088,7 @@ function moveSelectedProspect(direction) {
   const currentIndex = Math.max(0, prospects.findIndex((prospect) => prospect.id === selectedProspectId));
   const nextIndex = (currentIndex + direction + prospects.length) % prospects.length;
   selectedProspectId = prospects[nextIndex].id;
+  if (activeResearchJob?.prospectId !== selectedProspectId) activeResearchJob = null;
   activeLeadSectionId = "dashboard-account";
   render();
   scrollLeadWorkspaceToTop();
@@ -2312,6 +2313,7 @@ document.addEventListener("click", async (event) => {
   const openProspect = event.target.closest("[data-open-prospect-id]");
   if (openProspect) {
     selectedProspectId = openProspect.dataset.openProspectId;
+    if (activeResearchJob?.prospectId !== selectedProspectId) activeResearchJob = null;
     activeLeadSectionId = "dashboard-account";
     setView("prospects");
     render();
@@ -2367,6 +2369,7 @@ document.addEventListener("click", async (event) => {
   const prospectCardButton = event.target.closest("[data-prospect-id]");
   if (prospectCardButton) {
     selectedProspectId = prospectCardButton.dataset.prospectId;
+    if (activeResearchJob?.prospectId !== selectedProspectId) activeResearchJob = null;
     activeLeadSectionId = "dashboard-account";
     renderProspects();
     renderLeadWorkspaceExtras(state.prospects?.find((prospect) => prospect.id === selectedProspectId));
