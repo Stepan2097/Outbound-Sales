@@ -1284,6 +1284,28 @@ tbody tr:last-child td {
   accent-color: var(--teal);
 }
 
+.compact-checks {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.compact-checks label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.compact-checks input {
+  width: 17px;
+  min-height: 17px;
+  flex: 0 0 auto;
+  accent-color: var(--teal);
+}
+
 .bar-list {
   display: grid;
   gap: 10px;

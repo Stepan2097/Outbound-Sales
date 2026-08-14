@@ -21,10 +21,11 @@ Local outbound workspace for researching prospects, generating product-specific 
 - Track historical lead interactions and use them to estimate chance of reaching the lead and chance of closing.
 - Use the AI Operator tab for bulk sales actions such as sorting leads, changing statuses, logging interactions, preparing outreach, refreshing contact discovery, and pulling LinkedIn-heavy leads from CRM/Supabase.
 - Configure one primary Apify lead database actor plus optional specialist actors for LinkedIn profile enrichment, email/phone discovery, Facebook/person matching, Apollo/ZoomInfo, and WhatsApp/Telegram phone presence checks.
+- Use FullEnrich as the primary verified work-email and mobile-phone waterfall. Results arrive through an authenticated webhook and remain locked until seller approval.
 
 Contact discovery is intentionally review-first. It creates public/business search candidates and confidence labels; it does not scrape private profiles or silently approve personal contact data.
 
-See [INTEGRATION_HANDOFF.md](./INTEGRATION_HANDOFF.md) for the developer checklist.
+See [INTEGRATION_HANDOFF.md](./INTEGRATION_HANDOFF.md) for the developer checklist and [CRM_API_CONTRACT.md](./CRM_API_CONTRACT.md) for the exact two-way CRM contract.
 
 ## Run
 
@@ -45,3 +46,11 @@ POST /api/webhooks/call-transcript
 ```
 
 Supported matching fields: `prospectId`, `linkedinUrl`, `email`, or `name` + `company`. Include `transcript` or `text` in the payload.
+
+## FullEnrich Webhook
+
+Verified contact results are accepted at:
+
+```http
+POST /api/webhooks/fullenrich?token={FULLENRICH_WEBHOOK_SECRET}
+```

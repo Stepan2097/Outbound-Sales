@@ -924,12 +924,36 @@
                 <div><span>AI runtime</span><strong id="aiRuntimeStatus">mock</strong></div>
                 <div><span>OpenRouter models</span><strong id="openRouterModelCount">0</strong></div>
                 <div><span>Apify</span><strong id="apifyStatus">not configured</strong></div>
+                <div><span>Verified contacts</span><strong id="contactEnrichmentStatus">not configured</strong></div>
                 <div><span>CRM</span><strong id="crmStatus">not configured</strong></div>
                 <div><span>Calls</span><strong id="transcriptStatus">manual paste</strong></div>
                 <div><span>Tasks</span><strong id="notificationStatus">in-app</strong></div>
                 <div><span>Supabase</span><strong id="supabaseStatus">not configured</strong></div>
                 <div><span>Postgres</span><strong id="postgresStatus">not configured</strong></div>
               </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-heading">
+                <div>
+                  <h2>Verified Email + Phone</h2>
+                  <p>FullEnrich waterfall with seller approval before use</p>
+                </div>
+              </div>
+              <form class="integration-form" id="contactEnrichmentForm">
+                <input id="fullEnrichTokenInput" type="password" autocomplete="off" placeholder="FullEnrich API key" aria-label="FullEnrich API key" />
+                <input id="fullEnrichWebhookBaseUrlInput" type="url" placeholder="https://outbound-sales.example.com" aria-label="Public Outbound OS URL" />
+                <div class="check-grid compact-checks">
+                  <label><input id="fullEnrichWorkEmailInput" type="checkbox" checked /> Work email</label>
+                  <label><input id="fullEnrichPhoneInput" type="checkbox" checked /> Mobile phone</label>
+                  <label><input id="fullEnrichPersonalEmailInput" type="checkbox" /> Personal email</label>
+                </div>
+                <details class="optional-fields">
+                  <summary>Advanced webhook security</summary>
+                  <input id="fullEnrichWebhookSecretInput" type="password" autocomplete="off" placeholder="Optional webhook secret; generated when omitted" aria-label="FullEnrich webhook secret" />
+                </details>
+                <button class="primary-button" type="submit"><i data-lucide="badge-check"></i><span>Connect FullEnrich</span></button>
+              </form>
             </section>
 
             <section class="panel">

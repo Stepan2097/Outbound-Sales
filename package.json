@@ -9,6 +9,7 @@
   },
   "scripts": {
     "start": "node server.mjs",
-    "check": "node --check server.mjs && node --check app/main.js"
+    "check": "node --check server.mjs && node --check app/main.js",
+    "test": "node --test tests/*.test.mjs"
   }
 }

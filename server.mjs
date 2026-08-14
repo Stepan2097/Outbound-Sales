@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createReadStream, existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
@@ -22,9 +22,11 @@ const defaultTelegramCheckerActorId = "akula.marketing/telegram-get-phone-info";
 const defaultSecondaryCompanyPeopleActorId = "harvestapi/linkedin-company-employees";
 const defaultPersonEnrichmentActorId = "ryanclinton/person-enrichment-lookup";
 const legacyPipelineLabsActorId = "kVYdvNOefemtiDXO5";
+const defaultFullEnrichBaseUrl = "https://app.fullenrich.com/api/v2";
 const authAccessCookie = "outbound_os_access";
 const authRefreshCookie = "outbound_os_refresh";
 const authSessionCache = new Map();
+const fullEnrichWaiters = new Map();
 
 const taskTypes = [
   "ICP_ANALYSIS",
@@ -171,6 +173,20 @@ const state = {
       lastRunAt: null,
       keyMetadata: null
     },
+    contactEnrichment: {
+      configured: false,
+      provider: "fullenrich",
+      baseUrl: defaultFullEnrichBaseUrl,
+      webhookBaseUrl: "",
+      includeWorkEmail: true,
+      includePersonalEmail: false,
+      includePhone: true,
+      timeoutSeconds: 105,
+      status: "not_configured",
+      lastRunAt: null,
+      lastWebhookAt: null,
+      keyMetadata: null
+    },
     crm: {
       configured: false,
       name: "Custom CRM",
@@ -234,6 +250,8 @@ const state = {
   ],
   vault: null,
   apifyVault: null,
+  contactEnrichmentVault: null,
+  contactEnrichmentWebhookVault: null,
   mcpVault: null,
   crmVault: null,
   transcriptVault: null,
@@ -329,6 +347,20 @@ async function handleApi(request, response, url) {
     const body = await readJson(request);
     await updateSupabasePassword(cleanText(body.accessToken || ""), body.password);
     sendJson(response, 200, { ok: true });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/webhooks/fullenrich") {
+    const suppliedToken = cleanText(url.searchParams.get("token") || request.headers["x-webhook-token"] || "");
+    const expectedToken = state.contactEnrichmentWebhookVault ? decryptSecret(state.contactEnrichmentWebhookVault) : "";
+    if (!expectedToken || !secretsMatch(suppliedToken, expectedToken)) {
+      sendJson(response, 401, { error: "FullEnrich webhook authentication failed." });
+      return;
+    }
+    const body = await readJson(request);
+    const result = await ingestFullEnrichWebhook(body);
+    await writePersistentWorkspaceState();
+    sendJson(response, 200, result);
     return;
   }
 
@@ -911,6 +943,48 @@ async function handleApi(request, response, url) {
     state.integrations.apify.configured = Boolean(state.apifyVault);
     state.integrations.apify.status = state.integrations.apify.configured ? "configured" : "missing_token";
     addEvent("integration", "Apify scraper settings saved.");
+    await writePersistentWorkspaceState();
+    sendJson(response, 200, publicState());
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/integrations/contact-enrichment/configure") {
+    const body = await readJson(request);
+    state.integrations.contactEnrichment = {
+      ...state.integrations.contactEnrichment,
+      provider: "fullenrich",
+      baseUrl: normalizeFullEnrichBaseUrl(body.baseUrl || state.integrations.contactEnrichment.baseUrl),
+      webhookBaseUrl: normalizeUrl(body.webhookBaseUrl || state.integrations.contactEnrichment.webhookBaseUrl),
+      includeWorkEmail: body.includeWorkEmail !== false,
+      includePersonalEmail: body.includePersonalEmail === true,
+      includePhone: body.includePhone !== false,
+      timeoutSeconds: clampNumber(body.timeoutSeconds, 45, 180, state.integrations.contactEnrichment.timeoutSeconds)
+    };
+    if (typeof body.apiToken === "string" && body.apiToken.trim()) {
+      state.contactEnrichmentVault = encryptSecret(body.apiToken.trim());
+      state.integrations.contactEnrichment.keyMetadata = {
+        provider: "fullenrich",
+        configured: true,
+        rotatedAt: new Date().toISOString(),
+        keyVersion: (state.integrations.contactEnrichment.keyMetadata?.keyVersion ?? 0) + 1
+      };
+    }
+    if (typeof body.webhookSecret === "string" && body.webhookSecret.trim()) {
+      state.contactEnrichmentWebhookVault = encryptSecret(body.webhookSecret.trim());
+    } else if (state.contactEnrichmentVault && !state.contactEnrichmentWebhookVault) {
+      state.contactEnrichmentWebhookVault = encryptSecret(randomBytes(24).toString("hex"));
+    }
+    state.integrations.contactEnrichment.configured = Boolean(
+      state.contactEnrichmentVault
+      && state.contactEnrichmentWebhookVault
+      && state.integrations.contactEnrichment.webhookBaseUrl
+    );
+    state.integrations.contactEnrichment.status = state.integrations.contactEnrichment.configured
+      ? "configured"
+      : state.contactEnrichmentVault
+        ? "needs_webhook_url"
+        : "needs_api_key";
+    addEvent("integration", "FullEnrich verified email and phone settings saved.");
     await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
@@ -1543,6 +1617,12 @@ function apiError(message, statusCode = 400) {
   return error;
 }
 
+function secretsMatch(left, right) {
+  const leftDigest = createHash("sha256").update(String(left || "")).digest();
+  const rightDigest = createHash("sha256").update(String(right || "")).digest();
+  return timingSafeEqual(leftDigest, rightDigest);
+}
+
 function supabaseAuthConfig() {
   if (!state.integrations.supabase.url || !state.supabaseVault) {
     throw apiError("Supabase Auth is not configured on the server yet.", 503);
@@ -1965,10 +2045,19 @@ function applyPersistentWorkspaceState(saved = {}) {
   if (saved.integrationSettings?.mcp && typeof saved.integrationSettings.mcp === "object") {
     state.mcpSync = { ...state.mcpSync, ...saved.integrationSettings.mcp };
   }
-  for (const key of ["crm", "transcripts", "notifications", "supabase", "postgres"]) {
+  for (const key of ["contactEnrichment", "crm", "transcripts", "notifications", "supabase", "postgres"]) {
     if (saved.integrationSettings?.[key] && typeof saved.integrationSettings[key] === "object") {
       state.integrations[key] = { ...state.integrations[key], ...saved.integrationSettings[key] };
     }
+  }
+  if (state.contactEnrichmentVault) {
+    state.integrations.contactEnrichment.configured = Boolean(
+      state.contactEnrichmentWebhookVault
+      && state.integrations.contactEnrichment.webhookBaseUrl
+    );
+    state.integrations.contactEnrichment.status = state.integrations.contactEnrichment.configured
+      ? "configured"
+      : "needs_webhook_secret_or_url";
   }
 }
 
@@ -2037,6 +2126,7 @@ async function writePersistentWorkspaceState() {
           maxChargeUsd: state.integrations.apify.maxChargeUsd,
           contactMaxChargeUsd: state.integrations.apify.contactMaxChargeUsd
         },
+        contactEnrichment: nonSecretIntegrationSettings(state.integrations.contactEnrichment),
         mcp: {
           baseUrl: state.mcpSync.baseUrl,
           resourceNamespace: state.mcpSync.resourceNamespace,
@@ -2084,6 +2174,7 @@ function publicState() {
     },
     integrations: {
       apify: redactIntegration(state.integrations.apify),
+      contactEnrichment: redactIntegration(state.integrations.contactEnrichment),
       crm: redactIntegration(state.integrations.crm),
       transcripts: redactIntegration(state.integrations.transcripts),
       notifications: redactIntegration(state.integrations.notifications),
@@ -3026,6 +3117,9 @@ function normalizeProspect(input) {
     updatedAt: input.updatedAt || now,
     accountKey: cleanText(input.accountKey || ""),
     contactDiscovery: normalizeSavedContactDiscovery(input.contactDiscovery),
+    verifiedContactEnrichment: input.verifiedContactEnrichment && typeof input.verifiedContactEnrichment === "object"
+      ? input.verifiedContactEnrichment
+      : null,
     outreach: input.outreach || null,
     researchHistory: Array.isArray(input.researchHistory) ? input.researchHistory.slice(0, 12) : [],
     nextActionPlan: input.nextActionPlan || null,
@@ -4403,6 +4497,330 @@ function dedupeAppPortfolio(apps = []) {
   return [...byKey.values()];
 }
 
+async function applyVerifiedContactEnrichment(prospect, discovery, phase) {
+  if (phase === "people") return discovery;
+  const result = await enrichProspectWithFullEnrich(prospect);
+  discovery.verifiedProvider = {
+    provider: "fullenrich",
+    status: result.status,
+    requestId: result.requestId || "",
+    enrichmentId: result.enrichmentId || "",
+    checkedAt: new Date().toISOString()
+  };
+  if (result.candidates?.length) {
+    discovery.candidates = mergeContactCandidates([...result.candidates, ...discovery.candidates]);
+  }
+  if (result.warning) discovery.warnings = mergeStringLists(discovery.warnings || [], [result.warning]);
+  return discovery;
+}
+
+function applyVerifiedProviderStatus(discovery) {
+  const providerStatus = discovery.verifiedProvider?.status || "";
+  if (["complete", "cached"].includes(providerStatus)) {
+    discovery.scraperStatus = "verified_contact_enriched";
+    discovery.scraperNote = `${discovery.scraperNote || ""} FullEnrich returned verified contact evidence; seller approval is still required.`.trim();
+  } else if (providerStatus === "pending") {
+    discovery.scraperStatus = "verified_contact_pending";
+    discovery.scraperNote = `${discovery.scraperNote || ""} FullEnrich is still processing in the background.`.trim();
+  }
+  return discovery;
+}
+
+async function enrichProspectWithFullEnrich(prospect) {
+  const integration = state.integrations.contactEnrichment;
+  if (!integration?.configured || !state.contactEnrichmentVault || !state.contactEnrichmentWebhookVault) {
+    return { status: "not_configured", candidates: [] };
+  }
+  if (!isNamedPersonProspect(prospect)) {
+    return { status: "named_person_required", candidates: [] };
+  }
+
+  const previous = prospect.verifiedContactEnrichment;
+  if (previous?.status === "complete" && isIsoWithinDays(previous.completedAt, 30)) {
+    return {
+      status: "cached",
+      requestId: previous.requestId,
+      enrichmentId: previous.enrichmentId,
+      candidates: previous.candidates || []
+    };
+  }
+  if (previous?.status === "pending" && isIsoWithinMinutes(previous.startedAt, 10)) {
+    return {
+      status: "pending",
+      requestId: previous.requestId,
+      enrichmentId: previous.enrichmentId,
+      candidates: previous.candidates || [],
+      warning: "FullEnrich is still processing verified email and phone data in the background."
+    };
+  }
+
+  const requestId = `fullenrich-${randomBytes(8).toString("hex")}`;
+  const webhookSecret = decryptSecret(state.contactEnrichmentWebhookVault);
+  const webhookUrl = `${integration.webhookBaseUrl.replace(/\/+$/, "")}/api/webhooks/fullenrich?token=${encodeURIComponent(webhookSecret)}`;
+  const enrichFields = [];
+  if (integration.includeWorkEmail) enrichFields.push("contact.work_emails");
+  if (integration.includePersonalEmail) enrichFields.push("contact.personal_emails");
+  if (integration.includePhone) enrichFields.push("contact.phones");
+  if (!enrichFields.length) return { status: "no_fields_selected", candidates: [] };
+
+  const resultPromise = waitForFullEnrichResult(requestId, Number(integration.timeoutSeconds || 105) * 1000);
+  const payload = {
+    name: `Outbound OS - ${prospect.name}`,
+    webhook_events: { contact_finished: webhookUrl },
+    data: [{
+      first_name: firstNameFor(prospect.name),
+      last_name: lastNameFor(prospect.name),
+      domain: normalizeDomain(prospect.website || prospect.publicCompanyResearch?.domain),
+      company_name: prospect.company,
+      linkedin_url: normalizeLinkedInProfileUrl(prospect.linkedin),
+      enrich_fields: enrichFields,
+      custom: {
+        workspace_id: String(state.workspaceId),
+        prospect_id: String(prospect.id),
+        request_id: requestId
+      }
+    }]
+  };
+
+  prospect.verifiedContactEnrichment = {
+    provider: "fullenrich",
+    status: "pending",
+    requestId,
+    enrichmentId: "",
+    startedAt: new Date().toISOString(),
+    completedAt: null,
+    candidates: []
+  };
+  integration.status = "running";
+  integration.lastRunAt = new Date().toISOString();
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15_000);
+    const response = await fetch(`${integration.baseUrl.replace(/\/+$/, "")}/contact/enrich/bulk?silentFail=true`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${decryptSecret(state.contactEnrichmentVault)}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    }).finally(() => clearTimeout(timeout));
+    const responseBody = await response.json().catch(() => ({}));
+    if (!response.ok || !responseBody.enrichment_id) {
+      cancelFullEnrichWaiter(requestId);
+      const detail = cleanText(responseBody.message || responseBody.error || `HTTP ${response.status}`);
+      prospect.verifiedContactEnrichment.status = "failed";
+      prospect.verifiedContactEnrichment.error = detail;
+      integration.status = "error";
+      return { status: "failed", requestId, candidates: [], warning: `FullEnrich request failed: ${detail}` };
+    }
+    prospect.verifiedContactEnrichment.enrichmentId = cleanText(responseBody.enrichment_id);
+    await writePersistentWorkspaceState();
+    const result = await resultPromise;
+    if (result.status === "pending") integration.status = "waiting_for_webhook";
+    return { ...result, enrichmentId: prospect.verifiedContactEnrichment.enrichmentId };
+  } catch (error) {
+    cancelFullEnrichWaiter(requestId);
+    const message = error?.name === "AbortError" ? "request timed out" : error instanceof Error ? error.message : String(error);
+    prospect.verifiedContactEnrichment.status = "failed";
+    prospect.verifiedContactEnrichment.error = message;
+    integration.status = "error";
+    return { status: "failed", requestId, candidates: [], warning: `FullEnrich request failed: ${message}` };
+  }
+}
+
+function waitForFullEnrichResult(requestId, timeoutMs) {
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      fullEnrichWaiters.delete(requestId);
+      resolve({
+        status: "pending",
+        requestId,
+        candidates: [],
+        warning: "FullEnrich is still processing. Verified contacts will appear automatically when its webhook arrives."
+      });
+    }, timeoutMs);
+    fullEnrichWaiters.set(requestId, {
+      resolve: (result) => {
+        clearTimeout(timeout);
+        fullEnrichWaiters.delete(requestId);
+        resolve(result);
+      },
+      cancel: () => {
+        clearTimeout(timeout);
+        fullEnrichWaiters.delete(requestId);
+      }
+    });
+  });
+}
+
+function cancelFullEnrichWaiter(requestId) {
+  fullEnrichWaiters.get(requestId)?.cancel();
+}
+
+async function ingestFullEnrichWebhook(body = {}) {
+  const records = fullEnrichWebhookRecords(body);
+  const batchStatus = cleanText(body.status || "").toUpperCase();
+  let processed = 0;
+  let candidatesAdded = 0;
+  let duplicatesIgnored = 0;
+  for (const record of records) {
+    const custom = record?.custom && typeof record.custom === "object" ? record.custom : {};
+    const prospect = findProspect(cleanText(custom.prospect_id || custom.prospectId || ""));
+    const requestId = cleanText(custom.request_id || custom.requestId || prospect?.verifiedContactEnrichment?.requestId || "");
+    if (!prospect) continue;
+    if (requestId && prospect.verifiedContactEnrichment?.status === "complete" && prospect.verifiedContactEnrichment.requestId === requestId) {
+      fullEnrichWaiters.get(requestId)?.resolve({
+        status: "complete",
+        requestId,
+        candidates: prospect.verifiedContactEnrichment.candidates || []
+      });
+      duplicatesIgnored += 1;
+      continue;
+    }
+    const candidates = contactCandidatesFromFullEnrichRecord(record);
+    prospect.contactDiscovery ||= buildContactDiscovery(prospect);
+    prospect.contactDiscovery.candidates = mergeContactCandidates([
+      ...candidates,
+      ...(prospect.contactDiscovery.candidates || [])
+    ]);
+    prospect.contactDiscovery.updatedAt = new Date().toISOString();
+    prospect.contactDiscovery.completedAt = new Date().toISOString();
+    prospect.contactDiscovery.verifiedProvider = {
+      provider: "fullenrich",
+      status: "complete",
+      requestId,
+      enrichmentId: cleanText(body.id || body.enrichment_id || prospect.verifiedContactEnrichment?.enrichmentId || ""),
+      checkedAt: new Date().toISOString()
+    };
+    prospect.verifiedContactEnrichment = {
+      ...(prospect.verifiedContactEnrichment || {}),
+      provider: "fullenrich",
+      status: "complete",
+      requestId,
+      enrichmentId: cleanText(body.id || body.enrichment_id || prospect.verifiedContactEnrichment?.enrichmentId || ""),
+      completedAt: new Date().toISOString(),
+      candidates
+    };
+    prospect.updatedAt = new Date().toISOString();
+    recordLeadResearch(prospect, {
+      stage: "verified_contact_enrichment",
+      summary: `${candidates.length} verified email or phone candidate${candidates.length === 1 ? "" : "s"} returned by FullEnrich.`,
+      contactDiscovery: prospect.contactDiscovery,
+      warnings: []
+    });
+    fullEnrichWaiters.get(requestId)?.resolve({ status: "complete", requestId, candidates });
+    processed += 1;
+    candidatesAdded += candidates.length;
+  }
+  if (!processed && ["CANCELED", "CREDITS_INSUFFICIENT", "RATE_LIMIT"].includes(batchStatus)) {
+    const enrichmentId = cleanText(body.id || body.enrichment_id || "");
+    for (const prospect of state.prospects) {
+      const pending = prospect.verifiedContactEnrichment;
+      if (pending?.status !== "pending" || (enrichmentId && pending.enrichmentId !== enrichmentId)) continue;
+      const warning = `FullEnrich finished with ${batchStatus.toLowerCase().replaceAll("_", " ")}.`;
+      pending.status = "failed";
+      pending.completedAt = new Date().toISOString();
+      pending.error = warning;
+      fullEnrichWaiters.get(pending.requestId)?.resolve({
+        status: "failed",
+        requestId: pending.requestId,
+        candidates: [],
+        warning
+      });
+    }
+  }
+  state.integrations.contactEnrichment.lastWebhookAt = new Date().toISOString();
+  state.integrations.contactEnrichment.status = processed
+    ? "connected"
+    : batchStatus === "CREDITS_INSUFFICIENT"
+      ? "credits_insufficient"
+      : batchStatus === "RATE_LIMIT"
+        ? "rate_limited"
+        : batchStatus === "CANCELED"
+          ? "canceled"
+        : "webhook_unmatched";
+  if (processed) addEvent("enrichment", `FullEnrich returned ${candidatesAdded} verified contact candidate${candidatesAdded === 1 ? "" : "s"}.`);
+  return { ok: true, processed, candidatesAdded, duplicatesIgnored };
+}
+
+function fullEnrichWebhookRecords(body = {}) {
+  const records = body.data || body.datas || body.results || [];
+  if (Array.isArray(records)) return records;
+  return records && typeof records === "object" ? [records] : [];
+}
+
+function contactCandidatesFromFullEnrichRecord(record = {}) {
+  const contact = record.contact && typeof record.contact === "object" ? record.contact : record;
+  const candidates = [];
+  const workEmails = fullEnrichValues(contact.work_emails || contact.workEmails || contact.emails || contact.most_probable_email || contact.email);
+  const personalEmails = fullEnrichValues(contact.personal_emails || contact.personalEmails);
+  for (const entry of workEmails) {
+    const value = fullEnrichValue(entry, ["email", "address", "value"]);
+    if (!value) continue;
+    const status = cleanText(typeof entry === "object" ? entry.status || entry.verification_status || contact.most_probable_email_status : contact.most_probable_email_status).toUpperCase();
+    const deliverable = /DELIVERABLE|HIGH_PROBABILITY|VALID/.test(status);
+    const catchAll = /CATCH.?ALL/.test(status);
+    candidates.push({
+      type: "email",
+      value,
+      confidence: deliverable ? 96 : catchAll ? 76 : 68,
+      source: "fullenrich:waterfall",
+      status: deliverable ? "deliverable_needs_permission_review" : catchAll ? "catch_all_needs_review" : "verification_required",
+      evidence: ["fullenrich_waterfall", status ? `email_status:${status.toLowerCase()}` : "email_status:unknown"]
+    });
+  }
+  for (const entry of personalEmails) {
+    const value = fullEnrichValue(entry, ["email", "address", "value"]);
+    if (!value) continue;
+    candidates.push({
+      type: "email",
+      value,
+      confidence: 55,
+      source: "fullenrich:personal_email",
+      status: "personal_address_review",
+      evidence: ["fullenrich_waterfall", "personal_email_requires_explicit_permission"]
+    });
+  }
+  const phones = fullEnrichValues(contact.phones || contact.phone_numbers || contact.phoneNumbers || contact.most_probable_phone || contact.phone);
+  for (const entry of phones) {
+    const value = fullEnrichValue(entry, ["number", "phone", "value"]);
+    if (!normalizedPhoneDigits(value)) continue;
+    const region = cleanText(typeof entry === "object" ? entry.region || entry.country || "" : "");
+    candidates.push({
+      type: "phone",
+      value,
+      confidence: 88,
+      source: "fullenrich:waterfall",
+      status: "verified_phone_pending_approval",
+      evidence: ["fullenrich_mobile_found", region ? `region:${region}` : ""].filter(Boolean)
+    });
+  }
+  return mergeContactCandidates(candidates);
+}
+
+function fullEnrichValues(value) {
+  if (Array.isArray(value)) return value;
+  return value ? [value] : [];
+}
+
+function fullEnrichValue(entry, keys) {
+  if (typeof entry === "string") return cleanText(entry);
+  if (!entry || typeof entry !== "object") return "";
+  return cleanText(keys.map((key) => entry[key]).find(Boolean) || "");
+}
+
+function isIsoWithinDays(value, days) {
+  return isIsoWithinMinutes(value, Number(days || 0) * 24 * 60);
+}
+
+function isIsoWithinMinutes(value, minutes) {
+  const timestamp = new Date(value || "").getTime();
+  const age = Date.now() - timestamp;
+  return Number.isFinite(timestamp) && age >= 0 && age <= Number(minutes || 0) * 60_000;
+}
+
 async function enrichProspectContacts(prospect, options = {}) {
   const phase = ["people", "contacts"].includes(options.phase) ? options.phase : "all";
   const publicCandidates = await enrichPublicWebSignals(prospect);
@@ -4414,12 +4832,13 @@ async function enrichProspectContacts(prospect, options = {}) {
   ]);
   const apifyConfigured = state.apifyVault && state.integrations.apify.configured;
   if (!apifyConfigured) {
+    await applyVerifiedContactEnrichment(prospect, discovery, phase);
     discovery.candidates = mergeContactCandidates(addMessengerLinkCandidates(discovery.candidates));
     discovery.scraperStatus = publicCandidates.length ? "public_web_discovery" : "mock_public_search";
     discovery.scraperNote = publicCandidates.length
       ? `${publicCandidates.length} public web candidate${publicCandidates.length === 1 ? "" : "s"} found. Configure Apify actor IDs for phone/email enrichment.`
       : "Configure Apify token and actor IDs to run Apollo, ZoomInfo, LinkedIn, or contact-finder scrapers.";
-    return discovery;
+    return applyVerifiedProviderStatus(discovery);
   }
 
   const contactActorInputs = [
@@ -4446,10 +4865,11 @@ async function enrichProspectContacts(prospect, options = {}) {
   });
 
   if (!actorInputs.length) {
+    await applyVerifiedContactEnrichment(prospect, discovery, phase);
     discovery.candidates = mergeContactCandidates(addMessengerLinkCandidates(discovery.candidates));
     discovery.scraperStatus = "configured_without_actors";
     discovery.scraperNote = "Apify token is configured, but no actor IDs were provided.";
-    return discovery;
+    return applyVerifiedProviderStatus(discovery);
   }
 
   const apifyCandidates = [];
@@ -4488,6 +4908,7 @@ async function enrichProspectContacts(prospect, options = {}) {
     discovery.companyPeople = prospect.companyPeople;
   }
   discovery.candidates = mergeContactCandidates([...apifyCandidates, ...discovery.candidates]);
+  await applyVerifiedContactEnrichment(prospect, discovery, phase);
   discovery.scraperStatus = apifyCandidates.length || companyPeople.length ? "apify_enriched" : skippedForTemplate ? "configured_needs_template" : "apify_no_results";
   discovery.scraperNote = actorsRun
     ? `${apifyCandidates.length} contact candidates and ${companyPeople.length} company people returned from ${actorsRun} Apify actor${actorsRun === 1 ? "" : "s"}. Direct channels remain locked until a seller approves the evidence.`
@@ -4496,7 +4917,7 @@ async function enrichProspectContacts(prospect, options = {}) {
       : "No Apify actors ran.";
   state.integrations.apify.lastRunAt = new Date().toISOString();
   state.integrations.apify.status = discovery.scraperStatus;
-  return discovery;
+  return applyVerifiedProviderStatus(discovery);
 }
 
 async function runPhoneMessengerChecks(prospect, candidates = []) {
@@ -9884,6 +10305,17 @@ function normalizeUrl(value) {
   }
 }
 
+function normalizeFullEnrichBaseUrl(value) {
+  const text = cleanText(value || defaultFullEnrichBaseUrl).replace(/\/+$/, "");
+  try {
+    const url = new URL(text);
+    if (url.protocol !== "https:") return defaultFullEnrichBaseUrl;
+    return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
+  } catch {
+    return defaultFullEnrichBaseUrl;
+  }
+}
+
 function normalizeApifyActorId(value) {
   const text = cleanText(value);
   if (!text) return "";
@@ -10104,6 +10536,41 @@ function initializeRuntimeConfigFromEnv() {
       source: "server_environment"
     };
     addEvent("integration", "Apify configuration loaded from server environment.");
+  }
+
+  const fullEnrichToken = process.env.FULLENRICH_API_KEY || "";
+  const fullEnrichWebhookSecret = process.env.FULLENRICH_WEBHOOK_SECRET || "";
+  const fullEnrichWebhookBaseUrl = normalizeUrl(process.env.FULLENRICH_WEBHOOK_BASE_URL || process.env.APP_PUBLIC_URL || "");
+  if (fullEnrichToken.trim() || fullEnrichWebhookBaseUrl) {
+    state.integrations.contactEnrichment.baseUrl = normalizeFullEnrichBaseUrl(
+      process.env.FULLENRICH_API_BASE_URL || state.integrations.contactEnrichment.baseUrl
+    );
+    state.integrations.contactEnrichment.webhookBaseUrl = fullEnrichWebhookBaseUrl;
+    state.integrations.contactEnrichment.includeWorkEmail = process.env.FULLENRICH_INCLUDE_WORK_EMAIL !== "false";
+    state.integrations.contactEnrichment.includePersonalEmail = process.env.FULLENRICH_INCLUDE_PERSONAL_EMAIL === "true";
+    state.integrations.contactEnrichment.includePhone = process.env.FULLENRICH_INCLUDE_PHONE !== "false";
+    state.integrations.contactEnrichment.timeoutSeconds = clampNumber(
+      process.env.FULLENRICH_TIMEOUT_SECONDS,
+      45,
+      180,
+      state.integrations.contactEnrichment.timeoutSeconds
+    );
+    if (fullEnrichToken.trim()) state.contactEnrichmentVault = encryptSecret(fullEnrichToken.trim());
+    if (fullEnrichWebhookSecret.trim()) state.contactEnrichmentWebhookVault = encryptSecret(fullEnrichWebhookSecret.trim());
+    state.integrations.contactEnrichment.configured = Boolean(
+      state.contactEnrichmentVault
+      && state.contactEnrichmentWebhookVault
+      && state.integrations.contactEnrichment.webhookBaseUrl
+    );
+    state.integrations.contactEnrichment.status = state.integrations.contactEnrichment.configured
+      ? "configured"
+      : state.contactEnrichmentVault
+        ? "needs_webhook_secret_or_url"
+        : "needs_api_key";
+    state.integrations.contactEnrichment.keyMetadata = state.contactEnrichmentVault
+      ? { provider: "fullenrich", keyVersion: 1, configuredAt: now, source: "server_environment" }
+      : state.integrations.contactEnrichment.keyMetadata;
+    addEvent("integration", "FullEnrich configuration loaded from server environment.");
   }
 
   const mcpBaseUrl = normalizeUrl(process.env.MCP_PORTAL_BASE_URL || "");

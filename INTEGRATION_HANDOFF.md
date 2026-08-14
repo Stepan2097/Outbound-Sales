@@ -4,7 +4,7 @@
 
 The local platform now supports live OpenRouter generation. Analysis/coaching defaults to `anthropic/claude-haiku-4.5`; outreach writing defaults to `anthropic/claude-sonnet-5`. Secrets are stored only in the running server's in-memory encrypted vault, so they must be re-entered after restart until a production secret store is added.
 
-The supplied Supabase REST URL is reachable but requires an API key. The supplied Postgres host and port are reachable, but database authentication requires the Postgres password.
+The production Supabase URL is reachable, but the previously pasted anon and service-role keys now return `Invalid API key` when called directly. Rotate the server-only service-role key or provide the Postgres password. The supplied Postgres host and port are reachable, but database authentication still requires the password.
 
 ## Needed From Your Team
 
@@ -58,6 +58,21 @@ The supplied Supabase REST URL is reachable but requires an API key. The supplie
 ### Apollo / ZoomInfo
 
 Use official APIs or authorized exports where possible. If using Apify Actors against Apollo or ZoomInfo, confirm your account terms allow that workflow. The platform should store source, confidence, and review status for every returned contact detail.
+
+### Verified Email + Phone
+
+FullEnrich is the selected primary provider because it exposes a direct API waterfall across multiple sources, returns email verification status, supports mobile-phone enrichment, and delivers results asynchronously by webhook.
+
+Needed from your team:
+
+- FullEnrich account with API access and sufficient email/phone credits.
+- `FULLENRICH_API_KEY` added only to Coolify server environment variables.
+- `FULLENRICH_WEBHOOK_SECRET`, generated as a long random value and added to Coolify.
+- `FULLENRICH_WEBHOOK_BASE_URL=https://outbound-sales.169-58-60-245.sslip.io`.
+- Decision on personal email usage. It is disabled by default.
+- Approved countries and channels for phone, WhatsApp, Telegram, and SMS outreach.
+
+The implementation requests work email and mobile phone by LinkedIn URL plus name/company, stores provider evidence, rejects unverified personal email for activation, and requires seller approval before a direct channel is enabled.
 
 ### Custom CRM
 
@@ -116,13 +131,13 @@ Matching priority: `prospectId`, `linkedinUrl`, `email`, then `name` + `company`
 
 ## Next Engineering Steps
 
-1. Provide Supabase anon/service-role key and Postgres password.
+1. Rotate the Supabase service-role key or provide the Postgres password.
 2. Confirm CRM lead source: Supabase table name or custom CRM endpoint, plus LinkedIn field mapping.
 3. Confirm CRM activity endpoint for logging AI Operator actions back to lead cards.
 4. Replace in-memory state with Postgres tables.
 5. Persist encrypted credentials in a server-side secret store.
 6. Wire MCP product, lead, and knowledge-base sync to your real schema.
-7. Add a tested Apify input template for the provided lead database actor, then run a low-charge enrichment test.
+7. Add FullEnrich credentials and run a ten-lead coverage test; keep Apify as LinkedIn/company-people and fallback enrichment.
 8. Wire CRM push/pull, task creation, and activity history ingestion.
 9. Wire transcript provider webhooks.
 10. Train scoring on real historical outcomes instead of seeded demo priors.

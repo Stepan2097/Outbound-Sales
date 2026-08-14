@@ -253,6 +253,7 @@ function renderIntegrations() {
   document.getElementById("aiRuntimeStatus").textContent = state.aiRuntime?.mode === "openrouter" ? "OpenRouter live" : "Mock AI";
   document.getElementById("openRouterModelCount").textContent = `${state.aiRuntime?.syncedOpenRouterModels || 0} synced`;
   document.getElementById("apifyStatus").textContent = state.integrations?.apify?.status || "not_configured";
+  document.getElementById("contactEnrichmentStatus").textContent = state.integrations?.contactEnrichment?.status || "not_configured";
   document.getElementById("crmStatus").textContent = state.integrations?.crm?.status || "not_configured";
   document.getElementById("transcriptStatus").textContent = state.integrations?.transcripts?.status || "manual_paste";
   document.getElementById("notificationStatus").textContent = state.integrations?.notifications?.status || "in_app";
@@ -280,6 +281,12 @@ function renderIntegrations() {
   document.getElementById("companyPeopleInputTemplate").value = apify?.actorInputTemplates?.companyPeople || "";
   document.getElementById("apifyMaxChargeInput").value = apify?.maxChargeUsd || 1.5;
   document.getElementById("apifyContactMaxChargeInput").value = apify?.contactMaxChargeUsd || 0.2;
+
+  const contactEnrichment = state.integrations?.contactEnrichment;
+  document.getElementById("fullEnrichWebhookBaseUrlInput").value = contactEnrichment?.webhookBaseUrl || "";
+  document.getElementById("fullEnrichWorkEmailInput").checked = contactEnrichment?.includeWorkEmail !== false;
+  document.getElementById("fullEnrichPhoneInput").checked = contactEnrichment?.includePhone !== false;
+  document.getElementById("fullEnrichPersonalEmailInput").checked = contactEnrichment?.includePersonalEmail === true;
 
   document.getElementById("mcpBaseUrlInput").value = state.mcpSync?.baseUrl || "";
   document.getElementById("mcpNamespaceInput").value = state.mcpSync?.resourceNamespace || "";
@@ -2708,6 +2715,25 @@ document.getElementById("apifyConfigForm").addEventListener("submit", async (eve
     })
   });
   document.getElementById("apifyTokenInput").value = "";
+  render();
+});
+
+document.getElementById("contactEnrichmentForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  state = await api("/api/integrations/contact-enrichment/configure", {
+    method: "POST",
+    body: JSON.stringify({
+      apiToken: document.getElementById("fullEnrichTokenInput").value,
+      webhookBaseUrl: document.getElementById("fullEnrichWebhookBaseUrlInput").value,
+      webhookSecret: document.getElementById("fullEnrichWebhookSecretInput").value,
+      includeWorkEmail: document.getElementById("fullEnrichWorkEmailInput").checked,
+      includePhone: document.getElementById("fullEnrichPhoneInput").checked,
+      includePersonalEmail: document.getElementById("fullEnrichPersonalEmailInput").checked
+    })
+  });
+  document.getElementById("fullEnrichTokenInput").value = "";
+  document.getElementById("fullEnrichWebhookSecretInput").value = "";
+  uiNotice = "Verified contact enrichment settings saved.";
   render();
 });
 
