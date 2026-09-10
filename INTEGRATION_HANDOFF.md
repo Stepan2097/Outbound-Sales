@@ -2,9 +2,9 @@
 
 ## Current Runtime Truth
 
-The local platform now supports live OpenRouter generation. Analysis/coaching defaults to `anthropic/claude-haiku-4.5`; outreach writing defaults to `anthropic/claude-sonnet-5`. Secrets are stored only in the running server's in-memory encrypted vault, so they must be re-entered after restart until a production secret store is added.
+The platform supports live OpenRouter generation. Analysis defaults to `anthropic/claude-haiku-4.5`; outreach writing defaults to `anthropic/claude-sonnet-5`. Production secrets should be supplied through Coolify environment variables and are never returned to the browser.
 
-The production Supabase URL is reachable, but the previously pasted anon and service-role keys now return `Invalid API key` when called directly. Rotate the server-only service-role key or provide the Postgres password. The supplied Postgres host and port are reachable, but database authentication still requires the password.
+The Advantage CRM Supabase service-role connection has been verified with HTTP 200 access. Its schema exposes 27 tables including `contacts`, `companies`, `activities`, `tasks`, and `deals`. The AdAction EMEA prospect folder is readable, and CRM activity logging works for leads imported with their CRM identifiers. The separate private Supabase knowledge database is also reachable with HTTP 200 and exposes 38 tables including `wiki_pages`, `lesson_embeddings`, and `knowledge_gaps`. These two Supabase connections must remain separate in deployment settings.
 
 ## Needed From Your Team
 
@@ -61,18 +61,17 @@ Use official APIs or authorized exports where possible. If using Apify Actors ag
 
 ### Verified Email + Phone
 
-FullEnrich is the selected primary provider because it exposes a direct API waterfall across multiple sources, returns email verification status, supports mobile-phone enrichment, and delivers results asynchronously by webhook.
+The default enrichment path is a cost-capped Apify waterfall:
 
-Needed from your team:
+- `enrich-crm/enrich-crm-enrich-contact` for person-level work email and phone enrichment.
+- `inexhaustible_glass/linkedin-email-finder` as a lower-cost domain/contact fallback.
+- `harvestapi/linkedin-company-employees` for the primary company-people map.
+- `scraper-engine/linkedin-company-employees-scraper` as the secondary people provider.
+- `vtrdev/whatsapp-number-validator` and `akula.marketing/telegram-get-phone-info` only after a phone is found and approved.
 
-- FullEnrich account with API access and sufficient email/phone credits.
-- `FULLENRICH_API_KEY` added only to Coolify server environment variables.
-- `FULLENRICH_WEBHOOK_SECRET`, generated as a long random value and added to Coolify.
-- `FULLENRICH_WEBHOOK_BASE_URL=https://outbound-sales.169-58-60-245.sslip.io`.
-- Decision on personal email usage. It is disabled by default.
-- Approved countries and channels for phone, WhatsApp, Telegram, and SMS outreach.
+The waterfall runs sequentially, stops when a verified work email and phone are available, caps the actors used per lead, and reuses recent verified results. FullEnrich remains an optional legacy webhook integration, not a prerequisite.
 
-The implementation requests work email and mobile phone by LinkedIn URL plus name/company, stores provider evidence, rejects unverified personal email for activation, and requires seller approval before a direct channel is enabled.
+Needed from your team: approved countries and channels for phone/messenger outreach, plus confirmation that the selected Apify Actors and target-data sources are permitted for your use case.
 
 ### Custom CRM
 
@@ -131,13 +130,9 @@ Matching priority: `prospectId`, `linkedinUrl`, `email`, then `name` + `company`
 
 ## Next Engineering Steps
 
-1. Rotate the Supabase service-role key or provide the Postgres password.
-2. Confirm CRM lead source: Supabase table name or custom CRM endpoint, plus LinkedIn field mapping.
-3. Confirm CRM activity endpoint for logging AI Operator actions back to lead cards.
-4. Replace in-memory state with Postgres tables.
-5. Persist encrypted credentials in a server-side secret store.
-6. Wire MCP product, lead, and knowledge-base sync to your real schema.
-7. Add FullEnrich credentials and run a ten-lead coverage test; keep Apify as LinkedIn/company-people and fallback enrichment.
-8. Wire CRM push/pull, task creation, and activity history ingestion.
-9. Wire transcript provider webhooks.
-10. Train scoring on real historical outcomes instead of seeded demo priors.
+1. Confirm the exact CRM conflict rules for bidirectional edits to lead status, task dates, and opportunity stage.
+2. Map historical replies, meetings, opportunities, and losses into the scoring-training job.
+3. Confirm the MCP portal contract if it should supplement the private knowledge Supabase.
+4. Run a representative 25-50 lead Apify coverage and cost benchmark before raising per-lead spend caps.
+5. Wire the selected call-transcript provider webhook.
+6. Define approved countries, consent rules, and channel policies for phone, SMS, WhatsApp, and Telegram.

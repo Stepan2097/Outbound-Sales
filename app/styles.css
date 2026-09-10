@@ -3951,6 +3951,430 @@ dialog {
   font-size: 12px;
 }
 
+.strategy-panel {
+  background: linear-gradient(145deg, rgba(9, 32, 56, 0.96), rgba(7, 24, 43, 0.96));
+}
+
+.strategy-content,
+.strategy-list,
+.strategy-section-body {
+  display: grid;
+  gap: 10px;
+}
+
+.strategy-decision-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.strategy-decision-grid > div,
+.strategy-section,
+.strategy-row,
+.strategy-title-row,
+.strategy-hypothesis,
+.strategy-stakeholder,
+.strategy-message,
+.strategy-branch,
+.strategy-transition-grid > article,
+.strategy-sequence-row,
+.strategy-score {
+  border: 1px solid rgba(143, 177, 207, 0.18);
+  border-radius: 8px;
+  background: rgba(4, 16, 29, 0.5);
+}
+
+.strategy-decision-grid > div {
+  min-height: 76px;
+  padding: 11px;
+}
+
+.strategy-decision-grid span,
+.strategy-decision-grid strong {
+  display: block;
+}
+
+.strategy-decision-grid span,
+.strategy-row p,
+.strategy-row small,
+.strategy-title-row span,
+.strategy-title-row dt,
+.strategy-title-row dd,
+.strategy-hypothesis p,
+.strategy-stakeholder small,
+.strategy-stakeholder dt,
+.strategy-stakeholder dd,
+.strategy-message .message-evidence p,
+.strategy-branch p,
+.strategy-branch span,
+.strategy-transition-grid span,
+.strategy-transition-grid p,
+.strategy-transition-grid small,
+.strategy-sequence-row span,
+.strategy-sequence-row small,
+.strategy-score p {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.strategy-decision-grid strong {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.strategy-section {
+  overflow: hidden;
+}
+
+.strategy-section > summary {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: 52px;
+  padding: 8px 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.strategy-section > summary::-webkit-details-marker {
+  display: none;
+}
+
+.strategy-section > summary::after {
+  content: "+";
+  color: #65f0db;
+  font-size: 20px;
+}
+
+.strategy-section[open] > summary::after {
+  content: "−";
+}
+
+.strategy-section > summary > span {
+  color: #65f0db;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.strategy-section-body {
+  border-top: 1px solid rgba(143, 177, 207, 0.14);
+  padding: 12px;
+}
+
+.strategy-section-body > h3 {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.strategy-section-body > p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.strategy-row,
+.strategy-title-row,
+.strategy-hypothesis,
+.strategy-stakeholder,
+.strategy-message,
+.strategy-branch,
+.strategy-transition-grid > article,
+.strategy-sequence-row,
+.strategy-score {
+  padding: 11px;
+}
+
+.strategy-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+}
+
+.strategy-row strong,
+.strategy-row p,
+.strategy-row span {
+  display: block;
+  margin: 5px 0 0;
+}
+
+.claim-label {
+  display: inline-flex !important;
+  width: fit-content;
+  margin: 0 0 5px !important;
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.claim-label.fact {
+  color: #65f0db;
+  background: rgba(45, 212, 160, 0.12);
+}
+
+.claim-label.hypothesis {
+  color: #ffd381;
+  background: rgba(244, 189, 80, 0.12);
+}
+
+.strategy-title-row,
+.strategy-stakeholder {
+  display: grid;
+  gap: 10px;
+}
+
+.strategy-title-row > div:first-child strong,
+.strategy-title-row > div:first-child span {
+  display: block;
+}
+
+.strategy-title-row dl,
+.strategy-stakeholder dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 14px;
+  margin: 0;
+}
+
+.strategy-title-row dl > div,
+.strategy-stakeholder dl > div {
+  min-width: 0;
+}
+
+.strategy-title-row dt,
+.strategy-stakeholder dt {
+  margin-bottom: 3px;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.strategy-title-row dd,
+.strategy-stakeholder dd {
+  margin: 0;
+  font-size: 12px;
+}
+
+.strategy-hypothesis-grid,
+.strategy-stakeholder-grid,
+.strategy-message-grid,
+.strategy-branch-grid,
+.strategy-transition-grid,
+.strategy-score-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.strategy-hypothesis header,
+.strategy-message header,
+.strategy-stakeholder header,
+.strategy-score > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.strategy-hypothesis header span,
+.strategy-hypothesis header b {
+  color: #65f0db;
+  font-size: 11px;
+}
+
+.strategy-hypothesis > strong,
+.strategy-hypothesis p {
+  display: block;
+  margin: 8px 0 0;
+  line-height: 1.45;
+}
+
+.strategy-hypothesis p b {
+  color: var(--text);
+}
+
+.strategy-stakeholder header {
+  justify-content: flex-start;
+}
+
+.strategy-stakeholder header > span {
+  display: grid;
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 50%;
+  color: #031422;
+  background: #65f0db;
+  font-weight: 900;
+}
+
+.strategy-stakeholder header strong,
+.strategy-stakeholder header small {
+  display: block;
+}
+
+.strategy-message header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.strategy-message pre {
+  margin: 10px 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font: inherit;
+  line-height: 1.55;
+}
+
+.strategy-message.blocked {
+  border-color: rgba(244, 189, 80, 0.32);
+  background: rgba(45, 32, 13, 0.24);
+}
+
+.strategy-message.blocked pre {
+  color: #ffd381;
+}
+
+.message-evidence {
+  border-top: 1px solid rgba(143, 177, 207, 0.14);
+  padding-top: 8px;
+}
+
+.message-evidence p {
+  margin: 4px 0;
+  font-size: 12px;
+}
+
+.strategy-branch strong,
+.strategy-branch p,
+.strategy-branch span,
+.strategy-transition-grid strong,
+.strategy-transition-grid p,
+.strategy-transition-grid small {
+  display: block;
+  margin: 0 0 8px;
+}
+
+.strategy-sequence-row {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 12px;
+}
+
+.strategy-sequence-row > b {
+  color: #65f0db;
+}
+
+.strategy-sequence-row strong,
+.strategy-sequence-row span,
+.strategy-sequence-row small {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.strategy-score > div strong {
+  color: #65f0db;
+  font-size: 18px;
+}
+
+.strategy-score p {
+  margin: 8px 0 0;
+  font-size: 12px;
+}
+
+.strategy-gate,
+.strategy-channel {
+  border: 1px solid rgba(244, 189, 80, 0.36);
+  border-radius: 8px;
+  background: rgba(45, 32, 13, 0.32);
+  padding: 12px;
+}
+
+.strategy-gate.approved {
+  border-color: rgba(45, 212, 160, 0.32);
+  background: rgba(11, 54, 46, 0.3);
+}
+
+.strategy-gate header,
+.strategy-gate-actions,
+.strategy-channel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.strategy-gate header span,
+.strategy-gate header strong,
+.strategy-channel span,
+.strategy-channel strong,
+.strategy-channel small {
+  display: block;
+}
+
+.strategy-gate header span,
+.strategy-channel span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.strategy-gate header b {
+  color: #ffd381;
+  font-size: 12px;
+}
+
+.strategy-gate.approved header b {
+  color: #65f0db;
+}
+
+.strategy-gate > p,
+.strategy-channel > p {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.strategy-gate-checks {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin: 10px 0;
+}
+
+.strategy-gate-checks > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid rgba(143, 177, 207, 0.14);
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.strategy-gate-checks span,
+.strategy-gate-checks strong {
+  font-size: 11px;
+}
+
+.strategy-gate-checks span {
+  color: var(--muted);
+}
+
+.strategy-gate-actions {
+  justify-content: flex-start;
+  margin-top: 10px;
+}
+
+.strategy-channel {
+  display: grid;
+  align-items: start;
+  margin-top: 2px;
+  border-color: rgba(143, 177, 207, 0.18);
+  background: rgba(4, 16, 29, 0.48);
+}
+
 @media (max-width: 1080px) {
   .database-layout,
   .learning-example-list,
@@ -3961,9 +4385,22 @@ dialog {
   .leads-layout,
   .intelligence-hero,
   .intelligence-grid,
+  .strategy-decision-grid,
+  .strategy-hypothesis-grid,
+  .strategy-stakeholder-grid,
+  .strategy-message-grid,
+  .strategy-branch-grid,
+  .strategy-transition-grid,
+  .strategy-score-grid,
   .company-summary,
   .company-detail-grid,
   .knowledge-inbox-form {
+    grid-template-columns: 1fr;
+  }
+
+  .strategy-title-row dl,
+  .strategy-stakeholder dl,
+  .strategy-gate-checks {
     grid-template-columns: 1fr;
   }
 

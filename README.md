@@ -14,6 +14,7 @@ Local outbound workspace for researching prospects, generating product-specific 
 - Connect OpenRouter directly from Settings, with `anthropic/claude-haiku-4.5` for analysis/coaching and `anthropic/claude-sonnet-5` for outreach writing.
 - Check Supabase REST and Postgres reachability from Settings.
 - Review prospect fit, title, company, location, notes, and account context.
+- Open the Account Strategy tab for the complete A-M AdAction brief: recent signals, title analysis, growth hypotheses, stakeholder-specific routes, first touch, conversation tree, consultation CTA, multi-thread sequence, risks, and deterministic 1-10 scores.
 - Generate public contact-discovery candidates, including business email patterns, LinkedIn search links, Facebook people-search links, and web search links.
 - Prepare AI-generated outreach messages across email, LinkedIn, and call opener.
 - Paste call transcripts or connect a transcript webhook to get call-quality analysis, coaching tips, follow-up templates, and a next task.
@@ -21,7 +22,8 @@ Local outbound workspace for researching prospects, generating product-specific 
 - Track historical lead interactions and use them to estimate chance of reaching the lead and chance of closing.
 - Use the AI Operator tab for bulk sales actions such as sorting leads, changing statuses, logging interactions, preparing outreach, refreshing contact discovery, and pulling LinkedIn-heavy leads from CRM/Supabase.
 - Configure one primary Apify lead database actor plus optional specialist actors for LinkedIn profile enrichment, email/phone discovery, Facebook/person matching, Apollo/ZoomInfo, and WhatsApp/Telegram phone presence checks.
-- Use FullEnrich as the primary verified work-email and mobile-phone waterfall. Results arrive through an authenticated webhook and remain locked until seller approval.
+- Use a cost-capped Apify waterfall for company people, work-email, and phone enrichment. It stops when verified email and phone are found, limits actors per lead, and reuses recent verified results.
+- Keep email, phone, WhatsApp, Telegram, and SMS locked until the seller approves the matched contact and channel.
 
 Contact discovery is intentionally review-first. It creates public/business search candidates and confidence labels; it does not scrape private profiles or silently approve personal contact data.
 
@@ -35,7 +37,7 @@ node server.mjs
 
 Open [http://localhost:4173](http://localhost:4173).
 
-The platform keeps OpenRouter and integration keys server-side in an in-memory encrypted vault. If no OpenRouter key is configured and tested, the app stays functional in mock AI mode. Local memory is reset when the server restarts; production should use a real secret store.
+The platform keeps OpenRouter and integration keys server-side in an in-memory encrypted vault. Workspace records persist to the configured state volume, while production credentials should come from Coolify environment variables or a real secret store. If OpenRouter is unavailable, research still produces a conservative deterministic brief and visibly blocks unsupported outreach.
 
 ## Transcript Webhook
 
@@ -47,7 +49,7 @@ POST /api/webhooks/call-transcript
 
 Supported matching fields: `prospectId`, `linkedinUrl`, `email`, or `name` + `company`. Include `transcript` or `text` in the payload.
 
-## FullEnrich Webhook
+## Optional FullEnrich Webhook
 
 Verified contact results are accepted at:
 

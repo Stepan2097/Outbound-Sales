@@ -23,11 +23,12 @@ test("FullEnrich webhooks are authenticated, approval-gated, and idempotent", as
     },
     stdio: "ignore"
   });
+  const exitPromise = new Promise((resolve) => child.once("exit", resolve));
 
   try {
     await waitForHealth();
     const page = await fetch(origin).then((response) => response.text());
-    assert.match(page, /Verified Email \+ Phone/);
+    assert.match(page, /Research &amp; Contact Enrichment/);
 
     const unauthorized = await fetch(`${origin}/api/webhooks/fullenrich`, {
       method: "POST",
@@ -62,8 +63,8 @@ test("FullEnrich webhooks are authenticated, approval-gated, and idempotent", as
     assert.equal(candidates.find((item) => item.status === "personal_address_review").approvalStatus, "verification_required");
     assert.equal(prospect.researchHistory.filter((item) => item.stage === "verified_contact_enrichment").length, 1);
   } finally {
-    child.kill("SIGTERM");
-    await new Promise((resolve) => child.once("exit", resolve));
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+    await Promise.race([exitPromise, new Promise((resolve) => setTimeout(resolve, 2000))]);
     await rm(directory, { recursive: true, force: true });
   }
 });

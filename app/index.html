@@ -114,6 +114,7 @@
             <nav class="lead-section-nav" aria-label="Lead workspace sections" role="tablist">
               <select id="mobileLeadSectionSelect" aria-label="Lead workspace section">
                 <option value="dashboard-account">Company</option>
+                <option value="dashboard-strategy">Strategy</option>
                 <option value="dashboard-intelligence">Brief</option>
                 <option value="dashboard-buying">Committee</option>
                 <option value="dashboard-contact">Contacts</option>
@@ -124,6 +125,7 @@
                 <option value="dashboard-cycle">Sales Cycle</option>
               </select>
               <button type="button" role="tab" data-lead-tab="dashboard-account">Company</button>
+              <button type="button" role="tab" data-lead-tab="dashboard-strategy">Strategy</button>
               <button type="button" role="tab" data-lead-tab="dashboard-intelligence">Brief</button>
               <button type="button" role="tab" data-lead-tab="dashboard-buying">Committee</button>
               <button type="button" role="tab" data-lead-tab="dashboard-contact">Contacts</button>
@@ -160,6 +162,17 @@
                     <span class="pill" id="companyConfidencePill">no research</span>
                   </div>
                   <div class="company-brief" id="companyBriefContent"></div>
+                </section>
+
+                <section class="panel lead-section strategy-panel" id="dashboard-strategy">
+                  <div class="panel-heading">
+                    <div>
+                      <h2>Account Strategy</h2>
+                      <p>Account thesis, stakeholder routes, conversation plan, and evidence</p>
+                    </div>
+                    <span class="pill">A-M brief</span>
+                  </div>
+                  <div class="strategy-content" id="prospectingStrategyContent"></div>
                 </section>
 
                 <section class="panel lead-section" id="dashboard-buying">
@@ -924,36 +937,14 @@
                 <div><span>AI runtime</span><strong id="aiRuntimeStatus">mock</strong></div>
                 <div><span>OpenRouter models</span><strong id="openRouterModelCount">0</strong></div>
                 <div><span>Apify</span><strong id="apifyStatus">not configured</strong></div>
-                <div><span>Verified contacts</span><strong id="contactEnrichmentStatus">not configured</strong></div>
+                <div><span>Contact enrichment</span><strong id="contactEnrichmentStatus">not configured</strong></div>
                 <div><span>CRM</span><strong id="crmStatus">not configured</strong></div>
                 <div><span>Calls</span><strong id="transcriptStatus">manual paste</strong></div>
                 <div><span>Tasks</span><strong id="notificationStatus">in-app</strong></div>
                 <div><span>Supabase</span><strong id="supabaseStatus">not configured</strong></div>
                 <div><span>Postgres</span><strong id="postgresStatus">not configured</strong></div>
+                <div><span>Product memory</span><strong id="knowledgeDatabaseStatus">not configured</strong></div>
               </div>
-            </section>
-
-            <section class="panel">
-              <div class="panel-heading">
-                <div>
-                  <h2>Verified Email + Phone</h2>
-                  <p>FullEnrich waterfall with seller approval before use</p>
-                </div>
-              </div>
-              <form class="integration-form" id="contactEnrichmentForm">
-                <input id="fullEnrichTokenInput" type="password" autocomplete="off" placeholder="FullEnrich API key" aria-label="FullEnrich API key" />
-                <input id="fullEnrichWebhookBaseUrlInput" type="url" placeholder="https://outbound-sales.example.com" aria-label="Public Outbound OS URL" />
-                <div class="check-grid compact-checks">
-                  <label><input id="fullEnrichWorkEmailInput" type="checkbox" checked /> Work email</label>
-                  <label><input id="fullEnrichPhoneInput" type="checkbox" checked /> Mobile phone</label>
-                  <label><input id="fullEnrichPersonalEmailInput" type="checkbox" /> Personal email</label>
-                </div>
-                <details class="optional-fields">
-                  <summary>Advanced webhook security</summary>
-                  <input id="fullEnrichWebhookSecretInput" type="password" autocomplete="off" placeholder="Optional webhook secret; generated when omitted" aria-label="FullEnrich webhook secret" />
-                </details>
-                <button class="primary-button" type="submit"><i data-lucide="badge-check"></i><span>Connect FullEnrich</span></button>
-              </form>
             </section>
 
             <section class="panel">
@@ -991,8 +982,8 @@
             <section class="panel">
               <div class="panel-heading">
                 <div>
-                  <h2>Apify Enrichment</h2>
-                  <p>Lead database lookup plus specialist scrapers</p>
+                  <h2>Research &amp; Contact Enrichment</h2>
+                  <p>Cost-capped Apify waterfall with 30-day reuse</p>
                 </div>
               </div>
               <form class="integration-form" id="apifyConfigForm">
@@ -1005,7 +996,7 @@
                 <details class="optional-fields">
                   <summary>Specialist actors</summary>
                   <input id="linkedinActorInput" type="text" placeholder="LinkedIn actor id, e.g. user~linkedin-profile" />
-                  <input id="contactFinderActorInput" type="text" placeholder="delicious_zebu/contact-info-scraper" />
+                  <input id="contactFinderActorInput" type="text" placeholder="inexhaustible_glass/linkedin-email-finder" />
                   <input id="apolloActorInput" type="text" placeholder="Apollo actor id" />
                   <input id="zoominfoActorInput" type="text" placeholder="ZoomInfo actor id" />
                   <input id="facebookProfileActorInput" type="text" placeholder="Facebook/person match actor id" />
@@ -1013,13 +1004,17 @@
                   <input id="phoneMessengerCheckActorInput" type="text" placeholder="WhatsApp/Telegram phone check actor id" />
                   <input id="whatsappCheckerActorInput" type="text" placeholder="vtrdev/whatsapp-number-validator" />
                   <input id="telegramCheckerActorInput" type="text" placeholder="akula.marketing/telegram-get-phone-info" />
-                  <input id="companyPeopleActorInput" type="text" placeholder="scraper-engine/linkedin-company-employees-scraper" />
-                  <input id="companyPeopleSecondaryActorInput" type="text" placeholder="harvestapi/linkedin-company-employees" />
-                  <input id="personEnrichmentActorInput" type="text" placeholder="ryanclinton/person-enrichment-lookup" />
+                  <input id="companyPeopleActorInput" type="text" placeholder="harvestapi/linkedin-company-employees" />
+                  <input id="companyPeopleSecondaryActorInput" type="text" placeholder="scraper-engine/linkedin-company-employees-scraper" />
+                  <input id="personEnrichmentActorInput" type="text" placeholder="enrich-crm/enrich-crm-enrich-contact" />
                   <textarea id="companyPeopleInputTemplate" rows="5" spellcheck="false" placeholder='{"leadTargets":["{{linkedinPeopleUrl}}"],"maxLeadsPerCompany":12,"jobTitleKeywords":["Founder","Head of Affiliates"],"includeOnlyDecisionMakers":false}'></textarea>
                 </details>
                 <input id="apifyMaxChargeInput" type="number" min="0.05" step="0.05" />
                 <input id="apifyContactMaxChargeInput" type="number" min="0.05" max="5" step="0.05" aria-label="Maximum charge per verified contact run" />
+                <div class="split-fields">
+                  <input id="apifyMaxActorsInput" type="number" min="1" max="6" step="1" aria-label="Maximum actors per lead" placeholder="Max actors per lead" />
+                  <input id="apifyCacheDaysInput" type="number" min="1" max="120" step="1" aria-label="Enrichment cache days" placeholder="Cache days" />
+                </div>
                 <button class="primary-button" type="submit"><i data-lucide="save"></i><span>Save Apify</span></button>
               </form>
             </section>

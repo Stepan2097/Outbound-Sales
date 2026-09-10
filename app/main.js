@@ -253,12 +253,15 @@ function renderIntegrations() {
   document.getElementById("aiRuntimeStatus").textContent = state.aiRuntime?.mode === "openrouter" ? "OpenRouter live" : "Mock AI";
   document.getElementById("openRouterModelCount").textContent = `${state.aiRuntime?.syncedOpenRouterModels || 0} synced`;
   document.getElementById("apifyStatus").textContent = state.integrations?.apify?.status || "not_configured";
-  document.getElementById("contactEnrichmentStatus").textContent = state.integrations?.contactEnrichment?.status || "not_configured";
+  document.getElementById("contactEnrichmentStatus").textContent = state.integrations?.apify?.configured
+    ? state.integrations.apify.enrichmentMode || "cost-capped Apify"
+    : "not configured";
   document.getElementById("crmStatus").textContent = state.integrations?.crm?.status || "not_configured";
   document.getElementById("transcriptStatus").textContent = state.integrations?.transcripts?.status || "manual_paste";
   document.getElementById("notificationStatus").textContent = state.integrations?.notifications?.status || "in_app";
   document.getElementById("supabaseStatus").textContent = state.integrations?.supabase?.status || "not_configured";
   document.getElementById("postgresStatus").textContent = state.integrations?.postgres?.status || "not_configured";
+  document.getElementById("knowledgeDatabaseStatus").textContent = state.integrations?.knowledgeDatabase?.status || "not_configured";
 
   document.getElementById("analysisModelInput").value = state.aiModelDefaults?.analysisModel || "anthropic/claude-haiku-4.5";
   document.getElementById("writingModelInput").value = state.aiModelDefaults?.writingModel || "anthropic/claude-sonnet-5";
@@ -267,7 +270,7 @@ function renderIntegrations() {
   document.getElementById("leadDatabaseActorInput").value = apify?.actorIds?.leadDatabase || "";
   document.getElementById("leadDatabaseInputTemplate").value = apify?.actorInputTemplates?.leadDatabase || "";
   document.getElementById("linkedinActorInput").value = apify?.actorIds?.linkedinProfile || "";
-  document.getElementById("contactFinderActorInput").value = apify?.actorIds?.contactFinder || "delicious_zebu/contact-info-scraper";
+  document.getElementById("contactFinderActorInput").value = apify?.actorIds?.contactFinder || "inexhaustible_glass/linkedin-email-finder";
   document.getElementById("apolloActorInput").value = apify?.actorIds?.apollo || "";
   document.getElementById("zoominfoActorInput").value = apify?.actorIds?.zoominfo || "";
   document.getElementById("facebookProfileActorInput").value = apify?.actorIds?.facebookProfile || "";
@@ -275,18 +278,14 @@ function renderIntegrations() {
   document.getElementById("phoneMessengerCheckActorInput").value = apify?.actorIds?.phoneMessengerCheck || "";
   document.getElementById("whatsappCheckerActorInput").value = apify?.actorIds?.whatsappChecker || "vtrdev/whatsapp-number-validator";
   document.getElementById("telegramCheckerActorInput").value = apify?.actorIds?.telegramChecker || "akula.marketing/telegram-get-phone-info";
-  document.getElementById("companyPeopleActorInput").value = apify?.actorIds?.companyPeople || "scraper-engine/linkedin-company-employees-scraper";
-  document.getElementById("companyPeopleSecondaryActorInput").value = apify?.actorIds?.companyPeopleSecondary || "harvestapi/linkedin-company-employees";
-  document.getElementById("personEnrichmentActorInput").value = apify?.actorIds?.personEnrichment || "ryanclinton/person-enrichment-lookup";
+  document.getElementById("companyPeopleActorInput").value = apify?.actorIds?.companyPeople || "harvestapi/linkedin-company-employees";
+  document.getElementById("companyPeopleSecondaryActorInput").value = apify?.actorIds?.companyPeopleSecondary || "scraper-engine/linkedin-company-employees-scraper";
+  document.getElementById("personEnrichmentActorInput").value = apify?.actorIds?.personEnrichment || "enrich-crm/enrich-crm-enrich-contact";
   document.getElementById("companyPeopleInputTemplate").value = apify?.actorInputTemplates?.companyPeople || "";
   document.getElementById("apifyMaxChargeInput").value = apify?.maxChargeUsd || 1.5;
   document.getElementById("apifyContactMaxChargeInput").value = apify?.contactMaxChargeUsd || 0.2;
-
-  const contactEnrichment = state.integrations?.contactEnrichment;
-  document.getElementById("fullEnrichWebhookBaseUrlInput").value = contactEnrichment?.webhookBaseUrl || "";
-  document.getElementById("fullEnrichWorkEmailInput").checked = contactEnrichment?.includeWorkEmail !== false;
-  document.getElementById("fullEnrichPhoneInput").checked = contactEnrichment?.includePhone !== false;
-  document.getElementById("fullEnrichPersonalEmailInput").checked = contactEnrichment?.includePersonalEmail === true;
+  document.getElementById("apifyMaxActorsInput").value = apify?.maxActorsPerLead || 3;
+  document.getElementById("apifyCacheDaysInput").value = apify?.cacheDays || 30;
 
   document.getElementById("mcpBaseUrlInput").value = state.mcpSync?.baseUrl || "";
   document.getElementById("mcpNamespaceInput").value = state.mcpSync?.resourceNamespace || "";
@@ -807,6 +806,7 @@ function renderLeadWorkspaceExtras(prospect) {
   setHtml("nextActionSummary", nextActionRows(prospect));
   setHtml("salesCycleList", salesCycleRows(prospect));
   setHtml("intelligenceContent", intelligenceRows(prospect));
+  setHtml("prospectingStrategyContent", prospectingStrategyRows(prospect));
   setText("intelligenceStatusPill", intelligenceStatusLabel(prospect));
   renderLeadSectionTabs();
   updateQuickCopies(prospect);
@@ -1334,6 +1334,65 @@ function intelligenceRows(prospect) {
       </section>
     </div>
   `;
+}
+
+function prospectingStrategyRows(prospect) {
+  if (!prospect) return `<div class="empty-state">Open a lead and run research to build the account strategy.</div>`;
+  const strategy = prospect.leadIntelligence?.prospecting_strategy;
+  if (!strategy) return `<div class="intelligence-empty"><i data-lucide="route"></i><div><strong>No account strategy yet</strong><span>Run research to create the A-M account brief, stakeholder routes, message, and conversation plan.</span></div><button class="primary-button" type="button" data-intel-analyze="fresh"><i data-lucide="sparkles"></i><span>Analyze</span></button></div>`;
+
+  const decision = strategy.decision_summary || {};
+  const assessment = strategy.executive_assessment || {};
+  const gate = strategy.internal_readiness_gate || {};
+  const channelStrategy = strategy.channel_strategy || {};
+  const decisionRows = [
+    ["Primary", decision.primary_contact],
+    ["Second route", decision.secondary_contact],
+    ["Conversation hook", decision.best_conversation_hook || decision.best_title],
+    ["Pilot choice", decision.best_pilot_candidate || decision.best_title],
+    ["Best question", decision.best_question]
+  ].map(([label, value]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value || "Needs research")}</strong></div>`).join("");
+  const gateChecks = (gate.checks || []).map((item) => `<div><span>${escapeHtml(item.check)}</span><strong>${escapeHtml(titleCase(item.status || "verify"))}</strong></div>`).join("");
+  const gateActions = gate.policy_sensitive || gate.regulated_category ? `<div class="strategy-gate-actions"><button type="button" data-policy-decision="approved_conditions"><i data-lucide="shield-check"></i><span>Approve Conditions</span></button><button class="danger-button" type="button" data-policy-decision="parked"><i data-lucide="pause-circle"></i><span>Park Account</span></button></div>` : "";
+  const knownFacts = (assessment.known_facts || []).map((item) => `<article class="strategy-row"><div><span class="claim-label fact">Known fact</span><strong>${escapeHtml(item.statement)}</strong>${strategyEvidence(prospect, item.source_ids)}</div></article>`).join("");
+  const signals = (strategy.recent_signals || []).map((item) => `<article class="strategy-row"><div><span class="claim-label ${item.claim_type === "known_fact" ? "fact" : "hypothesis"}">${escapeHtml(titleCase(item.claim_type || "hypothesis"))}</span><strong>${escapeHtml(item.signal)}</strong><p>${escapeHtml(item.commercial_meaning || "")}</p>${strategyEvidence(prospect, item.source_ids)}</div><small>${escapeHtml(item.date_window || "Date unknown")} · ${Number(item.confidence || 0)}%</small></article>`).join("");
+  const titles = (strategy.title_analysis || []).map((item) => `<article class="strategy-title-row"><div><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml([item.os, item.geo, item.monetization].filter(Boolean).join(" · "))}</span></div><dl><div><dt>Objective</dt><dd>${escapeHtml(item.likely_objective || "Unknown")}</dd></div><div><dt>KPI</dt><dd>${escapeHtml(item.likely_kpi || "Unknown")}</dd></div><div><dt>Risk</dt><dd>${escapeHtml(item.main_risk || "Unknown")}</dd></div><div><dt>Ask</dt><dd>${escapeHtml(item.discovery_question || "")}</dd></div></dl>${strategyEvidence(prospect, item.source_ids)}</article>`).join("");
+  const hypotheses = (strategy.growth_hypotheses || []).map((item, index) => `<article class="strategy-hypothesis"><header><span>Hypothesis ${index + 1}</span><b>${Number(item.confidence || 0)}%</b></header><strong>${escapeHtml(item.hypothesis)}</strong><p><b>Evidence:</b> ${escapeHtml(item.evidence || "Not yet verified")}</p><p><b>Why it matters:</b> ${escapeHtml(item.why_it_matters || "")}</p><p><b>Ask:</b> ${escapeHtml(item.validation_question || "")}</p><p><b>AdAction angle:</b> ${escapeHtml(item.adaction_angle || "")}</p>${strategyEvidence(prospect, item.source_ids)}</article>`).join("");
+  const stakeholders = (strategy.stakeholder_map || []).map((item, index) => `<article class="strategy-stakeholder"><header><span>${index + 1}</span><div><strong>${escapeHtml(item.full_name || item.target_role || "Unresolved stakeholder")}</strong><small>${escapeHtml([item.role, titleCase(item.deal_role || "")].filter(Boolean).join(" · "))}</small></div></header><dl><div><dt>Purpose</dt><dd>${escapeHtml(item.learn || item.why_contact || "")}</dd></div><div><dt>Personal hook</dt><dd>${escapeHtml(item.personal_hook || "Needs research")}</dd></div><div><dt>Business hook</dt><dd>${escapeHtml(item.business_hook || "")}</dd></div><div><dt>CTA</dt><dd>${escapeHtml(item.cta || "")}</dd></div><div><dt>Do not pitch yet</dt><dd>${escapeHtml(item.do_not_pitch_yet || "")}</dd></div></dl>${strategyEvidence(prospect, item.source_ids)}</article>`).join("");
+  const firstTouch = strategy.recommended_first_touch || {};
+  const messages = [firstTouch.linkedin ? ["LinkedIn", firstTouch.linkedin] : null, firstTouch.email ? ["Email", firstTouch.email] : null].filter(Boolean).map(([label, item]) => {
+    const copyButton = gate.outreach_allowed
+      ? `<button data-copy-text="${escapeAttr([item.subject, item.body].filter(Boolean).join("\n\n"))}" data-copy-channel="${label.toLowerCase()}" data-copy-label="Strategy ${label}" title="Copy" aria-label="Copy"><i data-lucide="copy"></i></button>`
+      : `<button type="button" disabled aria-disabled="true" title="Resolve the readiness gate before copying"><i data-lucide="lock-keyhole"></i></button>`;
+    return `<article class="strategy-message ${gate.outreach_allowed ? "" : "blocked"}"><header><span class="pill">${label}</span><strong>${escapeHtml(item.subject || item.angle || "First touch")}</strong>${copyButton}</header><pre>${escapeHtml(item.body || "")}</pre>${(item.evidence || []).map((entry) => `<div class="message-evidence"><span class="claim-label ${entry.claim_type === "hypothesis" ? "hypothesis" : "fact"}">${escapeHtml(titleCase(entry.claim_type || "context"))}</span><p>${escapeHtml(entry.line)}</p>${strategyEvidence(prospect, entry.source_ids)}</div>`).join("") || strategyEvidence(prospect, item.source_ids)}</article>`;
+  }).join("");
+  const conversation = (strategy.conversation_tree || []).map((item) => `<article class="strategy-branch"><strong>If: ${escapeHtml(item.if_they_say)}</strong><p>${escapeHtml(item.respond_with)}</p><span>Next question: ${escapeHtml(item.next_question)}</span></article>`).join("");
+  const transition = strategy.adaction_transition || {};
+  const cta = strategy.consultation_cta || {};
+  const sequence = (strategy.multi_thread_sequence || []).map((item) => `<article class="strategy-sequence-row"><b>${escapeHtml(item.day || "Next")}</b><div><strong>${escapeHtml(item.full_name || item.target_role || "Next stakeholder")}</strong><span>${escapeHtml(item.purpose || "")}</span><small>${escapeHtml([item.channel, item.thesis].filter(Boolean).join(" · "))}</small></div></article>`).join("");
+  const risks = (strategy.risks || []).map((item) => `<article class="strategy-row"><div><strong>${escapeHtml(item.risk)}</strong><p>${escapeHtml(item.why_it_matters || "")}</p><span>${escapeHtml(item.handling || "")}</span>${strategyEvidence(prospect, item.source_ids)}</div></article>`).join("");
+  const scores = Object.entries(strategy.account_scores || {}).map(([key, item]) => `<article class="strategy-score"><div><span>${escapeHtml(titleCase(key))}</span><strong>${Number(item.score || 0)}/10</strong></div><p>${escapeHtml(item.rationale || "")}</p></article>`).join("");
+
+  return `<div class="strategy-decision-grid">${decisionRows}</div>
+    <article class="strategy-gate ${gate.outreach_allowed ? "approved" : "blocked"}"><header><div><span>Internal Readiness Gate</span><strong>${escapeHtml(titleCase(gate.status || "standard verification"))}</strong></div><b>${gate.outreach_allowed ? "Outreach eligible" : "Hold outreach"}</b></header><p>${escapeHtml(gate.reason || "")}</p><div class="strategy-gate-checks">${gateChecks}</div>${strategyEvidence(prospect, gate.source_ids)}${gateActions}</article>
+    <details class="strategy-section" open><summary><span>A</span><strong>Executive Account Assessment</strong></summary><div class="strategy-section-body"><h3>${escapeHtml(assessment.summary || "Assessment pending")}</h3><p>${escapeHtml(assessment.why_now || "")}</p>${knownFacts || `<div class="empty-state">No source-backed account fact yet.</div>`}<article class="strategy-channel"><span>Channel strategy</span><strong>${escapeHtml(channelStrategy.primary_route || "Choose after contact review")}</strong><p>${escapeHtml(channelStrategy.reason || "")}</p><small>${escapeHtml(channelStrategy.stop_rule || "")}</small></article></div></details>
+    <details class="strategy-section"><summary><span>B</span><strong>Recent 30-90 Day Signals</strong></summary><div class="strategy-section-body strategy-list">${signals || `<div class="empty-state">No dated signals verified.</div>`}</div></details>
+    <details class="strategy-section"><summary><span>C</span><strong>App and Title Analysis</strong></summary><div class="strategy-section-body strategy-list">${titles || `<div class="empty-state">No titles verified.</div>`}</div></details>
+    <details class="strategy-section"><summary><span>D</span><strong>Growth Hypotheses</strong></summary><div class="strategy-section-body strategy-hypothesis-grid">${hypotheses || `<div class="empty-state">No hypotheses prepared.</div>`}</div></details>
+    <details class="strategy-section"><summary><span>E-F</span><strong>Stakeholders and Person-First Angles</strong></summary><div class="strategy-section-body strategy-stakeholder-grid">${stakeholders || `<div class="empty-state">No named stakeholders found.</div>`}</div></details>
+    <details class="strategy-section"><summary><span>G</span><strong>Recommended First Touch</strong></summary><div class="strategy-section-body strategy-message-grid">${messages}</div></details>
+    <details class="strategy-section"><summary><span>H</span><strong>Follow-Up Conversation Tree</strong></summary><div class="strategy-section-body strategy-branch-grid">${conversation}</div></details>
+    <details class="strategy-section"><summary><span>I-J</span><strong>AdAction Transition and Consultation CTA</strong></summary><div class="strategy-section-body strategy-transition-grid"><article><span>When to transition</span><p>${escapeHtml(transition.when_to_use || "")}</p><strong>${escapeHtml(transition.language || "")}</strong><small>${escapeHtml(transition.commercial_framework || "")}</small>${strategyEvidence(prospect, transition.source_ids)}</article><article><span>${escapeHtml(cta.positioning || "Consultation")}</span><strong>${escapeHtml(cta.ask || "")}</strong><p>${escapeHtml(cta.agenda || "")}</p></article></div></details>
+    <details class="strategy-section"><summary><span>K</span><strong>Multi-Thread Sequence</strong></summary><div class="strategy-section-body strategy-list">${sequence}</div></details>
+    <details class="strategy-section"><summary><span>L</span><strong>Risks and Objections</strong></summary><div class="strategy-section-body strategy-list">${risks}</div></details>
+    <details class="strategy-section"><summary><span>M</span><strong>Overall Account Score</strong></summary><div class="strategy-section-body strategy-score-grid">${scores}</div></details>`;
+}
+
+function strategyEvidence(prospect, sourceIds = []) {
+  const ids = new Set(sourceIds || []);
+  const sources = [...(prospect?.leadIntelligence?.sources || []), ...(prospect?.appPortfolio?.evidence || [])]
+    .filter((source) => ids.has(source.source_id));
+  return sources.length ? evidenceLinks(sources, true) : `<span class="evidence-missing">Hypothesis or evidence pending</span>`;
 }
 
 function bestContactConfidence(prospect) {
@@ -2367,6 +2426,23 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  const policyDecision = event.target.closest("[data-policy-decision]");
+  if (policyDecision && selectedProspectId) {
+    const status = policyDecision.dataset.policyDecision;
+    const label = status === "parked" ? "Parking account..." : "Saving approved conditions...";
+    await runUiAction("policy-decision", label, async () => {
+      state = await api("/api/prospects/policy-decision", {
+        method: "POST",
+        body: JSON.stringify({ prospectId: selectedProspectId, status })
+      });
+    });
+    uiNotice = status === "parked"
+      ? "Account parked. Research and outreach remain on hold."
+      : "Conditions approved. Run research again to rebuild the strategy under those conditions.";
+    renderTopbar();
+    return;
+  }
+
   const removeProspect = event.target.closest("[data-remove-prospect-id]");
   if (removeProspect) {
     await removeProspectById(removeProspect.dataset.removeProspectId);
@@ -2711,29 +2787,12 @@ document.getElementById("apifyConfigForm").addEventListener("submit", async (eve
       personEnrichmentActorId: document.getElementById("personEnrichmentActorInput").value,
       companyPeopleInputTemplate: document.getElementById("companyPeopleInputTemplate").value,
       maxChargeUsd: Number(document.getElementById("apifyMaxChargeInput").value),
-      contactMaxChargeUsd: Number(document.getElementById("apifyContactMaxChargeInput").value)
+      contactMaxChargeUsd: Number(document.getElementById("apifyContactMaxChargeInput").value),
+      maxActorsPerLead: Number(document.getElementById("apifyMaxActorsInput").value),
+      cacheDays: Number(document.getElementById("apifyCacheDaysInput").value)
     })
   });
   document.getElementById("apifyTokenInput").value = "";
-  render();
-});
-
-document.getElementById("contactEnrichmentForm").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  state = await api("/api/integrations/contact-enrichment/configure", {
-    method: "POST",
-    body: JSON.stringify({
-      apiToken: document.getElementById("fullEnrichTokenInput").value,
-      webhookBaseUrl: document.getElementById("fullEnrichWebhookBaseUrlInput").value,
-      webhookSecret: document.getElementById("fullEnrichWebhookSecretInput").value,
-      includeWorkEmail: document.getElementById("fullEnrichWorkEmailInput").checked,
-      includePhone: document.getElementById("fullEnrichPhoneInput").checked,
-      includePersonalEmail: document.getElementById("fullEnrichPersonalEmailInput").checked
-    })
-  });
-  document.getElementById("fullEnrichTokenInput").value = "";
-  document.getElementById("fullEnrichWebhookSecretInput").value = "";
-  uiNotice = "Verified contact enrichment settings saved.";
   render();
 });
 
