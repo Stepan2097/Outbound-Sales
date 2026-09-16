@@ -1926,6 +1926,7 @@ function setView(viewName) {
     {
       prospects: "Dashboard",
       leads: "Leads",
+      warmup: "LinkedIn Warm-up",
       ai: "AI Operator",
       database: "Knowledge Base",
       products: "Products",
@@ -1940,6 +1941,11 @@ function setView(viewName) {
     }[viewName] || "Outbound Sales OS";
   if (viewName === "overview") {
     drawTrafficChart();
+  }
+  // Loaded when the tab is opened rather than at boot: it talks to a different
+  // database, and a workspace that never warms an account should not pay for it.
+  if (viewName === "warmup") {
+    loadWarmup();
   }
 }
 
@@ -3310,3 +3316,407 @@ document.getElementById("compareBtn").addEventListener("click", () => {
 });
 
 await bootApplication();
+
+/* ── LinkedIn warm-up ──────────────────────────────────────────────────────
+ *
+ * The list is Anty's profiles with this app's warm-up joined on, never the
+ * other way round. Every number shown here — today's quota, what is left, when
+ * the next session is due — comes from the server rather than being recomputed
+ * in the browser, so the figure on screen is the figure an action is checked
+ * against.
+ */
+
+const warmupState = {
+  config: null,
+  dashboard: null,
+  profiles: [],
+  selectedAccountId: null,
+  selectedProfileId: null,
+  detail: null,
+  busy: false,
+  error: ""
+};
+
+function warmupApi(path, options) {
+  return api(`/api/warmup${path}`, options);
+}
+
+const WARMUP_STATUS_TONE = {
+  warming: "tone-live",
+  paused: "tone-warn",
+  blocked: "tone-bad",
+  needs_attention: "tone-warn",
+  finished: "tone-done",
+  excluded: "tone-muted",
+  off: "tone-muted"
+};
+
+const WARMUP_STATUS_LABEL = {
+  warming: "Warming",
+  paused: "Paused",
+  blocked: "Blocked",
+  needs_attention: "Needs attention",
+  finished: "Finished",
+  excluded: "Excluded",
+  off: "Off"
+};
+
+function warmupRelativeTime(iso) {
+  if (!iso) return "—";
+  const minutes = Math.round((Date.parse(iso) - Date.now()) / 60000);
+  if (!Number.isFinite(minutes)) return "—";
+  const time = new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (minutes <= 0) return time;
+  if (minutes < 60) return `${time} · in ${minutes} min`;
+  return `${time} · in ${Math.round(minutes / 60)} h`;
+}
+
+/** What the "next session" cell says, which follows the quota and not the clock. */
+function warmupNextSessionCell(profile) {
+  const next = profile.nextSession;
+  if (profile.isRunningNow) return '<span class="warmup-due">open now</span>';
+  if (!next) return "—";
+  if (next.overdue) return '<span class="warmup-due">due now</span>';
+  if (next.today) return warmupRelativeTime(next.at);
+  return `tomorrow ${new Date(next.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+}
+
+function warmupConnectionsCell(profile) {
+  const { today = 0, total = 0, quota = 0, startsDay = null } = profile.connections || {};
+  if (quota > 0) return `${today}/${quota} <span class="warmup-subtle">· ${total} all time</span>`;
+  if (startsDay) return `<span class="warmup-subtle">from day ${startsDay}</span>`;
+  return `<span class="warmup-subtle">${total} all time</span>`;
+}
+
+function renderWarmupConfigNote() {
+  const note = document.getElementById("warmupConfigNote");
+  if (!note) return;
+  const config = warmupState.config;
+  const problems = [];
+
+  if (warmupState.error) problems.push(escapeHtml(warmupState.error));
+  if (config && !config.configured) {
+    problems.push(`The Anty database is not configured — set ${escapeHtml(config.missing.join(", "))} on the server.`);
+  }
+  if (config?.configured && !config.teamConfigured) {
+    problems.push("ANTY_TEAM_ID is not set, so every team's profiles are listed.");
+  }
+  if (config?.configured && !config.crmConfigured) {
+    problems.push(`The lead queue is off — set ${escapeHtml(config.crmMissing.join(", "))} to send connection requests to named people.`);
+  }
+  if (config?.configured && !config.secretsConfigured) {
+    problems.push("LINKEDIN_SECRET_KEY is not set, so account passwords cannot be stored.");
+  }
+
+  note.hidden = problems.length === 0;
+  note.innerHTML = problems.map((problem) => `<p>${problem}</p>`).join("");
+}
+
+function renderWarmupStats() {
+  const strip = document.getElementById("warmupStatsStrip");
+  if (!strip) return;
+  const dashboard = warmupState.dashboard;
+  if (!dashboard) {
+    strip.innerHTML = "";
+    return;
+  }
+
+  const { totals, todayProgress } = dashboard;
+  const window = warmupState.config?.window;
+  const cards = [
+    { label: "Warming", value: totals.warming },
+    { label: "Paused", value: totals.paused },
+    { label: "Finished", value: totals.completed },
+    { label: "Not started", value: totals.idle },
+    { label: "Today", value: `${todayProgress.done}/${todayProgress.planned}` },
+    { label: "Session window", value: window ? `${window.label}${window.open ? "" : " · closed"}` : "—" }
+  ];
+
+  strip.innerHTML = cards
+    .map((card) => `<div class="warmup-stat"><span>${escapeHtml(card.label)}</span><strong>${escapeHtml(String(card.value))}</strong></div>`)
+    .join("");
+}
+
+function renderWarmupProfiles() {
+  const body = document.getElementById("warmupProfileTableBody");
+  if (!body) return;
+
+  if (!warmupState.profiles.length) {
+    body.innerHTML = '<tr><td colspan="6"><div class="empty-state">No profiles match.</div></td></tr>';
+    return;
+  }
+
+  body.innerHTML = warmupState.profiles
+    .map((profile) => {
+      const status = profile.status;
+      const account = profile.account;
+      return `
+        <tr data-warmup-profile="${escapeHtml(profile.id)}" class="${profile.id === warmupState.selectedProfileId ? "is-selected" : ""}">
+          <td>
+            <strong>${escapeHtml(profile.name)}</strong>
+            <div class="warmup-subtle">${escapeHtml(profile.owner || "—")}${profile.proxy ? " · proxied" : " · no proxy"}</div>
+          </td>
+          <td><span class="pill ${WARMUP_STATUS_TONE[status] || "tone-muted"}">${escapeHtml(WARMUP_STATUS_LABEL[status] || status)}</span></td>
+          <td>${escapeHtml(profile.day || "—")}</td>
+          <td>${warmupConnectionsCell(profile)}</td>
+          <td>${warmupNextSessionCell(profile)}</td>
+          <td class="warmup-row-actions">
+            ${account
+              ? '<button class="text-button" type="button" data-warmup-open>Open</button>'
+              : '<button class="primary-button" type="button" data-warmup-adopt>Warm up</button>'}
+          </td>
+        </tr>`;
+    })
+    .join("");
+}
+
+function renderWarmupDetail() {
+  const title = document.getElementById("warmupDetailTitle");
+  const subtitle = document.getElementById("warmupDetailSubtitle");
+  const body = document.getElementById("warmupDetailBody");
+  if (!title || !body) return;
+
+  const detail = warmupState.detail;
+  if (!detail) {
+    title.textContent = "No profile selected";
+    subtitle.textContent = "Pick a profile to see its day, today's quota and its own log";
+    body.innerHTML = '<div class="empty-state">Select a profile from the list.</div>';
+    refreshIcons();
+    return;
+  }
+
+  const account = detail.account;
+  const warmup = account.warmup;
+  title.textContent = account.label;
+  subtitle.textContent = warmup
+    ? `${warmup.strategyName} · day ${warmup.day} of ${warmup.totalDays}${warmup.phase ? ` · ${warmup.phase}` : ""}`
+    : "Not warming yet";
+
+  const actionRows = warmup && !warmup.finished
+    ? (warmupState.config?.actionKinds || [])
+        .map(({ kind, label }) => {
+          const quota = warmup.quotas[kind] ?? 0;
+          const done = warmup.done[kind] ?? 0;
+          // A kind with no quota today is forbidden, not merely finished, so it
+          // gets no button rather than a disabled-looking one.
+          if (quota === 0) {
+            return `<div class="warmup-action is-off"><span>${escapeHtml(label)}</span><em>not allowed today</em></div>`;
+          }
+          return `
+            <div class="warmup-action">
+              <span>${escapeHtml(label)}</span>
+              <strong>${done}/${quota}</strong>
+              <button class="text-button" type="button" data-warmup-record="${escapeHtml(kind)}" ${done >= quota ? "disabled" : ""}>Record one</button>
+            </div>`;
+        })
+        .join("")
+    : "";
+
+  const controls = [];
+  if (account.status === "excluded") {
+    controls.push('<button class="text-button" type="button" data-warmup-control="include">Put back in the list</button>');
+  } else if (!warmup || warmup.state === "completed" || !warmup.runId) {
+    controls.push('<button class="primary-button" type="button" data-warmup-control="start">Start warm-up</button>');
+    controls.push('<button class="text-button" type="button" data-warmup-control="exclude">Exclude</button>');
+  } else if (warmup.state === "paused") {
+    controls.push('<button class="primary-button" type="button" data-warmup-control="resume">Resume</button>');
+    controls.push('<button class="danger-button" type="button" data-warmup-control="stop">Stop</button>');
+  } else {
+    controls.push('<button class="text-button" type="button" data-warmup-control="warning">Got a warning</button>');
+    controls.push('<button class="danger-button" type="button" data-warmup-control="stop">Stop</button>');
+  }
+
+  const healthOptions = (warmupState.config?.healthValues || [])
+    .map(({ value, label }) => `<option value="${escapeHtml(value)}" ${account.health === value ? "selected" : ""}>${escapeHtml(label)}</option>`)
+    .join("");
+
+  const rules = warmup?.rules?.length
+    ? `<ul class="warmup-rules">${warmup.rules.map((rule) => `<li>${escapeHtml(rule)}</li>`).join("")}</ul>`
+    : "";
+
+  const sessions = detail.sessions.length
+    ? detail.sessions
+        .slice(0, 8)
+        .map((session) => {
+          const did = Object.entries(session.actions || {}).map(([kind, count]) => `${kind}: ${count}`).join(", ");
+          return `<li><strong>${new Date(session.startedAt).toLocaleString()}</strong> · ${
+            session.endedAt ? `${session.durationMin} min` : "open"
+          } · ${escapeHtml(session.source)}${did ? ` · ${escapeHtml(did)}` : ""}</li>`;
+        })
+        .join("")
+    : "<li>No sessions recorded yet.</li>";
+
+  const events = detail.events.length
+    ? detail.events
+        .slice(0, 12)
+        .map((event) => `<li class="level-${escapeHtml(event.level)}"><span>${new Date(event.created_at).toLocaleString()}</span> ${escapeHtml(event.message)}</li>`)
+        .join("")
+    : "<li>Nothing logged yet.</li>";
+
+  body.innerHTML = `
+    <div class="warmup-detail-controls">${controls.join("")}</div>
+    ${warmup?.pausedUntil ? `<p class="warmup-paused">Paused after a warning until ${escapeHtml(warmup.pausedUntil)}.</p>` : ""}
+    ${actionRows ? `<div class="warmup-actions">${actionRows}</div>` : ""}
+    ${rules}
+    <div class="warmup-health">
+      <label for="warmupHealthSelect">Health</label>
+      <select id="warmupHealthSelect">${healthOptions}</select>
+      <input id="warmupHealthNote" type="text" placeholder="What did you see?" value="${escapeHtml(account.healthNote || "")}" />
+      <button class="text-button" type="button" data-warmup-health>Save</button>
+    </div>
+    <h3>Sessions</h3>
+    <ul class="warmup-sessions">${sessions}</ul>
+    <h3>Log</h3>
+    <ul class="warmup-events">${events}</ul>
+  `;
+  refreshIcons();
+}
+
+async function loadWarmupProfiles() {
+  const search = document.getElementById("warmupSearchInput")?.value.trim() || "";
+  const platform = document.getElementById("warmupPlatformSelect")?.value || "linkedin";
+  const params = new URLSearchParams({ platform });
+  if (search) params.set("q", search);
+
+  const payload = await warmupApi(`/profiles?${params}`);
+  warmupState.profiles = payload.profiles;
+  renderWarmupProfiles();
+}
+
+async function loadWarmupAccountDetail(accountId) {
+  if (!accountId) {
+    warmupState.detail = null;
+    renderWarmupDetail();
+    return;
+  }
+  const [accountPayload, sessionsPayload, eventsPayload] = await Promise.all([
+    warmupApi(`/accounts?id=${encodeURIComponent(accountId)}`),
+    warmupApi(`/sessions?accountId=${encodeURIComponent(accountId)}`),
+    warmupApi(`/events?accountId=${encodeURIComponent(accountId)}&limit=30`)
+  ]);
+  warmupState.detail = {
+    account: accountPayload.account,
+    sessions: sessionsPayload.sessions,
+    events: eventsPayload.events
+  };
+  renderWarmupDetail();
+}
+
+async function loadWarmup({ full = true } = {}) {
+  if (warmupState.busy) return;
+  warmupState.busy = true;
+  warmupState.error = "";
+  try {
+    if (full || !warmupState.config) {
+      warmupState.config = await warmupApi("/config");
+    }
+    renderWarmupConfigNote();
+    if (!warmupState.config.configured) {
+      warmupState.profiles = [];
+      renderWarmupProfiles();
+      renderWarmupStats();
+      return;
+    }
+
+    // Reconciling Anty's "profile is running" flag with the sessions table is
+    // what makes the Sessions column true; it is cheap and idempotent, so the
+    // screen does it on every load rather than relying on somebody remembering.
+    await warmupApi("/sync", { method: "POST" }).catch(() => null);
+
+    warmupState.dashboard = await warmupApi("/dashboard");
+    renderWarmupStats();
+    await loadWarmupProfiles();
+    if (warmupState.selectedAccountId) await loadWarmupAccountDetail(warmupState.selectedAccountId);
+  } catch (error) {
+    warmupState.error = error.message;
+    renderWarmupConfigNote();
+  } finally {
+    warmupState.busy = false;
+    refreshIcons();
+  }
+}
+
+async function warmupControl(action, extra = {}) {
+  if (!warmupState.selectedAccountId) return;
+  try {
+    await warmupApi("/control", {
+      method: "POST",
+      body: JSON.stringify({ accountId: warmupState.selectedAccountId, action, ...extra })
+    });
+    await loadWarmup({ full: false });
+  } catch (error) {
+    warmupState.error = error.message;
+    renderWarmupConfigNote();
+  }
+}
+
+async function selectWarmupProfile(profileId) {
+  const profile = warmupState.profiles.find((item) => item.id === profileId);
+  if (!profile) return;
+  warmupState.selectedProfileId = profileId;
+  warmupState.selectedAccountId = profile.account?.id || null;
+  renderWarmupProfiles();
+  await loadWarmupAccountDetail(warmupState.selectedAccountId);
+}
+
+/** Put a profile on warm-up: create its account, then start the run. */
+async function adoptWarmupProfile(profileId) {
+  const profile = warmupState.profiles.find((item) => item.id === profileId);
+  if (!profile) return;
+  try {
+    const created = await warmupApi("/accounts", {
+      method: "POST",
+      body: JSON.stringify({ label: profile.name, profileRemoteId: profile.id })
+    });
+    warmupState.selectedProfileId = profile.id;
+    warmupState.selectedAccountId = created.account.id;
+    await warmupControl("start");
+  } catch (error) {
+    warmupState.error = error.message;
+    renderWarmupConfigNote();
+  }
+}
+
+document.getElementById("warmupRefreshBtn")?.addEventListener("click", () => loadWarmup());
+document.getElementById("warmupPlatformSelect")?.addEventListener("change", () => loadWarmupProfiles());
+document.getElementById("warmupSearchInput")?.addEventListener("input", () => {
+  clearTimeout(warmupState.searchTimer);
+  warmupState.searchTimer = setTimeout(() => loadWarmupProfiles(), 250);
+});
+
+document.getElementById("warmupProfileTableBody")?.addEventListener("click", (event) => {
+  const row = event.target.closest("[data-warmup-profile]");
+  if (!row) return;
+  const profileId = row.dataset.warmupProfile;
+  if (event.target.closest("[data-warmup-adopt]")) {
+    adoptWarmupProfile(profileId);
+    return;
+  }
+  selectWarmupProfile(profileId);
+});
+
+document.getElementById("warmupDetailBody")?.addEventListener("click", (event) => {
+  const control = event.target.closest("[data-warmup-control]");
+  if (control) {
+    warmupControl(control.dataset.warmupControl);
+    return;
+  }
+  const record = event.target.closest("[data-warmup-record]");
+  if (record) {
+    warmupControl("record", { kind: record.dataset.warmupRecord });
+    return;
+  }
+  if (event.target.closest("[data-warmup-health]")) {
+    const health = document.getElementById("warmupHealthSelect")?.value;
+    const note = document.getElementById("warmupHealthNote")?.value || "";
+    warmupApi("/accounts/health", {
+      method: "POST",
+      body: JSON.stringify({ accountId: warmupState.selectedAccountId, health, note })
+    })
+      .then(() => loadWarmup({ full: false }))
+      .catch((error) => {
+        warmupState.error = error.message;
+        renderWarmupConfigNote();
+      });
+  }
+});

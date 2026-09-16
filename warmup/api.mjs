@@ -217,6 +217,12 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         const run = account ? runByAccount.get(account.id) || null : null;
         const last = account?.wl_sessions?.[0] || null;
         const status = deriveStatus(account, run, todayIso);
+        // The day the account is on, so the list's Day column has something to
+        // put there. Read from the run's own snapshot, which is what the detail
+        // panel reads too — two ways of counting the day is two answers.
+        const day = run && run.state !== "stopped"
+          ? { day: currentDay(new Date(run.started_at), run.paused_days ?? 0), totalDays: totalDays(run.strategy_snapshot) }
+          : null;
         return {
           id: row.id,
           name: row.name,
@@ -227,6 +233,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           owner: row.created_by_name?.trim() || row.created_by_email || null,
           ownerEmail: row.created_by_email,
           account: account ? { id: account.id, status: account.status, phase: phaseOf(account, run) } : null,
+          day: day && day.day <= day.totalDays ? `${day.day}/${day.totalDays}` : null,
           health: account?.health ?? "ok",
           healthNote: account?.health_note ?? null,
           status,
@@ -339,6 +346,20 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
 
     // ── accounts ───────────────────────────────────────────────────────────
     if (method === "GET" && path === "/accounts") {
+      // One account by id, for the detail panel — the list is too heavy an
+      // answer to a question about a single row.
+      const single = url.searchParams.get("id");
+      if (single) {
+        const account = await loadAccount(single);
+        if (!account) return fail(response, sendJson, 404, "Account not found");
+        sendJson(response, 200, {
+          success: true,
+          secretsConfigured: secretsConfigured(),
+          account: await describeAccount(account)
+        });
+        return true;
+      }
+
       const status = url.searchParams.get("status");
       const search = (url.searchParams.get("q") || "").trim();
 

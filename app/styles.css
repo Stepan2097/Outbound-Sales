@@ -4563,3 +4563,240 @@ dialog {
     grid-template-columns: 1fr;
   }
 }
+
+/* ── LinkedIn warm-up ───────────────────────────────────────────────────── */
+
+.warmup-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(320px, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.warmup-layout .span-2 {
+  grid-column: 1 / -1;
+}
+
+.warmup-config-note {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(183, 121, 31, 0.32);
+  background: rgba(183, 121, 31, 0.08);
+  color: var(--amber);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.warmup-config-note p {
+  margin: 0 0 6px;
+}
+
+.warmup-config-note p:last-child {
+  margin-bottom: 0;
+}
+
+.warmup-stats-strip {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 1100px) {
+  .warmup-stats-strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .warmup-stats-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.warmup-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--surface-strong);
+  min-width: 108px;
+}
+
+.warmup-stat span {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.warmup-stat strong {
+  font-size: 18px;
+}
+
+.warmup-list-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.warmup-list-panel tbody tr {
+  cursor: pointer;
+}
+
+.warmup-list-panel tbody tr.is-selected {
+  background: var(--teal-weak);
+}
+
+.warmup-row-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.warmup-subtle {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* The one cell that has to be read across the room: today's work is still
+   outstanding and its planned time has gone. */
+.warmup-due {
+  color: var(--amber);
+  font-weight: 800;
+}
+
+/* The colour comes from the theme variables rather than fixed hexes: the
+   base .pill is written for the light palette, and a status nobody can read in
+   the dark theme is a status column that does not work. */
+.pill.tone-live { background: var(--teal-weak); color: var(--teal); }
+.pill.tone-warn { background: rgba(183, 121, 31, 0.16); color: var(--amber); }
+.pill.tone-bad { background: rgba(194, 65, 53, 0.14); color: var(--red); }
+.pill.tone-done { background: rgba(37, 99, 235, 0.12); color: var(--blue); }
+.pill.tone-muted { background: var(--surface-strong); color: var(--muted); }
+
+.warmup-detail-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.warmup-paused {
+  margin: 0 0 12px;
+  color: var(--amber);
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.warmup-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.warmup-action {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--surface-strong);
+  font-size: 13px;
+}
+
+.warmup-action strong {
+  font-variant-numeric: tabular-nums;
+}
+
+/* A quota that is spent reads as spent. The button stays in place rather than
+   disappearing, so the row does not reflow the moment the last one lands. */
+.warmup-action button[disabled] {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.warmup-action.is-off {
+  grid-template-columns: 1fr auto;
+  color: var(--muted);
+}
+
+.warmup-action.is-off em {
+  font-style: normal;
+  font-size: 12px;
+}
+
+.warmup-rules {
+  margin: 0 0 14px;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.warmup-rules li {
+  margin-bottom: 4px;
+}
+
+.warmup-health {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.warmup-health label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.warmup-health input {
+  flex: 1 1 160px;
+}
+
+.warmup-detail-panel h3 {
+  margin: 16px 0 8px;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.warmup-sessions,
+.warmup-events {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12.5px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.warmup-sessions li,
+.warmup-events li {
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: var(--surface-strong);
+  color: var(--ink);
+}
+
+.warmup-events li span {
+  color: var(--muted);
+  margin-right: 6px;
+}
+
+.warmup-events li.level-warn {
+  background: rgba(183, 121, 31, 0.1);
+}
+
+.warmup-events li.level-error {
+  background: rgba(194, 65, 53, 0.1);
+}
+
+@media (max-width: 1100px) {
+  .warmup-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

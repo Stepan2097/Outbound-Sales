@@ -43,6 +43,7 @@
           <button class="nav-item active" data-view="prospects"><i data-lucide="layout-dashboard"></i><span>Dashboard</span></button>
           <button class="nav-item" data-view="leads"><i data-lucide="users"></i><span>Leads</span></button>
           <button class="nav-item" data-view="ai"><i data-lucide="bot"></i><span>AI Operator</span></button>
+          <button class="nav-item" data-view="warmup"><i data-lucide="flame"></i><span>Warm-up</span></button>
           <button class="nav-item" data-view="database"><i data-lucide="book-open"></i><span>Knowledge Base</span></button>
           <button class="nav-item" data-view="products"><i data-lucide="package"></i><span>Products</span></button>
           <button class="nav-item" data-view="account"><i data-lucide="circle-user-round"></i><span>Account</span></button>
@@ -608,6 +609,68 @@
                 </div>
               </div>
               <div class="assistant-action-list" id="assistantActionList"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="view-warmup">
+          <div class="warmup-layout">
+            <section class="panel span-2">
+              <div class="panel-heading">
+                <div>
+                  <h2>LinkedIn Warm-up</h2>
+                  <p>Anty profiles, the schedule they run to, and what has already happened today</p>
+                </div>
+                <button class="text-button" id="warmupRefreshBtn" type="button"><i data-lucide="refresh-cw"></i><span>Refresh</span></button>
+              </div>
+              <div class="warmup-config-note" id="warmupConfigNote" hidden></div>
+              <div class="warmup-stats-strip" id="warmupStatsStrip"></div>
+            </section>
+
+            <section class="panel warmup-list-panel">
+              <div class="panel-heading">
+                <div>
+                  <h2>Profiles</h2>
+                  <p>The list is Anty's profiles with the warm-up joined on — an account here that Anty does not have would be a browser nobody can open</p>
+                </div>
+                <div class="warmup-list-controls">
+                  <input id="warmupSearchInput" type="search" placeholder="Search by profile name" aria-label="Search profiles" />
+                  <select id="warmupPlatformSelect" aria-label="Platform">
+                    <option value="linkedin">LinkedIn</option>
+                    <option value="all">Every type</option>
+                    <option value="facebook">Facebook</option>
+                    <option value="instagram">Instagram</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Profile</th>
+                      <th>Status</th>
+                      <th>Day</th>
+                      <th>Connections</th>
+                      <th>Next session</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="warmupProfileTableBody"></tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="panel warmup-detail-panel">
+              <div class="panel-heading">
+                <div>
+                  <h2 id="warmupDetailTitle">No profile selected</h2>
+                  <p id="warmupDetailSubtitle">Pick a profile to see its day, today's quota and its own log</p>
+                </div>
+              </div>
+              <div id="warmupDetailBody">
+                <div class="empty-state">Select a profile from the list.</div>
+              </div>
             </section>
           </div>
         </section>
