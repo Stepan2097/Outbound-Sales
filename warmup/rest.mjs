@@ -66,6 +66,12 @@ class Query {
     return this;
   }
 
+  /** Everything except these. Same comma caveat as `in`. */
+  notIn(column, values) {
+    this.params.append(column, `not.in.(${(values || []).map(filterValue).join(",")})`);
+    return this;
+  }
+
   /** Case-insensitive match. `*` is the wildcard, so a bare value is an exact one. */
   ilike(column, value) {
     this.params.append(column, `ilike.${filterValue(value)}`);

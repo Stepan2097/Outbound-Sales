@@ -15,6 +15,10 @@ import {
   describeTargeting, folderNameOf, forecastFor, listFolders, normalizeFilters
 } from "./targeting.mjs";
 import {
+  AUDIT_HIDDEN_TYPES, MAX_THREADS_PER_RUN, lastSyncedAt, listThreads, markRead, markSynced, normalizeThreadInput,
+  outreachFor, readThread, storeThread, syncSummary, threadKeyOf, unreadCount
+} from "./inbox.mjs";
+import {
   allowanceReason, claimCapacity, claimCutoff, defaultFilters, describeCampaign, isCampaignState,
   migrateCampaigns, moveTo, nextOrder, normalizeCampaign, progressApproximate, progressFrom, renumber,
   runningFor, targetingOf
@@ -354,6 +358,32 @@ async function enrichCampaigns(campaigns) {
   return enriched;
 }
 
+/**
+ * A thread as every screen sees it: what the inbox module derived, plus who
+ * holds it and what had already been done with the person.
+ *
+ * `accountLabel` is the profile's name in this app; `accountIdentity` is who
+ * the browser turned out to be signed in as. Both, because they disagree often
+ * enough — "Profile 47 - linkedin" is not something to put in front of a seller
+ * deciding which of five logins somebody answered.
+ */
+function describeThread(thread, { labels, identities, outreach }) {
+  const found = outreach.get(threadKeyOf(thread)) || { crmContactId: null, outreachStatus: null };
+  return {
+    threadKey: thread.threadKey,
+    accountId: thread.accountId,
+    accountLabel: labels.get(thread.accountId) ?? null,
+    accountIdentity: identities.get(thread.accountId)?.name ?? null,
+    participant: thread.participant,
+    lastMessage: thread.lastMessage,
+    messageCount: thread.messageCount,
+    unread: thread.unread,
+    crmContactId: found.crmContactId,
+    outreachStatus: found.outreachStatus,
+    lastSyncedAt: thread.lastSyncedAt
+  };
+}
+
 export async function handleWarmupApi({ request, response, url, sendJson, readJson, campaigns: campaignStore }) {
   const path = url.pathname.replace(/^\/api\/warmup/, "") || "/";
   const method = request.method;
@@ -379,6 +409,21 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
   try {
     // ── configuration ──────────────────────────────────────────────────────
     if (method === "GET" && path === "/config") {
+      // The nav badge's number, so a screen that already asks for the config
+      // does not need a second request to know whether anybody wrote.
+      //
+      // Null rather than 0 when the database cannot be reached: "nobody wrote"
+      // and "we could not tell" have to be tellable apart, or a badge that
+      // quietly vanishes during an outage reads as an empty inbox.
+      let unreadReplies = null;
+      if (anty.configured()) {
+        try {
+          unreadReplies = await unreadCount();
+        } catch (error) {
+          console.error("[warmup] could not count unread replies:", error.message);
+        }
+      }
+
       sendJson(response, 200, {
         success: true,
         configured: anty.configured(),
@@ -389,7 +434,8 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         teamConfigured: Boolean(antyTeamId()),
         window: { ...SESSION_WINDOW, label: windowLabel(), open: insideWindow() },
         actionKinds: ACTION_KINDS.map((kind) => ({ kind, label: ACTION_LABEL[kind] })),
-        healthValues: HEALTH_VALUES.map((value) => ({ value, label: HEALTH_LABEL[value] }))
+        healthValues: HEALTH_VALUES.map((value) => ({ value, label: HEALTH_LABEL[value] })),
+        unreadReplies
       });
       return true;
     }
@@ -427,7 +473,11 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         }
       }
 
+      // Messages live in this table too, and there are far more of them than
+      // there are audit lines — eight replies would push a whole day of history
+      // off a panel that shows eight rows.
       const recent = await anty.from("wl_events").select("id,account_id,level,type,message,created_at")
+        .notIn("type", AUDIT_HIDDEN_TYPES)
         .order("created_at", { ascending: false }).limit(8).rows();
 
       sendJson(response, 200, {
@@ -1064,7 +1114,11 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       const level = url.searchParams.get("level");
       const limit = intParam(url.searchParams.get("limit"), 100, 500);
 
-      let query = anty.from("wl_events").select("id,account_id,level,type,message,meta,created_at");
+      // This route hands back `meta`, and for a message row `meta` is the
+      // message — somebody's private reply, body and all. The inbox has screens
+      // of its own; an account's history panel is not one of them.
+      let query = anty.from("wl_events").select("id,account_id,level,type,message,meta,created_at")
+        .notIn("type", AUDIT_HIDDEN_TYPES);
       if (accountId) query = query.eq("account_id", accountId);
       if (level && level !== "all") query = query.eq("level", level);
       const events = await query.order("created_at", { ascending: false }).limit(limit).rows();
@@ -1604,7 +1658,96 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       return true;
     }
 
+    // ── the inbox ──────────────────────────────────────────────────────────
+    //
+    // Everything under here reads and writes through `warmup/inbox.mjs` and
+    // never names the table the messages happen to live in. That is the whole
+    // point of that module: when a Postgres password arrives and threads get
+    // tables of their own, this file does not change.
+    if (method === "GET" && path === "/inbox") {
+      const accountId = url.searchParams.get("accountId") || null;
+      const threads = await listThreads({ accountId, unreadOnly: url.searchParams.get("unread") === "1" });
+
+      const accounts = await anty.from("wl_accounts").select("id,label").rows();
+      const [identities, outreach] = await Promise.all([loginIdentities(), outreachFor(threads)]);
+      const labels = new Map(accounts.map((account) => [account.id, account.label]));
+
+      sendJson(response, 200, {
+        success: true,
+        unread: threads.filter((thread) => thread.unread).length,
+        // Top level as well as per thread: the one case this value decides —
+        // an empty inbox — is the case with no thread to carry it, and
+        // "nothing arrived" and "the agent never ran" need different people to
+        // do different things.
+        sync: await syncSummary(accounts.map((account) => account.id)),
+        threads: threads.map((thread) => describeThread(thread, { labels, identities, outreach }))
+      });
+      return true;
+    }
+
+    if (method === "GET" && path === "/inbox/thread") {
+      const accountId = url.searchParams.get("accountId") || "";
+      const threadKey = url.searchParams.get("threadKey") || "";
+      if (!accountId || !threadKey) return fail(response, sendJson, 400, "A thread needs an accountId and a threadKey");
+
+      const found = await readThread({ accountId, threadKey });
+      if (!found) return fail(response, sendJson, 404, "Thread not found");
+
+      const account = await loadAccount(accountId);
+      const [identities, outreach] = await Promise.all([loginIdentities(), outreachFor([found.thread])]);
+
+      sendJson(response, 200, {
+        success: true,
+        thread: describeThread(found.thread, {
+          labels: new Map(account ? [[account.id, account.label]] : []),
+          identities,
+          outreach
+        }),
+        messages: found.messages
+      });
+      return true;
+    }
+
+    if (method === "POST" && path === "/inbox/read") {
+      const body = await readJson(request);
+      if (!body) return fail(response, sendJson, 400, "Invalid JSON body");
+      const accountId = String(body.accountId || "");
+      const threadKey = String(body.threadKey || "");
+      if (!accountId || !threadKey) return fail(response, sendJson, 400, "A thread needs an accountId and a threadKey");
+      if (!await loadAccount(accountId)) return fail(response, sendJson, 404, "Account not found");
+
+      // Marking an already-read thread is a harmless no-op, and the mark is
+      // written anyway: opening a thread twice is the normal case, and the
+      // second mark is what keeps it read when a reply landed between the two.
+      const readAt = await markRead(accountId, threadKey);
+      // The badge's new number, so the one screen that just changed it does not
+      // have to ask for the whole config again to find out.
+      sendJson(response, 200, { success: true, readAt, unread: await unreadCount() });
+      return true;
+    }
+
     // ── the seam between the portal and the agent ──────────────────────────
+    // The agent knows a profile by its name, not by an id, and has to resolve
+    // one to the other before it can ask for anything else. Under /agent so the
+    // agent token reaches it, and deliberately thin — ids, names and the linked
+    // profile, nothing about proxies, no secrets and nothing from the CRM. A
+    // token sitting on somebody's laptop is not a copy of the workspace.
+    if (method === "GET" && path === "/agent/accounts") {
+      const rows = await anty.from("wl_accounts").select("id,label,login,profile_remote_id,status,health").rows();
+      sendJson(response, 200, {
+        success: true,
+        accounts: rows.map((row) => ({
+          id: row.id,
+          label: row.label,
+          login: row.login,
+          profileRemoteId: row.profile_remote_id,
+          status: row.status,
+          health: row.health
+        }))
+      });
+      return true;
+    }
+
     if (method === "GET" && path === "/agent") {
       const accountId = url.searchParams.get("accountId");
       // Without an account, the one thing worth answering is whether the agent
@@ -1641,6 +1784,11 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         },
         queue: claims.map((row) => describeClaim(row, owners.get(row.id) ?? null)),
         session: session ? { id: session.id, startedAt: session.started_at } : null,
+        // Where the agent stops reading. Answered by the portal rather than
+        // kept in a file beside the agent, because a Mac that gets replaced or
+        // a portal that gets re-pointed would otherwise re-read a year of
+        // history — slow, and a pattern somebody notices.
+        inbox: { lastSyncedAt: await lastSyncedAt(account.id), maxThreads: MAX_THREADS_PER_RUN },
         // The agent asks rather than carrying its own copy, so moving the
         // window on screen moves it for today's run too.
         window: { ...SESSION_WINDOW, label: windowLabel(), open: insideWindow() }
@@ -1807,6 +1955,28 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           meta: { health: body.health, note }
         });
         sendJson(response, 200, { success: true });
+        return true;
+      }
+
+      // ── the inbox, as the agent found it ──────────────────────────────
+      //
+      // Upserting, not appending: a message already stored for this account is
+      // skipped rather than duplicated, and the suppression is a read before a
+      // write because there is no unique index to lean on. See `inbox.mjs`.
+      if (action === "inbox.thread") {
+        const input = normalizeThreadInput(body);
+        if (input.error) return fail(response, sendJson, 400, input.error);
+        sendJson(response, 200, { success: true, ...await storeThread({ account, input }) });
+        return true;
+      }
+
+      // The sync finished. Written even when it saw nothing, which is the point
+      // of it: without this mark an empty inbox cannot tell "no new messages"
+      // from "the agent never looked".
+      if (action === "inbox.done") {
+        const seen = Number(body.threadsSeen);
+        const threadsSeen = Number.isFinite(seen) ? Math.max(0, Math.trunc(seen)) : 0;
+        sendJson(response, 200, { success: true, threadsSeen, syncedAt: await markSynced(account.id, threadsSeen) });
         return true;
       }
 

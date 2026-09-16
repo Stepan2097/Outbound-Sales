@@ -393,7 +393,26 @@ async function handleApi(request, response, url) {
     return;
   }
 
-  if (url.pathname.startsWith("/api/webhooks/")) {
+  // The warm-up agent runs on somebody's Mac beside Anty. It has no workspace
+  // session and cannot get one, so it carries a shared token — matched here,
+  // ahead of the session gate, exactly as the FullEnrich webhook above is.
+  //
+  // The prefix is the whole scope. Everything else under /api/warmup, the inbox
+  // read API included, stays behind the session: a token that can post a
+  // message must not be able to read the workspace.
+  if (url.pathname === "/api/warmup/agent" || url.pathname.startsWith("/api/warmup/agent/")) {
+    const expectedAgentToken = process.env.WARMUP_AGENT_TOKEN || "";
+    // In a header, never a query parameter — those land in access logs.
+    const suppliedAgentToken = cleanText(request.headers["x-agent-token"] || "");
+    // Unset means closed, not open. An agent route that opens because a
+    // deployment forgot a variable is a service-role key on the public internet,
+    // and AUTH_DEV_BYPASS must not stand in for the token either — this gate
+    // runs before authenticateApiRequest is ever reached.
+    if (!expectedAgentToken || !secretsMatch(suppliedAgentToken, expectedAgentToken)) {
+      sendJson(response, 401, { success: false, error: "Agent authentication failed." });
+      return;
+    }
+  } else if (url.pathname.startsWith("/api/webhooks/")) {
     const suppliedToken = cleanText(request.headers["x-webhook-token"] || String(request.headers.authorization || "").replace(/^Bearer\s+/i, ""));
     if (!state.transcriptVault || suppliedToken !== decryptSecret(state.transcriptVault)) {
       sendJson(response, 401, { error: "Webhook authentication failed." });
