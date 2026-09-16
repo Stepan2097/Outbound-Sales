@@ -63,7 +63,6 @@
           </div>
           <div class="topbar-actions">
             <select id="productSelect" aria-label="Product for outreach"></select>
-            <select id="activeLinkedinSelect" aria-label="Active LinkedIn sender"><option value="">No LinkedIn sender</option></select>
             <button class="icon-button" id="accountMenuBtn" type="button" title="Account" aria-label="Open account"><i data-lucide="circle-user-round"></i></button>
             <button class="primary-button" id="quickPrepareBtn"><i data-lucide="wand-sparkles"></i><span>Run Research</span></button>
             <button class="utility-hidden" id="syncMcpBtn"><i data-lucide="database-zap"></i><span>Sync MCP</span></button>
@@ -436,15 +435,6 @@
               </form>
             </section>
             <section class="panel">
-              <div class="panel-heading"><div><h2>LinkedIn Senders</h2><p>Choose which account is performing outreach</p></div></div>
-              <form class="integration-form" id="linkedinIdentityForm">
-                <input id="linkedinIdentityNameInput" type="text" placeholder="Account name, e.g. Pavlo - main" required />
-                <input id="linkedinIdentityUrlInput" type="url" placeholder="https://www.linkedin.com/in/..." required />
-                <button type="submit"><i data-lucide="plus"></i><span>Add LinkedIn Account</span></button>
-              </form>
-              <div class="identity-list" id="linkedinIdentityList"></div>
-            </section>
-            <section class="panel">
               <div class="panel-heading"><div><h2>Password</h2><p>Use at least 10 characters</p></div></div>
               <form class="integration-form" id="accountPasswordForm">
                 <input id="accountPasswordInput" type="password" autocomplete="new-password" minlength="10" placeholder="New password" required />
@@ -627,6 +617,52 @@
               <div class="warmup-stats-strip" id="warmupStatsStrip"></div>
             </section>
 
+            <section class="panel warmup-targeting-panel span-2">
+              <div class="panel-heading">
+                <div>
+                  <h2>Targeting</h2>
+                  <p>Which CRM folder the warm-up draws from, who it may approach in it, and what that actually amounts to</p>
+                </div>
+                <span class="pill tone-muted" id="warmupTargetingPill">not saved yet</span>
+              </div>
+
+              <div class="warmup-targeting-grid">
+                <label class="warmup-field warmup-field-folder">
+                  <span>Folder</span>
+                  <select id="warmupFolderSelect" aria-label="CRM folder">
+                    <option value="">Loading folders...</option>
+                  </select>
+                </label>
+                <label class="warmup-field">
+                  <span>Country</span>
+                  <input id="warmupFilterCountry" type="text" placeholder="Any country" autocomplete="off" />
+                </label>
+                <label class="warmup-field">
+                  <span>Position contains</span>
+                  <input id="warmupFilterPosition" type="text" placeholder="Any position" autocomplete="off" />
+                </label>
+                <label class="warmup-field">
+                  <span>Lead status</span>
+                  <input id="warmupFilterStatus" type="text" placeholder="Any status" list="warmupLeadStatusOptions" autocomplete="off" />
+                  <datalist id="warmupLeadStatusOptions">
+                    <option value="new"></option>
+                  </datalist>
+                </label>
+                <label class="warmup-field">
+                  <span>Owner</span>
+                  <input id="warmupFilterOwner" type="text" placeholder="Any owner (CRM user id)" autocomplete="off" />
+                </label>
+              </div>
+
+              <div class="warmup-forecast" id="warmupForecast"></div>
+
+              <div class="warmup-targeting-footer">
+                <button class="primary-button" id="warmupSaveTargetingBtn" type="button"><i data-lucide="crosshair"></i><span>Save targeting</span></button>
+                <button class="text-button" id="warmupResetTargetingBtn" type="button" hidden><i data-lucide="undo-2"></i><span>Undo changes</span></button>
+                <p class="warmup-targeting-accounts" id="warmupTargetingAccounts"></p>
+              </div>
+            </section>
+
             <section class="panel warmup-list-panel">
               <div class="panel-heading">
                 <div>
@@ -648,6 +684,7 @@
                 <table>
                   <thead>
                     <tr>
+                      <th class="warmup-tick-head" title="Ticked accounts work the targeted folder">Sends</th>
                       <th>Profile</th>
                       <th>Status</th>
                       <th>Day</th>
@@ -671,6 +708,17 @@
               <div id="warmupDetailBody">
                 <div class="empty-state">Select a profile from the list.</div>
               </div>
+            </section>
+
+            <section class="panel warmup-leads-panel span-2">
+              <div class="panel-heading">
+                <div>
+                  <h2 id="warmupLeadsTitle">Lead queue</h2>
+                  <p id="warmupLeadsSubtitle">The next people the targeting reaches, with anyone already approached from any account left out</p>
+                </div>
+                <button class="text-button" id="warmupLeadsRefreshBtn" type="button"><i data-lucide="refresh-cw"></i><span>Refresh queue</span></button>
+              </div>
+              <div id="warmupLeadsBody"></div>
             </section>
           </div>
         </section>

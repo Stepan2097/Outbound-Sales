@@ -1608,10 +1608,6 @@ output {
   text-transform: uppercase;
 }
 
-#activeLinkedinSelect {
-  width: 190px;
-}
-
 #mobileLeadSectionSelect {
   display: none;
 }
@@ -1626,7 +1622,6 @@ output {
 .research-progress-heading,
 .message-angle-heading,
 .angle-footer,
-.identity-row,
 .team-row {
   display: flex;
   justify-content: space-between;
@@ -1694,7 +1689,6 @@ output {
 .app-portfolio-section,
 .app-title-list,
 .message-angle-grid,
-.identity-list,
 .team-list,
 .account-layout {
   display: grid;
@@ -1707,7 +1701,6 @@ output {
 
 .app-title-row,
 .message-angle-card,
-.identity-row,
 .team-row,
 .scoring-learning-card {
   border: 1px solid rgba(143, 177, 207, 0.18);
@@ -1723,15 +1716,12 @@ output {
 
 .app-title-row strong,
 .app-title-row span,
-.identity-row strong,
-.identity-row a,
 .team-row strong,
 .team-row span {
   display: block;
 }
 
 .app-title-row span,
-.identity-row a,
 .team-row span {
   color: var(--muted);
   font-size: 12px;
@@ -1831,15 +1821,6 @@ output {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.identity-row.active {
-  border-color: rgba(101, 240, 219, 0.45);
-}
-
-.identity-row > div:last-child {
-  display: flex;
-  gap: 8px;
-}
-
 .scoring-learning-card {
   grid-column: 1 / -1;
 }
@@ -1921,8 +1902,7 @@ output {
     grid-template-columns: minmax(0, 1fr) auto;
   }
 
-  #productSelect,
-  #activeLinkedinSelect {
+  #productSelect {
     width: 100%;
   }
 
@@ -1956,7 +1936,6 @@ output {
   }
 
   .contact-card,
-  .identity-row,
   .team-row,
   .research-progress-heading,
   .message-angle-heading,
@@ -4799,4 +4778,333 @@ dialog {
   .warmup-layout {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* ── Warm-up targeting ───────────────────────────────────────────────────────
+ *
+ * The panel is built around the forecast line, not the dropdown: a folder of
+ * 22 088 contacts at ~22 requests a day is three years of work, and the screen
+ * has to say that before it offers to save it. Hence the picker is a single
+ * quiet row and the sentence beneath it is the loudest thing on the panel.
+ */
+
+.warmup-targeting-grid {
+  display: grid;
+  grid-template-columns: minmax(200px, 1.7fr) repeat(4, minmax(130px, 1fr));
+  gap: 10px;
+  align-items: end;
+}
+
+.warmup-field {
+  min-width: 0;
+  gap: 4px;
+}
+
+.warmup-field > span {
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.warmup-forecast {
+  margin: 14px 0 12px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--surface-strong);
+  display: grid;
+  gap: 7px;
+}
+
+.warmup-forecast-line {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.5;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The rate is the number everything else follows from, so it is the one the
+   eye lands on first. */
+.warmup-forecast-line strong {
+  font-size: 20px;
+  font-weight: 850;
+}
+
+.warmup-forecast-dot {
+  color: var(--muted);
+  margin: 0 7px;
+}
+
+.warmup-forecast-hint {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 650;
+  line-height: 1.55;
+}
+
+.warmup-forecast-today,
+.warmup-forecast-stale {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* Tones are mixed from the palette tokens rather than written as hexes: the
+   amber that reads as a warning on the light theme is a different amber in the
+   dark one, and a fixed value would be legible in exactly one of them. The
+   plain background above stays as the fallback where color-mix is missing. */
+.warmup-forecast.is-ok {
+  border-color: color-mix(in srgb, var(--teal) 34%, transparent);
+  background: color-mix(in srgb, var(--teal) 9%, transparent);
+}
+
+.warmup-forecast.is-ok .warmup-forecast-hint {
+  color: var(--teal);
+}
+
+.warmup-forecast.is-warn {
+  border-color: color-mix(in srgb, var(--amber) 42%, transparent);
+  background: color-mix(in srgb, var(--amber) 10%, transparent);
+}
+
+.warmup-forecast.is-warn .warmup-forecast-hint {
+  color: var(--amber);
+}
+
+/* The folder nobody can finish. It gets the loudest treatment on the screen
+   because agreeing to it costs months before anything looks wrong. */
+.warmup-forecast.is-bad {
+  border-color: color-mix(in srgb, var(--red) 46%, transparent);
+  background: color-mix(in srgb, var(--red) 11%, transparent);
+}
+
+.warmup-forecast.is-bad .warmup-forecast-hint {
+  color: var(--red);
+}
+
+.warmup-forecast.is-muted .warmup-forecast-line {
+  font-size: 15px;
+  color: var(--muted);
+}
+
+.warmup-targeting-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.warmup-targeting-accounts {
+  margin: 0;
+  flex: 1 1 240px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.warmup-targeting-problem {
+  font-style: normal;
+  font-weight: 750;
+  color: var(--red);
+}
+
+/* ── The tick column and the identity line ─────────────────────────────────*/
+
+.warmup-tick-head,
+.warmup-tick {
+  width: 1%;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.warmup-tick-head {
+  font-size: 11px;
+}
+
+/* The global input rule stretches every input to the full cell; a checkbox is
+   the one control that has to keep its own size. */
+.warmup-tick input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  accent-color: var(--teal);
+  cursor: pointer;
+}
+
+.warmup-tick input[type="checkbox"]:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+/* Who the browser is actually signed in as, which is not the profile label. */
+.warmup-identity {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--teal);
+}
+
+.warmup-identity svg {
+  width: 13px;
+  height: 13px;
+  flex: none;
+}
+
+/* ── The lead queue ────────────────────────────────────────────────────────*/
+
+.warmup-leads {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.warmup-leads li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: var(--surface-strong);
+  font-size: 13px;
+}
+
+.warmup-lead-who {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.warmup-lead-who strong,
+.warmup-lead-who span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* An unconfigured queue and an empty one are different answers, so this is a
+   prompt rather than an error. */
+.warmup-leads-prompt {
+  display: grid;
+  gap: 4px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px dashed color-mix(in srgb, var(--amber) 45%, transparent);
+  background: color-mix(in srgb, var(--amber) 8%, transparent);
+  font-size: 13px;
+}
+
+.warmup-leads-prompt strong {
+  color: var(--amber);
+  font-size: 14px;
+}
+
+.warmup-leads-prompt span {
+  color: var(--muted);
+}
+
+.warmup-leads-prompt.is-bad {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--red) 45%, transparent);
+  background: color-mix(in srgb, var(--red) 9%, transparent);
+}
+
+.warmup-leads-prompt.is-bad strong {
+  color: var(--red);
+}
+
+@media (max-width: 1100px) {
+  .warmup-targeting-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .warmup-field-folder {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 640px) {
+  .warmup-targeting-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .warmup-forecast {
+    padding: 12px 13px;
+  }
+
+  /* The line still has to be the loudest thing on a phone, but each clause
+     gets its own row so none of them is cut in half. */
+  .warmup-forecast-line {
+    font-size: 15px;
+  }
+
+  .warmup-forecast-line strong {
+    font-size: 17px;
+  }
+
+  .warmup-forecast-dot {
+    margin: 0 5px;
+  }
+
+  .warmup-targeting-footer {
+    align-items: stretch;
+  }
+
+  .warmup-leads li {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .warmup-lead-who {
+    grid-column: 1 / -1;
+  }
+}
+
+/* The app styles its links per context, and an unstyled one lands on the
+   browser's default blue — unreadable on either of these palettes. */
+.warmup-leads a {
+  color: var(--teal);
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.warmup-leads a:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 640px) {
+  /* Search and the platform filter each collapsed to a thumbnail when the
+     heading took the width; they get their own row instead. */
+  .warmup-list-panel .panel-heading {
+    flex-wrap: wrap;
+  }
+
+  .warmup-list-controls {
+    flex: 1 1 100%;
+  }
+
+  .warmup-list-controls input,
+  .warmup-list-controls select {
+    min-width: 0;
+  }
+}
+
+/* Today and at peak are different promises, and the gap between them is the
+   reason the forecast exists — so the numbers in that line keep full contrast
+   even though the sentence around them is quiet. */
+.warmup-forecast-today strong {
+  color: var(--ink);
+  font-weight: 800;
 }

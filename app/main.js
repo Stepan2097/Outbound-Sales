@@ -39,7 +39,10 @@ async function api(path, options = {}) {
       authState = { authenticated: false, bootstrapRequired: Boolean(body.bootstrapRequired) };
       showAuthGate();
     }
-    throw new Error(body.error || `Request failed with ${response.status}`);
+    const failure = new Error(body.error || `Request failed with ${response.status}`);
+    failure.status = response.status;
+    failure.payload = body;
+    throw failure;
   }
   return response.json();
 }
@@ -80,7 +83,6 @@ function renderTopbar() {
     ? `Key version ${state.keyMetadata.keyVersion} · ${state.keyMetadata.environment}`
     : "No key configured";
   fillSelect(document.getElementById("productSelect"), state.products, (product) => product.id, (product) => product.name, state.selectedProductId);
-  renderActiveLinkedinSelect();
 }
 
 async function bootApplication() {
@@ -142,31 +144,11 @@ function renderAccount() {
   document.getElementById("accountNameInput").value = user.name || "";
   document.getElementById("accountTitleInput").value = user.title || "";
   document.getElementById("accountEmailInput").value = user.email || "";
-  setHtml("linkedinIdentityList", (user.linkedinAccounts || []).length
-    ? user.linkedinAccounts.map((account) => `
-      <article class="identity-row ${account.id === user.activeLinkedinAccountId ? "active" : ""}">
-        <div><strong>${escapeHtml(account.name)}</strong><a href="${escapeAttr(account.url)}" target="_blank" rel="noreferrer">${escapeHtml(shortUrl(account.url))}</a></div>
-        <div>
-          <button type="button" data-activate-linkedin="${escapeAttr(account.id)}" ${account.id === user.activeLinkedinAccountId ? "disabled" : ""}><i data-lucide="check"></i><span>${account.id === user.activeLinkedinAccountId ? "Active" : "Use"}</span></button>
-          <button class="icon-button danger-button" type="button" data-delete-linkedin="${escapeAttr(account.id)}" title="Remove"><i data-lucide="trash-2"></i></button>
-        </div>
-      </article>`).join("")
-    : `<div class="empty-state">Add the LinkedIn account this seller will use.</div>`);
   const adminPanel = document.getElementById("adminTeamPanel");
   adminPanel.hidden = user.role !== "admin";
   setHtml("teamUserList", (authState.team || []).map((member) => `
     <article class="team-row"><div><strong>${escapeHtml(member.name)}</strong><span>${escapeHtml(member.email)}</span></div><span class="pill">${escapeHtml(member.role)}</span></article>
   `).join(""));
-}
-
-function renderActiveLinkedinSelect() {
-  const select = document.getElementById("activeLinkedinSelect");
-  const user = authState?.user;
-  if (!select || !user) return;
-  const accounts = user.linkedinAccounts || [];
-  select.innerHTML = accounts.length
-    ? accounts.map((account) => `<option value="${escapeAttr(account.id)}" ${account.id === user.activeLinkedinAccountId ? "selected" : ""}>${escapeHtml(account.name)}</option>`).join("")
-    : `<option value="">No LinkedIn sender</option>`;
 }
 
 function renderProductContext() {
@@ -2182,13 +2164,6 @@ document.getElementById("mobileLeadSectionSelect").addEventListener("change", (e
 
 document.getElementById("accountMenuBtn").addEventListener("click", () => setView("account"));
 
-document.getElementById("activeLinkedinSelect").addEventListener("change", async (event) => {
-  if (!event.target.value) return;
-  await api("/api/account/linkedin/active", { method: "POST", body: JSON.stringify({ accountId: event.target.value }) });
-  authState = await api("/api/auth/status");
-  render();
-});
-
 document.getElementById("authModeBtn").addEventListener("click", () => {
   authMode = authMode === "recover" ? "login" : "recover";
   setText("authMessage", "");
@@ -2236,14 +2211,6 @@ document.getElementById("accountProfileForm").addEventListener("submit", async (
   render();
 });
 
-document.getElementById("linkedinIdentityForm").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  await api("/api/account/linkedin", { method: "POST", body: JSON.stringify({ name: document.getElementById("linkedinIdentityNameInput").value, url: document.getElementById("linkedinIdentityUrlInput").value }) });
-  event.currentTarget.reset();
-  authState = await api("/api/auth/status");
-  render();
-});
-
 document.getElementById("accountPasswordForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const password = document.getElementById("accountPasswordInput").value;
@@ -2282,20 +2249,6 @@ document.addEventListener("click", async (event) => {
     await runUiAction("contact-approval", "Reviewing contact evidence and channel access...", async () => {
       state = await api("/api/prospects/contacts/approval", { method: "POST", body: JSON.stringify({ prospectId: selectedProspectId, type: contactDecision.dataset.contactType, value: contactDecision.dataset.contactValue, decision: contactDecision.dataset.contactDecision }) });
     });
-    return;
-  }
-  const activate = event.target.closest("[data-activate-linkedin]");
-  if (activate) {
-    await api("/api/account/linkedin/active", { method: "POST", body: JSON.stringify({ accountId: activate.dataset.activateLinkedin }) });
-    authState = await api("/api/auth/status");
-    render();
-    return;
-  }
-  const remove = event.target.closest("[data-delete-linkedin]");
-  if (remove) {
-    await api("/api/account/linkedin/delete", { method: "POST", body: JSON.stringify({ accountId: remove.dataset.deleteLinkedin }) });
-    authState = await api("/api/auth/status");
-    render();
     return;
   }
   if (event.target.closest("#retrainScoringBtn")) {
@@ -3334,7 +3287,26 @@ const warmupState = {
   selectedProfileId: null,
   detail: null,
   busy: false,
-  error: ""
+  error: "",
+  // Targeting: the folder the queue draws from, the filters that narrow it,
+  // and the server's forecast for that combination. The forecast is never
+  // recomputed here — a second copy of that arithmetic is a second answer.
+  folders: [],
+  targeting: null,
+  forecast: null,
+  forecastError: "",
+  foldersReady: false,
+  targetingReady: false,
+  targetingError: "",
+  targetingNotice: "",
+  savingTargeting: false,
+  pendingAccountIds: null,
+  leads: [],
+  leadsTotal: null,
+  leadsTargeting: null,
+  leadsPrompt: "",
+  leadsError: "",
+  leadsReady: false
 };
 
 function warmupApi(path, options) {
@@ -3437,23 +3409,367 @@ function renderWarmupStats() {
     .join("");
 }
 
+/* ── Targeting ─────────────────────────────────────────────────────────────
+ *
+ * The dropdown is not the point of this panel; the sentence under it is. A
+ * folder of 22 088 contacts at about 22 requests a day is a thousand days of
+ * work, and a picker that does not say so presents that folder as something
+ * you can simply run. So every number on the line comes from the server's
+ * forecast, and the line is written to be read as a verdict rather than a
+ * readout.
+ */
+
+const WARMUP_EMPTY_FILTERS = { country: "", position: "", leadStatus: "", ownerId: "" };
+
+function warmupFilterInputs() {
+  return {
+    country: document.getElementById("warmupFilterCountry"),
+    position: document.getElementById("warmupFilterPosition"),
+    leadStatus: document.getElementById("warmupFilterStatus"),
+    ownerId: document.getElementById("warmupFilterOwner")
+  };
+}
+
+/** What the form says right now, which is not always what is saved. */
+function warmupFormTargeting() {
+  const filters = { ...WARMUP_EMPTY_FILTERS };
+  for (const [key, input] of Object.entries(warmupFilterInputs())) {
+    filters[key] = (input?.value || "").trim();
+  }
+  return { folderId: document.getElementById("warmupFolderSelect")?.value || "", filters };
+}
+
+function warmupSavedTargeting() {
+  const saved = warmupState.targeting;
+  return {
+    folderId: saved?.folderId || "",
+    filters: { ...WARMUP_EMPTY_FILTERS, ...(saved?.filters || {}) }
+  };
+}
+
+function warmupTargetingDirty() {
+  if (!warmupState.foldersReady) return false;
+  const form = warmupFormTargeting();
+  const saved = warmupSavedTargeting();
+  if (form.folderId !== saved.folderId) return true;
+  return Object.keys(WARMUP_EMPTY_FILTERS).some((key) => form.filters[key] !== saved.filters[key]);
+}
+
+function warmupSelectedAccountIds() {
+  return new Set(warmupState.targeting?.accountIds || []);
+}
+
+/** 12 038 rather than 12038: these are counts somebody has to weigh. */
+function warmupCount(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "—";
+  return Math.round(number).toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+}
+
+/** A thousand days is not a figure anybody can feel; "2.7 years" is. */
+function warmupDuration(days) {
+  const number = Number(days);
+  if (!Number.isFinite(number) || number <= 0) return null;
+  if (number < 45) return `${Math.round(number)} days`;
+  if (number < 365) return `${Math.round(number / 30)} months`;
+  return `${(number / 365).toFixed(1)} years`;
+}
+
+function warmupFolderName(folderId) {
+  if (!folderId) return null;
+  if (warmupState.targeting?.folderId === folderId && warmupState.targeting.folderName) {
+    return warmupState.targeting.folderName;
+  }
+  return warmupState.folders.find((folder) => folder.id === folderId)?.name || null;
+}
+
+function renderWarmupFolderOptions(selectedId) {
+  const select = document.getElementById("warmupFolderSelect");
+  if (!select) return;
+  const signature = `${warmupState.foldersReady}|${warmupState.folders.length}|${selectedId || ""}|${warmupState.targetingError}`;
+  if (select.dataset.signature === signature) return;
+  select.dataset.signature = signature;
+
+  if (!warmupState.foldersReady) {
+    select.innerHTML = `<option value="">${escapeHtml(warmupState.targetingError ? "Folders unavailable" : "Loading folders...")}</option>`;
+    select.disabled = true;
+    return;
+  }
+
+  select.disabled = false;
+  const options = [`<option value="">Pick a folder</option>`];
+  const known = new Set();
+  for (const folder of warmupState.folders) {
+    known.add(folder.id);
+    const count = warmupCount(folder.contactCount);
+    const archived = folder.isArchived ? " · archived" : "";
+    options.push(`<option value="${escapeAttr(folder.id)}" ${folder.id === selectedId ? "selected" : ""}>${escapeHtml(folder.name)} · ${escapeHtml(count)} contacts${archived}</option>`);
+  }
+  // A saved folder the list no longer carries (archived, or renamed away) is
+  // still the folder this workspace is pointed at, so it stays selectable
+  // rather than silently becoming "none".
+  if (selectedId && !known.has(selectedId)) {
+    const name = warmupState.targeting?.folderName || selectedId;
+    options.splice(1, 0, `<option value="${escapeAttr(selectedId)}" selected>${escapeHtml(name)} · not in the folder list</option>`);
+  }
+  select.innerHTML = options.join("");
+}
+
+/**
+ * The forecast line. Four shapes: no API, nothing targeted, a folder that the
+ * ticked accounts can finish, and — the one that matters — a folder they
+ * cannot.
+ */
+function renderWarmupForecast() {
+  const host = document.getElementById("warmupForecast");
+  if (!host) return;
+
+  const stale = warmupTargetingDirty()
+    ? '<p class="warmup-forecast-stale">These numbers are for the saved targeting. Save to count what is on screen.</p>'
+    : "";
+
+  if (warmupState.targetingError) {
+    host.className = "warmup-forecast is-muted";
+    host.innerHTML = `
+      <p class="warmup-forecast-line">${escapeHtml(warmupState.targetingError)}</p>
+      <p class="warmup-forecast-hint">${warmupState.foldersReady
+        ? "A folder picked now can still be saved, but there is no forecast to check it against until the server answers."
+        : "Nothing here is saved while the server cannot answer, so the lead queue keeps whatever it was pointed at."}</p>`;
+    return;
+  }
+
+  const forecast = warmupState.forecast;
+  if (!forecast) {
+    host.className = "warmup-forecast is-muted";
+    host.innerHTML = warmupSavedTargeting().folderId
+      ? `<p class="warmup-forecast-line">${escapeHtml(warmupState.forecastError || "No forecast came back for this folder.")}</p>
+         <p class="warmup-forecast-hint">Nothing says how long this folder would take until the server can count it, so treat the picker below as unchecked.</p>${stale}`
+      : `<p class="warmup-forecast-line">Nothing is targeted yet.</p>
+         <p class="warmup-forecast-hint">Pick a folder, tick the accounts that will work it in Profiles below, then save. Until then the lead queue has nothing to draw from.</p>${stale}`;
+    return;
+  }
+
+  const matching = Number(forecast.matching) || 0;
+  const approached = Number(forecast.alreadyApproached) || 0;
+  const remaining = Number(forecast.remaining) || 0;
+  const perMonth = Number(forecast.reachedThisMonth) || 0;
+  const peak = Number(forecast.perDayAtPeak) || 0;
+  const now = Number(forecast.perDayNow) || 0;
+  const chosen = Number(forecast.accountsChosen) || 0;
+  const fullPass = warmupDuration(forecast.daysToFinish);
+
+  const parts = [
+    `<span>${warmupCount(matching)} in the folder</span>`,
+    `<span>${warmupCount(approached)} already approached</span>`,
+    `<strong>${warmupCount(peak)} a day</strong>`,
+    `<span>~${warmupCount(perMonth)} in a month</span>`,
+    fullPass
+      ? `<span>a full pass ~${escapeHtml(fullPass)}</span>`
+      : `<span>a full pass never finishes</span>`
+  ];
+
+  let tone = "is-ok";
+  let hint = "";
+
+  if (chosen === 0) {
+    tone = "is-bad";
+    hint = `Nobody is working this folder, so none of the ${warmupCount(remaining)} left get reached. Tick the accounts that should send from it in Profiles below.`;
+  } else if (peak === 0) {
+    tone = "is-bad";
+    hint = `The ${chosen === 1 ? "ticked account has" : `${chosen} ticked accounts have`} no connection quota even at peak, so the queue would never move. Tick an account that is actually warming.`;
+  } else if (remaining === 0) {
+    tone = "is-muted";
+    hint = "Everyone this targeting matches has already been approached. Widen the filters or pick another folder.";
+  } else if (remaining > perMonth * 3) {
+    tone = "is-bad";
+    hint = `At that rate this folder is ${escapeHtml(fullPass || "more work than these accounts will ever get through")} of work — ${warmupCount(perMonth)} of the ${warmupCount(remaining)} left get reached in the first month and the rest simply sit there. Narrow it by country, position or lead status until what is left is a list these accounts can finish.`;
+  } else if (remaining > perMonth) {
+    tone = "is-warn";
+    hint = `${warmupCount(remaining)} left is more than one month of sending. It finishes in about ${escapeHtml(fullPass || "an unknown time")} — narrow the filters if that is longer than the campaign.`;
+  }
+
+  // Today and at peak are different promises, and the panel should not let the
+  // better one stand for both.
+  let today = "";
+  if (peak && now === 0) {
+    today = `<p class="warmup-forecast-today"><strong>Nothing goes out today.</strong> None of the ticked accounts may send a connection request yet — the strategy holds them back over the first days — so <strong>${warmupCount(peak)} a day</strong> is what they reach once every one of them is warm, not what happens now.</p>`;
+  } else if (peak && now !== peak) {
+    today = `<p class="warmup-forecast-today">Today it is <strong>${warmupCount(now)} a day</strong>, not ${warmupCount(peak)}: the rest of the ticked accounts are still climbing, paused or not warming yet.</p>`;
+  }
+
+  host.className = `warmup-forecast ${tone}`;
+  host.innerHTML = `
+    <p class="warmup-forecast-line">${parts.join('<span class="warmup-forecast-dot" aria-hidden="true">·</span>')}</p>
+    ${hint ? `<p class="warmup-forecast-hint">${hint}</p>` : ""}
+    ${today}
+    ${stale}`;
+}
+
+function warmupTickedAccountsLine() {
+  const ids = warmupSelectedAccountIds();
+  if (!ids.size) return "No account is ticked, so this targeting sends nothing.";
+  const names = [];
+  for (const profile of warmupState.profiles) {
+    if (profile.account && ids.has(profile.account.id)) names.push(profile.name);
+  }
+  const hidden = ids.size - names.length;
+  if (!names.length) return `Worked by ${ids.size} account${ids.size === 1 ? "" : "s"} that this list does not show.`;
+  const listed = escapeHtml(names.slice(0, 4).join(", "));
+  const more = names.length > 4 ? ` +${names.length - 4} more` : "";
+  return `Worked by ${listed}${more}${hidden > 0 ? ` · ${hidden} not in the list below` : ""}`;
+}
+
+function renderWarmupTargetingAccounts() {
+  const accountsLine = document.getElementById("warmupTargetingAccounts");
+  if (!accountsLine) return;
+  accountsLine.innerHTML = warmupState.targetingNotice
+    ? `<em class="warmup-targeting-problem">${escapeHtml(warmupState.targetingNotice)}</em>`
+    : warmupTickedAccountsLine();
+}
+
+function renderWarmupTargeting({ resetForm = false } = {}) {
+  const pill = document.getElementById("warmupTargetingPill");
+  const saveButton = document.getElementById("warmupSaveTargetingBtn");
+  const undoButton = document.getElementById("warmupResetTargetingBtn");
+  if (!pill || !saveButton) return;
+
+  const saved = warmupSavedTargeting();
+  if (resetForm) {
+    for (const [key, input] of Object.entries(warmupFilterInputs())) {
+      if (input) input.value = saved.filters[key] || "";
+    }
+  }
+  renderWarmupFolderOptions(resetForm ? saved.folderId : (document.getElementById("warmupFolderSelect")?.value || saved.folderId));
+
+  for (const input of Object.values(warmupFilterInputs())) {
+    if (input) input.disabled = !warmupState.foldersReady;
+  }
+
+  const dirty = warmupTargetingDirty();
+  saveButton.disabled = !warmupState.foldersReady || warmupState.savingTargeting;
+  saveButton.querySelector("span").textContent = warmupState.savingTargeting ? "Saving..." : "Save targeting";
+  if (undoButton) undoButton.hidden = !dirty;
+
+  if (!warmupState.foldersReady || !warmupState.targetingReady) {
+    pill.className = "pill tone-muted";
+    pill.textContent = "unavailable";
+  } else if (dirty) {
+    pill.className = "pill tone-warn";
+    pill.textContent = "unsaved changes";
+  } else if (warmupState.targeting?.updatedAt) {
+    pill.className = "pill tone-live";
+    pill.textContent = "saved";
+    pill.title = `Saved ${new Date(warmupState.targeting.updatedAt).toLocaleString()}`;
+  } else {
+    pill.className = "pill tone-muted";
+    pill.textContent = "not saved yet";
+  }
+
+  renderWarmupTargetingAccounts();
+  renderWarmupForecast();
+  refreshIcons();
+}
+
+function warmupLeadLink(url) {
+  const value = String(url || "");
+  return /^https?:\/\//i.test(value) ? value : null;
+}
+
+function renderWarmupLeads() {
+  const title = document.getElementById("warmupLeadsTitle");
+  const subtitle = document.getElementById("warmupLeadsSubtitle");
+  const body = document.getElementById("warmupLeadsBody");
+  if (!title || !subtitle || !body) return;
+
+  // The header names the folder: a queue that does not say where it comes from
+  // is a list of strangers.
+  const targeting = warmupState.leadsTargeting || warmupState.targeting;
+  const folderName = targeting?.folderName || warmupFolderName(targeting?.folderId);
+  // A queue answering "nothing is targeted" must not carry a folder name in
+  // its header — that would be two answers to the same question.
+  title.textContent = folderName && !warmupState.leadsPrompt ? `Lead queue · ${folderName}` : "Lead queue";
+
+  if (warmupState.leadsPrompt) {
+    subtitle.textContent = "Nothing is targeted yet";
+    body.innerHTML = `<div class="warmup-leads-prompt">
+      <strong>${escapeHtml(warmupState.leadsPrompt)}</strong>
+      <span>Choose one in Targeting above and save it — the queue is whatever that folder and those filters match.</span>
+    </div>`;
+    refreshIcons();
+    return;
+  }
+
+  if (warmupState.leadsError) {
+    subtitle.textContent = "The queue could not be read";
+    body.innerHTML = `<div class="warmup-leads-prompt is-bad"><strong>${escapeHtml(warmupState.leadsError)}</strong>
+      <span>The CRM not answering and nobody being left are different answers; this is the first one.</span></div>`;
+    refreshIcons();
+    return;
+  }
+
+  if (!warmupState.leadsReady) {
+    subtitle.textContent = "The lead queue is not available on this server yet";
+    body.innerHTML = '<div class="empty-state">Nothing to show until the queue endpoint answers.</div>';
+    return;
+  }
+
+  subtitle.textContent = Number.isFinite(warmupState.leadsTotal)
+    ? `${warmupCount(warmupState.leadsTotal)} match the targeting · the next ${warmupState.leads.length} are listed, anyone already approached from any account left out`
+    : "The next people the targeting reaches, with anyone already approached from any account left out";
+
+  if (!warmupState.leads.length) {
+    body.innerHTML = '<div class="empty-state">Nobody is left in this folder under these filters.</div>';
+    return;
+  }
+
+  body.innerHTML = `<ul class="warmup-leads">${warmupState.leads
+    .map((lead) => {
+      const link = warmupLeadLink(lead.linkedin);
+      const where = [lead.position, lead.company].filter(Boolean).join(" · ");
+      return `<li>
+        <div class="warmup-lead-who">
+          <strong>${escapeHtml(lead.name || "Unnamed contact")}</strong>
+          ${where ? `<span class="warmup-subtle">${escapeHtml(where)}</span>` : ""}
+        </div>
+        <span class="warmup-subtle">${escapeHtml(lead.country || "—")}</span>
+        ${link ? `<a href="${escapeAttr(link)}" target="_blank" rel="noreferrer">profile</a>` : '<span class="warmup-subtle">no profile link</span>'}
+      </li>`;
+    })
+    .join("")}</ul>`;
+  refreshIcons();
+}
+
 function renderWarmupProfiles() {
   const body = document.getElementById("warmupProfileTableBody");
   if (!body) return;
 
   if (!warmupState.profiles.length) {
-    body.innerHTML = '<tr><td colspan="6"><div class="empty-state">No profiles match.</div></td></tr>';
+    body.innerHTML = '<tr><td colspan="7"><div class="empty-state">No profiles match.</div></td></tr>';
+    renderWarmupTargetingAccounts();
     return;
   }
+
+  const ticked = warmupSelectedAccountIds();
 
   body.innerHTML = warmupState.profiles
     .map((profile) => {
       const status = profile.status;
       const account = profile.account;
+      // The person the browser is actually signed in as, which is not the same
+      // string as the profile label somebody typed in Anty.
+      const identity = profile.identity || account?.identity || null;
       return `
         <tr data-warmup-profile="${escapeHtml(profile.id)}" class="${profile.id === warmupState.selectedProfileId ? "is-selected" : ""}">
+          <td class="warmup-tick">
+            ${account
+              ? `<input type="checkbox" data-warmup-account-tick="${escapeAttr(account.id)}" ${ticked.has(account.id) ? "checked" : ""} ${warmupState.foldersReady ? "" : "disabled"} aria-label="Send the targeted folder from ${escapeAttr(profile.name)}" title="Work the targeted folder from this account" />`
+              : '<span class="warmup-subtle" title="Not on warm-up yet, so it cannot be sent from">—</span>'}
+          </td>
           <td>
             <strong>${escapeHtml(profile.name)}</strong>
+            ${identity?.name
+              ? `<div class="warmup-identity" title="Signed in as this person on the last agent login"><i data-lucide="badge-check"></i><span>${escapeHtml(identity.name)}${identity.slug ? ` · ${escapeHtml(identity.slug)}` : ""}</span></div>`
+              : ""}
             <div class="warmup-subtle">${escapeHtml(profile.owner || "—")}${profile.proxy ? " · proxied" : " · no proxy"}</div>
           </td>
           <td><span class="pill ${WARMUP_STATUS_TONE[status] || "tone-muted"}">${escapeHtml(WARMUP_STATUS_LABEL[status] || status)}</span></td>
@@ -3468,6 +3784,9 @@ function renderWarmupProfiles() {
         </tr>`;
     })
     .join("");
+
+  renderWarmupTargetingAccounts();
+  refreshIcons();
 }
 
 function renderWarmupDetail() {
@@ -3572,6 +3891,150 @@ function renderWarmupDetail() {
   refreshIcons();
 }
 
+/**
+ * Folders and the saved targeting, in one round. Both are allowed to be
+ * missing — the backend may not carry them yet — and the panel says so rather
+ * than pretending the folder list is empty.
+ */
+async function loadWarmupTargeting({ resetForm = true } = {}) {
+  const [folders, targeting] = await Promise.allSettled([
+    warmupApi("/folders"),
+    warmupApi("/targeting")
+  ]);
+
+  const problems = [];
+  if (folders.status === "fulfilled") {
+    warmupState.folders = folders.value.folders || [];
+    warmupState.foldersReady = true;
+  } else {
+    warmupState.foldersReady = false;
+    problems.push(folders.reason?.status === 404
+      ? "This server does not carry the folder list yet, so the folder cannot be picked here."
+      : `The folder list could not be read: ${folders.reason?.message}`);
+  }
+
+  if (targeting.status === "fulfilled") {
+    warmupState.targeting = targeting.value.targeting || null;
+    warmupState.forecast = targeting.value.forecast || null;
+    // The server counts the folder itself and says so when it could not; a
+    // missing forecast with a reason is better than a missing forecast.
+    warmupState.forecastError = targeting.value.forecastError || "";
+    warmupState.targetingReady = true;
+  } else {
+    warmupState.targetingReady = false;
+    warmupState.forecast = null;
+    problems.push(targeting.reason?.status === 404
+      ? "This server does not carry the saved targeting yet, so nothing picked here would be kept."
+      : `The saved targeting could not be read: ${targeting.reason?.message}`);
+  }
+  warmupState.targetingError = problems.join(" ");
+  renderWarmupTargeting({ resetForm });
+  renderWarmupProfiles();
+}
+
+async function saveWarmupTargeting({ accountIds } = {}) {
+  if (!warmupState.foldersReady) return;
+  // A second tick while the first save is still in flight is not a lost click,
+  // it is the next thing to save — otherwise ticking two accounts quickly
+  // leaves the second one on screen and absent from the server.
+  if (warmupState.savingTargeting) {
+    warmupState.pendingAccountIds = accountIds || Array.from(warmupSelectedAccountIds());
+    return;
+  }
+  const form = warmupFormTargeting();
+  if (!form.folderId) {
+    warmupState.targetingNotice = "Pick a folder first — the queue has to draw from something.";
+    renderWarmupTargeting();
+    return;
+  }
+
+  warmupState.savingTargeting = true;
+  warmupState.targetingNotice = "";
+  renderWarmupTargeting();
+
+  let saved = false;
+  try {
+    const payload = await warmupApi("/targeting", {
+      method: "POST",
+      body: JSON.stringify({
+        folderId: form.folderId,
+        filters: form.filters,
+        accountIds: accountIds || Array.from(warmupSelectedAccountIds())
+      })
+    });
+    warmupState.targeting = payload.targeting || null;
+    warmupState.forecast = payload.forecast || null;
+    warmupState.forecastError = payload.forecastError || "";
+    saved = true;
+  } catch (error) {
+    // Kept in the panel rather than the page-wide note: this is about the
+    // folder somebody just picked, not about the warm-up being broken.
+    warmupState.targetingNotice = error.message;
+  } finally {
+    warmupState.savingTargeting = false;
+  }
+
+  renderWarmupTargeting({ resetForm: saved });
+  renderWarmupProfiles();
+  if (saved) await loadWarmupLeads();
+
+  if (warmupState.pendingAccountIds) {
+    const next = warmupState.pendingAccountIds;
+    warmupState.pendingAccountIds = null;
+    await saveWarmupTargeting({ accountIds: next });
+  }
+}
+
+/** Ticking an account is itself a save: the forecast has to follow the tick. */
+function toggleWarmupAccount(accountId, on) {
+  const ids = warmupSelectedAccountIds();
+  if (on) ids.add(accountId);
+  else ids.delete(accountId);
+  const accountIds = Array.from(ids);
+
+  warmupState.targeting = warmupState.targeting
+    ? { ...warmupState.targeting, accountIds }
+    : { folderId: "", folderName: null, filters: { ...WARMUP_EMPTY_FILTERS }, accountIds, updatedAt: null };
+
+  const form = warmupFormTargeting();
+  if (!form.folderId) {
+    warmupState.targetingNotice = "Pick a folder and save — the ticked accounts are stored with the targeting.";
+    renderWarmupTargeting();
+    renderWarmupProfiles();
+    return;
+  }
+  saveWarmupTargeting({ accountIds });
+}
+
+async function loadWarmupLeads() {
+  try {
+    const payload = await warmupApi("/leads?limit=10");
+    warmupState.leads = payload.leads || [];
+    warmupState.leadsTotal = Number.isFinite(payload.queueTotal) ? payload.queueTotal : null;
+    warmupState.leadsTargeting = payload.targeting || null;
+    warmupState.leadsPrompt = "";
+    warmupState.leadsError = "";
+    warmupState.leadsReady = true;
+  } catch (error) {
+    warmupState.leads = [];
+    warmupState.leadsTotal = null;
+    warmupState.leadsPrompt = "";
+    warmupState.leadsError = "";
+    // 409 is the server saying nothing is targeted yet. That is a prompt, and
+    // drawing it in red would be calling the user's unfinished setup a fault.
+    if (error.payload?.needsTargeting || error.status === 409) {
+      warmupState.leadsReady = true;
+      warmupState.leadsPrompt = error.message || "Pick a folder before pulling leads";
+    } else if (error.status === 404) {
+      warmupState.leadsReady = false;
+    } else {
+      warmupState.leadsReady = true;
+      warmupState.leadsError = error.message;
+    }
+  }
+  renderWarmupLeads();
+}
+
 async function loadWarmupProfiles() {
   const search = document.getElementById("warmupSearchInput")?.value.trim() || "";
   const platform = document.getElementById("warmupPlatformSelect")?.value || "linkedin";
@@ -3613,8 +4076,12 @@ async function loadWarmup({ full = true } = {}) {
     renderWarmupConfigNote();
     if (!warmupState.config.configured) {
       warmupState.profiles = [];
+      warmupState.foldersReady = false;
+      warmupState.targetingReady = false;
+      warmupState.targetingError = "The warm-up is not configured on this server, so there is no folder list to pick from.";
       renderWarmupProfiles();
       renderWarmupStats();
+      renderWarmupTargeting();
       return;
     }
 
@@ -3625,7 +4092,10 @@ async function loadWarmup({ full = true } = {}) {
 
     warmupState.dashboard = await warmupApi("/dashboard");
     renderWarmupStats();
+    // Targeting first: the tick column in the profiles table is drawn from it.
+    await loadWarmupTargeting({ resetForm: full });
     await loadWarmupProfiles();
+    await loadWarmupLeads();
     if (warmupState.selectedAccountId) await loadWarmupAccountDetail(warmupState.selectedAccountId);
   } catch (error) {
     warmupState.error = error.message;
@@ -3684,7 +4154,15 @@ document.getElementById("warmupSearchInput")?.addEventListener("input", () => {
   warmupState.searchTimer = setTimeout(() => loadWarmupProfiles(), 250);
 });
 
+document.getElementById("warmupProfileTableBody")?.addEventListener("change", (event) => {
+  const tick = event.target.closest("[data-warmup-account-tick]");
+  if (!tick) return;
+  toggleWarmupAccount(tick.dataset.warmupAccountTick, tick.checked);
+});
+
 document.getElementById("warmupProfileTableBody")?.addEventListener("click", (event) => {
+  // Ticking an account is not the same gesture as opening it.
+  if (event.target.closest("[data-warmup-account-tick]")) return;
   const row = event.target.closest("[data-warmup-profile]");
   if (!row) return;
   const profileId = row.dataset.warmupProfile;
@@ -3720,3 +4198,24 @@ document.getElementById("warmupDetailBody")?.addEventListener("click", (event) =
       });
   }
 });
+
+document.getElementById("warmupFolderSelect")?.addEventListener("change", () => {
+  warmupState.targetingNotice = "";
+  renderWarmupTargeting();
+});
+
+for (const id of ["warmupFilterCountry", "warmupFilterPosition", "warmupFilterStatus", "warmupFilterOwner"]) {
+  document.getElementById(id)?.addEventListener("input", () => {
+    warmupState.targetingNotice = "";
+    renderWarmupTargeting();
+  });
+}
+
+document.getElementById("warmupSaveTargetingBtn")?.addEventListener("click", () => saveWarmupTargeting());
+
+document.getElementById("warmupResetTargetingBtn")?.addEventListener("click", () => {
+  warmupState.targetingNotice = "";
+  renderWarmupTargeting({ resetForm: true });
+});
+
+document.getElementById("warmupLeadsRefreshBtn")?.addEventListener("click", () => loadWarmupLeads());
