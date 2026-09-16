@@ -5,6 +5,7 @@ import { createServer } from "node:http";
 import { connect as connectTcp } from "node:net";
 import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
+import { handleWarmupApi } from "./warmup/api.mjs";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 const appRoot = join(root, "app");
@@ -392,6 +393,28 @@ async function handleApi(request, response, url) {
     const auth = await authenticateApiRequest(request, response);
     if (!auth) return;
     request.auth = auth;
+  }
+
+  // LinkedIn warm-up. Its own modules, its own Anty database, mounted behind
+  // the workspace sign-in the rest of the app already enforces.
+  if (url.pathname === "/api/warmup" || url.pathname.startsWith("/api/warmup/")) {
+    const handled = await handleWarmupApi({
+      request,
+      response,
+      url,
+      sendJson,
+      // The warm-up routes answer a malformed body with 400 rather than a
+      // thrown parse error, so they need the null the shared reader never gives.
+      readJson: async (incoming) => {
+        try {
+          return await readJson(incoming);
+        } catch {
+          return null;
+        }
+      }
+    });
+    if (!handled) sendJson(response, 404, { success: false, error: "Unknown warm-up endpoint." });
+    return;
   }
 
   if (request.method === "GET" && url.pathname === "/api/state") {
