@@ -139,15 +139,54 @@ export function linkedinSlug(value) {
 }
 
 /**
+ * What LinkedIn prints where a name should be when it will not tell you the
+ * name: a restricted or out-of-network profile renders "LinkedIn Member", and a
+ * deleted one renders some variant of the same idea.
+ *
+ * These are not names and must not be stored as though they were. Folded into
+ * the one sentinel — `UNNAMED` — so there is a single value a screen has to
+ * know how to render and a single value the matcher has to refuse. Ten threads
+ * all called "LinkedIn Member" are ten different people, and treating that
+ * string as a name would file every one of them against the same outreach row.
+ */
+const NON_NAMES = new Set(["unknown", "linkedin member", "linkedin user", "deleted member", "deleted user", "member"]);
+
+export const UNNAMED = "Unknown";
+
+/**
+ * A name with its whitespace collapsed to single spaces.
+ *
+ * The agent reads names out of a DOM, and a name split across two elements
+ * arrives carrying the newline and the indentation between them — so
+ * `"LinkedIn\n      Member"` is a likelier sight in production than the tidy
+ * `"LinkedIn Member"`. Trimming the ends is not enough: the ragged form would
+ * skip the placeholder fold below, stay a "name", and go back into
+ * `matchOutreachRow` as an exact-name candidate — the collision that fold
+ * exists to prevent, walked around by a line break.
+ *
+ * Collapsing cannot swallow a real person, because every comparison downstream
+ * is still whole-string: "Linda  Memberly" becomes "Linda Memberly" and is
+ * still nobody's placeholder.
+ */
+function cleanName(value, max = 200) {
+  return typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, max) : "";
+}
+
+/**
  * The person on the other side. A missing slug or headline is normal and is
  * stored as null: a group thread has no `/in/` link, and a headline is a thing
  * LinkedIn sometimes simply does not render.
+ *
+ * The name and the headline are stored collapsed. A body is not — newlines are
+ * the message there, whereas in a name they are only ever an artefact of how
+ * the page was built.
  */
 export function normalizeParticipant(raw) {
+  const name = cleanName(raw?.name);
   return {
-    name: text(raw?.name, 200) || "Unknown",
+    name: !name || NON_NAMES.has(name.toLowerCase()) ? UNNAMED : name,
     slug: linkedinSlug(raw?.slug) || null,
-    headline: text(raw?.headline, 300) || null
+    headline: cleanName(raw?.headline, 300) || null
   };
 }
 
@@ -302,7 +341,9 @@ export function splitStored(messages, seen) {
  */
 export function matchOutreachRow(rows, participant) {
   const slug = linkedinSlug(participant?.slug);
-  const name = text(participant?.name, 200).toLowerCase();
+  // Collapsed on both sides of every comparison below, so a participant that
+  // skipped the normalizer and a CRM row with a stray double space still meet.
+  const name = cleanName(participant?.name).toLowerCase();
 
   // Newest first, so a person approached twice is credited to the live attempt.
   const ordered = rows.slice().sort((left, right) =>
@@ -312,11 +353,16 @@ export function matchOutreachRow(rows, participant) {
     const bySlug = ordered.find((row) => linkedinSlug(row.person_linkedin) === slug);
     if (bySlug) return bySlug;
   }
-  // "Unknown" is what a participant with no readable name becomes, and it is
-  // not a name — matching on it would file every unreadable thread against
-  // whoever happens to be called that.
-  if (!name || name === "unknown") return null;
-  return ordered.find((row) => text(row.person_name, 200).toLowerCase() === name) || null;
+  // A participant LinkedIn would not name is not a person we can identify, and
+  // matching on the placeholder would file every unnameable thread against
+  // whichever row happens to carry the same string. Checked against the same
+  // set the normalizer uses, so a participant that skipped it is still safe.
+  if (!name || NON_NAMES.has(name)) return null;
+  return ordered.find((row) => {
+    const person = cleanName(row.person_name).toLowerCase();
+    // And a CRM row carrying the placeholder as its name matches nobody either.
+    return person === name && !NON_NAMES.has(person);
+  }) || null;
 }
 
 /**

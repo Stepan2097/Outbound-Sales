@@ -43,7 +43,7 @@
           <button class="nav-item active" data-view="prospects"><i data-lucide="layout-dashboard"></i><span>Dashboard</span></button>
           <button class="nav-item" data-view="leads"><i data-lucide="users"></i><span>Leads</span></button>
           <button class="nav-item" data-view="ai"><i data-lucide="bot"></i><span>AI Operator</span></button>
-          <button class="nav-item" data-view="warmup"><i data-lucide="flame"></i><span>Warm-up</span></button>
+          <button class="nav-item" data-view="warmup"><i data-lucide="flame"></i><span>Warm-up</span><span class="nav-badge" id="warmupNavBadge" hidden></span></button>
           <button class="nav-item" data-view="database"><i data-lucide="book-open"></i><span>Knowledge Base</span></button>
           <button class="nav-item" data-view="products"><i data-lucide="package"></i><span>Products</span></button>
           <button class="nav-item" data-view="account"><i data-lucide="circle-user-round"></i><span>Account</span></button>
@@ -615,6 +615,27 @@
               </div>
               <div class="warmup-config-note" id="warmupConfigNote" hidden></div>
               <div class="warmup-stats-strip" id="warmupStatsStrip"></div>
+            </section>
+
+            <!-- Above Campaigns because a reply outranks a plan: everything below
+                 this panel is what the accounts are about to do, and this is what
+                 already came back. -->
+            <section class="panel warmup-inbox-panel span-2">
+              <div class="panel-heading">
+                <div>
+                  <h2 id="warmupInboxTitle">Inbox</h2>
+                  <p id="warmupInboxSubtitle">What came back — replies that arrived on the accounts, newest and unread first</p>
+                </div>
+                <div class="warmup-inbox-controls" id="warmupInboxControls">
+                  <span class="pill tone-muted" id="warmupInboxPill">loading</span>
+                  <label class="warmup-inbox-toggle" id="warmupInboxUnreadLabel">
+                    <input type="checkbox" id="warmupInboxUnreadOnly" />
+                    <span>Unread only</span>
+                  </label>
+                  <button class="text-button" id="warmupInboxRefreshBtn" type="button"><i data-lucide="refresh-cw"></i><span>Refresh</span></button>
+                </div>
+              </div>
+              <div id="warmupInboxBody"></div>
             </section>
 
             <section class="panel warmup-campaigns-panel span-2">

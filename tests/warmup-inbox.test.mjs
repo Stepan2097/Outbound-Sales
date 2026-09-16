@@ -3,7 +3,8 @@ import test from "node:test";
 
 import {
   BODY_LIMIT, TRUNCATION_MARKER, byUnreadThenNewest, clampBody, crmContent, deriveThreads, externalIdFor,
-  linkedinSlug, matchOutreachRow, normalizeMessage, normalizeParticipant, normalizeThreadInput, splitStored
+  UNNAMED, linkedinSlug, matchOutreachRow, normalizeMessage, normalizeParticipant, normalizeThreadInput,
+  splitStored
 } from "../warmup/inbox.mjs";
 
 const RECEIVED = "2026-09-16T12:00:00.000Z";
@@ -84,7 +85,53 @@ test("a missing slug and headline are normal, not errors", () => {
 });
 
 test("a participant with no name at all becomes Unknown", () => {
-  assert.equal(normalizeParticipant(null).name, "Unknown");
+  assert.equal(normalizeParticipant(null).name, UNNAMED);
+});
+
+test("the placeholders LinkedIn prints instead of a name are not names", () => {
+  // A restricted or out-of-network profile renders "LinkedIn Member"; the agent
+  // reads exactly what is on screen, so this arrives for real.
+  for (const printed of ["LinkedIn Member", "linkedin member", "  LinkedIn User ", "Deleted Member", "Unknown"]) {
+    assert.equal(normalizeParticipant({ name: printed }).name, UNNAMED, printed);
+  }
+});
+
+test("a placeholder split across two elements is still a placeholder", () => {
+  // The agent reads a DOM. A name built from two spans arrives with the newline
+  // and the indentation between them, and that ragged form is likelier in
+  // production than the tidy one — trimming the ends alone would let it through
+  // as a "name" and straight back into the matcher.
+  for (const ragged of ["linkedin  member", "LinkedIn\n      Member", "  Deleted\tUser  ", "LinkedIn Member"]) {
+    assert.equal(normalizeParticipant({ name: ragged }).name, UNNAMED, JSON.stringify(ragged));
+  }
+});
+
+test("collapsing whitespace cannot swallow a real person", () => {
+  // Every comparison stays whole-string, so the near-misses survive.
+  assert.equal(normalizeParticipant({ name: "Linda Memberly" }).name, "Linda Memberly");
+  assert.equal(normalizeParticipant({ name: "Unknown Petrov" }).name, "Unknown Petrov");
+  assert.equal(normalizeParticipant({ name: "Member Okafor" }).name, "Member Okafor");
+  assert.equal(normalizeParticipant({ name: "Linda  Memberly" }).name, "Linda Memberly",
+    "a name is stored tidied — a newline in a name is an artefact of the page, never the name");
+});
+
+test("a headline is tidied too, but a body never is", () => {
+  assert.equal(normalizeParticipant({ name: "A", headline: "Head of\n   Nothing" }).headline, "Head of Nothing");
+  assert.equal(clampBody("line one\nline two").body, "line one\nline two",
+    "newlines are the message in a body and only ever an artefact in a name");
+});
+
+test("a ragged placeholder reaches no outreach row", () => {
+  const rows = [{ id: "r", person_name: "LinkedIn Member", person_linkedin: null, created_at: "2026-09-01T00:00:00Z" }];
+  assert.equal(matchOutreachRow(rows, { name: "LinkedIn\n   Member", slug: null }), null,
+    "the collision closed by the fold must not reopen through a line break");
+});
+
+test("two unnameable threads are two people, not one outreach row matched twice", () => {
+  const rows = [{ id: "r", person_name: "LinkedIn Member", person_linkedin: null, created_at: "2026-09-01T00:00:00Z" }];
+  assert.equal(matchOutreachRow(rows, normalizeParticipant({ name: "LinkedIn Member" })), null);
+  assert.equal(matchOutreachRow(rows, { name: "LinkedIn Member", slug: null }), null,
+    "safe even when the participant skipped the normalizer");
 });
 
 test("a message with no body is the only fatal thing", () => {

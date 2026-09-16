@@ -3314,7 +3314,30 @@ const warmupState = {
   leadsTargeting: null,
   leadsPrompt: "",
   leadsError: "",
-  leadsReady: false
+  leadsReady: false,
+  // The inbox. `ready` is "the endpoint answered", `available` is "this server
+  // has the endpoint at all" — a portal built before the inbox landed should
+  // say so rather than claim nobody has written.
+  inbox: {
+    threads: [],
+    unread: 0,
+    sync: null,
+    ready: false,
+    available: true,
+    error: "",
+    unreadOnly: false,
+    showAll: false,
+    // The open thread, held as account + thread because a thread key is only
+    // unique within the account it arrived on.
+    openAccountId: null,
+    openThreadKey: null,
+    open: null,
+    openError: "",
+    openBusy: false
+  },
+  // Null is "not asked yet", which is not the same as zero: a badge that has
+  // never been told a number must not claim there is nothing to read.
+  unreadReplies: null
 };
 
 function warmupApi(path, options) {
@@ -4752,13 +4775,19 @@ async function loadWarmup({ full = true } = {}) {
       warmupState.config = await warmupApi("/config");
     }
     renderWarmupConfigNote();
+    if (Number.isFinite(warmupState.config?.unreadReplies)) setWarmupUnread(warmupState.config.unreadReplies);
     if (!warmupState.config.configured) {
       warmupState.profiles = [];
       warmupState.foldersReady = false;
       warmupState.campaignsReady = false;
       warmupState.campaignsError = "The warm-up is not configured on this server, so there are no folders to build a campaign on.";
+      // Nothing can have arrived on accounts this server cannot even reach, and
+      // the config note above already says why. An inbox promising otherwise
+      // would be a second, softer answer to the same question.
+      warmupState.inbox.available = false;
       renderWarmupProfiles();
       renderWarmupStats();
+      renderWarmupInbox();
       renderWarmupCampaigns();
       renderWarmupQueue();
       return;
@@ -4771,6 +4800,9 @@ async function loadWarmup({ full = true } = {}) {
 
     warmupState.dashboard = await warmupApi("/dashboard");
     renderWarmupStats();
+    // The inbox before the plan: it is the top panel, it depends on nothing
+    // else here, and it is the one thing on this screen somebody else wrote.
+    await loadWarmupInbox();
     // Campaigns first: the tick column in the profiles table is drawn from the
     // selected one, and the queue below is drawn from its accounts.
     await loadWarmupCampaigns({ resetForm: full });
@@ -4945,3 +4977,740 @@ document.getElementById("warmupQueueBody")?.addEventListener("click", (event) =>
 document.getElementById("warmupQueueRefreshBtn")?.addEventListener("click", () => loadWarmupQueues());
 
 document.getElementById("warmupLeadsRefreshBtn")?.addEventListener("click", () => loadWarmupLeads());
+
+/* ── The inbox ─────────────────────────────────────────────────────────────
+ *
+ * Everything else on this screen is outbound: who will be approached, at what
+ * rate, for how long. This panel is the only part that is somebody else
+ * talking, which is why it sits above the campaigns rather than below them.
+ *
+ * Two rules govern it.
+ *
+ * The first is that message bodies are text typed by strangers on the
+ * internet, and this is the one place in the app where hostile input arrives.
+ * Every body, name and headline reaches the DOM through `escapeHtml`, and line
+ * breaks are kept by CSS rather than by turning newlines into markup — so a
+ * reply containing a script tag is read as the characters somebody typed and
+ * can never be anything else.
+ *
+ * The second is that an empty inbox has two meanings that want opposite
+ * reactions. Nothing arrived is fine. No account has synced means the agent is
+ * not running, every reply on every account is currently invisible, and the
+ * operator needs to know today. `lastSyncedAt` is what tells them apart, so a
+ * panel that cannot read it says that too rather than guessing the calm one.
+ */
+
+/** A run is roughly daily, so a gap longer than this is a stopped agent. */
+const WARMUP_SYNC_STALE_HOURS = 36;
+
+/**
+ * How many threads the panel shows before it offers the rest. The inbox leads
+ * this screen; it is not supposed to swallow it. Twenty-two conversations at
+ * full height push the campaigns panel and its forecast off the bottom of the
+ * page, which is the same harm as shrinking them by a different route. Unread
+ * sorts first, so the ones above the fold are the ones that were waiting.
+ */
+const WARMUP_INBOX_PREVIEW = 8;
+
+const WARMUP_OUTREACH_TONE = {
+  pending: "tone-muted",
+  connected: "tone-live",
+  replied: "tone-live",
+  accepted: "tone-live",
+  skipped: "tone-muted",
+  failed: "tone-bad"
+};
+
+/** How long ago, said the way a person would say it. */
+function warmupAgo(iso) {
+  if (!iso) return "";
+  const then = Date.parse(iso);
+  if (!Number.isFinite(then)) return "";
+  const minutes = Math.round((Date.now() - then) / 60000);
+  if (minutes < 0) return new Date(then).toLocaleString();
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} h ago`;
+  const days = Math.round(hours / 24);
+  if (days === 1) return "yesterday";
+  if (days < 30) return `${days} days ago`;
+  return new Date(then).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" });
+}
+
+/** The same moment in full, for the tooltip behind the short version. */
+function warmupStamp(iso) {
+  if (!iso) return "";
+  const then = Date.parse(iso);
+  return Number.isFinite(then) ? new Date(then).toLocaleString() : "";
+}
+
+function warmupHoursSince(iso) {
+  const then = Date.parse(iso || "");
+  if (!Number.isFinite(then)) return null;
+  return (Date.now() - then) / 3600000;
+}
+
+/**
+ * A stranger's message, escaped. The return value is HTML, so there is no
+ * version of this text that reaches the DOM unescaped: newlines survive
+ * because `.warmup-message-body` is `white-space: pre-wrap`, not because
+ * anything here builds tags out of what was typed.
+ */
+function warmupBodyHtml(body) {
+  return escapeHtml(String(body ?? ""));
+}
+
+/** The first line of a message, for a list row that has one line to spend. */
+function warmupPreviewHtml(body, limit = 150) {
+  const text = String(body ?? "").replace(/\s+/g, " ").trim();
+  if (!text) return '<em class="warmup-subtle">no text in this message</em>';
+  const chars = Array.from(text);
+  const clipped = chars.length > limit ? `${chars.slice(0, limit - 1).join("")}…` : text;
+  return escapeHtml(clipped);
+}
+
+/**
+ * A LinkedIn link built from a slug somebody else supplied. Anything that is
+ * not plainly a slug or an http(s) URL gets no link at all — a person's own
+ * profile is not worth inventing a destination for.
+ */
+function warmupProfileUrl(slug) {
+  const value = String(slug || "").trim();
+  if (!value) return null;
+  if (/^https?:\/\//i.test(value)) return value;
+  if (!/^[A-Za-z0-9._-]+$/.test(value)) return null;
+  return `https://www.linkedin.com/in/${value}`;
+}
+
+/**
+ * The strings that are not names. The server folds all of these to "Unknown"
+ * before they reach here and its matcher refuses that sentinel from both sides,
+ * which is where the rule with teeth lives — a thread that cannot name somebody
+ * must never be filed against a CRM contact. This list is the display half of
+ * the same idea, kept because an older server, or one whose normaliser is
+ * bypassed, would otherwise have "LinkedIn Member" printed as a surname on ten
+ * rows that are ten different people. Whole string, trimmed, case-insensitive:
+ * "Linda Memberly" is a person.
+ */
+const WARMUP_UNNAMED = new Set([
+  "unknown",
+  "linkedin member",
+  "linkedin user",
+  "deleted member",
+  "deleted user",
+  "member"
+]);
+
+function warmupParticipantUnnamed(participant) {
+  // Runs of whitespace are collapsed before the comparison: the agent reads
+  // these strings out of the DOM, where "LinkedIn Member" can arrive as
+  // "LinkedIn\n      Member". Collapsing cannot swallow a real name — "Linda
+  // Memberly" is still not in the set however it was spaced.
+  const name = String(participant?.name || "").replace(/\s+/g, " ").trim();
+  return !name || WARMUP_UNNAMED.has(name.toLowerCase());
+}
+
+/** Who wrote, or an honest admission that nobody here knows. */
+function warmupParticipantName(participant) {
+  if (warmupParticipantUnnamed(participant)) return "Somebody this thread does not name";
+  return String(participant.name).trim();
+}
+
+/**
+ * Why there is no name, which has two ordinary causes that look identical by
+ * the time they reach this screen: LinkedIn withholding it on a restricted or
+ * out-of-network profile, and the agent failing to read it. Worth saying,
+ * because only the second one is a fault.
+ */
+function warmupParticipantNameAttr(participant) {
+  return warmupParticipantUnnamed(participant)
+    ? ' title="LinkedIn showed no name for this person — usually a restricted or out-of-network profile, sometimes a failed read. This thread is deliberately matched to nobody in the CRM."'
+    : "";
+}
+
+/**
+ * Which account a thread arrived on, by the person the browser is signed in as
+ * rather than by the label somebody typed into Anty. When only the label is
+ * known the row says that, because "arrived on Profile 7" and "arrived on Anna
+ * Kovalenko" are not the same claim.
+ */
+function warmupThreadAccount(thread) {
+  const identity = thread?.accountIdentity;
+  const name = typeof identity === "string" ? identity.trim() : String(identity?.name || "").trim();
+  if (name) return { name, exact: true };
+  const label = String(thread?.accountLabel || "").trim();
+  if (label) return { name: label, exact: false };
+  return { name: "an account this portal cannot name", exact: false };
+}
+
+/**
+ * What is known about syncing, from wherever it landed. The server carries the
+ * summary at the top level — the only place it can be read when there are no
+ * threads at all — and the contract also puts `lastSyncedAt` on each thread.
+ * Read both, so the two halves of this phase can land in either order.
+ */
+function warmupInboxSync() {
+  const inbox = warmupState.inbox;
+  const sync = inbox.sync && typeof inbox.sync === "object" ? inbox.sync : null;
+
+  let lastSyncedAt = sync?.lastSyncedAt || null;
+  let fromThreads = false;
+  for (const thread of inbox.threads) {
+    const seen = thread?.lastSyncedAt;
+    if (!seen) continue;
+    if (!lastSyncedAt || Date.parse(seen) > Date.parse(lastSyncedAt)) {
+      lastSyncedAt = seen;
+      fromThreads = true;
+    }
+  }
+
+  const accountsTotal = Number.isFinite(sync?.accountsTotal) ? sync.accountsTotal : null;
+  const accountsSynced = Number.isFinite(sync?.accountsSynced) ? sync.accountsSynced : null;
+
+  // "Never synced" is a claim, and it can only be made when the server actually
+  // reports on syncing. Without that, the honest answer is that this is not
+  // known — which is itself worth saying rather than dressing up as calm.
+  const known = Boolean(sync) || fromThreads;
+  const hours = warmupHoursSince(lastSyncedAt);
+
+  return {
+    known,
+    lastSyncedAt,
+    accountsTotal,
+    accountsSynced,
+    stale: Number.isFinite(hours) && hours > WARMUP_SYNC_STALE_HOURS
+  };
+}
+
+/** The accounts that have never been read, said as a sentence or not at all. */
+function warmupSyncGapHtml(sync) {
+  if (sync.accountsTotal === null || sync.accountsSynced === null) return "";
+  if (sync.accountsSynced >= sync.accountsTotal) return "";
+  const missing = sync.accountsTotal - sync.accountsSynced;
+  return `<div class="warmup-inbox-note is-warn">
+    <strong>${warmupCount(missing)} of ${warmupCount(sync.accountsTotal)} account${sync.accountsTotal === 1 ? "" : "s"} ${missing === 1 ? "has" : "have"} never been read.</strong>
+    <span>Whatever arrived on ${missing === 1 ? "it" : "them"} is not below and is not counted — this list is only as complete as the accounts the agent has actually opened.</span>
+  </div>`;
+}
+
+/**
+ * The empty inbox, which is the screen this panel will show most often until
+ * the agent runs against real LinkedIn — so it is the part that has to be
+ * right. Each branch says which of the two empties this is.
+ */
+function warmupInboxEmptyHtml() {
+  const inbox = warmupState.inbox;
+
+  if (inbox.unreadOnly) {
+    return `<div class="warmup-inbox-note is-calm">
+      <strong>Nothing unread.</strong>
+      <span>Everything that arrived has been opened. <button class="warmup-inbox-link" type="button" data-warmup-inbox-showall>Show every thread</button> to read them again.</span>
+    </div>`;
+  }
+
+  const sync = warmupInboxSync();
+
+  if (!sync.known) {
+    return `<div class="warmup-inbox-note is-warn">
+      <strong>No replies — and this server does not say when the accounts were last read.</strong>
+      <span>So this cannot tell an empty inbox from an agent that has never looked, and those are not the same thing: one is a quiet week, the other is every reply on every account going unseen. The sync time is what separates them.</span>
+    </div>`;
+  }
+
+  if (!sync.lastSyncedAt) {
+    return `<div class="warmup-inbox-note is-bad">
+      <strong>No account has ever been read. This is not an empty inbox — it is an agent that has never looked.</strong>
+      <span>The warm-up agent opens LinkedIn messaging at the end of each run and posts what it finds here. Nothing has ever posted, so a reply on any of these accounts is invisible to everybody except whoever opens that account by hand. Check that the agent is running and pointed at this portal, and that its token is set on both sides.</span>
+    </div>`;
+  }
+
+  if (sync.stale) {
+    return `<div class="warmup-inbox-note is-warn">
+      <strong>Nothing has come in, and the last time anything looked was ${escapeHtml(warmupAgo(sync.lastSyncedAt))}.</strong>
+      <span>The last read was ${escapeHtml(warmupStamp(sync.lastSyncedAt))}. The agent reads the accounts at the end of every run, so a gap this long is more likely a stopped agent than a quiet week — an inbox nobody is reading looks exactly like an inbox nobody has written to.</span>
+    </div>`;
+  }
+
+  const coverage = sync.accountsTotal !== null && sync.accountsSynced !== null
+    ? ` All ${warmupCount(sync.accountsSynced)} of ${warmupCount(sync.accountsTotal)} account${sync.accountsTotal === 1 ? "" : "s"} were read.`
+    : "";
+
+  return `<div class="warmup-inbox-note is-calm">
+    <strong>Nothing has come in.</strong>
+    <span>The accounts were last read ${escapeHtml(warmupAgo(sync.lastSyncedAt))}, and nobody has written back since.${escapeHtml(coverage)} This is an empty inbox rather than an unread one.</span>
+  </div>`;
+}
+
+function warmupThreadRowHtml(thread) {
+  const participant = thread.participant || {};
+  const name = warmupParticipantName(participant);
+  const account = warmupThreadAccount(thread);
+  const last = thread.lastMessage || {};
+  const inbound = last.direction !== "out";
+  const count = Number(thread.messageCount) || 0;
+  const status = String(thread.outreachStatus || "").trim();
+  const accountTitle = account.exact
+    ? "The person this account is signed in as"
+    : "Anty's profile label — this portal does not know who this account is signed in as";
+
+  return `
+    <button class="warmup-thread ${thread.unread ? "is-unread" : ""}" type="button"
+      data-warmup-thread="${escapeAttr(thread.threadKey || "")}"
+      data-warmup-thread-account="${escapeAttr(thread.accountId || "")}">
+      <span class="warmup-thread-mark" aria-hidden="true"></span>
+      <span class="warmup-thread-who">
+        <strong${warmupParticipantNameAttr(participant)}>${escapeHtml(name)}</strong>
+        ${participant.headline ? `<span class="warmup-subtle">${escapeHtml(participant.headline)}</span>` : ""}
+        <span class="warmup-identity" title="${escapeAttr(accountTitle)}">
+          <i data-lucide="${account.exact ? "badge-check" : "circle-help"}"></i>
+          <span>on ${escapeHtml(account.name)}</span>
+        </span>
+      </span>
+      <span class="warmup-thread-preview">
+        <span class="warmup-thread-from">${inbound ? "They" : "You"}:</span>
+        ${warmupPreviewHtml(last.body)}
+      </span>
+      <span class="warmup-thread-meta">
+        <time datetime="${escapeAttr(last.sentAt || "")}" title="${escapeAttr(warmupStamp(last.sentAt))}">${escapeHtml(warmupAgo(last.sentAt) || "—")}</time>
+        <span class="warmup-subtle">${warmupCount(count)} message${count === 1 ? "" : "s"}</span>
+        ${status ? `<span class="pill ${WARMUP_OUTREACH_TONE[status] || "tone-muted"}">${escapeHtml(status)}</span>` : ""}
+        ${thread.unread ? '<span class="warmup-thread-unread">unread</span>' : ""}
+      </span>
+    </button>`;
+}
+
+function warmupMessageHtml(message, participantName, accountName) {
+  const inbound = message.direction !== "out";
+  const who = inbound ? (participantName || "They") : accountName;
+  return `<li class="warmup-message ${inbound ? "is-in" : "is-out"}">
+    <div class="warmup-message-head">
+      <strong>${escapeHtml(who)}</strong>
+      <time datetime="${escapeAttr(message.sentAt || "")}" title="${escapeAttr(warmupStamp(message.sentAt))}">${escapeHtml(warmupAgo(message.sentAt) || "—")}</time>
+    </div>
+    <div class="warmup-message-body">${warmupBodyHtml(message.body)}</div>
+  </li>`;
+}
+
+/**
+ * One conversation, oldest first. Above it the things that make a reply
+ * actionable: who wrote, where to find them, which account holds the thread,
+ * and where that person stands in the outreach they were part of.
+ */
+function warmupThreadViewHtml() {
+  const inbox = warmupState.inbox;
+  const back = '<button class="text-button warmup-thread-back" type="button" data-warmup-inbox-back><i data-lucide="arrow-left"></i><span>All replies</span></button>';
+
+  if (inbox.openError) {
+    return `${back}<div class="warmup-inbox-note is-bad">
+      <strong>${escapeHtml(inbox.openError)}</strong>
+      <span>The conversation could not be read. What is in the list is the last thing this portal was told about it.</span>
+    </div>`;
+  }
+  if (!inbox.open) {
+    return `${back}<div class="empty-state">Opening the conversation...</div>`;
+  }
+
+  const thread = inbox.open.thread || {};
+  const participant = thread.participant || {};
+  const name = warmupParticipantName(participant);
+  const account = warmupThreadAccount(thread);
+  const link = warmupProfileUrl(participant.slug);
+  const status = String(thread.outreachStatus || "").trim();
+  const messages = Array.isArray(inbox.open.messages) ? inbox.open.messages : [];
+  const accountTitle = account.exact
+    ? "The person this account is signed in as"
+    : "Anty's profile label — this portal does not know who this account is signed in as";
+
+  const head = `
+    <div class="warmup-thread-head">
+      ${back}
+      <div class="warmup-thread-head-who">
+        <strong${warmupParticipantNameAttr(participant)}>${escapeHtml(name)}</strong>
+        ${participant.headline ? `<span class="warmup-subtle">${escapeHtml(participant.headline)}</span>` : ""}
+        ${link
+          ? `<a href="${escapeAttr(link)}" target="_blank" rel="noreferrer noopener"><i data-lucide="external-link"></i><span>their LinkedIn</span></a>`
+          : '<span class="warmup-subtle">no profile link came with this thread</span>'}
+      </div>
+      <div class="warmup-thread-head-meta">
+        <span class="warmup-identity" title="${escapeAttr(accountTitle)}">
+          <i data-lucide="${account.exact ? "badge-check" : "circle-help"}"></i>
+          <span>arrived on ${escapeHtml(account.name)}</span>
+        </span>
+        ${status
+          ? `<span class="pill ${WARMUP_OUTREACH_TONE[status] || "tone-muted"}">${escapeHtml(status)}</span>`
+          : '<span class="warmup-subtle">not matched to anyone this account approached</span>'}
+      </div>
+    </div>`;
+
+  if (!messages.length) {
+    return `${head}<div class="warmup-inbox-note is-warn">
+      <strong>This thread has no messages stored.</strong>
+      <span>The conversation was seen but nothing in it was read — on the agent's side that is what a rotted selector looks like.</span>
+    </div>`;
+  }
+
+  return `${head}
+    <ol class="warmup-messages">${messages.map((message) => warmupMessageHtml(message, name, account.name)).join("")}</ol>
+    <p class="warmup-thread-foot">Reading is all this does. Replying goes out from a real account against a real person, so it needs its own quota treatment and is not in this phase — answer from the account itself.</p>`;
+}
+
+function renderWarmupInbox() {
+  const title = document.getElementById("warmupInboxTitle");
+  const subtitle = document.getElementById("warmupInboxSubtitle");
+  const pill = document.getElementById("warmupInboxPill");
+  const toggleLabel = document.getElementById("warmupInboxUnreadLabel");
+  const toggle = document.getElementById("warmupInboxUnreadOnly");
+  const body = document.getElementById("warmupInboxBody");
+  if (!body || !title || !subtitle) return;
+
+  const inbox = warmupState.inbox;
+  if (toggle) toggle.checked = inbox.unreadOnly;
+  renderWarmupNavBadge();
+
+  // A thread is open: the panel becomes that conversation, and the controls
+  // that belong to the list step out of the way rather than filter nothing.
+  if (inbox.openThreadKey !== null) {
+    const open = inbox.open?.thread?.participant;
+    title.textContent = open ? `Inbox · ${warmupParticipantName(open)}` : "Inbox · one conversation";
+    subtitle.textContent = "The conversation as the agent read it, oldest first";
+    if (toggleLabel) toggleLabel.hidden = true;
+    if (pill) pill.hidden = true;
+    body.innerHTML = warmupThreadViewHtml();
+    refreshIcons();
+    return;
+  }
+
+  title.textContent = "Inbox";
+  if (toggleLabel) toggleLabel.hidden = false;
+  if (pill) pill.hidden = false;
+
+  if (pill) {
+    if (!inbox.available) {
+      pill.className = "pill tone-muted";
+      pill.textContent = "not on this server";
+    } else if (inbox.error) {
+      pill.className = "pill tone-bad";
+      pill.textContent = "unavailable";
+    } else if (!inbox.ready) {
+      pill.className = "pill tone-muted";
+      pill.textContent = "loading";
+    } else if (inbox.unread > 0) {
+      pill.className = "pill tone-live";
+      pill.textContent = `${warmupCount(inbox.unread)} unread`;
+    } else {
+      // With nothing unread the pill stops counting and starts reporting on the
+      // reading, because "nothing yet" beside a panel saying nothing has ever
+      // looked is the calm half of the very distinction this panel exists for.
+      const state = warmupInboxSync();
+      if (state.known && !state.lastSyncedAt) {
+        pill.className = "pill tone-bad";
+        pill.textContent = "never read";
+      } else if (state.stale) {
+        pill.className = "pill tone-warn";
+        pill.textContent = "not read lately";
+      } else if (!state.known && !inbox.threads.length) {
+        pill.className = "pill tone-warn";
+        pill.textContent = "reading unknown";
+      } else {
+        pill.className = "pill tone-muted";
+        pill.textContent = inbox.threads.length ? "all read" : "nothing yet";
+      }
+    }
+  }
+
+  if (!inbox.available) {
+    subtitle.textContent = "The inbox is not on this server yet";
+    body.innerHTML = `<div class="warmup-inbox-note is-warn">
+      <strong>This server has no inbox endpoint.</strong>
+      <span>Nothing is wrong with the accounts — this portal is simply older than the inbox. Nobody's reply is being lost, but nothing is reading for them either.</span>
+    </div>`;
+    refreshIcons();
+    return;
+  }
+
+  if (inbox.error) {
+    subtitle.textContent = "The inbox could not be read";
+    body.innerHTML = `<div class="warmup-inbox-note is-bad">
+      <strong>${escapeHtml(inbox.error)}</strong>
+      <span>The inbox not answering and nobody having written are different answers; this is the first one.</span>
+    </div>`;
+    refreshIcons();
+    return;
+  }
+
+  if (!inbox.ready) {
+    subtitle.textContent = "Reading what came back";
+    body.innerHTML = '<div class="empty-state">Loading the inbox...</div>';
+    return;
+  }
+
+  const sync = warmupInboxSync();
+  // Three answers, not two: read at a time, never read, and not reported. The
+  // subtitle must not turn the third into the second.
+  const read = sync.lastSyncedAt
+    ? `accounts last read ${warmupAgo(sync.lastSyncedAt)}`
+    : (sync.known ? "no account read yet" : "this server does not report when the accounts were read");
+
+  if (!inbox.threads.length) {
+    subtitle.textContent = inbox.unreadOnly ? "Unread only" : read;
+    body.innerHTML = warmupInboxEmptyHtml();
+    refreshIcons();
+    return;
+  }
+
+  subtitle.textContent = `${warmupCount(inbox.threads.length)} conversation${inbox.threads.length === 1 ? "" : "s"}${inbox.unreadOnly ? " unread" : ""} · ${read}`;
+
+  const shown = inbox.showAll ? inbox.threads : inbox.threads.slice(0, WARMUP_INBOX_PREVIEW);
+  const hidden = inbox.threads.length - shown.length;
+  // Collapsing must never hide a waiting reply quietly, so the button says how
+  // many of what it is holding back are still unread.
+  const hiddenUnread = hidden > 0
+    ? inbox.threads.slice(shown.length).filter((thread) => thread.unread).length
+    : 0;
+  const more = hidden > 0
+    ? `<button class="warmup-inbox-more" type="button" data-warmup-inbox-expand>Show ${warmupCount(hidden)} more conversation${hidden === 1 ? "" : "s"}${hiddenUnread ? ` · ${warmupCount(hiddenUnread)} still unread` : ""}</button>`
+    : (inbox.showAll && inbox.threads.length > WARMUP_INBOX_PREVIEW
+      ? '<button class="warmup-inbox-more" type="button" data-warmup-inbox-collapse>Show fewer</button>'
+      : "");
+
+  body.innerHTML = `${warmupSyncGapHtml(sync)}
+    <div class="warmup-threads">${shown.map((thread) => warmupThreadRowHtml(thread)).join("")}</div>
+    ${more}`;
+  refreshIcons();
+}
+
+/* ── The badge ─────────────────────────────────────────────────────────────
+ *
+ * The count on the Warm-up nav item is the entire notification this phase
+ * ships: the workspace's notification settings have channels for email and
+ * Slack, none of them are wired to anything, and a badge that is true beats a
+ * channel that silently does nothing.
+ *
+ * Which means it cannot wait for somebody to open the tab — a reply nobody is
+ * told about is the problem being solved. So the count is read once at boot and
+ * then on a slow timer, but only while the window is actually in front, and
+ * never again on a server that says it has no warm-up configured.
+ */
+
+const WARMUP_BADGE_POLL_MS = 120000;
+let warmupBadgeTimer = null;
+
+function renderWarmupNavBadge() {
+  const badge = document.getElementById("warmupNavBadge");
+  if (!badge) return;
+  const count = warmupState.unreadReplies;
+  if (!Number.isFinite(count) || count <= 0) {
+    badge.hidden = true;
+    badge.textContent = "";
+    return;
+  }
+  badge.hidden = false;
+  badge.textContent = count > 99 ? "99+" : String(count);
+  badge.title = `${count} unread ${count === 1 ? "reply" : "replies"}`;
+  badge.setAttribute("aria-label", badge.title);
+}
+
+function setWarmupUnread(count) {
+  warmupState.unreadReplies = Number.isFinite(count) ? Math.max(0, count) : null;
+  renderWarmupNavBadge();
+}
+
+function stopWarmupBadgePoll() {
+  if (warmupBadgeTimer) clearInterval(warmupBadgeTimer);
+  warmupBadgeTimer = null;
+}
+
+async function refreshWarmupBadge() {
+  if (!authState?.authenticated) return;
+  if (document.visibilityState === "hidden") return;
+  try {
+    const config = await warmupApi("/config");
+    // A server with no warm-up will never have an unread reply, and should not
+    // be asked again for the rest of the session.
+    if (config && config.configured === false) {
+      setWarmupUnread(0);
+      stopWarmupBadgePoll();
+      return;
+    }
+    if (Number.isFinite(config?.unreadReplies)) setWarmupUnread(config.unreadReplies);
+  } catch (error) {
+    // A portal without the count is not a portal with a wrong count: leave the
+    // badge as it was, and stop pestering a server that has no such route.
+    if (error?.status === 404) stopWarmupBadgePoll();
+  }
+}
+
+function startWarmupBadge() {
+  stopWarmupBadgePoll();
+  warmupBadgeTimer = setInterval(() => refreshWarmupBadge(), WARMUP_BADGE_POLL_MS);
+  refreshWarmupBadge();
+}
+
+/* ── Loading and opening ───────────────────────────────────────────────── */
+
+async function loadWarmupInbox() {
+  const inbox = warmupState.inbox;
+  const params = new URLSearchParams();
+  if (inbox.unreadOnly) params.set("unread", "1");
+  const query = params.toString();
+
+  try {
+    const payload = await warmupApi(`/inbox${query ? `?${query}` : ""}`);
+    inbox.threads = Array.isArray(payload.threads) ? payload.threads : [];
+    inbox.unread = Number.isFinite(payload.unread) ? payload.unread : 0;
+    inbox.sync = payload.sync && typeof payload.sync === "object" ? payload.sync : null;
+    inbox.available = true;
+    inbox.ready = true;
+    inbox.error = "";
+    setWarmupUnread(inbox.unread);
+  } catch (error) {
+    inbox.threads = [];
+    inbox.sync = null;
+    if (error?.status === 404) {
+      // The endpoint is not built here. That is a different sentence from "the
+      // inbox is empty", and drawing the empty one would be a lie.
+      inbox.available = false;
+      inbox.ready = false;
+      inbox.error = "";
+    } else {
+      inbox.available = true;
+      inbox.ready = true;
+      inbox.error = error.message || "The inbox could not be read.";
+    }
+  }
+  renderWarmupInbox();
+}
+
+function warmupThreadIsOpen(accountId, threadKey) {
+  const inbox = warmupState.inbox;
+  return inbox.openAccountId === accountId && inbox.openThreadKey === threadKey;
+}
+
+/** Opening a thread marks it read — that is what opening it means. */
+async function markWarmupThreadRead(accountId, threadKey) {
+  const thread = warmupState.inbox.threads.find(
+    (row) => row.threadKey === threadKey && row.accountId === accountId
+  );
+  if (thread && !thread.unread) return;
+
+  let payload = null;
+  try {
+    payload = await warmupApi("/inbox/read", {
+      method: "POST",
+      body: JSON.stringify({ threadKey, accountId })
+    });
+  } catch (error) {
+    // Failing to mark it read leaves it unread, which is the safe direction: a
+    // reply shown twice costs a glance, a reply hidden costs the reply.
+    return;
+  }
+
+  if (thread) thread.unread = false;
+  warmupState.inbox.unread = Math.max(0, (warmupState.inbox.unread || 0) - 1);
+  // The mark comes back with the new global count, so the badge is the server's
+  // number rather than this screen's arithmetic about it.
+  if (Number.isFinite(payload?.unread)) {
+    setWarmupUnread(payload.unread);
+  } else if (Number.isFinite(warmupState.unreadReplies)) {
+    setWarmupUnread(warmupState.unreadReplies - 1);
+  }
+}
+
+async function openWarmupThread(accountId, threadKey) {
+  const inbox = warmupState.inbox;
+  inbox.openAccountId = accountId;
+  inbox.openThreadKey = threadKey;
+  inbox.open = null;
+  inbox.openError = "";
+  inbox.openBusy = true;
+  renderWarmupInbox();
+
+  try {
+    const payload = await warmupApi(
+      `/inbox/thread?threadKey=${encodeURIComponent(threadKey)}&accountId=${encodeURIComponent(accountId)}`
+    );
+    // The reader may have gone back, or opened something else, while this was
+    // in flight. Whatever is open now wins.
+    if (!warmupThreadIsOpen(accountId, threadKey)) return;
+    inbox.open = { thread: payload.thread || {}, messages: payload.messages || [] };
+    inbox.openError = "";
+  } catch (error) {
+    if (!warmupThreadIsOpen(accountId, threadKey)) return;
+    // A 404 here means the thread, not the route — a row can be listed and then
+    // be gone by the time somebody clicks it. Unless the list never answered
+    // either, in which case it is the route after all.
+    inbox.openError = error?.status === 404
+      ? (inbox.available
+        ? "This conversation is no longer stored on the server."
+        : "This server cannot open a single thread yet.")
+      : (error.message || "The conversation could not be read.");
+  } finally {
+    if (warmupThreadIsOpen(accountId, threadKey)) {
+      inbox.openBusy = false;
+      renderWarmupInbox();
+    }
+  }
+
+  if (warmupThreadIsOpen(accountId, threadKey) && !inbox.openError) {
+    await markWarmupThreadRead(accountId, threadKey);
+    if (warmupThreadIsOpen(accountId, threadKey)) renderWarmupInbox();
+  }
+}
+
+function closeWarmupThread() {
+  const inbox = warmupState.inbox;
+  inbox.openAccountId = null;
+  inbox.openThreadKey = null;
+  inbox.open = null;
+  inbox.openError = "";
+  inbox.openBusy = false;
+  renderWarmupInbox();
+}
+
+document.getElementById("warmupInboxRefreshBtn")?.addEventListener("click", () => {
+  const inbox = warmupState.inbox;
+  if (inbox.openThreadKey !== null) {
+    openWarmupThread(inbox.openAccountId, inbox.openThreadKey);
+    return;
+  }
+  loadWarmupInbox();
+});
+
+document.getElementById("warmupInboxUnreadOnly")?.addEventListener("change", (event) => {
+  warmupState.inbox.unreadOnly = Boolean(event.target.checked);
+  warmupState.inbox.ready = false;
+  renderWarmupInbox();
+  loadWarmupInbox();
+});
+
+document.getElementById("warmupInboxBody")?.addEventListener("click", (event) => {
+  if (event.target.closest("[data-warmup-inbox-back]")) {
+    closeWarmupThread();
+    return;
+  }
+  if (event.target.closest("[data-warmup-inbox-expand]")) {
+    warmupState.inbox.showAll = true;
+    renderWarmupInbox();
+    return;
+  }
+  if (event.target.closest("[data-warmup-inbox-collapse]")) {
+    warmupState.inbox.showAll = false;
+    renderWarmupInbox();
+    return;
+  }
+  if (event.target.closest("[data-warmup-inbox-showall]")) {
+    warmupState.inbox.unreadOnly = false;
+    warmupState.inbox.ready = false;
+    renderWarmupInbox();
+    loadWarmupInbox();
+    return;
+  }
+  // A link inside a row is the link, not the row.
+  if (event.target.closest("a")) return;
+  const row = event.target.closest("[data-warmup-thread]");
+  if (!row) return;
+  openWarmupThread(row.dataset.warmupThreadAccount, row.dataset.warmupThread);
+});
+
+startWarmupBadge();
