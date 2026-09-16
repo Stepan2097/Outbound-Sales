@@ -47,7 +47,8 @@ than any session and shorter than a day, so a crash costs one day at most and
 never burns a contact permanently. Release runs at the start of every claim and
 on `POST /api/warmup/campaigns/release`.
 
-**One account, several campaigns.** Campaigns carry an `order`; an account's
+**One account, several campaigns.** Campaigns carry an `order` — a position in
+the list, changed by moving a campaign to it (see `PATCH` below); an account's
 remaining quota is offered to them in that order, and the first campaign with
 work takes it. Round-robin was rejected: a seller who puts a campaign first
 means it, and splitting three ways produces three campaigns that all crawl.
@@ -141,10 +142,25 @@ Body `{ id, ...fields }`. Every field optional; what is absent keeps its value.
 `campaign.started` event, to `paused` a `campaign.paused`. Answers `200` with
 the same single enriched `campaign` as `POST`.
 
-**`order` is settable here**, and that is the reorder control: the claiming rule
-below says a seller who puts a campaign first means it, which is only true if
-putting it first is something a seller can do. Send the new number; the list
-re-sorts on the next read, and a tie is broken by which campaign is older.
+**`order` is a move, not a number.** `PATCH { id, order: N }` places that
+campaign at position `N` and renumbers its siblings around it, so the list is
+always a dense `0..n-1` with nothing sharing a place. Past either end is that
+end. `order` stays optional: a PATCH without it moves nothing.
+
+Set-the-number was tried and is wrong. Writing one campaign's `order` and
+leaving its siblings alone leaves two campaigns claiming the same position, and
+the tie-break by age then quietly keeps the older one in front — so "put this
+one first" did not put it first, and an account's whole quota stayed captured by
+whichever campaign was created earliest. The tie-break by age remains as the
+fallback for any stored state that somehow still has duplicates; it is no longer
+something a normal write can produce.
+
+Every write renumbers, so a delete closes its gap too — otherwise the positions
+left behind (0, 2) would make "move to position 1" mean two different things.
+
+This is the reorder control the claiming rule depends on: an account's quota
+goes to the first campaign in order, and "a seller who puts a campaign first
+means it" is only true if putting it first is something a seller can do.
 
 A single-campaign response cannot carry a field computed **across** campaigns.
 `progressApproximate` and the effective order are both relational: editing one

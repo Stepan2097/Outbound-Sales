@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  allowanceReason, byOrder, claimCapacity, claimCutoff, claimTtlHours, migrateCampaigns, nextOrder,
-  normalizeCampaign, progressApproximate, progressFrom, runningFor, targetingOf
+  allowanceReason, byOrder, claimCapacity, claimCutoff, claimTtlHours, migrateCampaigns, moveTo, nextOrder,
+  normalizeCampaign, progressApproximate, progressFrom, renumber, runningFor, targetingOf
 } from "../warmup/campaigns.mjs";
 
 /** The environment a deployment has before anybody has saved a thing. */
@@ -150,6 +150,65 @@ test("an account's quota is offered to its campaigns in the order a seller put t
   ];
   assert.deepEqual(runningFor(campaigns, "a").map((campaign) => campaign.id), ["first", "third"],
     "only running campaigns, only this account's, and the first in order gets the quota");
+});
+
+/** Three campaigns, first to third, the way a seller would have made them. */
+function three() {
+  return [
+    normalizeCampaign({ id: "first", name: "Перша", folderId: "f", order: 0, createdAt: "2026-09-16T09:00:00.000Z" }),
+    normalizeCampaign({ id: "second", name: "Друга", folderId: "f", order: 1, createdAt: "2026-09-16T10:00:00.000Z" }),
+    normalizeCampaign({ id: "third", name: "Третя", folderId: "f", order: 2, createdAt: "2026-09-16T11:00:00.000Z" })
+  ];
+}
+
+const places = (campaigns) => campaigns.slice().sort(byOrder).map((campaign) => `${campaign.id}#${campaign.order}`);
+
+test("moving the second campaign to the front actually makes it first", () => {
+  const moved = moveTo(three(), "second", 0);
+  assert.deepEqual(places(moved), ["second#0", "first#1", "third#2"]);
+  assert.equal(runningFor(moved.map((campaign) => ({ ...campaign, state: "running", accountIds: ["a"] })), "a")[0].id,
+    "second", "the first campaign in order is the one that takes the account's quota — that is what reordering is for");
+});
+
+test("writing one campaign's number without moving the rest would have left a tie, and no longer can", () => {
+  // The bug this test exists for: order 0 set on the second campaign left two
+  // campaigns at 0, and the tie-break by age kept the older one in front — so
+  // "put this one first" did not put it first.
+  const moved = moveTo(three(), "second", 0);
+  const numbers = moved.map((campaign) => campaign.order).sort((left, right) => left - right);
+  assert.deepEqual(numbers, [0, 1, 2], "positions must be a dense 0..n-1 with nothing sharing a place");
+  assert.equal(new Set(numbers).size, numbers.length);
+});
+
+test("a campaign can be moved to the end, and past the end is the end", () => {
+  assert.deepEqual(places(moveTo(three(), "first", 2)), ["second#0", "third#1", "first#2"]);
+  assert.deepEqual(places(moveTo(three(), "first", 99)), ["second#0", "third#1", "first#2"],
+    "a control that overshoots should land, not fail");
+  assert.deepEqual(places(moveTo(three(), "third", -5)), ["third#0", "first#1", "second#2"]);
+});
+
+test("moving a campaign leaves the others in the order they were in", () => {
+  assert.deepEqual(places(moveTo(three(), "third", 1)), ["first#0", "third#1", "second#2"]);
+  assert.deepEqual(places(moveTo(three(), "second", 1)), ["first#0", "second#1", "third#2"],
+    "moving a campaign to where it already is changes nothing");
+});
+
+test("moving a campaign that is not there renumbers the rest rather than throwing", () => {
+  assert.deepEqual(places(moveTo(three(), "deleted-a-moment-ago", 0)), ["first#0", "second#1", "third#2"]);
+});
+
+test("a gap left by a delete is closed, so the next move lands where it was aimed", () => {
+  const afterDelete = three().filter((campaign) => campaign.id !== "second");
+  assert.deepEqual(places(renumber(afterDelete)), ["first#0", "third#1"], "0 and 2 would make position 1 mean two things");
+  assert.deepEqual(places(renumber([])), []);
+});
+
+test("renumbering sorts by order first, and only then by age", () => {
+  const scrambled = [
+    normalizeCampaign({ id: "late", name: "Late", folderId: "f", order: 5, createdAt: "2026-09-16T09:00:00.000Z" }),
+    normalizeCampaign({ id: "early", name: "Early", folderId: "f", order: 1, createdAt: "2026-09-16T11:00:00.000Z" })
+  ];
+  assert.deepEqual(places(renumber(scrambled)), ["early#0", "late#1"]);
 });
 
 test("two campaigns saved in the same instant still have a fixed order", () => {

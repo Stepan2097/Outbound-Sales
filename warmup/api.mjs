@@ -15,8 +15,9 @@ import {
   describeTargeting, folderNameOf, forecastFor, listFolders, normalizeFilters
 } from "./targeting.mjs";
 import {
-  allowanceReason, byOrder, claimCapacity, claimCutoff, defaultFilters, describeCampaign, isCampaignState,
-  migrateCampaigns, nextOrder, normalizeCampaign, progressApproximate, progressFrom, runningFor, targetingOf
+  allowanceReason, claimCapacity, claimCutoff, defaultFilters, describeCampaign, isCampaignState,
+  migrateCampaigns, moveTo, nextOrder, normalizeCampaign, progressApproximate, progressFrom, renumber,
+  runningFor, targetingOf
 } from "./campaigns.mjs";
 
 /**
@@ -371,7 +372,9 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
     return campaigns;
   };
 
-  const saveCampaigns = (list) => campaignStore.write(list.slice().sort(byOrder));
+  // Every write leaves the list a dense 0..n-1: `order` is the place a campaign
+  // is in, and a gap left by a delete would make the next move land oddly.
+  const saveCampaigns = (list) => campaignStore.write(renumber(list));
 
   try {
     // ── configuration ──────────────────────────────────────────────────────
@@ -1234,11 +1237,15 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         accountIds,
         productId,
         state,
-        order: Number.isFinite(body.order) ? Number(body.order) : current.order,
+        order: current.order,
         updatedAt: new Date().toISOString()
       });
 
-      const next = campaigns.map((campaign) => (campaign.id === updated.id ? updated : campaign));
+      // `order` moves the campaign to that position and renumbers its siblings.
+      // Writing the number alone would leave two campaigns claiming one place.
+      const wanted = body.order === undefined || body.order === null ? null : Number(body.order);
+      const edited = campaigns.map((campaign) => (campaign.id === updated.id ? updated : campaign));
+      const next = Number.isFinite(wanted) ? moveTo(edited, updated.id, wanted) : renumber(edited);
       await saveCampaigns(next);
 
       // Only the two moves an operator would look for in the log later: a
@@ -1251,9 +1258,12 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         });
       }
 
+      // The saved copy, not the one built above: a move renumbers it, and the
+      // panel has to hear the position it actually landed in.
+      const saved = next.find((campaign) => campaign.id === updated.id);
       sendJson(response, 200, {
         success: true,
-        campaign: await enrichCampaign(updated, next, await campaignContext(next))
+        campaign: await enrichCampaign(saved, next, await campaignContext(next))
       });
       return true;
     }

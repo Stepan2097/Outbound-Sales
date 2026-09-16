@@ -84,6 +84,43 @@ export function nextOrder(campaigns) {
   return campaigns.reduce((max, campaign) => Math.max(max, campaign.order + 1), 0);
 }
 
+/** Number an already-ordered list 0..n-1, touching only what has to change. */
+function number(ordered) {
+  return ordered.map((campaign, index) => (campaign.order === index ? campaign : { ...campaign, order: index }));
+}
+
+/**
+ * The list as positions: sorted, then numbered 0..n-1 with no gaps and no ties.
+ *
+ * Run on every write, so a delete closes its gap and `order` always means the
+ * place a campaign is in rather than a number it happens to carry.
+ */
+export function renumber(campaigns) {
+  return number(campaigns.slice().sort(byOrder));
+}
+
+/**
+ * Move a campaign to a position, and renumber the rest around it.
+ *
+ * `order` is a position, not a label. Writing one campaign's number and leaving
+ * its siblings alone leaves two campaigns claiming the same place, and the
+ * tie-break by age then quietly keeps the older one in front — so "put this one
+ * first" would not put it first, which is the whole point of the control. The
+ * claiming rule leans on this: an account's quota goes to the first campaign in
+ * order, and a seller who cannot reorder cannot choose which one that is.
+ */
+export function moveTo(campaigns, id, position) {
+  const ordered = campaigns.slice().sort(byOrder);
+  const from = ordered.findIndex((campaign) => campaign.id === id);
+  if (from < 0) return number(ordered);
+
+  const [moved] = ordered.splice(from, 1);
+  // Past either end is that end: a control that overshoots should land, not fail.
+  const to = Math.max(0, Math.min(Math.trunc(position), ordered.length));
+  ordered.splice(to, 0, moved);
+  return number(ordered);
+}
+
 /**
  * The saved list, or the Phase 1 selection turned into one campaign.
  *
