@@ -1,10 +1,10 @@
-import { anty, crm, antyTeamId, crmError, leadById, leadQueue, queueTotal, today } from "./db.mjs";
+import { anty, crm, CONTACT_ID_BATCH, antyTeamId, crmError, leadById, leadQueue, queueTotal, today } from "./db.mjs";
 import { RestError } from "./rest.mjs";
 import { ACTION_KINDS, ACTION_LABEL, currentDay, planForDay, totalDays, validateStrategy } from "./strategy.mjs";
 import { SESSION_WINDOW, insideWindow, nextSession, windowLabel } from "./schedule.mjs";
 import { HEALTH_LABEL, HEALTH_VALUES, deriveStatus, isHealth } from "./status.mjs";
 import { PLATFORMS, parseProxy, platformOf, proxyString, retag } from "./platform.mjs";
-import { OUTREACH_COLUMNS, OUTREACH_STATUSES, describeOutreach, sentBy } from "./outreach.mjs";
+import { CLAIM_STATUS, OUTREACH_COLUMNS, OUTREACH_STATUSES, describeClaim, describeOutreach, personSnapshot, sentBy } from "./outreach.mjs";
 import { antyTimestampToIso, describeSession, durationMin } from "./sessions.mjs";
 import { encryptSecret, secretsConfigured } from "./secretbox.mjs";
 import {
@@ -12,8 +12,12 @@ import {
   logEvent, loadAccount, loginIdentities, newestRun, openSession, recordAction, toStrategy
 } from "./store.mjs";
 import {
-  describeTargeting, folderExists, folderNameOf, forecastFor, listFolders, normalizeFilters, normalizeTargeting
+  describeTargeting, folderNameOf, forecastFor, listFolders, normalizeFilters
 } from "./targeting.mjs";
+import {
+  allowanceReason, byOrder, claimCapacity, claimCutoff, defaultFilters, describeCampaign, isCampaignState,
+  migrateCampaigns, nextOrder, normalizeCampaign, progressApproximate, progressFrom, runningFor, targetingOf
+} from "./campaigns.mjs";
 
 /**
  * The warm-up's HTTP surface, mounted under /api/warmup.
@@ -72,29 +76,302 @@ function phaseOf(account, run) {
     : "warming";
 }
 
+/** A claimed or sent person, with only the columns a queue has any use for. */
+const CLAIM_COLUMNS =
+  "id,account_id,crm_contact_id,person_name,person_company,person_position,person_linkedin,status,created_at";
+
 /**
- * The saved selection plus what it comes to, which is the only shape the
- * targeting routes ever answer with. The forecast crosses two databases, and a
- * CRM that is not answering must not cost the panel the selection it is there
- * to show — so it degrades to a sentence beside a null forecast rather than a
- * failed request.
+ * Which of these contacts sit in this folder.
+ *
+ * An outreach row carries no campaign id — it cannot, without a migration — so
+ * this is how a row is attributed to a campaign: its account worked the row,
+ * and the folder holds the person.
  */
-async function targetingAnswer(targeting) {
-  if (!targeting.folderId) {
-    return { success: true, targeting: describeTargeting(targeting), forecast: null, forecastError: null };
+async function contactsInFolder(folderId, contactIds) {
+  const found = new Set();
+  for (let start = 0; start < contactIds.length; start += CONTACT_ID_BATCH) {
+    const rows = await crm.from("contacts").select("id")
+      .eq("folder_id", folderId).in("id", contactIds.slice(start, start + CONTACT_ID_BATCH)).rows();
+    for (const row of rows) found.add(row.id);
   }
-  try {
-    const [name, forecast] = await Promise.all([folderNameOf(targeting.folderId), forecastFor(targeting)]);
-    return { success: true, targeting: describeTargeting(targeting, name), forecast, forecastError: null };
-  } catch (error) {
-    return { success: true, targeting: describeTargeting(targeting), forecast: null, forecastError: crmError(error) };
-  }
+  return found;
 }
 
-export async function handleWarmupApi({ request, response, url, sendJson, readJson, targeting: targetingStore }) {
+/**
+ * How many connection requests each of these accounts has actually sent today.
+ *
+ * Read from the warm-up's own day counter rather than from the outreach rows: a
+ * row claimed yesterday and sent this morning still carries yesterday's
+ * `created_at`, and the day counter is the number the quota is checked against,
+ * so it cannot disagree with what an account was allowed.
+ */
+async function connectDoneToday(accountIds) {
+  const done = new Map(accountIds.map((id) => [id, 0]));
+  if (!accountIds.length) return done;
+
+  const runs = await anty.from("wl_runs").select("id,account_id,started_at")
+    .in("account_id", accountIds).in("state", ["running", "paused"])
+    .order("started_at", { ascending: false }).rows();
+
+  const accountByRun = new Map();
+  const seen = new Set();
+  for (const run of runs) {
+    // Newest first, so the first run seen for an account is its live one.
+    if (seen.has(run.account_id)) continue;
+    seen.add(run.account_id);
+    accountByRun.set(run.id, run.account_id);
+  }
+  if (!accountByRun.size) return done;
+
+  const rows = await anty.from("wl_day_actions").select("run_id,done")
+    .in("run_id", [...accountByRun.keys()]).eq("on_date", today()).eq("kind", "connect").rows();
+  for (const row of rows) {
+    const accountId = accountByRun.get(row.run_id);
+    if (accountId) done.set(accountId, (done.get(accountId) ?? 0) + (Number(row.done) || 0));
+  }
+  return done;
+}
+
+/**
+ * What this account is allowed to send today, and why.
+ *
+ * Asked through `checkQuota` — the same call the send itself makes — so a claim
+ * can never allocate work the send would refuse. Nothing here writes: quota is
+ * spent when something is sent, never when it is claimed.
+ */
+async function connectAllowance(account) {
+  if (account.status === "excluded") return { blocked: "Excluded from warm-up" };
+  if (account.health !== "ok") return { blocked: `Account health: ${HEALTH_LABEL[account.health] ?? account.health}` };
+
+  const run = await activeRun(account.id);
+  if (!run) return { blocked: "No warm-up in progress" };
+  if (run.paused_until && run.paused_until >= today()) return { blocked: `Paused until ${run.paused_until}` };
+
+  const allowance = await checkQuota(account, run, "connect", 1);
+  return {
+    run,
+    day: currentDay(new Date(run.started_at), run.paused_days ?? 0),
+    totalDays: totalDays(run.strategy_snapshot),
+    // A refusal for a day with no requests planned carries no quota, because
+    // there is none: zero is the whole answer, not a missing one.
+    quota: allowance.quota ?? 0,
+    spent: allowance.ok ? allowance.done - allowance.step : allowance.done ?? 0,
+    startsDay: connectStartsDay(run)
+  };
+}
+
+/**
+ * Let go of claims that outlived their session.
+ *
+ * A `queued` row holds a person out of everybody's pool while it stands, so a
+ * crash between claiming and sending would otherwise burn a real contact for
+ * good. Twenty hours is longer than any working session and shorter than a day:
+ * the worst a crash costs is one day of one account's allocation.
+ */
+async function releaseExpiredClaims() {
+  const gone = await anty.from("wl_outreach")
+    .eq("status", CLAIM_STATUS).lt("created_at", claimCutoff())
+    .remove().select("id").rows();
+  if (gone.length) {
+    await logEvent({
+      type: "campaign.released",
+      message: `Released ${gone.length} claim${gone.length > 1 ? "s" : ""} nobody worked in time`,
+      meta: { released: gone.length, reason: "expired" }
+    });
+  }
+  return gone.length;
+}
+
+/** Delete claims by id, in batches a URL can carry. */
+async function deleteClaims(ids) {
+  let released = 0;
+  for (let start = 0; start < ids.length; start += CONTACT_ID_BATCH) {
+    const gone = await anty.from("wl_outreach")
+      .in("id", ids.slice(start, start + CONTACT_ID_BATCH)).eq("status", CLAIM_STATUS)
+      .remove().select("id").rows();
+    released += gone.length;
+  }
+  return released;
+}
+
+/**
+ * The claims a deleted campaign was holding.
+ *
+ * Its accounts' rows, for contacts in its folder — and when the CRM cannot say
+ * which those are, only the accounts no other campaign works. Another
+ * campaign's allocation is not this one's to throw away.
+ */
+async function releaseCampaignClaims(campaign, campaigns) {
+  if (!campaign.accountIds.length) return 0;
+  const queued = await anty.from("wl_outreach").select("id,account_id,crm_contact_id")
+    .in("account_id", campaign.accountIds).eq("status", CLAIM_STATUS).rows();
+  if (!queued.length) return 0;
+
+  let mine = queued;
+  try {
+    const inFolder = await contactsInFolder(campaign.folderId, [...new Set(queued.map((row) => row.crm_contact_id))]);
+    mine = queued.filter((row) => inFolder.has(row.crm_contact_id));
+  } catch {
+    const shared = new Set(campaigns.flatMap((other) => (other.id === campaign.id ? [] : other.accountIds)));
+    mine = queued.filter((row) => !shared.has(row.account_id));
+  }
+  return deleteClaims(mine.map((row) => row.id));
+}
+
+/**
+ * A folder that is really there, accounts that are really rows, a product the
+ * workspace really sells.
+ *
+ * Checked rather than taken on trust: a folder id that is not there makes every
+ * later screen say "nobody matches" for a reason nobody can see.
+ */
+async function checkCampaignInput({ folderId, accountIds, productId, products }) {
+  let folderName;
+  try {
+    folderName = await folderNameOf(folderId);
+  } catch (error) {
+    return { status: 502, error: crmError(error) };
+  }
+  if (folderName === null) return { status: 404, error: "That folder is not in the CRM" };
+
+  if (accountIds.length) {
+    const known = await anty.from("wl_accounts").select("id").in("id", accountIds).rows();
+    const missing = accountIds.filter((id) => !known.some((row) => row.id === id));
+    if (missing.length) return { status: 400, error: `Unknown account: ${missing.join(", ")}` };
+  }
+
+  // A product is the workspace's own, and nothing about the message is decided
+  // here — a campaign stores which product it is for and no wording at all.
+  if (productId && !products.some((product) => product.id === productId)) {
+    return { status: 400, error: `Unknown product: ${productId}` };
+  }
+
+  return { folderName };
+}
+
+/**
+ * Which campaign each claimed row belongs to: its account's campaign, in order,
+ * whose folder holds the person. Without the CRM the rows are still worth
+ * showing, so they come back with no campaign named rather than not at all.
+ */
+async function claimOwners(campaigns, rows) {
+  const owners = new Map();
+  if (!rows.length || !campaigns.length) return owners;
+  const contactIds = [...new Set(rows.map((row) => row.crm_contact_id).filter(Boolean))];
+
+  try {
+    for (const campaign of campaigns) {
+      const inFolder = await contactsInFolder(campaign.folderId, contactIds);
+      for (const row of rows) {
+        if (owners.has(row.id)) continue;
+        if (campaign.accountIds.includes(row.account_id) && inFolder.has(row.crm_contact_id)) owners.set(row.id, campaign);
+      }
+    }
+  } catch {
+    return owners;
+  }
+  return owners;
+}
+
+/**
+ * Everything the campaign list needs from both databases, gathered once.
+ *
+ * Each row costs a forecast of its own — it is a count across two databases and
+ * there is no honest way to share it — but who has been approached, what went
+ * out today and which contacts sit in which folder is the same handful of
+ * queries for one campaign as for twenty.
+ */
+async function campaignContext(campaigns) {
+  const accountIds = [...new Set(campaigns.flatMap((campaign) => campaign.accountIds))];
+  const folderIds = [...new Set(campaigns.map((campaign) => campaign.folderId).filter(Boolean))];
+
+  const [rows, sentToday] = await Promise.all([
+    accountIds.length
+      ? anty.from("wl_outreach").select(CLAIM_COLUMNS).in("account_id", accountIds).rows()
+      : Promise.resolve([]),
+    connectDoneToday(accountIds)
+  ]);
+
+  const folderNames = new Map();
+  const inFolder = new Map();
+  try {
+    if (folderIds.length) {
+      const folders = await crm.from("contact_folders").select("id,name").in("id", folderIds).rows();
+      for (const folder of folders) folderNames.set(folder.id, folder.name);
+    }
+    const contactIds = [...new Set(rows.map((row) => row.crm_contact_id).filter(Boolean))];
+    for (const folderId of folderIds) {
+      inFolder.set(folderId, contactIds.length ? await contactsInFolder(folderId, contactIds) : new Set());
+    }
+  } catch {
+    // A CRM that is not answering costs the folder names and the attribution,
+    // not the list: the panel exists to show the campaigns, and it must not
+    // lose them because a count could not be taken.
+    inFolder.clear();
+  }
+
+  return { rows, sentToday, folderNames, inFolder };
+}
+
+/** One campaign with its forecast and its progress, for the list and for a write. */
+async function enrichCampaign(campaign, campaigns, context) {
+  const mine = context.inFolder.get(campaign.folderId);
+  const rows = context.rows.filter((row) =>
+    campaign.accountIds.includes(row.account_id) && (!mine || mine.has(row.crm_contact_id)));
+
+  const progress = progressFrom(rows, {
+    todayIso: today(),
+    sentToday: campaign.accountIds.reduce((total, id) => total + (context.sentToday.get(id) ?? 0), 0)
+  });
+
+  let forecast = null;
+  let forecastError = null;
+  try {
+    forecast = campaign.folderId ? await forecastFor(targetingOf(campaign)) : null;
+  } catch (error) {
+    forecast = null;
+    forecastError = crmError(error);
+  }
+
+  return {
+    ...describeCampaign(campaign, context.folderNames.get(campaign.folderId) ?? null),
+    forecast,
+    forecastError,
+    progress,
+    // Either two campaigns share an account and a folder, or the CRM could not
+    // say which rows are in the folder at all. Both make the number a caveat.
+    progressApproximate: !mine || progressApproximate(campaign, campaigns)
+  };
+}
+
+async function enrichCampaigns(campaigns) {
+  const context = await campaignContext(campaigns);
+  const enriched = [];
+  // One at a time: a forecast is several counts across two databases, and
+  // twenty campaigns firing them all at once is how a CRM starts refusing.
+  for (const campaign of campaigns) enriched.push(await enrichCampaign(campaign, campaigns, context));
+  return enriched;
+}
+
+export async function handleWarmupApi({ request, response, url, sendJson, readJson, campaigns: campaignStore }) {
   const path = url.pathname.replace(/^\/api\/warmup/, "") || "/";
   const method = request.method;
-  const savedTargeting = () => normalizeTargeting(targetingStore.read());
+
+  /**
+   * The campaigns, migrating Phase 1's single targeting on the first read.
+   *
+   * The migrated list is written through immediately, so from that moment there
+   * is exactly one place that answers "which folder is this account working".
+   * The old key is read and never written: a rollback to Phase 1 finds its
+   * targeting exactly as it left it.
+   */
+  const loadCampaigns = async () => {
+    const { campaigns, migrated } = migrateCampaigns(campaignStore.read(), campaignStore.readTargeting());
+    if (migrated) await campaignStore.write(campaigns);
+    return campaigns;
+  };
+
+  const saveCampaigns = (list) => campaignStore.write(list.slice().sort(byOrder));
 
   try {
     // ── configuration ──────────────────────────────────────────────────────
@@ -809,8 +1086,12 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       const accountId = url.searchParams.get("accountId");
       if (!accountId) return fail(response, sendJson, 400, "Which account?");
       const limit = intParam(url.searchParams.get("limit"), 100, 500);
+      // Claims are deliberately not here: this list means "who we approached",
+      // and a queued row is an allocation nobody has sent yet. GET /queue is
+      // where those live.
       const rows = await anty.from("wl_outreach").select(OUTREACH_COLUMNS)
-        .eq("account_id", accountId).order("created_at", { ascending: false }).limit(limit).rows();
+        .eq("account_id", accountId).neq("status", CLAIM_STATUS)
+        .order("created_at", { ascending: false }).limit(limit).rows();
       sendJson(response, 200, { success: true, outreach: rows.map(describeOutreach) });
       return true;
     }
@@ -859,78 +1140,333 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       return true;
     }
 
-    if (method === "GET" && path === "/targeting") {
-      sendJson(response, 200, await targetingAnswer(savedTargeting()));
+    // ── campaigns: folder x accounts x product, and what they come to ─────
+    if (method === "GET" && path === "/campaigns") {
+      sendJson(response, 200, { success: true, campaigns: await enrichCampaigns(await loadCampaigns()) });
       return true;
     }
 
     /**
-     * Save the selection.
-     *
-     * An absent `folderId` keeps the one already saved, so ticking an account
-     * in the profiles table can post the accounts alone; an explicitly empty
-     * one is refused, because a folder is the one part of this with no sensible
-     * default left.
+     * Create one. A campaign starts `draft` and last in order: nothing begins
+     * working a folder of twenty thousand people because a form was submitted.
      */
-    if (method === "POST" && path === "/targeting") {
+    if (method === "POST" && path === "/campaigns") {
       const body = await readJson(request);
       if (!body) return fail(response, sendJson, 400, "Invalid JSON body");
 
-      const current = savedTargeting();
-      const folderId = body.folderId === undefined ? current.folderId : String(body.folderId ?? "").trim();
-      if (!folderId) return fail(response, sendJson, 400, "Pick a folder before saving targeting");
+      const name = String(body.name ?? "").trim();
+      if (!name) return fail(response, sendJson, 400, "Give the campaign a name");
+      const folderId = String(body.folderId ?? "").trim();
+      if (!folderId) return fail(response, sendJson, 400, "Pick a folder before saving a campaign");
 
-      const filters = body.filters === undefined ? current.filters : normalizeFilters(body.filters);
+      const accountIds = [...new Set((Array.isArray(body.accountIds) ? body.accountIds : [])
+        .map((id) => String(id).trim()).filter(Boolean))];
+      const productId = body.productId === undefined || body.productId === null ? null : String(body.productId).trim() || null;
+
+      const checked = await checkCampaignInput({ folderId, accountIds, productId, products: campaignStore.products() });
+      if (checked.error) return fail(response, sendJson, checked.status, checked.error);
+
+      const campaigns = await loadCampaigns();
+      const created = normalizeCampaign({
+        name,
+        folderId,
+        folderName: checked.folderName,
+        // Absent filters on a new campaign start where Phase 1 started: the lead
+        // status the queue has always meant. Absent filters on a PATCH keep what
+        // was saved, because a box cleared on purpose means every status.
+        filters: body.filters === undefined ? defaultFilters() : normalizeFilters(body.filters),
+        accountIds,
+        productId,
+        state: "draft",
+        order: nextOrder(campaigns)
+      });
+
+      const next = [...campaigns, created];
+      await saveCampaigns(next);
+      await logEvent({
+        type: "campaign.created",
+        message: `Campaign "${created.name}" on "${checked.folderName}"${accountIds.length ? ` worked by ${accountIds.length} account${accountIds.length > 1 ? "s" : ""}` : " with no account chosen"}`,
+        meta: { campaignId: created.id, folderId, accountIds, productId }
+      });
+
+      sendJson(response, 201, {
+        success: true,
+        campaign: await enrichCampaign(created, next, await campaignContext(next))
+      });
+      return true;
+    }
+
+    /**
+     * Change one. Every field is optional and what is absent keeps its value,
+     * so ticking an account can post `{ id, accountIds }` alone.
+     */
+    if (method === "PATCH" && path === "/campaigns") {
+      const body = await readJson(request);
+      if (!body?.id) return fail(response, sendJson, 400, "Which campaign?");
+
+      const campaigns = await loadCampaigns();
+      const current = campaigns.find((campaign) => campaign.id === String(body.id));
+      if (!current) return fail(response, sendJson, 404, "That campaign is gone");
+
+      const folderId = body.folderId === undefined ? current.folderId : String(body.folderId ?? "").trim();
+      if (!folderId) return fail(response, sendJson, 400, "Pick a folder before saving a campaign");
       const accountIds = body.accountIds === undefined
         ? current.accountIds
         : [...new Set((Array.isArray(body.accountIds) ? body.accountIds : []).map((id) => String(id).trim()).filter(Boolean))];
+      const productId = body.productId === undefined
+        ? current.productId
+        : body.productId === null ? null : String(body.productId).trim() || null;
 
-      let name;
-      try {
-        name = await folderNameOf(folderId);
-      } catch (error) {
-        return fail(response, sendJson, 502, crmError(error));
+      if (body.state !== undefined && !isCampaignState(body.state)) {
+        return fail(response, sendJson, 400, `Unknown state: ${String(body.state)}`);
       }
-      // Checked rather than taken on trust: a folder id that is not there makes
-      // every later screen say "nobody matches" for a reason nobody can see.
-      if (name === null) return fail(response, sendJson, 404, "That folder is not in the CRM");
+      const state = body.state === undefined ? current.state : body.state;
 
-      if (accountIds.length) {
-        const known = await anty.from("wl_accounts").select("id").in("id", accountIds).rows();
-        const missing = accountIds.filter((id) => !known.some((row) => row.id === id));
-        if (missing.length) return fail(response, sendJson, 400, `Unknown account: ${missing.join(", ")}`);
-      }
+      const checked = await checkCampaignInput({ folderId, accountIds, productId, products: campaignStore.products() });
+      if (checked.error) return fail(response, sendJson, checked.status, checked.error);
 
-      const saved = {
+      const updated = normalizeCampaign({
+        ...current,
+        name: body.name === undefined ? current.name : String(body.name).trim() || current.name,
         folderId,
-        folderName: name,
-        filters,
+        folderName: checked.folderName,
+        filters: body.filters === undefined ? current.filters : normalizeFilters(body.filters),
         accountIds,
+        productId,
+        state,
+        order: Number.isFinite(body.order) ? Number(body.order) : current.order,
         updatedAt: new Date().toISOString()
-      };
-      await targetingStore.write(saved);
-
-      await logEvent({
-        type: "targeting.changed",
-        message: `Targeting: "${name}"${accountIds.length ? ` worked by ${accountIds.length} account${accountIds.length > 1 ? "s" : ""}` : " with no account chosen"}`,
-        meta: saved
       });
 
-      sendJson(response, 200, await targetingAnswer(normalizeTargeting(saved)));
+      const next = campaigns.map((campaign) => (campaign.id === updated.id ? updated : campaign));
+      await saveCampaigns(next);
+
+      // Only the two moves an operator would look for in the log later: a
+      // campaign that started sending, and one that stopped.
+      if (state !== current.state && (state === "running" || state === "paused")) {
+        await logEvent({
+          type: state === "running" ? "campaign.started" : "campaign.paused",
+          message: `Campaign "${updated.name}" ${state === "running" ? "started" : "paused"}`,
+          meta: { campaignId: updated.id, from: current.state, to: state, accountIds: updated.accountIds }
+        });
+      }
+
+      sendJson(response, 200, {
+        success: true,
+        campaign: await enrichCampaign(updated, next, await campaignContext(next))
+      });
+      return true;
+    }
+
+    /**
+     * Delete one, and let go of what it was holding. Rows already sent stay:
+     * they are history, and history is not the campaign's to delete.
+     */
+    if (method === "DELETE" && path === "/campaigns") {
+      const id = url.searchParams.get("id");
+      if (!id) return fail(response, sendJson, 400, "Which campaign?");
+
+      const campaigns = await loadCampaigns();
+      const doomed = campaigns.find((campaign) => campaign.id === id);
+      if (!doomed) return fail(response, sendJson, 404, "That campaign is gone");
+
+      const released = await releaseCampaignClaims(doomed, campaigns);
+      await saveCampaigns(campaigns.filter((campaign) => campaign.id !== id));
+      await logEvent({
+        type: "campaign.deleted",
+        message: `Campaign "${doomed.name}" deleted${released ? `, ${released} claim${released > 1 ? "s" : ""} released` : ""}`,
+        meta: { campaignId: doomed.id, released }
+      });
+
+      sendJson(response, 200, { success: true, released });
+      return true;
+    }
+
+    /**
+     * Claim the next people for an account.
+     *
+     * A claim is an allocation, not a send: it costs no quota, and its cap is
+     * today's remaining allowance so that nothing is allocated that could not
+     * be sent. An account whose quota has not opened yet — every account for
+     * its first three days — gets an empty list and a sentence saying when
+     * requests start, because that is the ordinary answer, not a failure.
+     */
+    if (method === "POST" && path === "/campaigns/claim") {
+      const body = await readJson(request);
+      if (!body) return fail(response, sendJson, 400, "Invalid JSON body");
+      const account = body.accountId ? await loadAccount(String(body.accountId)) : null;
+      if (!account) return fail(response, sendJson, 404, "Account not found");
+      const limit = intParam(body.limit, 0, 50);
+
+      // First, before anything is counted: a claim nobody worked in time is a
+      // person held out of the pool, and the capacity below has to see them gone.
+      const released = await releaseExpiredClaims();
+
+      const allowance = await connectAllowance(account);
+      if (allowance.blocked) return fail(response, sendJson, 409, allowance.blocked);
+
+      const queued = await anty.from("wl_outreach").select(CLAIM_COLUMNS)
+        .eq("account_id", account.id).eq("status", CLAIM_STATUS)
+        .order("created_at", { ascending: true }).rows();
+
+      const remainingQuota = Math.max(0, allowance.quota - allowance.spent);
+      const capacity = claimCapacity({ ...allowance, queued: queued.length, limit });
+      const empty = (reason) => {
+        sendJson(response, 200, { success: true, claimed: [], remainingQuota, reason, released });
+        return true;
+      };
+
+      if (capacity === 0) return empty(allowanceReason({ ...allowance, queued: queued.length }));
+
+      const campaigns = await loadCampaigns();
+      const working = runningFor(campaigns, account.id);
+      if (!working.length) return empty("No running campaign works this account");
+
+      const claimed = [];
+      let taken = 0;
+      for (const campaign of working) {
+        if (claimed.length >= capacity) break;
+        let candidates;
+        try {
+          candidates = await nextCandidates(capacity - claimed.length, targetingOf(campaign));
+        } catch (error) {
+          return fail(response, sendJson, 502, crmError(error));
+        }
+
+        for (const lead of candidates) {
+          if (claimed.length >= capacity) break;
+          try {
+            const row = await anty.from("wl_outreach").insert({
+              account_id: account.id,
+              ...personSnapshot(lead),
+              sent_by: sentBy(account),
+              status: CLAIM_STATUS
+            }).select(CLAIM_COLUMNS).single();
+            claimed.push(describeClaim(row, campaign));
+          } catch (error) {
+            // wl_outreach_person_once: somebody else claimed this person a
+            // moment ago. That is the index doing its job, not a failed batch.
+            if (error instanceof RestError && error.code === "23505") {
+              taken += 1;
+              continue;
+            }
+            throw error;
+          }
+        }
+      }
+
+      if (!claimed.length) {
+        const first = working[0];
+        return empty(`Nothing left in "${first.folderName || first.name}" that has not been approached`);
+      }
+
+      await logEvent({
+        accountId: account.id, runId: allowance.run.id, type: "campaign.claimed",
+        message: `Claimed ${claimed.length} contact${claimed.length > 1 ? "s" : ""} for ${account.label}${taken ? ` (${taken} taken by someone else)` : ""}`,
+        meta: { claimed: claimed.length, skipped: taken, remainingQuota, campaignIds: [...new Set(claimed.map((row) => row.campaignId))] }
+      });
+
+      sendJson(response, 200, { success: true, claimed, remainingQuota, reason: null, released });
+      return true;
+    }
+
+    /** Let go: everything expired, or everything this account is holding. */
+    if (method === "POST" && path === "/campaigns/release") {
+      // No body is the whole-board release, which is the common case — it should
+      // not need an empty object typed out to be understood.
+      const body = (await readJson(request)) || {};
+
+      let released = await releaseExpiredClaims();
+      const accountId = body.accountId ? String(body.accountId).trim() : "";
+      if (accountId) {
+        const rows = await anty.from("wl_outreach").select("id")
+          .eq("account_id", accountId).eq("status", CLAIM_STATUS).rows();
+        const count = await deleteClaims(rows.map((row) => row.id));
+        released += count;
+        if (count) {
+          await logEvent({
+            accountId, type: "campaign.released",
+            message: `Released ${count} claim${count > 1 ? "s" : ""} back to the pool`,
+            meta: { released: count, reason: "asked" }
+          });
+        }
+      }
+
+      sendJson(response, 200, { success: true, released });
+      return true;
+    }
+
+    /**
+     * What is claimed to an account right now, oldest first.
+     *
+     * Always a 200: an account that is paused, unhealthy or three days from its
+     * first request still has a queue worth showing, and "why is it empty" is
+     * the question the panel is really asking. The answer is `reason`.
+     */
+    if (method === "GET" && path === "/queue") {
+      const accountId = url.searchParams.get("accountId");
+      if (!accountId) return fail(response, sendJson, 400, "Which account?");
+      const account = await loadAccount(accountId);
+      if (!account) return fail(response, sendJson, 404, "Account not found");
+
+      // Expired claims are hidden rather than deleted here: a read that quietly
+      // rewrites the database is a read nobody can reason about. The next claim
+      // releases them.
+      const rows = await anty.from("wl_outreach").select(CLAIM_COLUMNS)
+        .eq("account_id", account.id).eq("status", CLAIM_STATUS)
+        .gte("created_at", claimCutoff())
+        .order("created_at", { ascending: true }).rows();
+
+      const campaigns = runningFor(await loadCampaigns(), account.id);
+      const byFolder = await claimOwners(campaigns, rows);
+
+      let reason = null;
+      if (!rows.length) {
+        const allowance = await connectAllowance(account);
+        reason = allowance.blocked
+          ?? allowanceReason({ ...allowance, queued: 0 })
+          ?? (campaigns.length ? "Nothing is claimed to this account right now" : "No running campaign works this account");
+      }
+
+      sendJson(response, 200, {
+        success: true,
+        accountId: account.id,
+        queue: rows.map((row) => describeClaim(row, byFolder.get(row.id) ?? null)),
+        reason
+      });
       return true;
     }
 
     // ── the lead queue ─────────────────────────────────────────────────────
+    /**
+     * The next people a campaign would reach — the manual path, kept as it was
+     * except that the folder now comes from a campaign rather than from the one
+     * saved targeting. Without `campaignId` it is the first running campaign,
+     * which is the same one `claim` would serve.
+     */
     if (method === "GET" && path === "/leads") {
       const limit = intParam(url.searchParams.get("limit"), 10, 50);
-      const targeting = savedTargeting();
+      const campaigns = await loadCampaigns();
+      const wanted = url.searchParams.get("campaignId");
+      const campaign = wanted
+        ? campaigns.find((row) => row.id === wanted)
+        : campaigns.find((row) => row.state === "running" && row.folderId) || campaigns.find((row) => row.folderId);
+
       // An empty queue and an unconfigured one are different answers, and only
       // one of them is the operator's to fix.
-      if (!targeting.folderId) {
-        sendJson(response, 409, { success: false, error: "Pick a folder before pulling leads", needsTargeting: true });
+      if (!campaign?.folderId) {
+        sendJson(response, 409, {
+          success: false,
+          error: wanted ? "That campaign is gone" : "Create a campaign before pulling leads",
+          // Kept under its Phase 1 name as well, so a panel that has not moved
+          // to campaigns yet still tells the prompt from a real failure.
+          needsCampaign: true,
+          needsTargeting: true
+        });
         return true;
       }
 
+      const targeting = targetingOf(campaign);
       try {
         const [leads, total, name] = await Promise.all([
           nextCandidates(limit, targeting),
@@ -939,6 +1475,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         ]);
         sendJson(response, 200, {
           success: true,
+          campaign: describeCampaign(campaign, name),
           targeting: describeTargeting(targeting, name),
           queueTotal: total,
           leads: leads.map((lead) => ({
@@ -998,19 +1535,31 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       const allowance = await checkQuota(account, run, "connect");
       if (!allowance.ok) return refusal(response, sendJson, allowance);
 
+      // A claim already standing for this person is the row this send belongs
+      // to. Updating it keeps one row per person and never fights the unique
+      // index — an insert beside a claim would lose to it every time.
+      const claim = await anty.from("wl_outreach").select("id")
+        .eq("crm_contact_id", lead.id).eq("status", CLAIM_STATUS).maybeSingle();
+
       let outreach;
       try {
-        outreach = await anty.from("wl_outreach").insert({
+        const sent = {
           account_id: account.id,
-          crm_contact_id: lead.id,
-          person_name: lead.name,
-          person_company: lead.company,
-          person_position: lead.position,
-          person_linkedin: lead.linkedin,
-          person_country: lead.country,
+          ...personSnapshot(lead),
           sent_by: sentBy(account),
           status: "pending"
-        }).select(OUTREACH_COLUMNS).single();
+        };
+        if (claim) {
+          // Guarded on the status it was read with, so two screens sending the
+          // same claim leave one send and one honest refusal rather than two.
+          const updated = await anty.from("wl_outreach").update(sent)
+            .eq("id", claim.id).eq("status", CLAIM_STATUS).select(OUTREACH_COLUMNS).rows();
+          if (!updated.length) return fail(response, sendJson, 409, "This person has already been approached");
+          outreach = updated[0];
+        } else {
+          // The manual path: nobody claimed this person, so the send makes the row.
+          outreach = await anty.from("wl_outreach").insert(sent).select(OUTREACH_COLUMNS).single();
+        }
       } catch (error) {
         // wl_outreach_person_once: one person, one approach, across every
         // account. A race between two screens is expected here, not exceptional.
@@ -1025,7 +1574,10 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       await logEvent({
         accountId: account.id, runId: run.id, type: "outreach.sent",
         message: `Connection request to ${lead.name ?? "a contact"}${lead.company ? ` (${lead.company})` : ""}`,
-        meta: { outreachId: outreach.id, crmContactId: lead.id, day: allowance.day, done: allowance.done, quota: allowance.quota }
+        meta: {
+          outreachId: outreach.id, crmContactId: lead.id, claimed: Boolean(claim),
+          day: allowance.day, done: allowance.done, quota: allowance.quota
+        }
       });
 
       sendJson(response, 200, {
@@ -1057,6 +1609,16 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
 
       const run = await activeRun(account.id);
       const session = await openSession(account.id);
+
+      // What is already claimed to this account, so a run does not need a
+      // second call to find its work. Expired claims are left out: they belong
+      // to the pool again, whether or not anything has deleted them yet.
+      const claims = await anty.from("wl_outreach").select(CLAIM_COLUMNS)
+        .eq("account_id", account.id).eq("status", CLAIM_STATUS)
+        .gte("created_at", claimCutoff())
+        .order("created_at", { ascending: true }).rows();
+      const owners = await claimOwners(runningFor(await loadCampaigns(), account.id), claims);
+
       const base = {
         success: true,
         account: {
@@ -1067,6 +1629,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           status: account.status,
           health: account.health
         },
+        queue: claims.map((row) => describeClaim(row, owners.get(row.id) ?? null)),
         session: session ? { id: session.id, startedAt: session.started_at } : null,
         // The agent asks rather than carrying its own copy, so moving the
         // window on screen moves it for today's run too.

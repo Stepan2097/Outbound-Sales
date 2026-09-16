@@ -57,6 +57,14 @@ export function today() {
   return new Date().toISOString().slice(0, 10);
 }
 
+/**
+ * How many contact ids go into one `in.(...)`: PostgREST caps a URL long before
+ * it caps a list, so every question asked of the CRM about a set of contacts is
+ * asked in batches. The set is small by construction — a ceiling of twenty-two
+ * approaches a day is what makes it so.
+ */
+export const CONTACT_ID_BATCH = 120;
+
 const LEAD_COLUMNS = "id,name,company,position,linkedin,country,email,phone,created_at,description";
 
 /**

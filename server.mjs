@@ -140,10 +140,15 @@ const state = {
   },
   products: seedProducts(),
   selectedProductId: "outbound-sales-os",
-  // Which CRM folder the LinkedIn warm-up works, narrowed how, by which
-  // accounts. It lives here rather than in the Anty database because that
+  // Which CRM folders the LinkedIn warm-up works, narrowed how, by which
+  // accounts. They live here rather than in the Anty database because that
   // database takes no migrations, and because this is a choice somebody made
-  // rather than a record of anything that happened. Null until the first save.
+  // rather than a record of anything that happened. Null until the first read,
+  // which migrates `warmupTargeting` into the list.
+  warmupCampaigns: null,
+  // Phase 1's single selection, superseded by the list above and kept exactly
+  // as it was written: the migration reads it and never writes it, so a
+  // rollback finds its targeting intact.
   warmupTargeting: null,
   mcpSync: {
     status: "connected",
@@ -417,15 +422,21 @@ async function handleApi(request, response, url) {
           return null;
         }
       },
-      // Targeting is workspace configuration, so the warm-up reads and writes it
-      // through the state this app already persists rather than keeping a store
-      // of its own.
-      targeting: {
-        read: () => state.warmupTargeting,
+      // Campaigns are workspace configuration, so the warm-up reads and writes
+      // them through the state this app already persists rather than keeping a
+      // store of its own.
+      campaigns: {
+        read: () => state.warmupCampaigns,
         async write(value) {
-          state.warmupTargeting = value;
+          state.warmupCampaigns = value;
           await writePersistentWorkspaceState();
-        }
+        },
+        // Read for the migration and never written, so Phase 1's selection
+        // survives a rollback exactly as it was saved.
+        readTargeting: () => state.warmupTargeting,
+        // A campaign points at one of the workspace's own products, which is
+        // all it says about the message — the wording is not this phase's.
+        products: () => state.products.map((product) => ({ id: product.id, name: product.name }))
       }
     });
     if (!handled) sendJson(response, 404, { success: false, error: "Unknown warm-up endpoint." });
@@ -2081,6 +2092,9 @@ function applyPersistentWorkspaceState(saved = {}) {
   if (saved.warmupTargeting && typeof saved.warmupTargeting === "object") {
     state.warmupTargeting = saved.warmupTargeting;
   }
+  if (Array.isArray(saved.warmupCampaigns)) {
+    state.warmupCampaigns = saved.warmupCampaigns;
+  }
   for (const key of ["contactEnrichment", "crm", "transcripts", "notifications", "supabase", "postgres", "knowledgeDatabase"]) {
     if (saved.integrationSettings?.[key] && typeof saved.integrationSettings[key] === "object") {
       state.integrations[key] = { ...state.integrations[key], ...saved.integrationSettings[key] };
@@ -2149,6 +2163,7 @@ async function writePersistentWorkspaceState() {
       historicalOutcomes: state.historicalOutcomes,
       scoringModel: state.scoringModel,
       researchJobs: state.researchJobs.slice(0, 100),
+      warmupCampaigns: state.warmupCampaigns,
       warmupTargeting: state.warmupTargeting,
       learning: {
         examples: state.learning.examples.slice(0, 500),

@@ -3,6 +3,14 @@
 Shared by the backend and frontend work on Phase 1. Do not change a shape here
 without updating this file first and telling the other side.
 
+> **Phase 2 superseded the targeting shapes.** `GET|POST /api/warmup/targeting`
+> are gone and `state.warmupTargeting` is read only by the migration in
+> `WARMUP_CAMPAIGNS_CONTRACT.md`. A campaign is one folder, one set of filters
+> and one set of accounts with a name and a state — so everything below about
+> folders, filters, the forecast, the queue and identity still holds, and holds
+> per campaign. Read this file for how those work; read the campaigns contract
+> for where they now live.
+
 ## Why
 
 Two things are hard-wired that should not be.

@@ -87,6 +87,11 @@ class Query {
     return this;
   }
 
+  lt(column, value) {
+    this.params.append(column, `lt.${filterValue(value)}`);
+    return this;
+  }
+
   /** Raw PostgREST `or=(a.ilike.*x*,b.ilike.*x*)` — the caller builds the clause. */
   or(clause) {
     this.params.append("or", `(${clause})`);

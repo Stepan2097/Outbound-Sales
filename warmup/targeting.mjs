@@ -1,4 +1,4 @@
-import { anty, crm, queueQuery, queueTotal, today } from "./db.mjs";
+import { anty, crm, CONTACT_ID_BATCH, queueQuery, queueTotal, today } from "./db.mjs";
 import { DEFAULT_STRATEGY, dailyQuota, totalDays } from "./strategy.mjs";
 import { connectQuotaToday } from "./store.mjs";
 
@@ -22,14 +22,6 @@ import { connectQuotaToday } from "./store.mjs";
 export const DEFAULT_LEAD_STATUS = "new";
 
 const FILTER_KEYS = ["country", "position", "leadStatus", "ownerId"];
-
-/**
- * The CRM has one folder whose contacts are the only ones we ever ask about,
- * and PostgREST caps a URL long before it caps a list — so the people already
- * approached are matched against the folder in batches. The list is the small
- * side by construction: a ceiling of twenty-two a day is what makes it so.
- */
-const APPROACHED_BATCH = 120;
 
 function cleanFilter(value) {
   return typeof value === "string" ? value.trim().slice(0, 120) : "";
@@ -121,10 +113,6 @@ export async function folderNameOf(folderId) {
   return folder?.name ?? null;
 }
 
-export async function folderExists(folderId) {
-  return Boolean(await crm.from("contact_folders").select("id").eq("id", folderId).maybeSingle());
-}
-
 // ── what it comes to ──────────────────────────────────────────────────────
 
 /**
@@ -176,8 +164,8 @@ async function approachedWithin(targeting) {
   if (!ids.length) return 0;
 
   let total = 0;
-  for (let start = 0; start < ids.length; start += APPROACHED_BATCH) {
-    total += await queueQuery("id", targeting).in("id", ids.slice(start, start + APPROACHED_BATCH)).count();
+  for (let start = 0; start < ids.length; start += CONTACT_ID_BATCH) {
+    total += await queueQuery("id", targeting).in("id", ids.slice(start, start + CONTACT_ID_BATCH)).count();
   }
   return total;
 }
