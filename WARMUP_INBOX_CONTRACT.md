@@ -97,9 +97,17 @@ the agent contract and it is deliberate, because the agent is reading a DOM it
 does not control:
 
 - `participant.slug` and `participant.headline` missing or null are normal — a
-  group thread has no `/in/` link. A missing `name` becomes `"Unknown"`, which
-  is then excluded from name matching so an unreadable thread is not filed
-  against a real stranger who happens to be called that.
+  group thread has no `/in/` link.
+- `participant.name` is never rejected, and neither is the placeholder LinkedIn
+  prints in place of one. A restricted or out-of-network profile renders
+  "LinkedIn Member"; deleted accounts render a variant. Those, and a missing
+  name, all fold into the single sentinel `"Unknown"`, which the matcher then
+  refuses from **both** sides — an unnameable participant matches nothing, and a
+  CRM row whose own `person_name` is a placeholder is matched by nobody.
+  Without that fold, ten threads called "LinkedIn Member" are ten different
+  people all matching one outreach row: one status moved wrongly and a CRM
+  activity per person filed against a stranger. The agent sends what LinkedIn
+  printed, verbatim; it must not invent a placeholder of its own.
 - `messages: []` is accepted, not refused. A conversation the agent opened and
   could not read is a fact worth reporting; a 400 would fail the run over it.
   `messages` present but not an array is a 400.
@@ -113,6 +121,24 @@ does not control:
 - A message with no body, or a direction that is neither `in` nor `out`, is
   counted in `invalid` and dropped. One unreadable message never costs the
   nineteen around it.
+- An attachment-only message — a file, a sticker, a voice note — arrives with
+  the body `[attachment]`, and a message with neither text nor media as
+  `[no text]`. Carried, never dropped: an inbound file **is** a reply, and
+  dropping it would mean the reply detection missed the very thing this phase
+  exists to catch. It stores, marks the thread unread, matches, moves the
+  status and reaches the CRM like any other inbound message.
+- A group thread is named by its whole visible row, e.g.
+  `"Anna Bauer, Tomás Ruiz"`, and carries no slug. It therefore matches nobody,
+  which is the right outcome: filing a group chat under whichever avatar loaded
+  first would move one member's outreach row on a message that was never about
+  them. Verified against a pending row for a named member — the row stays
+  `pending`, and that member writing alone still matches.
+- Names are stored with runs of whitespace collapsed to single spaces. The
+  agent reads a DOM, so a name split across two elements arrives carrying the
+  newline and indentation between them; without collapsing, a ragged
+  `"LinkedIn\n   Member"` would skip the placeholder fold above and go back into
+  the matcher as an exact-name candidate. Bodies are never collapsed — newlines
+  are the message there.
 
 Bodies are stored exactly as the agent found them — no stripping, no escaping.
 The screens escape before the DOM, and a mangled body loses the original for
