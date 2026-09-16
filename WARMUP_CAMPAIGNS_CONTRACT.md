@@ -141,6 +141,17 @@ Body `{ id, ...fields }`. Every field optional; what is absent keeps its value.
 `campaign.started` event, to `paused` a `campaign.paused`. Answers `200` with
 the same single enriched `campaign` as `POST`.
 
+**`order` is settable here**, and that is the reorder control: the claiming rule
+below says a seller who puts a campaign first means it, which is only true if
+putting it first is something a seller can do. Send the new number; the list
+re-sorts on the next read, and a tie is broken by which campaign is older.
+
+A single-campaign response cannot carry a field computed **across** campaigns.
+`progressApproximate` and the effective order are both relational: editing one
+campaign can change another's, and only `GET /api/warmup/campaigns` sees all of
+them. Use the returned campaign for instant feedback and reload the list after
+a write.
+
 ### `DELETE /api/warmup/campaigns?id=`
 
 Removes the campaign and releases every `queued` row belonging to its accounts,
@@ -175,7 +186,9 @@ The heart of it. Body `{ accountId, limit? }`.
 ```
 
 `released` is how many expired claims step 1 let go — the queue shrinking under
-somebody's feet is worth a word.
+somebody's feet is worth a word. It is news rather than state: it belongs to the
+claim that happened to do the releasing, and it is deliberately absent from
+`GET /api/warmup/queue`, which answers what is held now.
 
 `remainingQuota` is `quota - sent today`, and claiming does not change it. It
 answers "how many more may go out today", which is a different question from
@@ -327,6 +340,18 @@ badge: it is a caveat about counting, not a problem with the campaign.
 
 ### The queue
 
+**The queue is per account, not per campaign.** `claim` and `queue` both take an
+`accountId`, and a claimed row carries no campaign of its own — it is attributed
+by folder after the fact. So an account working two campaigns shows one merged
+list under both of them, and a **Claim now** click under campaign A can
+legitimately claim for campaign B, because the quota belongs to the account and
+the first campaign in order takes it.
+
+That is the design, not a gap: say so on screen rather than implying a
+per-campaign queue that does not exist. Name the campaign beside any row that
+came from a different one, and count the list by accounts ("4 held by 2
+accounts"), not by campaign.
+
 Under the selected campaign, per account: what is claimed to it right now, with
 the person's name, position, company and a link to their LinkedIn profile, and a
 **Sent a request** button that calls `leads/take`. Empty is the normal state for
@@ -346,6 +371,13 @@ and `selectedProductId` is a reasonable default for a new campaign.
 The forecast is still the centre of the panel. A campaign on a folder of twenty
 thousand still has to read as twenty thousand — moving from one form to a list
 must not shrink that sentence into a number in a table cell.
+
+One trap in the `Forecast` shape: `remaining: 0` has two causes that need
+opposite advice. Everyone matched has been approached, or nothing matched at
+all. Branch on `matching === 0` first — a filter that matches nobody must read
+as "nothing in this folder passes these filters", never as "everyone has already
+been approached", which is flatly false and sends the seller looking for work
+that was never there.
 
 ## Out of scope for this phase
 
