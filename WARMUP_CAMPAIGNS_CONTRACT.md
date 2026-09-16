@@ -53,6 +53,15 @@ remaining quota is offered to them in that order, and the first campaign with
 work takes it. Round-robin was rejected: a seller who puts a campaign first
 means it, and splitting three ways produces three campaigns that all crawl.
 
+**A position is not a rank.** `order` is a place in the whole list, drafts and
+paused campaigns included — they hold a position and can be moved. The number
+that decides anything is the rank among `running` campaigns, which is what the
+quota is offered along. The two disagree the moment a draft sits between two
+running campaigns, so only one of them belongs on screen: show the claim rank,
+and say plainly that a campaign which is not running is not in the line. Showing
+both numbers in one slot is unreadable, and showing the position alone tells a
+seller their draft is first in a queue it is not in.
+
 ## Backend
 
 Owns `warmup/**`, `server.mjs`, `tests/**`, and both contract files.

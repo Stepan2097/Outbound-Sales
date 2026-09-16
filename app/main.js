@@ -3713,15 +3713,20 @@ function warmupCampaignRowHtml(campaign, rank) {
     `${accounts} account${accounts === 1 ? "" : "s"}`,
     product ? escapeHtml(product) : "no product"
   ];
-  if (rank) {
-    meta.push(`<span title="Quota is offered to running campaigns in this order and the first with work takes it — move this one with the arrows.">#${rank} in line</span>`);
-  }
 
   const controls = [];
+  // The order is the only thing deciding which campaign an account actually
+  // serves — the first running one with work takes the whole quota. So the rank
+  // is not a tooltip on a label somebody cannot change; it is the readout of
+  // the two arrows that set it.
   const index = warmupState.campaigns.indexOf(campaign);
+  const rankLabel = rank
+    ? `<strong title="Its accounts' quota is offered to running campaigns in this order, and the first with work takes it.">#${rank} in line</strong>`
+    : `<em title="Where it sits in the order. It joins the line when it runs.">not in line</em>`;
   controls.push(`<span class="warmup-campaign-move">
-    <button class="text-button" type="button" data-warmup-campaign-move="up" ${index <= 0 ? "disabled" : ""} title="Offer this campaign its accounts' quota earlier" aria-label="Move ${escapeAttr(campaign.name || "this campaign")} up the order"><i data-lucide="chevron-up"></i></button>
-    <button class="text-button" type="button" data-warmup-campaign-move="down" ${index < 0 || index >= warmupState.campaigns.length - 1 ? "disabled" : ""} title="Offer this campaign its accounts' quota later" aria-label="Move ${escapeAttr(campaign.name || "this campaign")} down the order"><i data-lucide="chevron-down"></i></button>
+    <button class="text-button" type="button" data-warmup-campaign-move="up" ${index <= 0 ? "disabled" : ""} title="Offer this campaign its accounts' quota earlier" aria-label="Move ${escapeAttr(campaign.name || "this campaign")} earlier in the order"><i data-lucide="chevron-up"></i></button>
+    ${rankLabel}
+    <button class="text-button" type="button" data-warmup-campaign-move="down" ${index < 0 || index >= warmupState.campaigns.length - 1 ? "disabled" : ""} title="Offer this campaign its accounts' quota later" aria-label="Move ${escapeAttr(campaign.name || "this campaign")} later in the order"><i data-lucide="chevron-down"></i></button>
   </span>`);
   if (campaign.state === "running") {
     controls.push(`<button class="text-button" type="button" data-warmup-campaign-state="paused" title="Stop claiming from this campaign"><i data-lucide="pause"></i><span>Pause</span></button>`);
@@ -4405,10 +4410,16 @@ async function setWarmupCampaignState(campaignId, nextState) {
 }
 
 /**
- * Moving a campaign up or down the order. The two campaigns swap their `order`
- * values rather than one taking the other's: a campaign given the same number
- * as its neighbour is a tie, ties break on age, and a newer campaign would
- * then not move at all.
+ * Moving a campaign one place up or down the order.
+ *
+ * `order` is a position, not a number to be compared: PATCHing it puts the
+ * campaign at that index and renumbers the rest around it, so one write does
+ * the whole move and the list stays a dense 0..n-1 with nothing sharing a
+ * place. Past either end is that end, so a move from the last row needs no
+ * clamping beyond the disabled button.
+ *
+ * Every other row's position changes too, which is why this reloads the list
+ * rather than splicing the one campaign that came back.
  */
 async function moveWarmupCampaign(campaignId, direction) {
   const index = warmupState.campaigns.findIndex((item) => item.id === campaignId);
@@ -4416,14 +4427,14 @@ async function moveWarmupCampaign(campaignId, direction) {
   if (index === -1 || target < 0 || target >= warmupState.campaigns.length) return;
   if (warmupState.savingCampaign) return;
 
-  const moving = warmupState.campaigns[index];
-  const other = warmupState.campaigns[target];
   warmupState.savingCampaign = true;
   renderWarmupCampaigns();
 
   try {
-    await warmupApi("/campaigns", { method: "PATCH", body: JSON.stringify({ id: moving.id, order: other.order }) });
-    await warmupApi("/campaigns", { method: "PATCH", body: JSON.stringify({ id: other.id, order: moving.order }) });
+    await warmupApi("/campaigns", {
+      method: "PATCH",
+      body: JSON.stringify({ id: campaignId, order: target })
+    });
     warmupState.campaignNotice = "";
   } catch (error) {
     warmupState.campaignNotice = error.message;
@@ -4431,8 +4442,6 @@ async function moveWarmupCampaign(campaignId, direction) {
     warmupState.savingCampaign = false;
   }
 
-  // The order is relational, so it is read back rather than assumed: the second
-  // half of a swap can fail and leave a tie the server resolves its own way.
   await loadWarmupCampaigns({ resetForm: false });
   await loadWarmupQueues();
   await loadWarmupLeads();

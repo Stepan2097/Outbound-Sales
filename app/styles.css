@@ -5501,7 +5501,23 @@ dialog {
    only true if putting it first is something they can do. */
 .warmup-campaign-move {
   display: inline-flex;
+  align-items: center;
   gap: 2px;
+  margin-right: 4px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.warmup-campaign-move strong {
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.warmup-campaign-move em {
+  font-style: normal;
+  font-weight: 650;
+  color: var(--muted);
 }
 
 .warmup-campaign-move button {
