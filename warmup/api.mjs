@@ -1,6 +1,6 @@
-import { anty, crm, antyTeamId, crmError, leadById, leadQueue, today } from "./db.mjs";
+import { anty, crm, antyTeamId, crmError, leadById, leadQueue, queueTotal, today } from "./db.mjs";
 import { RestError } from "./rest.mjs";
-import { ACTION_KINDS, ACTION_LABEL, currentDay, dailyQuota, planForDay, totalDays, validateStrategy } from "./strategy.mjs";
+import { ACTION_KINDS, ACTION_LABEL, currentDay, planForDay, totalDays, validateStrategy } from "./strategy.mjs";
 import { SESSION_WINDOW, insideWindow, nextSession, windowLabel } from "./schedule.mjs";
 import { HEALTH_LABEL, HEALTH_VALUES, deriveStatus, isHealth } from "./status.mjs";
 import { PLATFORMS, parseProxy, platformOf, proxyString, retag } from "./platform.mjs";
@@ -8,9 +8,12 @@ import { OUTREACH_COLUMNS, OUTREACH_STATUSES, describeOutreach, sentBy } from ".
 import { antyTimestampToIso, describeSession, durationMin } from "./sessions.mjs";
 import { encryptSecret, secretsConfigured } from "./secretbox.mjs";
 import {
-  activeRun, checkQuota, commitAction, describeAccount, ensureDefaultStrategy,
-  logEvent, loadAccount, newestRun, openSession, recordAction, toStrategy
+  activeRun, checkQuota, commitAction, connectQuotaToday, describeAccount, ensureDefaultStrategy,
+  logEvent, loadAccount, loginIdentities, newestRun, openSession, recordAction, toStrategy
 } from "./store.mjs";
+import {
+  describeTargeting, folderExists, folderNameOf, forecastFor, listFolders, normalizeFilters, normalizeTargeting
+} from "./targeting.mjs";
 
 /**
  * The warm-up's HTTP surface, mounted under /api/warmup.
@@ -48,21 +51,6 @@ async function setAccountStatus(accountId, status) {
 }
 
 /**
- * Today's connection-request allowance, read from the run's own strategy
- * snapshot — the same source the record path checks against, so the number the
- * list shows and the number an action is refused by cannot disagree.
- */
-function connectQuotaToday(account, run, todayIso) {
-  if (!account || !run || run.state !== "running") return 0;
-  if (run.paused_until && run.paused_until >= todayIso) return 0;
-  const snapshot = run.strategy_snapshot;
-  if (!snapshot?.phases) return 0;
-  const day = currentDay(new Date(run.started_at), run.paused_days ?? 0);
-  if (day > totalDays(snapshot)) return 0;
-  return dailyQuota(snapshot, account.id, day, "connect");
-}
-
-/**
  * The first day this strategy allows a connection request. An empty column on
  * day 2 reads as broken; it is not, the plan forbids requests for three days.
  * Only while that day is still ahead — "from day 4" on day 9 would be a lie.
@@ -84,9 +72,29 @@ function phaseOf(account, run) {
     : "warming";
 }
 
-export async function handleWarmupApi({ request, response, url, sendJson, readJson }) {
+/**
+ * The saved selection plus what it comes to, which is the only shape the
+ * targeting routes ever answer with. The forecast crosses two databases, and a
+ * CRM that is not answering must not cost the panel the selection it is there
+ * to show — so it degrades to a sentence beside a null forecast rather than a
+ * failed request.
+ */
+async function targetingAnswer(targeting) {
+  if (!targeting.folderId) {
+    return { success: true, targeting: describeTargeting(targeting), forecast: null, forecastError: null };
+  }
+  try {
+    const [name, forecast] = await Promise.all([folderNameOf(targeting.folderId), forecastFor(targeting)]);
+    return { success: true, targeting: describeTargeting(targeting, name), forecast, forecastError: null };
+  } catch (error) {
+    return { success: true, targeting: describeTargeting(targeting), forecast: null, forecastError: crmError(error) };
+  }
+}
+
+export async function handleWarmupApi({ request, response, url, sendJson, readJson, targeting: targetingStore }) {
   const path = url.pathname.replace(/^\/api\/warmup/, "") || "/";
   const method = request.method;
+  const savedTargeting = () => normalizeTargeting(targetingStore.read());
 
   try {
     // ── configuration ──────────────────────────────────────────────────────
@@ -210,6 +218,10 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         outreachByAccount.set(row.account_id, (outreachByAccount.get(row.account_id) ?? 0) + 1);
       }
 
+      // Who each browser is actually signed in as — one query for the whole
+      // list, the same rule everything else on this endpoint follows.
+      const identityByAccount = await loginIdentities();
+
       const byProfile = new Map(linked.map((account) => [account.profile_remote_id, account]));
 
       const describe = (row) => {
@@ -233,6 +245,9 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           owner: row.created_by_name?.trim() || row.created_by_email || null,
           ownerEmail: row.created_by_email,
           account: account ? { id: account.id, status: account.status, phase: phaseOf(account, run) } : null,
+          // The profile's label is what somebody typed in Anty; this is the
+          // person LinkedIn thinks is signed in. They are rarely the same string.
+          identity: account ? identityByAccount.get(account.id) ?? null : null,
           day: day && day.day <= day.totalDays ? `${day.day}/${day.totalDays}` : null,
           health: account?.health ?? "ok",
           healthNote: account?.health_note ?? null,
@@ -831,13 +846,101 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       return true;
     }
 
+    // ── targeting: which folder, narrowed how, worked by whom ──────────────
+    if (method === "GET" && path === "/folders") {
+      try {
+        sendJson(response, 200, {
+          success: true,
+          folders: await listFolders({ includeArchived: url.searchParams.get("archived") === "1" })
+        });
+      } catch (error) {
+        return fail(response, sendJson, 502, crmError(error));
+      }
+      return true;
+    }
+
+    if (method === "GET" && path === "/targeting") {
+      sendJson(response, 200, await targetingAnswer(savedTargeting()));
+      return true;
+    }
+
+    /**
+     * Save the selection.
+     *
+     * An absent `folderId` keeps the one already saved, so ticking an account
+     * in the profiles table can post the accounts alone; an explicitly empty
+     * one is refused, because a folder is the one part of this with no sensible
+     * default left.
+     */
+    if (method === "POST" && path === "/targeting") {
+      const body = await readJson(request);
+      if (!body) return fail(response, sendJson, 400, "Invalid JSON body");
+
+      const current = savedTargeting();
+      const folderId = body.folderId === undefined ? current.folderId : String(body.folderId ?? "").trim();
+      if (!folderId) return fail(response, sendJson, 400, "Pick a folder before saving targeting");
+
+      const filters = body.filters === undefined ? current.filters : normalizeFilters(body.filters);
+      const accountIds = body.accountIds === undefined
+        ? current.accountIds
+        : [...new Set((Array.isArray(body.accountIds) ? body.accountIds : []).map((id) => String(id).trim()).filter(Boolean))];
+
+      let name;
+      try {
+        name = await folderNameOf(folderId);
+      } catch (error) {
+        return fail(response, sendJson, 502, crmError(error));
+      }
+      // Checked rather than taken on trust: a folder id that is not there makes
+      // every later screen say "nobody matches" for a reason nobody can see.
+      if (name === null) return fail(response, sendJson, 404, "That folder is not in the CRM");
+
+      if (accountIds.length) {
+        const known = await anty.from("wl_accounts").select("id").in("id", accountIds).rows();
+        const missing = accountIds.filter((id) => !known.some((row) => row.id === id));
+        if (missing.length) return fail(response, sendJson, 400, `Unknown account: ${missing.join(", ")}`);
+      }
+
+      const saved = {
+        folderId,
+        folderName: name,
+        filters,
+        accountIds,
+        updatedAt: new Date().toISOString()
+      };
+      await targetingStore.write(saved);
+
+      await logEvent({
+        type: "targeting.changed",
+        message: `Targeting: "${name}"${accountIds.length ? ` worked by ${accountIds.length} account${accountIds.length > 1 ? "s" : ""}` : " with no account chosen"}`,
+        meta: saved
+      });
+
+      sendJson(response, 200, await targetingAnswer(normalizeTargeting(saved)));
+      return true;
+    }
+
     // ── the lead queue ─────────────────────────────────────────────────────
     if (method === "GET" && path === "/leads") {
       const limit = intParam(url.searchParams.get("limit"), 10, 50);
+      const targeting = savedTargeting();
+      // An empty queue and an unconfigured one are different answers, and only
+      // one of them is the operator's to fix.
+      if (!targeting.folderId) {
+        sendJson(response, 409, { success: false, error: "Pick a folder before pulling leads", needsTargeting: true });
+        return true;
+      }
+
       try {
-        const leads = await nextCandidates(limit);
+        const [leads, total, name] = await Promise.all([
+          nextCandidates(limit, targeting),
+          queueTotal(targeting),
+          folderNameOf(targeting.folderId)
+        ]);
         sendJson(response, 200, {
           success: true,
+          targeting: describeTargeting(targeting, name),
+          queueTotal: total,
           leads: leads.map((lead) => ({
             id: lead.id,
             name: lead.name,
@@ -1162,13 +1265,13 @@ const MAX_PAGES = 5;
  * wl_outreach_person_once means one person is approached once across every
  * account, so the candidate list is the same whoever is asking.
  */
-async function nextCandidates(limit) {
+async function nextCandidates(limit, targeting) {
   const pageSize = Math.max(limit * OVERFETCH, 40);
   const candidates = [];
   let offset = 0;
 
   for (let page = 0; page < MAX_PAGES && candidates.length < limit; page += 1) {
-    const batch = await leadQueue({ limit: pageSize + offset, offset });
+    const batch = await leadQueue({ limit: pageSize + offset, offset, targeting });
     if (batch.length === 0) break;
     offset += batch.length;
 

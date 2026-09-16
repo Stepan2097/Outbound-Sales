@@ -26,24 +26,24 @@ export const anty = createRestClient({
   }
 });
 
+/**
+ * Only the address and the key are required. The folder and the owner used to
+ * be as well, which pinned the queue to one of the CRM's twenty-six folders for
+ * the life of the deployment; they are now the starting values for targeting a
+ * person chooses in the app, and an installation that sets neither is
+ * configured — it simply has nothing picked yet.
+ */
 export const crm = createRestClient({
   label: "The CRM",
   resolve() {
     const url = (process.env.WARMUP_CRM_SUPABASE_URL || process.env.SUPABASE_URL || "").replace(/\/+$/, "");
     const key = process.env.WARMUP_CRM_SERVICE_ROLE_KEY || process.env.SUPABASE_API_KEY || "";
-    const folderId = process.env.WARMUP_CRM_LEADS_FOLDER_ID || "";
-    const ownerId = process.env.WARMUP_CRM_LEADS_OWNER_ID || "";
     return {
       url,
       key,
-      folderId,
-      ownerId,
-      missing: required({
-        WARMUP_CRM_SUPABASE_URL: url,
-        WARMUP_CRM_SERVICE_ROLE_KEY: key,
-        WARMUP_CRM_LEADS_FOLDER_ID: folderId,
-        WARMUP_CRM_LEADS_OWNER_ID: ownerId
-      })
+      folderId: process.env.WARMUP_CRM_LEADS_FOLDER_ID || "",
+      ownerId: process.env.WARMUP_CRM_LEADS_OWNER_ID || "",
+      missing: required({ WARMUP_CRM_SUPABASE_URL: url, WARMUP_CRM_SERVICE_ROLE_KEY: key })
     };
   }
 });
@@ -60,18 +60,31 @@ export function today() {
 const LEAD_COLUMNS = "id,name,company,position,linkedin,country,email,phone,created_at,description";
 
 /**
- * The queue, defined in exactly one place. Every caller — the list, the count,
- * the re-read before a request is sent — has to mean the same set of people, or
- * the total says one thing and the list another.
+ * The queue, defined in exactly one place. Every caller — the list, the total
+ * under it, the forecast, the re-read before a request is sent — has to mean
+ * the same set of people, or the total says one thing and the list another.
+ *
+ * A blank filter is everyone, not nobody: the four inputs narrow the folder,
+ * and an empty box has to mean the box is not in use.
  */
-function queueQuery(columns) {
-  const config = crm.config();
-  return crm.from("contacts").select(columns).eq("folder_id", config.folderId).eq("lead_status", "new").eq("owner_id", config.ownerId);
+export function queueQuery(columns, targeting) {
+  const { country, position, leadStatus, ownerId } = targeting.filters;
+  let query = crm.from("contacts").select(columns).eq("folder_id", targeting.folderId);
+  if (leadStatus) query = query.eq("lead_status", leadStatus);
+  if (ownerId) query = query.eq("owner_id", ownerId);
+  if (country) query = query.ilike("country", country);
+  if (position) query = query.ilike("position", `*${position}*`);
+  return query;
+}
+
+/** How many people the folder and the filters come to. */
+export async function queueTotal(targeting) {
+  return queueQuery("id", targeting).count();
 }
 
 /** One page of candidates, newest added first. */
-export async function leadQueue({ limit, offset = 0 }) {
-  const rows = await queueQuery(LEAD_COLUMNS)
+export async function leadQueue({ limit, offset = 0, targeting }) {
+  const rows = await queueQuery(LEAD_COLUMNS, targeting)
     .order("created_at", { ascending: false })
     .limit(limit)
     .rows();
@@ -91,5 +104,8 @@ export async function leadById(id) {
 }
 
 export function crmError(error) {
-  return error instanceof Error ? error.message : "The CRM did not answer";
+  const message = error instanceof Error ? error.message : "";
+  // `fetch failed` is all Node says when the host is not there at all, and on a
+  // screen it reads as a bug in this app rather than as a CRM nobody can reach.
+  return !message || message === "fetch failed" ? "The CRM did not answer" : message;
 }

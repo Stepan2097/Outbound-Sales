@@ -18,15 +18,20 @@ export class RestError extends Error {
 }
 
 /**
- * PostgREST treats , . ( ) and spaces as syntax inside a filter value, so
- * anything carrying them is passed double-quoted. UUIDs and plain words go
- * through untouched, which keeps the common URL readable.
+ * Filter values go through as they are, and URL encoding does the whole job.
+ *
+ * PostgREST's own documentation says a value carrying a reserved character
+ * should be double-quoted, but the build behind Supabase passes those quotes
+ * down to Postgres rather than stripping them: `country=eq."United States"`
+ * matches nobody and a quoted uuid comes back as a type error. Only the first
+ * dot after the column separates the operator from the value, so spaces,
+ * commas, dots and parentheses inside a value need nothing done to them.
+ *
+ * The one place a comma still cuts is inside `in.(a,b)`, where it separates the
+ * list — every caller of `in` passes uuids, which cannot contain one.
  */
-function quoteValue(value) {
-  if (value === null || value === undefined) return "null";
-  const text = String(value);
-  if (/^[A-Za-z0-9_\-:+ ]*$/.test(text) && !text.includes(" ")) return text;
-  return `"${text.replace(/["\\]/g, "\\$&")}"`;
+function filterValue(value) {
+  return value === null || value === undefined ? "null" : String(value);
 }
 
 class Query {
@@ -47,17 +52,23 @@ class Query {
   }
 
   eq(column, value) {
-    this.params.append(column, `eq.${quoteValue(value)}`);
+    this.params.append(column, `eq.${filterValue(value)}`);
     return this;
   }
 
   neq(column, value) {
-    this.params.append(column, `neq.${quoteValue(value)}`);
+    this.params.append(column, `neq.${filterValue(value)}`);
     return this;
   }
 
   in(column, values) {
-    this.params.append(column, `in.(${(values || []).map(quoteValue).join(",")})`);
+    this.params.append(column, `in.(${(values || []).map(filterValue).join(",")})`);
+    return this;
+  }
+
+  /** Case-insensitive match. `*` is the wildcard, so a bare value is an exact one. */
+  ilike(column, value) {
+    this.params.append(column, `ilike.${filterValue(value)}`);
     return this;
   }
 
@@ -72,7 +83,7 @@ class Query {
   }
 
   gte(column, value) {
-    this.params.append(column, `gte.${quoteValue(value)}`);
+    this.params.append(column, `gte.${filterValue(value)}`);
     return this;
   }
 
@@ -111,7 +122,7 @@ class Query {
     return this;
   }
 
-  async #send() {
+  async #fetch() {
     const config = this.client.config();
     const url = `${config.url}/rest/v1/${this.table}${this.params.toString() ? `?${this.params}` : ""}`;
 
@@ -132,7 +143,7 @@ class Query {
       body: this.payload === undefined ? undefined : JSON.stringify(this.payload)
     });
 
-    if (response.status === 204) return [];
+    if (response.status === 204) return { response, rows: [] };
 
     const text = await response.text();
     let body = null;
@@ -150,8 +161,12 @@ class Query {
       throw new RestError(message, { code: body?.code ?? null, status: response.status, details: body?.details ?? null });
     }
 
-    if (body === null) return [];
-    return Array.isArray(body) ? body : [body];
+    if (body === null) return { response, rows: [] };
+    return { response, rows: Array.isArray(body) ? body : [body] };
+  }
+
+  async #send() {
+    return (await this.#fetch()).rows;
   }
 
   /** Every matching row. */
@@ -171,6 +186,21 @@ class Query {
     const rows = await this.#send();
     if (rows.length !== 1) throw new RestError(`Expected one row from ${this.table}, got ${rows.length}`, { status: 500 });
     return rows[0];
+  }
+
+  /**
+   * How many rows match, without carrying them back. PostgREST answers this in
+   * a header rather than the body, which is the whole point: the forecast asks
+   * how many people are in a folder of twenty-two thousand, and the answer must
+   * not cost twenty-two thousand rows.
+   */
+  async count() {
+    if (!this.params.has("select")) this.select("id");
+    this.headers = { ...this.headers, Prefer: "count=exact", Range: "0-0" };
+    const { response } = await this.#fetch();
+    // `0-0/12038`, or `*/0` when nothing matched at all.
+    const total = /\/(\d+)$/.exec(response.headers.get("content-range") || "")?.[1];
+    return total === undefined ? 0 : Number(total);
   }
 }
 

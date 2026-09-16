@@ -140,6 +140,11 @@ const state = {
   },
   products: seedProducts(),
   selectedProductId: "outbound-sales-os",
+  // Which CRM folder the LinkedIn warm-up works, narrowed how, by which
+  // accounts. It lives here rather than in the Anty database because that
+  // database takes no migrations, and because this is a choice somebody made
+  // rather than a record of anything that happened. Null until the first save.
+  warmupTargeting: null,
   mcpSync: {
     status: "connected",
     portal: "MCP Product Context Portal",
@@ -411,6 +416,16 @@ async function handleApi(request, response, url) {
         } catch {
           return null;
         }
+      },
+      // Targeting is workspace configuration, so the warm-up reads and writes it
+      // through the state this app already persists rather than keeping a store
+      // of its own.
+      targeting: {
+        read: () => state.warmupTargeting,
+        async write(value) {
+          state.warmupTargeting = value;
+          await writePersistentWorkspaceState();
+        }
       }
     });
     if (!handled) sendJson(response, 404, { success: false, error: "Unknown warm-up endpoint." });
@@ -436,50 +451,6 @@ async function handleApi(request, response, url) {
     const body = await readJson(request);
     await updateSupabasePassword(request.auth.accessToken, body.password);
     sendJson(response, 200, { ok: true });
-    return;
-  }
-
-  if (request.method === "POST" && url.pathname === "/api/account/linkedin") {
-    const body = await readJson(request);
-    const account = normalizeLinkedinIdentity(body);
-    if (!account.name || !account.url) {
-      sendJson(response, 400, { error: "LinkedIn account name and profile URL are required." });
-      return;
-    }
-    request.auth.profile.linkedinAccounts ??= [];
-    const existing = request.auth.profile.linkedinAccounts.find((item) => item.id === account.id || item.url.toLowerCase() === account.url.toLowerCase());
-    if (existing) Object.assign(existing, account, { id: existing.id, updatedAt: new Date().toISOString() });
-    else request.auth.profile.linkedinAccounts.push(account);
-    if (!request.auth.profile.activeLinkedinAccountId) request.auth.profile.activeLinkedinAccountId = (existing || account).id;
-    request.auth.profile.updatedAt = new Date().toISOString();
-    await writePersistentWorkspaceState();
-    sendJson(response, 200, publicState());
-    return;
-  }
-
-  if (request.method === "POST" && url.pathname === "/api/account/linkedin/active") {
-    const body = await readJson(request);
-    const account = (request.auth.profile.linkedinAccounts || []).find((item) => item.id === body.accountId);
-    if (!account) {
-      sendJson(response, 404, { error: "LinkedIn identity not found." });
-      return;
-    }
-    request.auth.profile.activeLinkedinAccountId = account.id;
-    request.auth.profile.updatedAt = new Date().toISOString();
-    await writePersistentWorkspaceState();
-    sendJson(response, 200, publicState());
-    return;
-  }
-
-  if (request.method === "POST" && url.pathname === "/api/account/linkedin/delete") {
-    const body = await readJson(request);
-    request.auth.profile.linkedinAccounts = (request.auth.profile.linkedinAccounts || []).filter((item) => item.id !== body.accountId);
-    if (request.auth.profile.activeLinkedinAccountId === body.accountId) {
-      request.auth.profile.activeLinkedinAccountId = request.auth.profile.linkedinAccounts[0]?.id || "";
-    }
-    request.auth.profile.updatedAt = new Date().toISOString();
-    await writePersistentWorkspaceState();
-    sendJson(response, 200, publicState());
     return;
   }
 
@@ -1884,8 +1855,6 @@ function ensureWorkspaceUserProfile(user, defaults = {}) {
       title: cleanText(defaults.title || metadata.title || ""),
       role: defaults.role === "admin" || metadata.role === "admin" || !state.users.length ? "admin" : "seller",
       status: "active",
-      linkedinAccounts: [],
-      activeLinkedinAccountId: "",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       lastLoginAt: null
@@ -1905,18 +1874,6 @@ async function findSupabaseUserByEmail(emailValue) {
   return (result.users || []).find((user) => String(user.email || "").toLowerCase() === email) || null;
 }
 
-function normalizeLinkedinIdentity(input = {}) {
-  const url = cleanText(input.url || input.linkedin || "");
-  if (!/^https?:\/\/(?:[a-z]{2,3}\.)?linkedin\.com\/in\//i.test(url)) return { name: cleanText(input.name || ""), url: "" };
-  return {
-    id: cleanText(input.id || `linkedin-${randomBytes(5).toString("hex")}`),
-    name: cleanText(input.name || "LinkedIn account").slice(0, 100),
-    url,
-    createdAt: input.createdAt || new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  };
-}
-
 function publicUserProfile(profile = {}) {
   return {
     id: profile.id,
@@ -1925,8 +1882,6 @@ function publicUserProfile(profile = {}) {
     title: profile.title || "",
     role: profile.role || "seller",
     status: profile.status || "active",
-    linkedinAccounts: (profile.linkedinAccounts || []).map((item) => ({ ...item })),
-    activeLinkedinAccountId: profile.activeLinkedinAccountId || "",
     createdAt: profile.createdAt,
     lastLoginAt: profile.lastLoginAt || null
   };
@@ -1947,14 +1902,7 @@ function publicAuthStatus(auth = null) {
 function actorContextForRequest(request) {
   const profile = request?.auth?.profile;
   if (!profile) return null;
-  const linkedin = (profile.linkedinAccounts || []).find((item) => item.id === profile.activeLinkedinAccountId) || null;
-  return {
-    userId: profile.id,
-    name: profile.name,
-    email: profile.email,
-    role: profile.role,
-    linkedinAccount: linkedin ? { id: linkedin.id, name: linkedin.name, url: linkedin.url } : null
-  };
+  return { userId: profile.id, name: profile.name, email: profile.email, role: profile.role };
 }
 
 function parseCookies(header) {
@@ -2068,11 +2016,7 @@ function applyPersistentWorkspaceState(saved = {}) {
   if (Array.isArray(saved.users)) {
     state.users = saved.users
       .filter((user) => user && user.id && user.email)
-      .map((user) => ({
-        ...user,
-        email: cleanText(user.email).toLowerCase(),
-        linkedinAccounts: Array.isArray(user.linkedinAccounts) ? user.linkedinAccounts.map(normalizeLinkedinIdentity).filter((account) => account.url) : []
-      }))
+      .map((user) => ({ ...user, email: cleanText(user.email).toLowerCase() }))
       .slice(0, 200);
   }
   if (saved.historicalOutcomes && typeof saved.historicalOutcomes === "object") state.historicalOutcomes = saved.historicalOutcomes;
@@ -2131,6 +2075,11 @@ function applyPersistentWorkspaceState(saved = {}) {
   }
   if (saved.integrationSettings?.mcp && typeof saved.integrationSettings.mcp === "object") {
     state.mcpSync = { ...state.mcpSync, ...saved.integrationSettings.mcp };
+  }
+  // Taken as it was written: the warm-up normalizes it on the way out, and a
+  // second opinion here would be a second set of defaults to keep in step.
+  if (saved.warmupTargeting && typeof saved.warmupTargeting === "object") {
+    state.warmupTargeting = saved.warmupTargeting;
   }
   for (const key of ["contactEnrichment", "crm", "transcripts", "notifications", "supabase", "postgres", "knowledgeDatabase"]) {
     if (saved.integrationSettings?.[key] && typeof saved.integrationSettings[key] === "object") {
@@ -2200,6 +2149,7 @@ async function writePersistentWorkspaceState() {
       historicalOutcomes: state.historicalOutcomes,
       scoringModel: state.scoringModel,
       researchJobs: state.researchJobs.slice(0, 100),
+      warmupTargeting: state.warmupTargeting,
       learning: {
         examples: state.learning.examples.slice(0, 500),
         playbook: state.learning.playbook,
@@ -4399,7 +4349,7 @@ function publicResearchJob(job = {}) {
     stages: job.stages || [],
     currentStage: job.currentStage || "",
     error: job.error || "",
-    actor: job.actor ? { name: job.actor.name, linkedinAccount: job.actor.linkedinAccount || null } : null,
+    actor: job.actor ? { name: job.actor.name } : null,
     createdAt: job.createdAt,
     startedAt: job.startedAt || null,
     completedAt: job.completedAt || null,
@@ -10582,7 +10532,6 @@ function crmActivityContent(prospect, input, metadata = {}) {
     metadata.recommendedChannel ? `Channel: ${metadata.recommendedChannel}` : input.channel ? `Channel: ${input.channel}` : "",
     metadata.messagePreview ? `Message preview: ${metadata.messagePreview}` : "",
     actor?.name ? `Executed by: ${actor.name}${actor.email ? ` (${actor.email})` : ""}` : "",
-    actor?.linkedinAccount?.url ? `LinkedIn sender: ${actor.linkedinAccount.name || "Assigned account"} - ${actor.linkedinAccount.url}` : "",
     metadata.localInteractionId ? `Outbound OS interaction: ${metadata.localInteractionId}` : ""
   ].filter(Boolean).join("\n")).slice(0, 1800);
 }

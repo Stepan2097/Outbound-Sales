@@ -31,6 +31,22 @@ export async function logEvent(input) {
   }
 }
 
+/**
+ * Today's connection-request allowance, read from the run's own strategy
+ * snapshot — the same source the record path checks against, so the number the
+ * list shows, the number the forecast adds up and the number an action is
+ * refused by cannot disagree.
+ */
+export function connectQuotaToday(account, run, todayIso) {
+  if (!account || !run || run.state !== "running") return 0;
+  if (run.paused_until && run.paused_until >= todayIso) return 0;
+  const snapshot = run.strategy_snapshot;
+  if (!snapshot?.phases) return 0;
+  const day = currentDay(new Date(run.started_at), run.paused_days ?? 0);
+  if (day > totalDays(snapshot)) return 0;
+  return dailyQuota(snapshot, account.id, day, "connect");
+}
+
 export function toStrategy(row) {
   return {
     id: row.id,
@@ -62,6 +78,44 @@ export async function ensureDefaultStrategy() {
 
 export async function loadAccount(id) {
   return anty.from("wl_accounts").select("*").eq("id", id).maybeSingle();
+}
+
+/**
+ * Who the browser is actually signed in as.
+ *
+ * The agent works this out on every run and logs it; it is read back here
+ * rather than copied into a column, because a column would be a second answer
+ * to the same question and the wrong one the day somebody points a profile at a
+ * different login. `slug` is not written by the current agent build, so an
+ * identity is a name with a slug missing rather than nothing at all.
+ */
+function toIdentity(event) {
+  const who = typeof event?.meta?.who === "string" ? event.meta.who.trim() : "";
+  const slug = typeof event?.meta?.slug === "string" ? event.meta.slug.trim() : "";
+  if (!who && !slug) return null;
+  return { name: who || null, slug: slug || null, seenAt: event.created_at };
+}
+
+export async function loginIdentity(accountId) {
+  const event = await anty.from("wl_events").select("meta,created_at")
+    .eq("account_id", accountId).eq("type", "agent.login")
+    .order("created_at", { ascending: false })
+    .maybeSingle();
+  return toIdentity(event);
+}
+
+/**
+ * Every account's newest sign-in, keyed by account. PostgREST applies the limit
+ * per parent row, so a list of any length is still one round trip — the same
+ * rule the profiles list already follows for sessions.
+ */
+export async function loginIdentities() {
+  const rows = await anty.from("wl_accounts").select("id,wl_events(meta,created_at)")
+    .eq("wl_events.type", "agent.login")
+    .order("created_at", { ascending: false, foreignTable: "wl_events" })
+    .limit(1, { foreignTable: "wl_events" })
+    .rows();
+  return new Map(rows.map((row) => [row.id, toIdentity(row.wl_events?.[0])]));
 }
 
 export async function activeRun(accountId) {
@@ -174,11 +228,12 @@ export async function recordAction(account, run, kind, step = 1, detail = null) 
  * put it in the payload.
  */
 export async function describeAccount(account) {
-  const [run, proxy] = await Promise.all([
+  const [run, proxy, identity] = await Promise.all([
     newestRun(account.id),
     account.proxy_id
       ? anty.from("wl_proxies").select("id,label,kind,host,port,username,country,status,last_checked_at").eq("id", account.proxy_id).maybeSingle()
-      : Promise.resolve(null)
+      : Promise.resolve(null),
+    loginIdentity(account.id)
   ]);
 
   const base = {
@@ -191,6 +246,7 @@ export async function describeAccount(account) {
     proxyId: account.proxy_id,
     strategyId: account.strategy_id,
     status: account.status,
+    identity,
     health: account.health,
     healthNote: account.health_note,
     healthChangedAt: account.health_changed_at,
