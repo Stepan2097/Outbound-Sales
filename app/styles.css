@@ -4780,19 +4780,61 @@ dialog {
   }
 }
 
-/* ── Warm-up targeting ───────────────────────────────────────────────────────
+/* ── Warm-up campaigns ───────────────────────────────────────────────────────
  *
- * The panel is built around the forecast line, not the dropdown: a folder of
+ * The panel is built around the forecast line, not the list: a folder of
  * 22 088 contacts at ~22 requests a day is three years of work, and the screen
- * has to say that before it offers to save it. Hence the picker is a single
- * quiet row and the sentence beneath it is the loudest thing on the panel.
+ * has to say that before it offers to run it. A list of campaigns is a table's
+ * worth of pressure to shrink that into a cell, so the rows stay quiet and the
+ * sentence under the selected one keeps the full width it had when this panel
+ * was a single form.
  */
 
-.warmup-targeting-grid {
+.warmup-campaigns-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.warmup-campaign-form {
+  margin: 0 0 14px;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px dashed var(--line);
+  background: var(--surface-strong);
   display: grid;
-  grid-template-columns: minmax(200px, 1.7fr) repeat(4, minmax(130px, 1fr));
+  gap: 12px;
+}
+
+/* Twelve columns so what the campaign IS sits on one line and what narrows it
+   sits on the next, rather than the four filters dragging a ragged tail. */
+.warmup-campaign-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: 10px;
   align-items: end;
+}
+
+.warmup-field-name { grid-column: span 4; }
+.warmup-field-folder { grid-column: span 5; }
+.warmup-field-product { grid-column: span 3; }
+
+.warmup-field-filter { grid-column: span 3; }
+
+.warmup-campaign-form-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.warmup-campaign-form-note {
+  margin: 0;
+  flex: 1 1 240px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--muted);
 }
 
 .warmup-field {
@@ -4889,14 +4931,23 @@ dialog {
   color: var(--muted);
 }
 
-.warmup-targeting-footer {
+.warmup-campaign-detail-foot {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
+  align-items: baseline;
+  gap: 6px 14px;
+  margin-bottom: 2px;
 }
 
-.warmup-targeting-accounts {
+.warmup-campaign-state-note {
+  margin: 0;
+  flex: 1 1 260px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.warmup-campaign-accounts {
   margin: 0;
   flex: 1 1 240px;
   font-size: 12.5px;
@@ -4904,7 +4955,7 @@ dialog {
   color: var(--muted);
 }
 
-.warmup-targeting-problem {
+.warmup-campaign-problem {
   font-style: normal;
   font-weight: 750;
   color: var(--red);
@@ -5026,18 +5077,31 @@ dialog {
 }
 
 @media (max-width: 1100px) {
-  .warmup-targeting-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .warmup-campaign-grid {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
   }
 
-  .warmup-field-folder {
-    grid-column: 1 / -1;
+  .warmup-field-name,
+  .warmup-field-folder,
+  .warmup-field-product {
+    grid-column: span 6;
+  }
+
+  .warmup-field-filter {
+    grid-column: span 3;
   }
 }
 
 @media (max-width: 640px) {
-  .warmup-targeting-grid {
+  .warmup-campaign-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .warmup-field-name,
+  .warmup-field-folder,
+  .warmup-field-product,
+  .warmup-field-filter {
+    grid-column: 1 / -1;
   }
 
   .warmup-forecast {
@@ -5058,7 +5122,7 @@ dialog {
     margin: 0 5px;
   }
 
-  .warmup-targeting-footer {
+  .warmup-campaign-form-footer {
     align-items: stretch;
   }
 
@@ -5107,4 +5171,351 @@ dialog {
 .warmup-forecast-today strong {
   color: var(--ink);
   font-weight: 800;
+}
+
+/* ── The campaign list ─────────────────────────────────────────────────────
+ *
+ * Rows are deliberately quiet. The scale of a campaign is not something a row
+ * can carry — "0 of 22 088" in a table cell reads as a progress bar with a long
+ * way to go, not as three years — so a row carries the tone of its forecast as
+ * a bar down its edge and leaves the sentence to the panel below it.
+ */
+
+.warmup-campaign-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.warmup-campaign-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 0.9fr) auto;
+  align-items: center;
+  gap: 10px 16px;
+  padding: 11px 14px 11px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line);
+  background: var(--surface-strong);
+  cursor: pointer;
+}
+
+.warmup-campaign-row:hover {
+  border-color: color-mix(in srgb, var(--teal) 32%, var(--line));
+}
+
+.warmup-campaign-row.is-selected {
+  border-color: color-mix(in srgb, var(--teal) 45%, transparent);
+  background: var(--teal-weak);
+}
+
+/* The same verdict the forecast reaches, on the edge of the row, so a campaign
+   nobody can finish is visible without selecting it. */
+.warmup-campaign-row.is-ok {
+  border-left-color: var(--teal);
+}
+
+.warmup-campaign-row.is-warn {
+  border-left-color: var(--amber);
+}
+
+.warmup-campaign-row.is-bad {
+  border-left-color: var(--red);
+}
+
+.warmup-campaign-row.is-muted {
+  border-left-color: var(--muted);
+}
+
+.warmup-campaign-who {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.warmup-campaign-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+/* The name is the control that selects the campaign, so the row keeps one
+   keyboard stop for choosing and the rest for acting. */
+.warmup-campaign-select {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font-size: 14.5px;
+  font-weight: 700;
+  text-align: left;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+}
+
+.warmup-campaign-select:hover {
+  border: 0;
+  background: none;
+  color: var(--teal);
+}
+
+.warmup-campaign-select:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.warmup-campaign-meta {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.warmup-campaign-count {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 7px;
+  font-size: 12.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.warmup-campaign-count strong {
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.warmup-campaign-claimed {
+  flex: 1 1 100%;
+  color: var(--teal);
+  font-weight: 700;
+}
+
+.warmup-campaign-count-unknown {
+  font-weight: 650;
+}
+
+/* A caveat about counting, not a problem with the campaign — so it is a note,
+   not a badge. */
+.warmup-campaign-approx {
+  flex: 1 1 100%;
+  font-size: 11.5px;
+  font-weight: 600;
+  font-style: italic;
+  color: var(--muted);
+  cursor: help;
+}
+
+.warmup-campaign-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.warmup-campaign-actions button {
+  min-height: 30px;
+  padding: 0 9px;
+  font-size: 12.5px;
+}
+
+.warmup-campaign-delete:hover {
+  border-color: color-mix(in srgb, var(--red) 50%, transparent);
+  color: var(--red);
+}
+
+.warmup-campaign-detail:empty {
+  display: none;
+}
+
+/* ── The claim queue ───────────────────────────────────────────────────────
+ *
+ * An account whose connection quota has not opened yet gets no rows and a
+ * sentence saying why — "Day 2 of 14 — connection requests start on day 4".
+ * That sentence is the answer somebody opened this panel for, so it is styled
+ * as content rather than as an empty state.
+ */
+
+.warmup-queue-accounts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 10px;
+}
+
+.warmup-queue-account {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--surface-strong);
+}
+
+/* The button keeps its corner whatever the name and the signed-in identity do
+   to the width, so two accounts side by side do not sit at different heights. */
+.warmup-queue-account > header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+}
+
+.warmup-queue-account > header > button {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 12.5px;
+}
+
+.warmup-queue-who {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+}
+
+.warmup-queue-who strong {
+  font-size: 14px;
+}
+
+.warmup-queue-who .warmup-identity {
+  margin-top: 0;
+}
+
+.warmup-queue-reason {
+  margin: 0;
+  padding: 11px 13px;
+  border-radius: 10px;
+  border: 1px dashed color-mix(in srgb, var(--amber) 45%, transparent);
+  background: color-mix(in srgb, var(--amber) 8%, transparent);
+  color: var(--amber);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.warmup-queue-reason.is-bad {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--red) 45%, transparent);
+  background: color-mix(in srgb, var(--red) 9%, transparent);
+  color: var(--red);
+}
+
+.warmup-queue-reason.is-muted {
+  border-color: var(--line);
+  background: transparent;
+  color: var(--muted);
+}
+
+.warmup-queue-list li {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  background: var(--surface);
+}
+
+/* Permanent, against a real person, once. It should not look like the button
+   next to it. */
+.warmup-queue-send {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 12.5px;
+  font-weight: 700;
+  border-color: color-mix(in srgb, var(--teal) 40%, transparent);
+  color: var(--teal);
+}
+
+.warmup-queue-send:hover {
+  border-color: var(--teal);
+  background: var(--teal-weak);
+}
+
+.warmup-queue-list a {
+  color: var(--teal);
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .warmup-campaign-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .warmup-campaign-actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 640px) {
+  .warmup-queue-accounts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .warmup-queue-account {
+    padding: 11px 12px;
+  }
+
+  /* Name over the two controls, so neither the profile link nor the button
+     that marks a real person is clipped. */
+  .warmup-queue-list li {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .warmup-queue-list .warmup-lead-who {
+    grid-column: 1 / -1;
+  }
+
+  .warmup-queue-send {
+    justify-self: end;
+  }
+}
+
+/* A queue belongs to the account, so a person claimed by a different campaign
+   the same account works says so rather than passing for this one's. */
+.warmup-queue-elsewhere {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--violet);
+  cursor: help;
+}
+
+/* Claiming releases expired claims first, so a queue can shrink without anyone
+   touching it. Said once, quietly, where it happened. */
+.warmup-queue-released {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--violet);
+}
+
+/* The claiming rule says a seller who puts a campaign first means it, which is
+   only true if putting it first is something they can do. */
+.warmup-campaign-move {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.warmup-campaign-move button {
+  min-height: 30px;
+  width: 28px;
+  padding: 0;
+}
+
+.warmup-campaign-move button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.warmup-campaign-move svg {
+  width: 15px;
+  height: 15px;
 }

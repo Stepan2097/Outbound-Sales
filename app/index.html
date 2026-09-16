@@ -617,50 +617,77 @@
               <div class="warmup-stats-strip" id="warmupStatsStrip"></div>
             </section>
 
-            <section class="panel warmup-targeting-panel span-2">
+            <section class="panel warmup-campaigns-panel span-2">
               <div class="panel-heading">
                 <div>
-                  <h2>Targeting</h2>
-                  <p>Which CRM folder the warm-up draws from, who it may approach in it, and what that actually amounts to</p>
+                  <h2>Campaigns</h2>
+                  <p>Each one is a folder, the accounts that work it and a product — and what that actually amounts to at the rate these accounts are allowed to send</p>
                 </div>
-                <span class="pill tone-muted" id="warmupTargetingPill">not saved yet</span>
+                <div class="warmup-campaigns-controls">
+                  <span class="pill tone-muted" id="warmupCampaignsPill">loading</span>
+                  <button class="primary-button" id="warmupCampaignNewBtn" type="button"><i data-lucide="plus"></i><span>New campaign</span></button>
+                </div>
               </div>
 
-              <div class="warmup-targeting-grid">
-                <label class="warmup-field warmup-field-folder">
-                  <span>Folder</span>
-                  <select id="warmupFolderSelect" aria-label="CRM folder">
-                    <option value="">Loading folders...</option>
-                  </select>
-                </label>
-                <label class="warmup-field">
-                  <span>Country</span>
-                  <input id="warmupFilterCountry" type="text" placeholder="Any country" autocomplete="off" />
-                </label>
-                <label class="warmup-field">
-                  <span>Position contains</span>
-                  <input id="warmupFilterPosition" type="text" placeholder="Any position" autocomplete="off" />
-                </label>
-                <label class="warmup-field">
-                  <span>Lead status</span>
-                  <input id="warmupFilterStatus" type="text" placeholder="Any status" list="warmupLeadStatusOptions" autocomplete="off" />
-                  <datalist id="warmupLeadStatusOptions">
-                    <option value="new"></option>
-                  </datalist>
-                </label>
-                <label class="warmup-field">
-                  <span>Owner</span>
-                  <input id="warmupFilterOwner" type="text" placeholder="Any owner (CRM user id)" autocomplete="off" />
-                </label>
-              </div>
+              <form class="warmup-campaign-form" id="warmupCampaignForm" hidden>
+                <div class="warmup-campaign-grid">
+                  <label class="warmup-field warmup-field-name">
+                    <span>Name</span>
+                    <input id="warmupCampaignName" type="text" placeholder="What is this campaign for?" autocomplete="off" />
+                  </label>
+                  <label class="warmup-field warmup-field-folder">
+                    <span>Folder</span>
+                    <select id="warmupFolderSelect" aria-label="CRM folder">
+                      <option value="">Loading folders...</option>
+                    </select>
+                  </label>
+                  <label class="warmup-field warmup-field-product">
+                    <span>Product</span>
+                    <select id="warmupCampaignProduct" aria-label="Product">
+                      <option value="">No product</option>
+                    </select>
+                  </label>
+                  <label class="warmup-field warmup-field-filter">
+                    <span>Country</span>
+                    <input id="warmupFilterCountry" type="text" placeholder="Any country" autocomplete="off" />
+                  </label>
+                  <label class="warmup-field warmup-field-filter">
+                    <span>Position contains</span>
+                    <input id="warmupFilterPosition" type="text" placeholder="Any position" autocomplete="off" />
+                  </label>
+                  <label class="warmup-field warmup-field-filter">
+                    <span>Lead status</span>
+                    <input id="warmupFilterStatus" type="text" placeholder="Any status" list="warmupLeadStatusOptions" autocomplete="off" />
+                    <datalist id="warmupLeadStatusOptions">
+                      <option value="new"></option>
+                    </datalist>
+                  </label>
+                  <label class="warmup-field warmup-field-filter">
+                    <span>Owner</span>
+                    <input id="warmupFilterOwner" type="text" placeholder="Any owner (CRM user id)" autocomplete="off" />
+                  </label>
+                </div>
+                <div class="warmup-campaign-form-footer">
+                  <button class="primary-button" id="warmupCampaignSaveBtn" type="submit"><i data-lucide="crosshair"></i><span>Save campaign</span></button>
+                  <button class="text-button" id="warmupCampaignCancelBtn" type="button"><i data-lucide="x"></i><span>Cancel</span></button>
+                  <p class="warmup-campaign-form-note" id="warmupCampaignFormNote"></p>
+                </div>
+              </form>
 
-              <div class="warmup-forecast" id="warmupForecast"></div>
+              <div class="warmup-campaign-list" id="warmupCampaignList"></div>
 
-              <div class="warmup-targeting-footer">
-                <button class="primary-button" id="warmupSaveTargetingBtn" type="button"><i data-lucide="crosshair"></i><span>Save targeting</span></button>
-                <button class="text-button" id="warmupResetTargetingBtn" type="button" hidden><i data-lucide="undo-2"></i><span>Undo changes</span></button>
-                <p class="warmup-targeting-accounts" id="warmupTargetingAccounts"></p>
+              <div class="warmup-campaign-detail" id="warmupCampaignDetail"></div>
+            </section>
+
+            <section class="panel warmup-queue-panel span-2">
+              <div class="panel-heading">
+                <div>
+                  <h2 id="warmupQueueTitle">Queue</h2>
+                  <p id="warmupQueueSubtitle">Who is claimed to each account of the selected campaign right now — a claim is an allocation, not a send</p>
+                </div>
+                <button class="text-button" id="warmupQueueRefreshBtn" type="button"><i data-lucide="refresh-cw"></i><span>Refresh queue</span></button>
               </div>
+              <div id="warmupQueueBody"></div>
             </section>
 
             <section class="panel warmup-list-panel">
@@ -684,7 +711,7 @@
                 <table>
                   <thead>
                     <tr>
-                      <th class="warmup-tick-head" title="Ticked accounts work the targeted folder">Sends</th>
+                      <th class="warmup-tick-head" title="Ticked accounts work the selected campaign">Works</th>
                       <th>Profile</th>
                       <th>Status</th>
                       <th>Day</th>
@@ -714,7 +741,7 @@
               <div class="panel-heading">
                 <div>
                   <h2 id="warmupLeadsTitle">Lead queue</h2>
-                  <p id="warmupLeadsSubtitle">The next people the targeting reaches, with anyone already approached from any account left out</p>
+                  <p id="warmupLeadsSubtitle">The pool a campaign draws from, before anything is claimed to an account — anyone already approached from any account left out</p>
                 </div>
                 <button class="text-button" id="warmupLeadsRefreshBtn" type="button"><i data-lucide="refresh-cw"></i><span>Refresh queue</span></button>
               </div>
