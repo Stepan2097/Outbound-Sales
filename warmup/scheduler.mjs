@@ -197,8 +197,15 @@ export function resetScheduler() {
  * Cool-off is checked last, after the quota, so an account that is cooling off
  * but has nothing left today is simply not due rather than reported as held
  * back: "Chloe Stewart is in cool-off" should mean work is waiting on her.
+ *
+ * `openProfiles` is the profiles Anty reports running right now, and it is the
+ * only guard here that is not about us. A lease covers the workers that ask;
+ * nothing covers a second launcher that does not — a portal left running on the
+ * old build, or a person who opened the profile in Anty by hand. Anty sees both,
+ * because both have to go through it to get a browser, so an account whose
+ * profile is already open is not due however much it owes.
  */
-export function dueFrom({ accounts, runs, dayActions, todayIso, nowMs = Date.now() }) {
+export function dueFrom({ accounts, runs, dayActions, openProfiles, todayIso, nowMs = Date.now() }) {
   const runByAccount = new Map((runs ?? []).map((row) => [row.account_id, row]));
 
   const doneByAccount = new Map();
@@ -210,6 +217,7 @@ export function dueFrom({ accounts, runs, dayActions, todayIso, nowMs = Date.now
 
   const ready = [];
   const held = [];
+  const busy = [];
   for (const account of accounts ?? []) {
     const run = runByAccount.get(account.id);
     if (!run) continue;
@@ -228,6 +236,11 @@ export function dueFrom({ accounts, runs, dayActions, todayIso, nowMs = Date.now
     }
     if (remaining <= 0) continue;
 
+    if (openProfiles?.has(account.profile_remote_id)) {
+      busy.push({ account, run, day, remaining, kinds });
+      continue;
+    }
+
     const until = coolingOff.get(account.id) ?? 0;
     if (until > nowMs) {
       held.push({ account, run, day, remaining, kinds, until });
@@ -245,7 +258,7 @@ export function dueFrom({ accounts, runs, dayActions, todayIso, nowMs = Date.now
   // one that was enabled five minutes ago.
   ready.sort((a, b) => Date.parse(a.run.started_at) - Date.parse(b.run.started_at));
   held.sort((a, b) => a.until - b.until);
-  return { ready, held };
+  return { ready, held, busy };
 }
 
 async function candidates(todayIso, nowMs) {
@@ -257,14 +270,21 @@ async function candidates(todayIso, nowMs) {
     .eq("health", "ok")
     .notNull("profile_remote_id")
     .rows();
-  if (!accounts.length) return { ready: [], held: [] };
+  if (!accounts.length) return { ready: [], held: [], busy: [] };
 
   const ids = accounts.map((account) => account.id);
+  const profileIds = accounts.map((account) => account.profile_remote_id);
   const runs = await anty.from("wl_runs").select("*").in("account_id", ids).eq("state", "running").rows();
   const dayActions = await anty.from("wl_day_actions").select("account_id,kind,done")
     .in("account_id", ids).eq("on_date", todayIso).rows();
+  // A deleted profile can still carry the status it had when it went, so it is
+  // not open anywhere — the same reading the sessions sync already takes.
+  const profiles = await anty.from("anty_browser_profiles").select("id,status,is_deleted").in("id", profileIds).rows();
+  const openProfiles = new Set(
+    profiles.filter((profile) => profile.status === "running" && !profile.is_deleted).map((profile) => profile.id)
+  );
 
-  return dueFrom({ accounts, runs, dayActions, todayIso, nowMs });
+  return dueFrom({ accounts, runs, dayActions, openProfiles, todayIso, nowMs });
 }
 
 /**
@@ -276,20 +296,17 @@ async function candidates(todayIso, nowMs) {
  * spam the rule exists to prevent. Countdowns go in `retryAfterSeconds`, which
  * is expected to move.
  *
- * `peek` answers the same question without taking the account.
- *
- * Asking is a GET and reads like one, but the answer is a lease — so a curl
- * while debugging, a health check, a monitor, or a browser tab left open on
- * this URL parks a real account for twenty-five minutes in the middle of the
- * morning, and the only symptom is a quiet morning. Anything that is not a
- * worker about to run should ask with `peek`, and a peeked answer carries no
- * `leaseId`, so an agent that used it by mistake has nothing to report back
- * with and cannot run on it.
+ * It takes nothing. Asking is a GET and behaves like one: `next` is what would
+ * be handed out, `leaseId` is always null, and the account is still free when
+ * the answer arrives. Taking it is `leaseAccount`, a POST, because a read that
+ * parked a real account for twenty-five minutes would have had a curl, a health
+ * check, a monitor or a client-side timeout costing a session in the middle of
+ * the morning, with a quiet morning as the only symptom.
  */
-export async function decideNext({ now = new Date(), random = Math.random, peek = false } = {}) {
+export async function decideNext({ now = new Date(), random = Math.random } = {}) {
   const nowMs = now.getTime();
   const window = { ...SESSION_WINDOW, label: windowLabel(), open: insideWindow(now) };
-  const idle = (reason, retryAfterSeconds) => ({ success: true, window, next: null, reason, retryAfterSeconds, peek });
+  const idle = (reason, retryAfterSeconds) => ({ success: true, window, next: null, reason, retryAfterSeconds });
 
   if (schedulerDisabled()) {
     return idle("the scheduler is switched off on this deployment", OUTSIDE_WINDOW_CAP);
@@ -306,46 +323,104 @@ export async function decideNext({ now = new Date(), random = Math.random, peek 
     return idle(`${running.label} is already running`, secondsUntil(running.expiresAt, nowMs));
   }
 
-  const { ready, held } = await candidates(today(), nowMs);
+  const { ready, held, busy } = await candidates(today(), nowMs);
   if (!ready.length) {
-    const cooling = held[0];
-    return idle(cooling ? `${cooling.account.label} is in cool-off` : "nothing owes work today", between(IDLE, random));
-  }
-
-  const pick = ready[0];
-  // A peek grants nothing and writes nothing: `scheduler.started` means an
-  // account was given to somebody who is about to run it, and a log full of
-  // starts that were monitoring is a log that cannot be read.
-  const lease = peek ? null : grantLease(pick.account, nowMs);
-  if (lease) {
-    await logEvent({
-      accountId: pick.account.id,
-      runId: pick.run.id,
-      type: "scheduler.started",
-      message: `Handed to a worker — day ${pick.day}, ${pick.remaining} action(s) left today`,
-      meta: { day: pick.day, remaining: pick.remaining, kinds: pick.kinds, leaseId: lease.leaseId }
-    });
+    // The open profile is reported ahead of the cool-off: one says wait, the
+    // other says something is running this account that did not ask us, and
+    // that is the sentence somebody needs to see.
+    return idle(blockedReason(busy[0], held[0]), between(IDLE, random));
   }
 
   return {
     success: true,
     window,
-    peek,
-    next: {
-      accountId: pick.account.id,
-      label: pick.account.label,
-      profileRemoteId: pick.account.profile_remote_id,
-      day: pick.day,
-      remaining: pick.remaining,
-      kinds: pick.kinds,
-      leaseId: lease?.leaseId ?? null,
-      leaseExpiresAt: lease ? new Date(lease.expiresAt).toISOString() : null
-    },
-    reason: peek ? "nobody is running, and this account is next" : null,
-    // A fallback, not the pacing: a worker that finishes reports back and is
-    // given `nextInSeconds` there. This is what it comes back on if it dies
-    // between being handed an account and saying what happened.
+    // Field-identical to what `leaseAccount` hands back, so a worker parses one
+    // shape. The two nulls are the difference between being told who is next
+    // and holding it.
+    next: { ...offer(ready[0]), leaseId: null, leaseExpiresAt: null },
+    reason: null,
+    // A fallback, not the pacing: a worker takes the account it was just shown
+    // and is paced by `nextInSeconds` when it reports back. This is what it
+    // comes back on if it never gets that far.
     retryAfterSeconds: between(GAP, random)
+  };
+}
+
+/**
+ * Why nothing can be handed out, in the stable wording the worker deduplicates
+ * on — no countdown, no timestamp, nothing that moves between two identical
+ * states.
+ */
+function blockedReason(busy, cooling, fallback = "nothing owes work today") {
+  if (busy) return `${busy.account.label} already has its profile open`;
+  if (cooling) return `${cooling.account.label} is in cool-off`;
+  return fallback;
+}
+
+/** The account, as both answers describe it. */
+function offer(pick) {
+  return {
+    accountId: pick.account.id,
+    label: pick.account.label,
+    profileRemoteId: pick.account.profile_remote_id,
+    day: pick.day,
+    remaining: pick.remaining,
+    kinds: pick.kinds
+  };
+}
+
+/**
+ * Take the account.
+ *
+ * Separate from the question deliberately, and it must stay separate: the
+ * moment a GET can lease, every probe of it is a lost session and nothing says
+ * so. The split is also what makes a race honest — two workers asking at once
+ * both get told the same account is next, one POST wins, and the loser is told
+ * who holds it and when to ask again rather than quietly running the same
+ * profile from a second machine.
+ *
+ * Everything is re-checked here rather than trusted from the GET: an answer a
+ * worker sat on for ten minutes is a claim about a window, a quota and a lease
+ * that may all have moved.
+ */
+export async function leaseAccount({ accountId, now = new Date(), random = Math.random }) {
+  const nowMs = now.getTime();
+  const refuse = (error, retryAfterSeconds) => ({ ok: false, status: 409, error, retryAfterSeconds });
+
+  if (schedulerDisabled()) {
+    return refuse("the scheduler is switched off on this deployment", OUTSIDE_WINDOW_CAP);
+  }
+  if (!insideWindow(now)) {
+    return refuse(`outside ${windowLabel()}`, secondsUntilWindowOpens(now));
+  }
+
+  sweepLeases(nowMs);
+  const running = activeLease(nowMs);
+  if (running) {
+    return refuse(`${running.label} is already running`, secondsUntil(running.expiresAt, nowMs));
+  }
+
+  const { ready, held, busy } = await candidates(today(), nowMs);
+  const pick = ready.find((item) => item.account.id === accountId);
+  if (!pick) {
+    const mine = (list) => list.find((item) => item.account.id === accountId);
+    // Not an error on the worker's part: it asked for what it was shown, and
+    // the answer moved underneath it. It polls again like any other refusal.
+    return refuse(blockedReason(mine(busy), mine(held), "that account does not owe work right now"), between(IDLE, random));
+  }
+
+  const lease = grantLease(pick.account, nowMs);
+  await logEvent({
+    accountId: pick.account.id,
+    runId: pick.run.id,
+    type: "scheduler.started",
+    message: `Handed to a worker — day ${pick.day}, ${pick.remaining} action(s) left today`,
+    meta: { day: pick.day, remaining: pick.remaining, kinds: pick.kinds, leaseId: lease.leaseId }
+  });
+
+  return {
+    ok: true,
+    lease: { ...offer(pick), leaseId: lease.leaseId, leaseExpiresAt: new Date(lease.expiresAt).toISOString() }
   };
 }
 

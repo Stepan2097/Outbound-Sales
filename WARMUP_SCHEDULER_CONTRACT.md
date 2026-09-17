@@ -55,22 +55,58 @@ Due, in the order the old scheduler used:
    `profile_view` and `like`. Connection requests come from a campaign's queue
    and are counted separately.
 4. It is not in cool-off and not leased to somebody else.
+5. Anty does not already have its profile open. The lease covers the workers
+   that ask; this covers the ones that do not — an old portal still running, or
+   a person who opened the profile by hand. Both have to go through Anty to get
+   a browser, so Anty is where they are visible.
 
 Oldest run first: an account waiting since day one goes before one enabled five
 minutes ago.
 
 ### `GET /api/warmup/agent/due`
 
-Token-scoped, like the rest of `/agent/*`. The worker's only question.
+Token-scoped, like the rest of `/agent/*`. The worker's question — and only the
+question. It grants nothing, so `leaseId` and `leaseExpiresAt` come back null
+and probing it costs nothing at all. Taking the account is the POST below, and
+the two must never be merged back together: see *What this got wrong*.
 
 ```ts
 { success: true,
   window: { startHour, endHour, label, open },
   next: null | { accountId, label, profileRemoteId, day, remaining, kinds: string[],
-                 leaseId: string, leaseExpiresAt: string },
+                 leaseId: null, leaseExpiresAt: null },
   reason: string | null,
   retryAfterSeconds: number }
 ```
+
+### `POST /api/warmup/agent/lease`
+
+`{ accountId }`, the account the GET just named. 200 takes it:
+
+```ts
+{ success: true,
+  lease: { accountId, label, profileRemoteId, day, remaining, kinds: string[],
+           leaseId: string, leaseExpiresAt: string } }
+```
+
+`lease` is field-identical to `next`, with the two nulls filled in, and it is
+the authoritative one: the window, the quota and the lease are all re-checked
+here, because an answer a worker sat on for ten minutes is a claim about three
+things that may all have moved.
+
+409 refuses it, and a refusal is an ordinary state rather than an error — the
+loser of a race polls again:
+
+```ts
+{ success: false, error: string, reason: string, retryAfterSeconds: number }
+```
+
+`error` and `reason` are the same sentence, in the stable wording the worker
+deduplicates on: "Chloe Stewart is already running", "Chloe Stewart is in
+cool-off", "Chloe Stewart already has its profile open", "that account does
+not owe work right now", "outside 09:00–13:00".
+404 is an account id that does not exist, and is the only answer a worker should
+treat as final.
 
 **`retryAfterSeconds` is the whole point.** It is how the server paces the Mac,
 and the worker obeys it without having an opinion:
@@ -79,8 +115,11 @@ and the worker obeys it without having an opinion:
 |---|---|
 | Outside the window | seconds until it opens, capped at 900 |
 | Inside, nothing due | 300–540, jittered |
-| Inside, an account handed out | the gap after it finishes — see below |
-| Another worker holds a lease | seconds until that lease expires |
+| Inside, an account named | 120–420 — what to do if it does not take it |
+| Another worker holds a lease | seconds until that lease expires, capped at 900 |
+
+Every one of them is a whole number between 1 and 900, and the cap is enforced
+in the arithmetic rather than promised in prose.
 
 `reason` is a sentence for the log when `next` is null — "outside 09:00–13:00",
 "nothing owes work today", "Chloe Stewart is already running".
@@ -165,14 +204,56 @@ care which one.
 
 ## What this got wrong
 
-Six things, found building it.
+Eight things, found building it.
 
-**`reason` cannot carry a number.** The worker logs a reason once and stays
-quiet until it changes, which is the only thing standing between a five-minute
-poll and a log nobody reads. A countdown inside the sentence — "in cool-off for
-another 31 min" — makes every poll a new reason and produces exactly the spam
-the rule exists to prevent. `reason` is now fixed text plus, at most, an account
-label; everything that moves is in `retryAfterSeconds`.
+**A lease only binds the things that ask for one.** The old portal's scheduler
+is a process, not a file, and taking the machinery out of `scheduler.ts` does
+not reach a `next-server` that has been running since yesterday with the old
+build in memory. It launched four sessions this morning — 07:05, 07:14, 07:29
+and 07:39 UTC — and the last of them was on the account this server spent the
+morning offering to a worker, which is why that account reads as owing three
+profile views twenty minutes after a browser was on it. Two decision-makers,
+one profile directory, and nothing in either of them can see the other.
+
+So "is it leased" is not the same question as "is it running", and the second
+one has an answer: Anty. Anything that opens one of these profiles has to go
+through it, so `anty_browser_profiles.status = running` now takes an account out
+of the due list however much it owes, and both `/due` and `/lease` say
+"<Label> already has its profile open". That closes the window on a second
+launcher and on a person who opened a profile by hand; it does not close the
+one where another scheduler is making decisions, because nothing in a database
+can. **The old portal has to be stopped, and that is an operational step, not a
+code change.**
+
+**A GET granted a lease, and that was the serious one.** Written as one call,
+`/agent/due` answered the question by taking the account — so the first curl
+anybody ran against it parked a real warming account for twenty-five minutes,
+in the middle of the 09:00–13:00 window, and said nothing anywhere. A health
+check on that URL, a monitor, an `--once` sanity run, a client-side timeout on a
+request the server had already answered, or a browser tab left open would each
+have cost a session, and the only symptom is a quiet morning — the exact failure
+this phase exists to stop. The worker found it with its first exploratory
+request and I reproduced it immediately.
+
+It is now split: the GET answers and takes nothing, `POST /agent/lease` takes
+it. **Do not merge them back together for convenience.** The two calls are one
+round trip apart and the second one re-checks everything anyway; what the split
+buys is that the safe operation is the one that looks safe, which is the only
+form of this that survives contact with a person holding curl. The race the
+split creates — two workers both told the same account is next — is honest and
+cheap: one POST wins, the loser gets a 409 naming the holder and a number to
+sleep on, and nobody runs the same profile twice from two machines.
+
+**`reason` cannot carry a number, and neither can the bound.** The worker logs a
+reason once and stays quiet until it changes, which is the only thing standing
+between a five-minute poll and a log nobody reads. A countdown inside the
+sentence — "in cool-off for another 31 min" — makes every poll a new reason and
+produces exactly the spam the rule exists to prevent. `reason` is now fixed text
+plus, at most, an account label; everything that moves is in
+`retryAfterSeconds`. And that number is clamped rather than trusted to stay
+inside its range: the wait on a lease came back at 1498 against a stated ceiling
+of 1500, which is one second of clock drift from breaking a bound somebody else
+is clamping against, and `LEASE_MINUTES` is a variable a deployment can raise.
 
 **Cool-off needed a sentence of its own.** The table has four cases and none of
 them fits an account that owes work and may not have it: "nothing owes work

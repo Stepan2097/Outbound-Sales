@@ -18,7 +18,7 @@ import {
   AUDIT_HIDDEN_TYPES, MAX_THREADS_PER_RUN, lastSyncedAt, listThreads, markRead, markSynced, normalizeThreadInput,
   outreachFor, readThread, storeThread, syncSummary, threadKeyOf, unreadCount
 } from "./inbox.mjs";
-import { decideNext, finishRun } from "./scheduler.mjs";
+import { decideNext, finishRun, leaseAccount } from "./scheduler.mjs";
 import {
   allowanceReason, claimCapacity, claimCutoff, defaultFilters, describeCampaign, isCampaignState,
   migrateCampaigns, moveTo, nextOrder, normalizeCampaign, progressApproximate, progressFrom, renumber,
@@ -1755,14 +1755,37 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
     // error — because the thing asking has no window, no order and no gap of
     // its own, and a 4xx would leave it with nothing to sleep on.
     //
-    // `?peek=1` asks the same question without taking the account. Asking
-    // normally hands out a lease, which is the right shape for a worker and a
-    // trap for everything else: a curl while debugging, a health check or a tab
-    // left open on this URL would otherwise park a real account for the length
-    // of a lease, in the middle of the morning, with a quiet morning as the only
-    // symptom.
+    // It grants nothing, and that is the whole design: a GET that leased would
+    // have made every curl, health check, monitor and client-side timeout cost
+    // a real account its session, with a quiet morning as the only symptom.
+    // Taking the account is the POST below.
     if (method === "GET" && path === "/agent/due") {
-      sendJson(response, 200, await decideNext({ peek: url.searchParams.get("peek") === "1" }));
+      sendJson(response, 200, await decideNext());
+      return true;
+    }
+
+    // Taking it. Separate from the question on purpose — see `leaseAccount` —
+    // and the only place a lease is ever granted.
+    if (method === "POST" && path === "/agent/lease") {
+      const body = await readJson(request);
+      if (!body) return fail(response, sendJson, 400, "Invalid JSON body");
+      const account = body.accountId ? await loadAccount(String(body.accountId)) : null;
+      if (!account) return fail(response, sendJson, 404, "Account not found");
+
+      const outcome = await leaseAccount({ accountId: account.id });
+      if (!outcome.ok) {
+        // 409 rather than an error the worker has to interpret: somebody else
+        // got there first is an ordinary state, and the answer carries both the
+        // sentence for the log and the number to sleep on.
+        sendJson(response, outcome.status, {
+          success: false,
+          error: outcome.error,
+          reason: outcome.error,
+          retryAfterSeconds: outcome.retryAfterSeconds
+        });
+        return true;
+      }
+      sendJson(response, 200, { success: true, lease: outcome.lease });
       return true;
     }
 

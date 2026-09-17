@@ -277,7 +277,9 @@ test("while somebody holds a lease the answer names them and waits exactly that 
   const answer = await decideNext({ now });
   assert.equal(answer.next, null);
   assert.equal(answer.reason, "Chloe Stewart is already running");
-  assert.equal(answer.retryAfterSeconds, leaseMinutes() * 60);
+  // Capped, not the whole 25 minutes: the worker was promised 900 at most, and
+  // coming back early to be told the same thing costs one poll.
+  assert.equal(answer.retryAfterSeconds, 900);
 
   const later = new Date(lease.expiresAt - 90_000);
   assert.equal((await decideNext({ now: later })).retryAfterSeconds, 90);
@@ -286,8 +288,9 @@ test("while somebody holds a lease the answer names them and waits exactly that 
 test("no reason ever carries a number that moves under the worker's log", async () => {
   const now = new Date(2026, 8, 17, 10, 0, 0);
   grantLease({ id: "a", label: "Chloe Stewart" }, now.getTime());
-  const first = await decideNext({ now });
-  const second = await decideNext({ now: new Date(now.getTime() + 61_000) });
+  // Late in the lease, where the countdown is under the cap and so actually moves.
+  const first = await decideNext({ now: new Date(now.getTime() + 11 * 60_000) });
+  const second = await decideNext({ now: new Date(now.getTime() + 12 * 60_000) });
   assert.equal(first.reason, second.reason, "the worker logs a reason once and stays quiet until it changes");
   assert.notEqual(first.retryAfterSeconds, second.retryAfterSeconds, "the countdown belongs here instead");
 });
