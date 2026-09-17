@@ -3,7 +3,7 @@ Description=Poll Outbound-Sales main for changes
 
 [Timer]
 OnBootSec=2min
-OnUnitActiveSec=5min
+OnUnitActiveSec=1min
 Persistent=true
 
 [Install]
