@@ -314,8 +314,14 @@ const state = {
   postgresVault: null
 };
 
-initializeRuntimeConfigFromEnv();
+// Order matters, and it changed when the Settings page went away. The saved
+// snapshot holds integration settings without their secrets, so restoring it
+// after the environment was read put back a "not configured" flag while the
+// key sat in the vault — the workspace then refused to sign anybody in. With
+// no screen to edit these on, the environment is the source of truth and is
+// applied last.
 await loadPersistentWorkspaceState();
+initializeRuntimeConfigFromEnv();
 void warmRuntimeConnections();
 
 const server = createServer(async (request, response) => {
@@ -1991,20 +1997,60 @@ function publicUserProfile(profile = {}) {
 
 // Returns "" for "use the workspace default" and null for "this is not a model
 // id I will store", which the endpoint turns into a 400.
+/**
+ * A choice is a model and, optionally, how hard it should think.
+ *
+ * Reasoning effort is not a separate model on OpenRouter — it is a parameter on
+ * the same id — so the two travel as one string and split here. "#" is the
+ * separator because an OpenRouter id never contains one: they are built from
+ * word characters, dots, colons, dashes and a single slash.
+ */
+const REASONING_EFFORTS = ["low", "medium", "high"];
+
+function splitModelChoice(value) {
+  const raw = cleanText(value || "");
+  if (!raw) return { modelId: "", effort: "" };
+  const hash = raw.indexOf("#");
+  if (hash === -1) return { modelId: raw, effort: "" };
+  const effort = raw.slice(hash + 1).toLowerCase();
+  return { modelId: raw.slice(0, hash), effort: REASONING_EFFORTS.includes(effort) ? effort : "" };
+}
+
+/**
+ * The models this workspace offers, and the thinking levels worth offering on
+ * each. Prices are per million tokens, read from the live OpenRouter catalogue
+ * — they are shown so a choice is made with its cost visible rather than after
+ * the invoice. Luna's output is ten times cheaper than Terra's, and a picker
+ * that hid that would be the reason somebody picked wrong.
+ */
+const CURATED_MODEL_CHOICES = [
+  { id: "openai/gpt-5.6-luna-pro", label: "GPT 5.6 Luna", efforts: REASONING_EFFORTS, lastKnownPrice: [0.2, 1.2] },
+  { id: "openai/gpt-5.6-terra-pro", label: "GPT 5.6 Terra", efforts: REASONING_EFFORTS, lastKnownPrice: [2, 12] },
+  { id: "openai/gpt-5.6-sol-pro", label: "GPT 5.6 Sol", efforts: REASONING_EFFORTS, lastKnownPrice: [2, 10] },
+  { id: "anthropic/claude-haiku-4.5", label: "Claude Haiku 4.5", efforts: REASONING_EFFORTS, lastKnownPrice: [1, 5] },
+  { id: "anthropic/claude-sonnet-5", label: "Claude Sonnet 5", efforts: REASONING_EFFORTS, lastKnownPrice: [2, 10] },
+  { id: "deepseek/deepseek-v4-pro", label: "DeepSeek V4 Pro", efforts: REASONING_EFFORTS, lastKnownPrice: [1.6, 3.2] }
+];
+
+const EFFORT_LABEL = { low: "швидко", medium: "середнє думання", high: "глибоке думання" };
+
 function normalizeUserModelId(value) {
-  const modelId = cleanText(value || "").slice(0, 160);
-  if (!modelId) return "";
-  const known = state.models.find((model) => model.id === modelId);
-  if (known) return known.provider === "mock" ? null : modelId;
+  const raw = cleanText(value || "").slice(0, 180);
+  if (!raw) return "";
+  const { modelId, effort } = splitModelChoice(raw);
+  if (!modelId) return null;
+  const suffix = effort ? `#${effort}` : "";
+  const known = (state.models || []).find((model) => model.id === modelId);
+  if (known) return known.provider === "mock" ? null : `${modelId}${suffix}`;
   // The OpenRouter catalogue is synced on demand, so a valid id can be absent
   // from state.models at the moment somebody picks it. Shape is the test.
-  return /^[\w.:-]+\/[\w.:-]+$/.test(modelId) ? modelId : null;
+  return /^[\w.:-]+\/[\w.:-]+$/.test(modelId) ? `${modelId}${suffix}` : null;
 }
 
 // The one rule the AI paths use. It never throws and never returns empty:
 // personal choice, then workspace default, then the id this build shipped with.
 function resolveModelForProfile(profile, kind = "analysis") {
-  const chosen = cleanText(profile?.modelId || "");
+  const chosen = splitModelChoice(profile?.modelId).modelId;
   if (chosen) return chosen;
   return kind === "writing"
     ? cleanText(state.aiModelDefaults.writingModel || "") || openRouterDefaults.writingModel
@@ -2013,6 +2059,11 @@ function resolveModelForProfile(profile, kind = "analysis") {
 
 function resolveModelForActingUser(kind = "analysis") {
   return resolveModelForProfile(actingUserProfile(), kind);
+}
+
+/** How hard the acting user asked their model to think, if they asked at all. */
+function resolveReasoningForActingUser() {
+  return splitModelChoice(actingUserProfile()?.modelId).effort || "";
 }
 
 function actingUserProfile() {
@@ -2026,6 +2077,21 @@ function setActingUserProfile(profile) {
 
 function accountModelView(profile = {}) {
   const chosen = cleanText(profile.modelId || "");
+  const priceOf = (id) => state.models.find((model) => model.id === id) || {};
+  // The named choices, model by thinking level, each carrying what it costs.
+  const curated = CURATED_MODEL_CHOICES.flatMap((choice) => {
+    const price = priceOf(choice.id);
+    return choice.efforts.map((effort) => ({
+      id: `${choice.id}#${effort}`,
+      label: `${choice.label} · ${EFFORT_LABEL[effort]}`,
+      modelId: choice.id,
+      effort,
+      inputPrice: price.inputPrice ?? choice.lastKnownPrice?.[0] ?? null,
+      outputPrice: price.outputPrice ?? choice.lastKnownPrice?.[1] ?? null,
+      priceIsLive: price.inputPrice !== undefined,
+      curated: true
+    }));
+  });
   const catalogue = state.models
     .filter((model) => model.provider !== "mock" && model.availability === "available")
     .map((model) => ({
@@ -2064,7 +2130,10 @@ function accountModelView(profile = {}) {
       writingModel: resolveModelForProfile(profile, "writing")
     },
     workspaceDefaults: { ...state.aiModelDefaults },
-    options: catalogue
+    effort: splitModelChoice(chosen).effort || "",
+    // Curated first: six models a person was actually offered, each at three
+    // thinking levels, ahead of four hundred rows nobody scrolls.
+    options: [...curated, ...catalogue]
   };
 }
 
@@ -12062,19 +12131,29 @@ function openRouterHeaders(apiKey = decryptSecret(state.vault)) {
 async function callOpenRouterJson({ model, taskType, profile, messages, maxTokens = 1200 }) {
   const startedAt = performance.now();
   const timeoutMs = openRouterTimeoutFor(profile, taskType);
+  const effort = resolveReasoningForActingUser();
   const requestBody = {
     model,
     messages,
     temperature: profile === "premium" ? 0.45 : 0.35,
     max_tokens: maxTokens,
-    response_format: { type: "json_object" }
+    response_format: { type: "json_object" },
+    // Only when somebody asked for it. Not every model on the router accepts
+    // the parameter, and one that does not must cost the caller a retry rather
+    // than the whole action — the same bargain response_format already has.
+    ...(effort ? { reasoning: { effort } } : {})
   };
 
   let payload;
   try {
     payload = await postOpenRouterChat(requestBody, { timeoutMs });
   } catch (error) {
-    if (String(error?.message || "").includes("response_format")) {
+    const complaint = String(error?.message || "");
+    if (complaint.includes("reasoning") || complaint.includes("effort")) {
+      const retryBody = { ...requestBody };
+      delete retryBody.reasoning;
+      payload = await postOpenRouterChat(retryBody, { timeoutMs });
+    } else if (complaint.includes("response_format")) {
       const retryBody = { ...requestBody };
       delete retryBody.response_format;
       payload = await postOpenRouterChat(retryBody, { timeoutMs: Math.min(timeoutMs, 9000) });

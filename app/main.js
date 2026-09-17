@@ -5636,11 +5636,21 @@ function renderProfileScreen() {
   if (!profileData) return;
   const { model, spend, time } = profileData;
 
-  const options = (model.options || []).map((option) => {
+  // Price in the option itself: a choice made without it is a choice made
+  // before the invoice rather than with it. Curated pairs first, then the rest.
+  const optionHtml = (option) => {
     const id = typeof option === "string" ? option : option.id;
-    const label = typeof option === "string" ? option : option.label || option.id;
-    return `<option value="${escapeAttr(id)}"${id === model.modelId ? " selected" : ""}>${escapeHtml(label)}</option>`;
-  });
+    const base = typeof option === "string" ? option : option.label || option.id;
+    const price = option.inputPrice != null && option.outputPrice != null
+      ? ` — ${option.inputPrice}/${option.outputPrice} за 1М`
+      : "";
+    return `<option value="${escapeAttr(id)}"${id === model.modelId ? " selected" : ""}>${escapeHtml(base + price)}</option>`;
+  };
+  const curated = (model.options || []).filter((option) => option.curated).map(optionHtml);
+  const rest = (model.options || []).filter((option) => !option.curated).map(optionHtml);
+  const options = curated.length
+    ? [`<optgroup label="Відібрані">${curated.join("")}</optgroup>`, `<optgroup label="Решта каталогу">${rest.join("")}</optgroup>`]
+    : rest;
   setHtml("profileModelSelect", `<option value=""${model.modelId ? "" : " selected"}>За замовчуванням робочого простору</option>${options.join("")}`);
   setText("profileModelNote", model.source === "user"
     ? `Обрано для цього акаунта. Аналіз: ${model.effective?.analysisModel || "—"}, написання: ${model.effective?.writingModel || "—"}.`
