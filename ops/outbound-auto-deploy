@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Poll GitHub for changes to Outbound-Sales and ask Coolify to deploy only
+# when the running image does not contain the current main commit.
+set -Eeuo pipefail
+
+readonly APP_UUID='ronkmbbm2d6m431vz4l3emdm'
+readonly APP_CONTAINER_PREFIX="${APP_UUID}-"
+readonly COOLIFY_CLIENT_CONTAINER_PREFIX='y4iu85iu74ceyoo8k9d6b0xa-'
+readonly REPOSITORY='https://github.com/Stepan2097/Outbound-Sales.git'
+readonly STATE_DIR='/var/lib/outbound-auto-deploy'
+readonly PENDING_FILE="${STATE_DIR}/pending-sha"
+readonly LOCK_FILE='/run/lock/outbound-auto-deploy.lock'
+readonly RETRY_AFTER_SECONDS=1200
+
+mkdir -p "${STATE_DIR}" "$(dirname "${LOCK_FILE}")"
+exec 9>"${LOCK_FILE}"
+flock -n 9 || exit 0
+
+log() {
+  logger -t outbound-auto-deploy -- "$*"
+}
+
+remote_sha="$(git ls-remote "${REPOSITORY}" refs/heads/main | awk 'NR == 1 { print $1 }')"
+if [[ ! "${remote_sha}" =~ ^[0-9a-f]{40}$ ]]; then
+  log 'Cannot read the current main commit from GitHub; no deploy started.'
+  exit 1
+fi
+
+if docker ps --format '{{.Names}} {{.Image}}' | awk -v prefix="${APP_CONTAINER_PREFIX}" -v sha="${remote_sha}" '$1 ~ "^" prefix && $2 ~ (":" sha "$") { found = 1 } END { exit !found }'; then
+  rm -f "${PENDING_FILE}"
+  log "${remote_sha} is already running."
+  exit 0
+fi
+
+if [[ -f "${PENDING_FILE}" ]]; then
+  read -r pending_sha pending_started_at < "${PENDING_FILE}" || true
+  now="$(date +%s)"
+  if [[ "${pending_sha:-}" == "${remote_sha}" && $((now - ${pending_started_at:-0})) -lt ${RETRY_AFTER_SECONDS} ]]; then
+    log "Deployment for ${remote_sha} is already in progress."
+    exit 0
+  fi
+fi
+
+coolify_client_container="$(docker ps --filter "name=${COOLIFY_CLIENT_CONTAINER_PREFIX}" --format '{{.Names}}' | head -n 1)"
+if [[ -z "${coolify_client_container}" ]]; then
+  log 'Cannot find the Coolify API client container; no deploy started.'
+  exit 1
+fi
+
+token="$(docker inspect "${coolify_client_container}" --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^COOLIFY_TOKEN=//p')"
+if [[ -z "${token}" ]]; then
+  log 'Cannot read the Coolify API token; no deploy started.'
+  exit 1
+fi
+
+status="$(curl -sS -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:8000/api/v1/deploy?uuid=${APP_UUID}" -H "Authorization: Bearer ${token}" -H 'Content-Type: application/json')"
+if [[ "${status}" != '200' ]]; then
+  log "Coolify rejected deployment for ${remote_sha} with HTTP ${status}."
+  exit 1
+fi
+
+printf '%s %s\n' "${remote_sha}" "$(date +%s)" > "${PENDING_FILE}"
+log "Started Coolify deployment for ${remote_sha}."

@@ -1,0 +1,8 @@
+[Unit]
+Description=Deploy Outbound-Sales when main has a new commit
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/outbound-auto-deploy
