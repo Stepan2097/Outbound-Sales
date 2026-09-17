@@ -80,7 +80,7 @@ export function parseProxy(input) {
     type = scheme[1].toLowerCase();
     rest = rest.slice(scheme[0].length);
   }
-  if (!["http", "https", "socks5", "socks4"].includes(type)) return { error: `Unknown proxy type "${type}"` };
+  if (!["http", "https", "socks5", "socks4"].includes(type)) return { error: `Невідомий тип проксі "${type}"` };
 
   let username;
   let password;
@@ -92,15 +92,15 @@ export function parseProxy(input) {
     const colon = credentials.indexOf(":");
     username = colon === -1 ? credentials : credentials.slice(0, colon);
     password = colon === -1 ? undefined : credentials.slice(colon + 1);
-    if (!username) return { error: "The username is missing before the colon" };
+    if (!username) return { error: "Перед двокрапкою немає імені користувача" };
   }
 
   const colon = rest.lastIndexOf(":");
-  if (colon === -1) return { error: "No port — expected host:port" };
+  if (colon === -1) return { error: "Немає порту — очікується host:port" };
   const host = rest.slice(0, colon).trim();
   const port = Number(rest.slice(colon + 1).trim());
-  if (!host) return { error: "No host" };
-  if (!Number.isInteger(port) || port < 1 || port > 65535) return { error: "The port is not a number between 1 and 65535" };
+  if (!host) return { error: "Немає хоста" };
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return { error: "Порт має бути числом від 1 до 65535" };
 
   return { type, host, port, ...(username ? { username } : {}), ...(password ? { password } : {}) };
 }

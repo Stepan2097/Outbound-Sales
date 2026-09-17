@@ -118,28 +118,28 @@ export function currentDay(startedAt, pausedDays, now = new Date()) {
 
 /** Reject a strategy that cannot be run, with a reason an operator can act on. */
 export function validateStrategy(input = {}) {
-  if (typeof input.name !== "string" || !input.name.trim()) return "A strategy needs a name";
-  if (!Array.isArray(input.phases) || input.phases.length === 0) return "Add at least one phase";
+  if (typeof input.name !== "string" || !input.name.trim()) return "Стратегії потрібна назва";
+  if (!Array.isArray(input.phases) || input.phases.length === 0) return "Додай хоча б одну фазу";
 
   let previousEnd = 0;
   for (const [index, phase] of input.phases.entries()) {
-    if (!Number.isInteger(phase.fromDay) || !Number.isInteger(phase.toDay)) return `Phase ${index + 1}: days must be whole numbers`;
-    if (phase.fromDay < 1 || phase.toDay < phase.fromDay) return `Phase ${index + 1}: the day range runs backwards`;
+    if (!Number.isInteger(phase.fromDay) || !Number.isInteger(phase.toDay)) return `Фаза ${index + 1}: дні мають бути цілими числами`;
+    if (phase.fromDay < 1 || phase.toDay < phase.fromDay) return `Фаза ${index + 1}: діапазон днів іде навпаки`;
     // Gaps are rejected rather than silently treated as rest days: a day with no
     // phase would quietly forbid every action, which reads as a broken app.
-    if (phase.fromDay !== previousEnd + 1) return `Phase ${index + 1} should start on day ${previousEnd + 1}`;
+    if (phase.fromDay !== previousEnd + 1) return `Фаза ${index + 1} має починатися з дня ${previousEnd + 1}`;
     previousEnd = phase.toDay;
 
     for (const [kind, range] of Object.entries(phase.quotas || {})) {
-      if (!ACTION_KINDS.includes(kind)) return `Phase ${index + 1}: unknown action "${kind}"`;
+      if (!ACTION_KINDS.includes(kind)) return `Фаза ${index + 1}: невідома дія "${kind}"`;
       const [low, high] = range || [];
       if (!Number.isInteger(low) || !Number.isInteger(high) || low < 0 || high < low) {
-        return `Phase ${index + 1}: ${ACTION_LABEL[kind]} range is not valid`;
+        return `Фаза ${index + 1}: діапазон «${ACTION_LABEL[kind]}» некоректний`;
       }
     }
   }
   if (input.pauseDays !== undefined && (!Number.isInteger(input.pauseDays) || input.pauseDays < 0)) {
-    return "Pause length must be a whole number of days";
+    return "Тривалість паузи має бути цілим числом днів";
   }
   return null;
 }

@@ -115,5 +115,5 @@ export function crmError(error) {
   const message = error instanceof Error ? error.message : "";
   // `fetch failed` is all Node says when the host is not there at all, and on a
   // screen it reads as a bug in this app rather than as a CRM nobody can reach.
-  return !message || message === "fetch failed" ? "The CRM did not answer" : message;
+  return !message || message === "fetch failed" ? "CRM не відповіла" : message;
 }

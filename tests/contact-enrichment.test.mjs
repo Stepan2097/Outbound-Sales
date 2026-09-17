@@ -28,7 +28,10 @@ test("FullEnrich webhooks are authenticated, approval-gated, and idempotent", as
   try {
     await waitForHealth();
     const page = await fetch(origin).then((response) => response.text());
-    assert.match(page, /Research &amp; Contact Enrichment/);
+    // Anchored on the id rather than the heading: this asserts the enrichment
+    // panel is served, and a heading is prose that is allowed to be reworded or
+    // translated without the shell having broken.
+    assert.match(page, /id="contactEnrichmentStatus"/);
 
     const unauthorized = await fetch(`${origin}/api/webhooks/fullenrich`, {
       method: "POST",

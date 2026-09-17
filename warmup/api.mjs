@@ -238,18 +238,18 @@ async function checkCampaignInput({ folderId, accountIds, productId, products })
   } catch (error) {
     return { status: 502, error: crmError(error) };
   }
-  if (folderName === null) return { status: 404, error: "That folder is not in the CRM" };
+  if (folderName === null) return { status: 404, error: "Такої папки немає в CRM" };
 
   if (accountIds.length) {
     const known = await anty.from("wl_accounts").select("id").in("id", accountIds).rows();
     const missing = accountIds.filter((id) => !known.some((row) => row.id === id));
-    if (missing.length) return { status: 400, error: `Unknown account: ${missing.join(", ")}` };
+    if (missing.length) return { status: 400, error: `Невідомий акаунт: ${missing.join(", ")}` };
   }
 
   // A product is the workspace's own, and nothing about the message is decided
   // here — a campaign stores which product it is for and no wording at all.
   if (productId && !products.some((product) => product.id === productId)) {
-    return { status: 400, error: `Unknown product: ${productId}` };
+    return { status: 400, error: `Невідомий продукт: ${productId}` };
   }
 
   return { folderName };
@@ -632,19 +632,19 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
      */
     if (method === "PATCH" && path === "/profiles") {
       const body = await readJson(request);
-      if (!body?.id) return fail(response, sendJson, 400, "Which profile?");
+      if (!body?.id) return fail(response, sendJson, 400, "Який профіль?");
 
       const profile = await anty.from("anty_browser_profiles")
         .select("id,name,start_page,tags,proxy,created_by_name,created_by_email")
         .eq("id", String(body.id)).maybeSingle();
-      if (!profile) return fail(response, sendJson, 404, "Profile not found");
+      if (!profile) return fail(response, sendJson, 404, "Профіль не знайдено");
 
       const patch = { updated_at: new Date().toISOString() };
       const changes = [];
 
       if (typeof body.name === "string") {
         const name = body.name.trim();
-        if (!name) return fail(response, sendJson, 400, "The name cannot be empty");
+        if (!name) return fail(response, sendJson, 400, "Назва не може бути порожньою");
         if (name !== profile.name) { patch.name = name; changes.push(`renamed to "${name}"`); }
       }
 
@@ -657,11 +657,11 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       }
 
       if (typeof body.platform === "string") {
-        if (!PLATFORMS.includes(body.platform)) return fail(response, sendJson, 400, "Unknown type");
+        if (!PLATFORMS.includes(body.platform)) return fail(response, sendJson, 400, "Невідомий тип");
         if (platformOf(profile) !== body.platform) {
           const result = retag(profile, body.platform);
           if (result.conflict) {
-            return fail(response, sendJson, 409, `Its start page is ${result.conflict} — change that first, or the two will disagree`);
+            return fail(response, sendJson, 409, `Стартова сторінка профілю — ${result.conflict}. Спочатку зміни її, інакше вони суперечитимуть одна одній`);
           }
           patch.tags = result.tags;
           changes.push(`marked as ${body.platform}`);
@@ -697,7 +697,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       const single = url.searchParams.get("id");
       if (single) {
         const account = await loadAccount(single);
-        if (!account) return fail(response, sendJson, 404, "Account not found");
+        if (!account) return fail(response, sendJson, 404, "Акаунт не знайдено");
         sendJson(response, 200, {
           success: true,
           secretsConfigured: secretsConfigured(),
@@ -724,7 +724,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
 
     if (method === "POST" && path === "/accounts") {
       const body = await readJson(request);
-      if (!body) return fail(response, sendJson, 400, "Invalid JSON body");
+      if (!body) return fail(response, sendJson, 400, "Некоректне тіло JSON");
 
       const label = String(body.label || "").trim();
       const login = String(body.login || "").trim();
@@ -734,7 +734,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       // A login is optional: an account created from an Anty profile is
       // identified by that profile, and demanding one here is what made
       // "Warm up" fail on a screen that has no field to type it into.
-      if (!label) return fail(response, sendJson, 400, "A name is required");
+      if (!label) return fail(response, sendJson, 400, "Назва обов'язкова");
 
       // One warm-up record per profile — two would count the same day twice.
       if (profileRemoteId) {
@@ -744,7 +744,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
 
       // Refuse rather than save the account with the password silently dropped.
       if (password && !secretsConfigured()) {
-        return fail(response, sendJson, 503, "Password storage is not configured on this server (LINKEDIN_SECRET_KEY)");
+        return fail(response, sendJson, 503, "Сховище паролів не налаштоване на цьому сервері (LINKEDIN_SECRET_KEY)");
       }
 
       const strategy = body.strategyId ? { id: String(body.strategyId) } : await ensureDefaultStrategy();
@@ -766,10 +766,10 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
 
     if (method === "PATCH" && path === "/accounts") {
       const body = await readJson(request);
-      if (!body?.id) return fail(response, sendJson, 400, "Which account?");
+      if (!body?.id) return fail(response, sendJson, 400, "Який акаунт?");
 
       const account = await loadAccount(String(body.id));
-      if (!account) return fail(response, sendJson, 404, "Account not found");
+      if (!account) return fail(response, sendJson, 404, "Акаунт не знайдено");
 
       const patch = { updated_at: new Date().toISOString() };
       const changed = [];
@@ -780,7 +780,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       if ("strategyId" in body) { patch.strategy_id = body.strategyId || null; changed.push("strategy"); }
       if ("note" in body) { patch.owner_note = body.note ? String(body.note) : null; changed.push("note"); }
       if (typeof body.password === "string" && body.password) {
-        if (!secretsConfigured()) return fail(response, sendJson, 503, "Password storage is not configured (LINKEDIN_SECRET_KEY)");
+        if (!secretsConfigured()) return fail(response, sendJson, 503, "Сховище паролів не налаштоване (LINKEDIN_SECRET_KEY)");
         patch.password_cipher = encryptSecret(body.password);
         changed.push("password");
       }
@@ -799,9 +799,9 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
 
     if (method === "DELETE" && path === "/accounts") {
       const id = url.searchParams.get("id");
-      if (!id) return fail(response, sendJson, 400, "Which account?");
+      if (!id) return fail(response, sendJson, 400, "Який акаунт?");
       const account = await loadAccount(id);
-      if (!account) return fail(response, sendJson, 404, "Account not found");
+      if (!account) return fail(response, sendJson, 404, "Акаунт не знайдено");
 
       await logEvent({ accountId: null, level: "warn", type: "account.deleted", message: `Account "${account.label}" deleted` });
       await anty.from("wl_accounts").remove().eq("id", account.id).rows();
@@ -820,12 +820,12 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
      */
     if (method === "POST" && path === "/accounts/health") {
       const body = await readJson(request);
-      if (!body) return fail(response, sendJson, 400, "Invalid JSON body");
-      if (!body.accountId) return fail(response, sendJson, 400, "Which account?");
-      if (!isHealth(body.health)) return fail(response, sendJson, 400, `Health must be one of: ${HEALTH_VALUES.join(", ")}`);
+      if (!body) return fail(response, sendJson, 400, "Некоректне тіло JSON");
+      if (!body.accountId) return fail(response, sendJson, 400, "Який акаунт?");
+      if (!isHealth(body.health)) return fail(response, sendJson, 400, `Стан має бути одним із: ${HEALTH_VALUES.join(", ")}`);
 
       const account = await loadAccount(String(body.accountId));
-      if (!account) return fail(response, sendJson, 404, "Account not found");
+      if (!account) return fail(response, sendJson, 404, "Акаунт не знайдено");
 
       const health = body.health;
       const note = typeof body.note === "string" && body.note.trim() ? body.note.trim() : null;
@@ -869,10 +869,10 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
      */
     if (method === "POST" && path === "/control") {
       const body = await readJson(request);
-      if (!body) return fail(response, sendJson, 400, "Invalid JSON body");
+      if (!body) return fail(response, sendJson, 400, "Некоректне тіло JSON");
 
       const account = body.accountId ? await loadAccount(String(body.accountId)) : null;
-      if (!account) return fail(response, sendJson, 404, "Account not found");
+      if (!account) return fail(response, sendJson, 404, "Акаунт не знайдено");
       const action = String(body.action || "");
 
       // Excluded is a state rather than a deletion, because "we decided not to
@@ -900,8 +900,8 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       }
 
       if (action === "start") {
-        if (account.status === "excluded") return fail(response, sendJson, 409, "This account is excluded from warm-up");
-        if (await activeRun(account.id)) return fail(response, sendJson, 409, "This account is already warming up");
+        if (account.status === "excluded") return fail(response, sendJson, 409, "Цей акаунт виключено з прогріву");
+        if (await activeRun(account.id)) return fail(response, sendJson, 409, "Цей акаунт уже прогрівається");
 
         let strategy;
         if (account.strategy_id) {
@@ -971,7 +971,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
 
       if (action === "record") {
         const kind = String(body.kind || "");
-        if (!ACTION_KINDS.includes(kind)) return fail(response, sendJson, 400, "Unknown action");
+        if (!ACTION_KINDS.includes(kind)) return fail(response, sendJson, 400, "Невідома дія");
         const step = Number.isInteger(body.count) ? Math.max(1, Number(body.count)) : 1;
         const outcome = await recordAction(account, run, kind, step);
         if (!outcome.ok) return refusal(response, sendJson, outcome);
@@ -979,7 +979,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         return true;
       }
 
-      return fail(response, sendJson, 400, "Unknown action");
+      return fail(response, sendJson, 400, "Невідома дія");
     }
 
     // ── strategies ─────────────────────────────────────────────────────────
@@ -993,7 +993,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
 
     if (method === "POST" && path === "/strategies") {
       const body = await readJson(request);
-      if (!body) return fail(response, sendJson, 400, "Invalid JSON body");
+      if (!body) return fail(response, sendJson, 400, "Некоректне тіло JSON");
       const problem = validateStrategy(body);
       if (problem) return fail(response, sendJson, 400, problem);
 
@@ -1011,12 +1011,12 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
 
     if (method === "PATCH" && path === "/strategies") {
       const body = await readJson(request);
-      if (!body?.id) return fail(response, sendJson, 400, "Which strategy?");
+      if (!body?.id) return fail(response, sendJson, 400, "Яка стратегія?");
       const problem = validateStrategy(body);
       if (problem) return fail(response, sendJson, 400, problem);
 
       const existing = await anty.from("wl_strategies").select("*").eq("id", String(body.id)).maybeSingle();
-      if (!existing) return fail(response, sendJson, 404, "Strategy not found");
+      if (!existing) return fail(response, sendJson, 404, "Стратегію не знайдено");
 
       const updated = await anty.from("wl_strategies").update({
         name: String(body.name).trim(),
@@ -1037,10 +1037,10 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
 
     if (method === "DELETE" && path === "/strategies") {
       const id = url.searchParams.get("id");
-      if (!id) return fail(response, sendJson, 400, "Which strategy?");
+      if (!id) return fail(response, sendJson, 400, "Яка стратегія?");
       const existing = await anty.from("wl_strategies").select("*").eq("id", id).maybeSingle();
-      if (!existing) return fail(response, sendJson, 404, "Strategy not found");
-      if (existing.is_default) return fail(response, sendJson, 409, "The default strategy cannot be deleted");
+      if (!existing) return fail(response, sendJson, 404, "Стратегію не знайдено");
+      if (existing.is_default) return fail(response, sendJson, 409, "Стратегію за замовчуванням видалити не можна");
 
       // Archived, not deleted: accounts point at it, and runs reference it for
       // provenance even though they carry their own snapshot.
@@ -1070,17 +1070,17 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
 
     if (method === "POST" && path === "/proxies") {
       const body = await readJson(request);
-      if (!body) return fail(response, sendJson, 400, "Invalid JSON body");
+      if (!body) return fail(response, sendJson, 400, "Некоректне тіло JSON");
 
       const label = String(body.label || "").trim();
       const host = String(body.host || "").trim();
       const port = Number(body.port);
       if (!label || !host || !Number.isInteger(port) || port < 1 || port > 65535) {
-        return fail(response, sendJson, 400, "Name, host and a valid port are required");
+        return fail(response, sendJson, 400, "Назва, хост і коректний порт обов'язкові");
       }
       const password = String(body.password || "");
       if (password && !secretsConfigured()) {
-        return fail(response, sendJson, 503, "Password storage is not configured (LINKEDIN_SECRET_KEY)");
+        return fail(response, sendJson, 503, "Сховище паролів не налаштоване (LINKEDIN_SECRET_KEY)");
       }
 
       const created = await anty.from("wl_proxies").insert({
@@ -1098,9 +1098,9 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
 
     if (method === "DELETE" && path === "/proxies") {
       const id = url.searchParams.get("id");
-      if (!id) return fail(response, sendJson, 400, "Which proxy?");
+      if (!id) return fail(response, sendJson, 400, "Який проксі?");
       const proxy = await anty.from("wl_proxies").select("id,label").eq("id", id).maybeSingle();
-      if (!proxy) return fail(response, sendJson, 404, "Proxy not found");
+      if (!proxy) return fail(response, sendJson, 404, "Проксі не знайдено");
 
       // Accounts survive; they fall back to whatever their browser profile uses.
       await anty.from("wl_proxies").remove().eq("id", proxy.id).rows();
@@ -1130,7 +1130,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
 
     if (method === "GET" && path === "/sessions") {
       const accountId = url.searchParams.get("accountId");
-      if (!accountId) return fail(response, sendJson, 400, "Which account?");
+      if (!accountId) return fail(response, sendJson, 400, "Який акаунт?");
       // Capped rather than paged: the question this answers is "what has this
       // account been doing lately", and lately is not four months ago.
       const rows = await anty.from("wl_sessions")
@@ -1142,7 +1142,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
 
     if (method === "GET" && path === "/outreach") {
       const accountId = url.searchParams.get("accountId");
-      if (!accountId) return fail(response, sendJson, 400, "Which account?");
+      if (!accountId) return fail(response, sendJson, 400, "Який акаунт?");
       const limit = intParam(url.searchParams.get("limit"), 100, 500);
       // Claims are deliberately not here: this list means "who we approached",
       // and a queued row is an allocation nobody has sent yet. GET /queue is
@@ -1160,12 +1160,12 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
      */
     if (method === "PATCH" && path === "/outreach") {
       const body = await readJson(request);
-      if (!body?.id) return fail(response, sendJson, 400, "Which outreach?");
+      if (!body?.id) return fail(response, sendJson, 400, "Який запис аутрічу?");
       const status = String(body.status || "");
-      if (!OUTREACH_STATUSES.includes(status)) return fail(response, sendJson, 400, "Unknown status");
+      if (!OUTREACH_STATUSES.includes(status)) return fail(response, sendJson, 400, "Невідомий статус");
 
       const existing = await anty.from("wl_outreach").select(OUTREACH_COLUMNS).eq("id", String(body.id)).maybeSingle();
-      if (!existing) return fail(response, sendJson, 404, "That outreach record is gone");
+      if (!existing) return fail(response, sendJson, 404, "Цього запису аутрічу вже немає");
 
       const patch = { status };
       if (typeof body.note === "string") patch.note = body.note.trim() || null;
@@ -1210,12 +1210,12 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
      */
     if (method === "POST" && path === "/campaigns") {
       const body = await readJson(request);
-      if (!body) return fail(response, sendJson, 400, "Invalid JSON body");
+      if (!body) return fail(response, sendJson, 400, "Некоректне тіло JSON");
 
       const name = String(body.name ?? "").trim();
-      if (!name) return fail(response, sendJson, 400, "Give the campaign a name");
+      if (!name) return fail(response, sendJson, 400, "Дай кампанії назву");
       const folderId = String(body.folderId ?? "").trim();
-      if (!folderId) return fail(response, sendJson, 400, "Pick a folder before saving a campaign");
+      if (!folderId) return fail(response, sendJson, 400, "Обери папку, перш ніж зберігати кампанію");
 
       const accountIds = [...new Set((Array.isArray(body.accountIds) ? body.accountIds : [])
         .map((id) => String(id).trim()).filter(Boolean))];
@@ -1260,14 +1260,14 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
      */
     if (method === "PATCH" && path === "/campaigns") {
       const body = await readJson(request);
-      if (!body?.id) return fail(response, sendJson, 400, "Which campaign?");
+      if (!body?.id) return fail(response, sendJson, 400, "Яка кампанія?");
 
       const campaigns = await loadCampaigns();
       const current = campaigns.find((campaign) => campaign.id === String(body.id));
-      if (!current) return fail(response, sendJson, 404, "That campaign is gone");
+      if (!current) return fail(response, sendJson, 404, "Цієї кампанії вже немає");
 
       const folderId = body.folderId === undefined ? current.folderId : String(body.folderId ?? "").trim();
-      if (!folderId) return fail(response, sendJson, 400, "Pick a folder before saving a campaign");
+      if (!folderId) return fail(response, sendJson, 400, "Обери папку, перш ніж зберігати кампанію");
       const accountIds = body.accountIds === undefined
         ? current.accountIds
         : [...new Set((Array.isArray(body.accountIds) ? body.accountIds : []).map((id) => String(id).trim()).filter(Boolean))];
@@ -1276,7 +1276,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         : body.productId === null ? null : String(body.productId).trim() || null;
 
       if (body.state !== undefined && !isCampaignState(body.state)) {
-        return fail(response, sendJson, 400, `Unknown state: ${String(body.state)}`);
+        return fail(response, sendJson, 400, `Невідомий стан: ${String(body.state)}`);
       }
       const state = body.state === undefined ? current.state : body.state;
 
@@ -1329,11 +1329,11 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
      */
     if (method === "DELETE" && path === "/campaigns") {
       const id = url.searchParams.get("id");
-      if (!id) return fail(response, sendJson, 400, "Which campaign?");
+      if (!id) return fail(response, sendJson, 400, "Яка кампанія?");
 
       const campaigns = await loadCampaigns();
       const doomed = campaigns.find((campaign) => campaign.id === id);
-      if (!doomed) return fail(response, sendJson, 404, "That campaign is gone");
+      if (!doomed) return fail(response, sendJson, 404, "Цієї кампанії вже немає");
 
       const released = await releaseCampaignClaims(doomed, campaigns);
       await saveCampaigns(campaigns.filter((campaign) => campaign.id !== id));
@@ -1358,9 +1358,9 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
      */
     if (method === "POST" && path === "/campaigns/claim") {
       const body = await readJson(request);
-      if (!body) return fail(response, sendJson, 400, "Invalid JSON body");
+      if (!body) return fail(response, sendJson, 400, "Некоректне тіло JSON");
       const account = body.accountId ? await loadAccount(String(body.accountId)) : null;
-      if (!account) return fail(response, sendJson, 404, "Account not found");
+      if (!account) return fail(response, sendJson, 404, "Акаунт не знайдено");
       const limit = intParam(body.limit, 0, 50);
 
       // First, before anything is counted: a claim nobody worked in time is a
@@ -1470,9 +1470,9 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
      */
     if (method === "GET" && path === "/queue") {
       const accountId = url.searchParams.get("accountId");
-      if (!accountId) return fail(response, sendJson, 400, "Which account?");
+      if (!accountId) return fail(response, sendJson, 400, "Який акаунт?");
       const account = await loadAccount(accountId);
-      if (!account) return fail(response, sendJson, 404, "Account not found");
+      if (!account) return fail(response, sendJson, 404, "Акаунт не знайдено");
 
       // Expired claims are hidden rather than deleted here: a read that quietly
       // rewrites the database is a read nobody can reason about. The next claim
@@ -1522,7 +1522,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       if (!campaign?.folderId) {
         sendJson(response, 409, {
           success: false,
-          error: wanted ? "That campaign is gone" : "Create a campaign before pulling leads",
+          error: wanted ? "Цієї кампанії вже немає" : "Створи кампанію, перш ніж тягнути ліди",
           // Kept under its Phase 1 name as well, so a panel that has not moved
           // to campaigns yet still tells the prompt from a real failure.
           needsCampaign: true,
@@ -1577,11 +1577,11 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
      */
     if (method === "POST" && path === "/leads/take") {
       const body = await readJson(request);
-      if (!body) return fail(response, sendJson, 400, "Invalid JSON body");
-      if (!body.crmContactId) return fail(response, sendJson, 400, "Which contact?");
+      if (!body) return fail(response, sendJson, 400, "Некоректне тіло JSON");
+      if (!body.crmContactId) return fail(response, sendJson, 400, "Який контакт?");
 
       const account = body.accountId ? await loadAccount(String(body.accountId)) : null;
-      if (!account) return fail(response, sendJson, 404, "Account not found");
+      if (!account) return fail(response, sendJson, 404, "Акаунт не знайдено");
 
       const run = await activeRun(account.id);
       if (!run) return fail(response, sendJson, 409, "No warm-up in progress");
@@ -1595,7 +1595,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       } catch (error) {
         return fail(response, sendJson, 502, crmError(error));
       }
-      if (!lead) return fail(response, sendJson, 404, "That contact is no longer in the CRM");
+      if (!lead) return fail(response, sendJson, 404, "Цього контакту вже немає в CRM");
 
       const allowance = await checkQuota(account, run, "connect");
       if (!allowance.ok) return refusal(response, sendJson, allowance);
@@ -1619,7 +1619,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           // same claim leave one send and one honest refusal rather than two.
           const updated = await anty.from("wl_outreach").update(sent)
             .eq("id", claim.id).eq("status", CLAIM_STATUS).select(OUTREACH_COLUMNS).rows();
-          if (!updated.length) return fail(response, sendJson, 409, "This person has already been approached");
+          if (!updated.length) return fail(response, sendJson, 409, "Ця людина вже в аутрічі");
           outreach = updated[0];
         } else {
           // The manual path: nobody claimed this person, so the send makes the row.
@@ -1629,7 +1629,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         // wl_outreach_person_once: one person, one approach, across every
         // account. A race between two screens is expected here, not exceptional.
         if (error instanceof RestError && error.code === "23505") {
-          return fail(response, sendJson, 409, "This person has already been approached");
+          return fail(response, sendJson, 409, "Ця людина вже в аутрічі");
         }
         throw error;
       }
@@ -1689,10 +1689,10 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
     if (method === "GET" && path === "/inbox/thread") {
       const accountId = url.searchParams.get("accountId") || "";
       const threadKey = url.searchParams.get("threadKey") || "";
-      if (!accountId || !threadKey) return fail(response, sendJson, 400, "A thread needs an accountId and a threadKey");
+      if (!accountId || !threadKey) return fail(response, sendJson, 400, "Треду потрібні accountId і threadKey");
 
       const found = await readThread({ accountId, threadKey });
-      if (!found) return fail(response, sendJson, 404, "Thread not found");
+      if (!found) return fail(response, sendJson, 404, "Тред не знайдено");
 
       const account = await loadAccount(accountId);
       const [identities, outreach] = await Promise.all([loginIdentities(), outreachFor([found.thread])]);
@@ -1711,11 +1711,11 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
 
     if (method === "POST" && path === "/inbox/read") {
       const body = await readJson(request);
-      if (!body) return fail(response, sendJson, 400, "Invalid JSON body");
+      if (!body) return fail(response, sendJson, 400, "Некоректне тіло JSON");
       const accountId = String(body.accountId || "");
       const threadKey = String(body.threadKey || "");
-      if (!accountId || !threadKey) return fail(response, sendJson, 400, "A thread needs an accountId and a threadKey");
-      if (!await loadAccount(accountId)) return fail(response, sendJson, 404, "Account not found");
+      if (!accountId || !threadKey) return fail(response, sendJson, 400, "Треду потрібні accountId і threadKey");
+      if (!await loadAccount(accountId)) return fail(response, sendJson, 404, "Акаунт не знайдено");
 
       // Marking an already-read thread is a harmless no-op, and the mark is
       // written anyway: opening a thread twice is the normal case, and the

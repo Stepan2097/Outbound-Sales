@@ -344,7 +344,7 @@ async function handleApi(request, response, url) {
 
   if (request.method === "POST" && url.pathname === "/api/auth/bootstrap") {
     if (state.users.some((user) => user.status !== "disabled")) {
-      sendJson(response, 409, { error: "The workspace owner already exists. Sign in instead." });
+      sendJson(response, 409, { error: "Власник робочого простору вже створений. Просто увійди." });
       return;
     }
     const body = await readJson(request);
@@ -491,7 +491,7 @@ async function handleApi(request, response, url) {
 
   if (request.method === "POST" && url.pathname === "/api/account/users") {
     if (request.auth.profile.role !== "admin") {
-      sendJson(response, 403, { error: "Only a workspace administrator can add users." });
+      sendJson(response, 403, { error: "Додавати користувачів може лише адміністратор робочого простору." });
       return;
     }
     const body = await readJson(request);
@@ -508,7 +508,7 @@ async function handleApi(request, response, url) {
   if (request.method === "POST" && url.pathname === "/api/openrouter/key") {
     const body = await readJson(request);
     if (typeof body.apiKey !== "string" || body.apiKey.trim().length < 8) {
-      sendJson(response, 400, { error: "Enter a valid OpenRouter API key." });
+      sendJson(response, 400, { error: "Введи дійсний API-ключ OpenRouter." });
       return;
     }
 
@@ -531,7 +531,7 @@ async function handleApi(request, response, url) {
     const body = await readJson(request);
     if (typeof body.apiKey === "string" && body.apiKey.trim()) {
       if (body.apiKey.trim().length < 8) {
-        sendJson(response, 400, { error: "Enter a valid OpenRouter API key." });
+        sendJson(response, 400, { error: "Введи дійсний API-ключ OpenRouter." });
         return;
       }
       state.vault = encryptSecret(body.apiKey.trim());
@@ -546,7 +546,7 @@ async function handleApi(request, response, url) {
 
     updateOpenRouterDefaults(body);
     if (!state.vault) {
-      sendJson(response, 400, { error: "OpenRouter API key is required before model sync." });
+      sendJson(response, 400, { error: "Спочатку додай API-ключ OpenRouter, потім синхронізуй моделі." });
       return;
     }
 
@@ -608,7 +608,7 @@ async function handleApi(request, response, url) {
     const body = await readJson(request);
     const model = state.models.find((item) => item.id === body.modelId);
     if (!model) {
-      sendJson(response, 404, { error: "Model not found." });
+      sendJson(response, 404, { error: "Модель не знайдено." });
       return;
     }
     model.enabled = Boolean(body.enabled);
@@ -621,7 +621,7 @@ async function handleApi(request, response, url) {
     const body = await readJson(request);
     const task = state.tasks.find((item) => item.taskType === body.taskType);
     if (!task) {
-      sendJson(response, 404, { error: "Task not found." });
+      sendJson(response, 404, { error: "Задачу не знайдено." });
       return;
     }
     task.primaryModel = body.primaryModel || task.primaryModel;
@@ -665,7 +665,7 @@ async function handleApi(request, response, url) {
     const body = await readJson(request);
     const product = state.products.find((item) => item.id === body.productId);
     if (!product) {
-      sendJson(response, 404, { error: "Product not found." });
+      sendJson(response, 404, { error: "Продукт не знайдено." });
       return;
     }
 
@@ -680,7 +680,7 @@ async function handleApi(request, response, url) {
     const body = await readJson(request);
     const text = cleanLongText(body.text || body.context || "");
     if (text.length < 20) {
-      sendJson(response, 400, { error: "Paste enough product context for the system to learn from it." });
+      sendJson(response, 400, { error: "Встав більше контексту про продукт, щоб системі було з чого вчитися." });
       return;
     }
 
@@ -700,7 +700,7 @@ async function handleApi(request, response, url) {
     const body = await readJson(request);
     const product = normalizeProduct(body);
     if (!product.name || !product.positioning) {
-      sendJson(response, 400, { error: "Product name and positioning are required." });
+      sendJson(response, 400, { error: "Назва продукту й позиціонування обов'язкові." });
       return;
     }
 
@@ -731,11 +731,11 @@ async function handleApi(request, response, url) {
     const productId = cleanText(body.productId || state.selectedProductId);
     const product = state.products.find((item) => item.id === productId);
     if (!product) {
-      sendJson(response, 404, { error: "Product not found." });
+      sendJson(response, 404, { error: "Продукт не знайдено." });
       return;
     }
     if (state.products.length <= 1) {
-      sendJson(response, 400, { error: "At least one product must remain in the workspace." });
+      sendJson(response, 400, { error: "У робочому просторі має лишитися хоча б один продукт." });
       return;
     }
 
@@ -753,13 +753,13 @@ async function handleApi(request, response, url) {
     const body = await readJson(request);
     const product = state.products.find((item) => item.id === (body.productId || state.selectedProductId));
     if (!product) {
-      sendJson(response, 404, { error: "Product not found." });
+      sendJson(response, 404, { error: "Продукт не знайдено." });
       return;
     }
 
     const example = normalizeOutreachExample(body);
     if (!example.message) {
-      sendJson(response, 400, { error: "Example message is required." });
+      sendJson(response, 400, { error: "Приклад повідомлення обов'язковий." });
       return;
     }
 
@@ -776,13 +776,13 @@ async function handleApi(request, response, url) {
     const body = await readJson(request);
     const product = state.products.find((item) => item.id === (body.productId || state.selectedProductId));
     if (!product) {
-      sendJson(response, 404, { error: "Product not found." });
+      sendJson(response, 404, { error: "Продукт не знайдено." });
       return;
     }
 
     const item = normalizeProductKnowledge(body);
     if (!item.title && !item.text && !item.url && !item.screenshot) {
-      sendJson(response, 400, { error: "Add product context before saving." });
+      sendJson(response, 400, { error: "Додай контекст продукту перед збереженням." });
       return;
     }
 
@@ -807,13 +807,13 @@ async function handleApi(request, response, url) {
     const body = await readJson(request);
     const product = state.products.find((item) => item.id === (body.productId || state.selectedProductId));
     if (!product) {
-      sendJson(response, 404, { error: "Product not found." });
+      sendJson(response, 404, { error: "Продукт не знайдено." });
       return;
     }
 
     const example = normalizeLearningExample(body, product);
     if (!example.messageText && !example.screenshot && !example.profileUrl && !example.sourceUrl) {
-      sendJson(response, 400, { error: "Add text, a screenshot, or a URL before saving." });
+      sendJson(response, 400, { error: "Додай текст, скріншот або URL перед збереженням." });
       return;
     }
 
@@ -841,7 +841,7 @@ async function handleApi(request, response, url) {
     const body = await readJson(request);
     const product = state.products.find((item) => item.id === (body.productId || state.selectedProductId));
     if (!product) {
-      sendJson(response, 404, { error: "Product not found." });
+      sendJson(response, 404, { error: "Продукт не знайдено." });
       return;
     }
 
@@ -859,7 +859,7 @@ async function handleApi(request, response, url) {
       tags: body.tags || "knowledge,inbox,context"
     }, product);
     if (!example.messageText && !example.screenshot && !example.profileUrl && !example.sourceUrl) {
-      sendJson(response, 400, { error: "Add text, a screenshot, or a URL before analyzing." });
+      sendJson(response, 400, { error: "Додай текст, скріншот або URL перед аналізом." });
       return;
     }
 
@@ -1222,7 +1222,7 @@ async function handleApi(request, response, url) {
     const body = await readJson(request);
     const prospect = findProspect(body.prospectId);
     if (!prospect) {
-      sendJson(response, 404, { error: "Prospect not found." });
+      sendJson(response, 404, { error: "Проспекта не знайдено." });
       return;
     }
 
@@ -1244,7 +1244,7 @@ async function handleApi(request, response, url) {
     const body = await readJson(request);
     const prospect = findProspect(body.prospectId);
     if (!prospect?.leadIntelligence) {
-      sendJson(response, 404, { error: "No intelligence snapshot found for this prospect." });
+      sendJson(response, 404, { error: "Для цього проспекта немає зрізу аналітики." });
       return;
     }
     const result = reviewLeadIntelligence(prospect, body);
@@ -1258,12 +1258,12 @@ async function handleApi(request, response, url) {
     const body = await readJson(request);
     const prospect = findProspect(body.prospectId);
     if (!prospect) {
-      sendJson(response, 404, { error: "Prospect not found." });
+      sendJson(response, 404, { error: "Проспекта не знайдено." });
       return;
     }
     const status = cleanText(body.status || "pending");
     if (!["pending", "approved_conditions", "parked"].includes(status)) {
-      sendJson(response, 400, { error: "Policy decision must be pending, approved_conditions, or parked." });
+      sendJson(response, 400, { error: "Рішення політики має бути pending, approved_conditions або parked." });
       return;
     }
     prospect.policyDecision = {
@@ -1285,7 +1285,7 @@ async function handleApi(request, response, url) {
     const body = await readJson(request);
     const prospect = findProspect(body.prospectId);
     if (!prospect?.leadIntelligence) {
-      sendJson(response, 404, { error: "No intelligence snapshot found for this prospect." });
+      sendJson(response, 404, { error: "Для цього проспекта немає зрізу аналітики." });
       return;
     }
     const task = createTaskFromIntelligence(prospect, clampNumber(body.stepIndex, 0, 20, 0));
@@ -1332,7 +1332,7 @@ async function handleApi(request, response, url) {
     const prospects = Array.isArray(body.prospects) ? body.prospects : [];
     const imported = prospects.map(normalizeProspect).filter((prospect) => prospect.name && prospect.company).slice(0, 500);
     if (!imported.length) {
-      sendJson(response, 400, { error: "No valid prospects found. Name and company are required." });
+      sendJson(response, 400, { error: "Придатних проспектів не знайдено. Ім'я та компанія обов'язкові." });
       return;
     }
 
@@ -1351,7 +1351,7 @@ async function handleApi(request, response, url) {
     const body = await readJson(request);
     const prospect = findProspect(body.prospectId);
     if (!prospect) {
-      sendJson(response, 404, { error: "Prospect not found." });
+      sendJson(response, 404, { error: "Проспекта не знайдено." });
       return;
     }
 
@@ -1381,7 +1381,7 @@ async function handleApi(request, response, url) {
     const body = await readJson(request);
     const prospect = findProspect(body.prospectId);
     if (!prospect) {
-      sendJson(response, 404, { error: "Prospect not found." });
+      sendJson(response, 404, { error: "Проспекта не знайдено." });
       return;
     }
     const existing = state.researchJobs.find((job) => job.prospectId === prospect.id && ["queued", "running"].includes(job.status));
@@ -1402,7 +1402,7 @@ async function handleApi(request, response, url) {
     const jobId = decodeURIComponent(url.pathname.slice("/api/research/jobs/".length));
     const job = state.researchJobs.find((item) => item.id === jobId);
     if (!job) {
-      sendJson(response, 404, { error: "Research job not found." });
+      sendJson(response, 404, { error: "Завдання на дослідження не знайдено." });
       return;
     }
     sendJson(response, 200, { job: publicResearchJob(job) });
@@ -1413,7 +1413,7 @@ async function handleApi(request, response, url) {
     const body = await readJson(request);
     const prospect = findProspect(body.prospectId);
     if (!prospect) {
-      sendJson(response, 404, { error: "Prospect not found." });
+      sendJson(response, 404, { error: "Проспекта не знайдено." });
       return;
     }
     const decision = body.decision === "approved" ? "approved" : body.decision === "rejected" ? "rejected" : "";
@@ -1421,11 +1421,11 @@ async function handleApi(request, response, url) {
       item.type === body.type && String(item.value || "").toLowerCase() === String(body.value || "").toLowerCase()
     );
     if (!candidate || !decision) {
-      sendJson(response, 400, { error: "Choose a valid contact and approval decision." });
+      sendJson(response, 400, { error: "Обери контакт і рішення щодо схвалення." });
       return;
     }
     if (decision === "approved" && !contactCandidateCanBeApproved(candidate)) {
-      sendJson(response, 409, { error: "This contact still needs verification evidence before it can be approved for outreach." });
+      sendJson(response, 409, { error: "Цьому контакту бракує підтверджень верифікації, щоб схвалити його для аутрічу." });
       return;
     }
     const actor = actorContextForRequest(request);
@@ -1467,7 +1467,7 @@ async function handleApi(request, response, url) {
     const body = await readJson(request);
     const linkedinUrl = cleanText(body.linkedinUrl || "");
     if (!/^https:\/\/(www\.)?linkedin\.com\/in\/.+/i.test(linkedinUrl)) {
-      sendJson(response, 400, { error: "Enter a LinkedIn profile URL like https://www.linkedin.com/in/name." });
+      sendJson(response, 400, { error: "Введи URL профілю LinkedIn, наприклад https://www.linkedin.com/in/name." });
       return;
     }
 
@@ -1511,7 +1511,7 @@ async function handleApi(request, response, url) {
     const body = await readJson(request);
     const prospect = findProspect(body.prospectId);
     if (!prospect) {
-      sendJson(response, 404, { error: "Prospect not found." });
+      sendJson(response, 404, { error: "Проспекта не знайдено." });
       return;
     }
 
@@ -1548,7 +1548,7 @@ async function handleApi(request, response, url) {
     const body = await readJson(request);
     const prospect = findProspect(body.prospectId);
     if (!prospect) {
-      sendJson(response, 404, { error: "Prospect not found." });
+      sendJson(response, 404, { error: "Проспекта не знайдено." });
       return;
     }
 
@@ -1564,7 +1564,7 @@ async function handleApi(request, response, url) {
     const body = await readJson(request);
     const prospect = findProspect(body.prospectId);
     if (!prospect) {
-      sendJson(response, 404, { error: "Prospect not found." });
+      sendJson(response, 404, { error: "Проспекта не знайдено." });
       return;
     }
     state.prospects = state.prospects.filter((item) => item.id !== prospect.id);
@@ -1579,7 +1579,7 @@ async function handleApi(request, response, url) {
     const body = await readJson(request);
     const prospect = findProspect(body.prospectId);
     if (!prospect) {
-      sendJson(response, 404, { error: "Prospect not found." });
+      sendJson(response, 404, { error: "Проспекта не знайдено." });
       return;
     }
 
@@ -1619,7 +1619,7 @@ async function handleApi(request, response, url) {
     const body = await readJson(request);
     const task = state.followUpTasks.find((item) => item.id === body.taskId);
     if (!task) {
-      sendJson(response, 404, { error: "Task not found." });
+      sendJson(response, 404, { error: "Задачу не знайдено." });
       return;
     }
     task.status = "done";
@@ -1647,13 +1647,13 @@ async function handleApi(request, response, url) {
     const body = await readJson(request);
     const prospect = findProspect(body.prospectId);
     if (!prospect) {
-      sendJson(response, 404, { error: "Prospect not found." });
+      sendJson(response, 404, { error: "Проспекта не знайдено." });
       return;
     }
 
     const transcript = cleanLongText(body.transcript || "");
     if (transcript.length < 40) {
-      sendJson(response, 400, { error: "Paste a longer call transcript or notes so AI can analyze it." });
+      sendJson(response, 400, { error: "Встав довший транскрипт дзвінка або нотатки, щоб AI міг їх проаналізувати." });
       return;
     }
 
@@ -1668,13 +1668,13 @@ async function handleApi(request, response, url) {
     const body = await readJson(request);
     const prospect = matchProspectForTranscript(body);
     if (!prospect) {
-      sendJson(response, 404, { error: "No matching prospect found for this transcript." });
+      sendJson(response, 404, { error: "Для цього транскрипта не знайдено відповідного проспекта." });
       return;
     }
 
     const transcript = cleanLongText(body.transcript || body.text || body.notes || "");
     if (transcript.length < 40) {
-      sendJson(response, 400, { error: "Transcript payload is too short to analyze." });
+      sendJson(response, 400, { error: "Транскрипт закороткий для аналізу." });
       return;
     }
 
@@ -1687,7 +1687,7 @@ async function handleApi(request, response, url) {
     return;
   }
 
-  sendJson(response, 404, { error: "Not found." });
+  sendJson(response, 404, { error: "Не знайдено." });
 }
 
 function apiError(message, statusCode = 400) {
@@ -1704,7 +1704,7 @@ function secretsMatch(left, right) {
 
 function supabaseAuthConfig() {
   if (!state.integrations.supabase.url || !state.supabaseVault) {
-    throw apiError("Supabase Auth is not configured on the server yet.", 503);
+    throw apiError("Supabase Auth ще не налаштовано на сервері.", 503);
   }
   return {
     url: state.integrations.supabase.url.replace(/\/+$/, ""),
@@ -1737,8 +1737,8 @@ async function createWorkspaceUser(input = {}, options = {}) {
   const name = cleanText(input.name || email.split("@")[0] || "Seller").slice(0, 120);
   const title = cleanText(input.title || "").slice(0, 120);
   const role = options.role === "admin" ? "admin" : "seller";
-  if (!/^\S+@\S+\.\S+$/.test(email)) throw apiError("Enter a valid work email address.");
-  if (password.length < 10) throw apiError("Password must contain at least 10 characters.");
+  if (!/^\S+@\S+\.\S+$/.test(email)) throw apiError("Введи коректну робочу email-адресу.");
+  if (password.length < 10) throw apiError("Пароль має містити щонайменше 10 символів.");
 
   let user;
   let existingAccount = false;
@@ -1753,7 +1753,7 @@ async function createWorkspaceUser(input = {}, options = {}) {
     if (!user) throw error;
     existingAccount = true;
   }
-  if (!user?.id) throw apiError("Supabase did not return a user account.", 502);
+  if (!user?.id) throw apiError("Supabase не повернув акаунт користувача.", 502);
   if (options.bootstrap) {
     try {
       const authenticated = await loginWorkspaceUser(email, password, {
@@ -1763,7 +1763,7 @@ async function createWorkspaceUser(input = {}, options = {}) {
       return { ...authenticated, existingAccount };
     } catch (error) {
       if (existingAccount && [400, 401].includes(Number(error?.statusCode || 0))) {
-        throw apiError("This email already exists. Enter its current password, or use a dedicated Outbound OS email.", 409);
+        throw apiError("Такий email уже існує. Введи його поточний пароль або візьми окремий email для Outbound OS.", 409);
       }
       throw error;
     }
@@ -1775,7 +1775,7 @@ async function createWorkspaceUser(input = {}, options = {}) {
 async function loginWorkspaceUser(emailValue, passwordValue, options = {}) {
   const email = cleanText(emailValue || "").toLowerCase();
   const password = String(passwordValue || "");
-  if (!email || !password) throw apiError("Enter your email and password.");
+  if (!email || !password) throw apiError("Введи email і пароль.");
   const session = await supabaseAuthRequest("token?grant_type=password", {
     method: "POST",
     body: { email, password }
@@ -1783,10 +1783,10 @@ async function loginWorkspaceUser(emailValue, passwordValue, options = {}) {
   const user = session.user || await verifySupabaseAccessToken(session.access_token);
   const existingProfile = findWorkspaceUserProfile(user);
   if (!existingProfile && !options.allowUnregistered) {
-    throw apiError("This account has not been invited to the Outbound OS workspace.", 403);
+    throw apiError("Цей акаунт не запрошено в робочий простір Outbound OS.", 403);
   }
   const profile = existingProfile || ensureWorkspaceUserProfile(user, options.defaults || {});
-  if (profile.status === "disabled") throw apiError("This workspace account is disabled.", 403);
+  if (profile.status === "disabled") throw apiError("Цей акаунт у робочому просторі вимкнено.", 403);
   cacheAuthSession(session.access_token, user);
   return { session, user, profile };
 }
@@ -1798,7 +1798,7 @@ async function authenticateApiRequest(request, response, options = {}) {
   }
   if (!state.users.some((user) => user.status !== "disabled")) {
     if (options.optional) return null;
-    sendJson(response, 401, { error: "Create the first workspace owner account.", bootstrapRequired: true });
+    sendJson(response, 401, { error: "Створи перший акаунт власника робочого простору.", bootstrapRequired: true });
     return null;
   }
   const cookies = parseCookies(request.headers.cookie || "");
@@ -1829,19 +1829,19 @@ async function authenticateApiRequest(request, response, options = {}) {
   if (!user) {
     if (options.optional) return null;
     clearAuthSessionCookies(request, response);
-    sendJson(response, 401, { error: "Your session has expired. Sign in again." });
+    sendJson(response, 401, { error: "Сесія завершилася. Увійди знову." });
     return null;
   }
   const profile = findWorkspaceUserProfile(user);
   if (!profile) {
     if (options.optional) return null;
     clearAuthSessionCookies(request, response);
-    sendJson(response, 403, { error: "This account has not been invited to the Outbound OS workspace." });
+    sendJson(response, 403, { error: "Цей акаунт не запрошено в робочий простір Outbound OS." });
     return null;
   }
   if (profile.status === "disabled") {
     if (options.optional) return null;
-    sendJson(response, 403, { error: "This workspace account is disabled." });
+    sendJson(response, 403, { error: "Цей акаунт у робочому просторі вимкнено." });
     return null;
   }
   return { user, profile, accessToken };
@@ -1985,8 +1985,8 @@ async function requestPasswordRecovery(emailValue, request) {
 
 async function updateSupabasePassword(accessToken, passwordValue) {
   const password = String(passwordValue || "");
-  if (!accessToken) throw apiError("The password reset link is missing or expired.", 401);
-  if (password.length < 10) throw apiError("Password must contain at least 10 characters.");
+  if (!accessToken) throw apiError("Посилання для скидання пароля відсутнє або протерміноване.", 401);
+  if (password.length < 10) throw apiError("Пароль має містити щонайменше 10 символів.");
   await supabaseAuthRequest("user", { method: "PUT", bearer: accessToken, body: { password } });
 }
 
@@ -1996,7 +1996,7 @@ async function serveStatic(response, pathname) {
   const filePath = join(appRoot, safePath);
   if (!filePath.startsWith(appRoot) || !existsSync(filePath)) {
     response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
-    response.end("Not found");
+    response.end("Не знайдено");
     return;
   }
 
@@ -2064,7 +2064,7 @@ function applyPersistentWorkspaceState(saved = {}) {
       return {
         ...job,
         status: "failed",
-        error: "Research was interrupted by a server restart. Run it again to resume from saved data.",
+        error: "Дослідження перервав перезапуск сервера. Запусти його ще раз — воно продовжить зі збережених даних.",
         completedAt: new Date().toISOString(),
         stages: (job.stages || []).map((stage) => stage.status === "running" ? { ...stage, status: "failed" } : stage)
       };

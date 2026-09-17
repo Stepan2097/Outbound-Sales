@@ -65,15 +65,15 @@ test("a strategy with a gap between phases is refused", () => {
 
   const gapped = structuredClone(valid);
   gapped.phases[1].fromDay = 5;
-  assert.match(validateStrategy(gapped), /should start on day 4/);
+  assert.match(validateStrategy(gapped), /має починатися з дня 4/);
 
   const unnamed = structuredClone(valid);
   unnamed.name = "  ";
-  assert.match(validateStrategy(unnamed), /needs a name/);
+  assert.match(validateStrategy(unnamed), /потрібна назва/);
 
   const backwards = structuredClone(valid);
   backwards.phases[0].toDay = 0;
-  assert.match(validateStrategy(backwards), /runs backwards/);
+  assert.match(validateStrategy(backwards), /іде навпаки/);
 });
 
 test("the planned session time lands inside the window, on a five-minute step", () => {
@@ -161,9 +161,9 @@ test("a proxy line round-trips, including a password holding an @", () => {
   assert.deepEqual(parsed, { type: "socks5", host: "host.example.com", port: 1080, username: "user", password: "p@ss:word" });
 
   assert.deepEqual(parseProxy("1.2.3.4:8080"), { type: "http", host: "1.2.3.4", port: 8080 });
-  assert.match(parseProxy("host.example.com").error, /No port/);
-  assert.match(parseProxy("host.example.com:70000").error, /between 1 and 65535/);
-  assert.match(parseProxy("ftp://host:21").error, /Unknown proxy type/);
+  assert.match(parseProxy("host.example.com").error, /Немає порту/);
+  assert.match(parseProxy("host.example.com:70000").error, /від 1 до 65535/);
+  assert.match(parseProxy("ftp://host:21").error, /Невідомий тип проксі/);
 });
 
 test("every action kind carries a label, so a refusal can name itself", async () => {
