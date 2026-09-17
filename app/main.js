@@ -17,6 +17,21 @@ let knowledgeFileId = null;
 let knowledgeDraft = null;
 let knowledgeEditorNeedsFill = false;
 let productBriefLoadedFor = null;
+// Контакти CRM. Папка на двадцять дві тисячі людей не їздить у /api/state, тож
+// сторінка тримає свою сторінку списку, вибрану людину і написані їй чернетки.
+let contactFolders = [];
+let contactFoldersLoaded = false;
+let contactFolderId = null;
+let crmContactRows = [];
+let contactTotal = 0;
+let contactOffset = 0;
+let contactSearch = "";
+let selectedContactId = null;
+let contactRecord = null;
+let contactDrafts = null;
+let contactProspectId = null;
+let contactsLoading = false;
+let contactsError = "";
 // Вкладка «Користувачі» живе нижче по файлу, а `await bootApplication()` ділить
 // модуль надвоє: усе, оголошене після нього, під час завантаження ще в TDZ.
 // Тому ці змінні стоять тут — інакше перезавантаження на цій вкладці валить
@@ -1756,7 +1771,9 @@ async function runUiAction(actionName, message, work) {
       "linkedin-import": "Ліда додано в чергу. Запусти Дослідження, коли будеш готовий збагатити його й підготувати аутріч.",
       "crm-import": "Лідів із CRM підтягнуто в чергу.",
       product: "Пам'ять продукту збережено. Система використає оновлений контекст для скорингу й аутрічу.",
-      remove: "Ліда прибрано з черги."
+      remove: "Ліда прибрано з черги.",
+      "contact-drafts": "Чернетки готові. Перечитай їх перед відправкою — надсилає людина, не система.",
+      "contact-import": "Контакт у черзі лідів. Дослідження і фолоу-апи для нього тепер доступні на вкладці «Ліди»."
     }[actionName] || "Готово.";
   } catch (error) {
     uiNotice = error?.message || "Не вдалося. Спробуй ще раз.";
@@ -1796,6 +1813,7 @@ function setView(viewName) {
     {
       prospects: "Панель",
       leads: "Ліди",
+      contacts: "Контакти з CRM",
       warmup: "Прогрів LinkedIn",
       ai: "AI-оператор",
       products: "Продукти і база знань",
@@ -1826,6 +1844,11 @@ function setView(viewName) {
   // відкриває, не варто вантажити на кожен рефреш.
   if (viewName === "products") {
     void loadKnowledgeLibrary().catch(() => {});
+  }
+
+  // Те саме для контактів: CRM опитується, коли на неї дивляться.
+  if (viewName === "contacts") {
+    void loadContactFolders().catch(() => {});
   }
 }
 
@@ -2694,6 +2717,341 @@ document.getElementById("knowledgeDeleteFileBtn").addEventListener("click", asyn
   knowledgeDraft = null;
   knowledgeFileId = null;
   renderProductWorkspace();
+  refreshIcons();
+});
+
+/**
+ * Контакти: папки CRM, людина в них, і три чернетки під три канали.
+ *
+ * CRM — чужа база, тож сторінка нічого в ній не змінює: читає папку, читає
+ * картку і показує те, що написав AI. У робочий простір контакт потрапляє лише
+ * тоді, коли його свідомо беруть у ліди.
+ *
+ * Стан тримається тут, а не в /api/state: папка на двадцять дві тисячі людей не
+ * має їздити в кожній відповіді сервера.
+ */
+const CONTACT_PAGE_SIZE = 25;
+
+function renderContacts() {
+  const folderList = document.getElementById("contactFolderList");
+  if (!folderList) return;
+
+  if (contactsError) {
+    folderList.innerHTML = `<div class="empty-state">${escapeHtml(contactsError)}</div>`;
+  } else {
+    folderList.innerHTML = contactFolders.length
+      ? contactFolders.map((folder) => `
+          <article class="contact-folder-row ${folder.id === contactFolderId ? "active" : ""}" data-contact-folder="${escapeAttr(folder.id)}">
+            <strong>${escapeHtml(folder.name || "Без назви")}</strong>
+            <span>${folder.contactCount} ${uaPlural(folder.contactCount, "контакт", "контакти", "контактів")}</span>
+          </article>
+        `).join("")
+      : `<div class="empty-state">${contactsLoading ? "Читаємо CRM..." : "Папок не знайдено"}</div>`;
+  }
+
+  const folder = contactFolders.find((item) => item.id === contactFolderId);
+  setText("contactListTitle", folder ? folder.name : "Контакти");
+  setText(
+    "contactListSubtitle",
+    folder
+      ? `${contactTotal} ${uaPlural(contactTotal, "контакт", "контакти", "контактів")}${contactSearch ? ` за запитом «${contactSearch}»` : ""}`
+      : "Вибери папку, щоб побачити людей"
+  );
+
+  setHtml("crmContactList", crmContactRows.length
+    ? crmContactRows.map((contact) => `
+        <article class="contact-row ${contact.id === selectedContactId ? "active" : ""}" data-contact="${escapeAttr(contact.id)}">
+          <strong>${escapeHtml(contact.name || "Без імені")}</strong>
+          <span>${escapeHtml([contact.position, contact.company].filter(Boolean).join(" · ") || "посада і компанія невідомі")}</span>
+          <small>${escapeHtml([contact.country, contact.lead_status].filter(Boolean).join(" · "))}${contactChannelHint(contact)}</small>
+        </article>
+      `).join("")
+    : `<div class="empty-state">${contactsLoading ? "Читаємо контакти..." : contactFolderId ? "У цій папці нічого не знайшлося" : "Папку не вибрано"}</div>`);
+
+  const from = contactTotal ? contactOffset + 1 : 0;
+  const to = Math.min(contactOffset + CONTACT_PAGE_SIZE, contactTotal);
+  setHtml("contactPager", contactTotal > CONTACT_PAGE_SIZE
+    ? `
+      <button type="button" id="contactPrevBtn" ${contactOffset === 0 ? "disabled" : ""}><i data-lucide="chevron-left"></i><span>Назад</span></button>
+      <span>${from}–${to} з ${contactTotal}</span>
+      <button type="button" id="contactNextBtn" ${to >= contactTotal ? "disabled" : ""}><span>Далі</span><i data-lucide="chevron-right"></i></button>
+    `
+    : "");
+
+  renderContactCard();
+  renderContactDrafts();
+}
+
+/** Якими каналами до цієї людини взагалі можна дотягнутися. */
+function contactChannelHint(contact = {}) {
+  const channels = [
+    contact.email ? "пошта" : "",
+    contact.linkedin ? "LinkedIn" : "",
+    contact.telegram ? "Telegram" : "",
+    contact.phone ? "телефон" : ""
+  ].filter(Boolean);
+  return channels.length ? ` · ${escapeHtml(channels.join(", "))}` : "";
+}
+
+const contactFieldLabels = {
+  company: "Компанія",
+  position: "Посада",
+  country: "Країна",
+  category: "Категорія",
+  lead_status: "Статус ліда",
+  lifecycle_stage: "Стадія",
+  email: "Пошта",
+  phone: "Телефон",
+  telegram: "Telegram",
+  linkedin: "LinkedIn",
+  facebook: "Facebook",
+  instagram: "Instagram",
+  twitter: "Twitter",
+  website: "Сайт",
+  created_at: "Доданий у CRM"
+};
+
+function renderContactCard() {
+  const contact = contactRecord;
+  if (!contact) {
+    setText("contactCardTitle", "Контакт не вибрано");
+    setText("contactCardSubtitle", "Вибери папку зліва, потім людину — і побачиш усе, що про неї знає CRM");
+    setText("contactCardPill", "—");
+    setHtml("contactCardBody", `<div class="empty-state">Контакт не вибрано.</div>`);
+    return;
+  }
+
+  setText("contactCardTitle", contact.name || "Без імені");
+  setText("contactCardSubtitle", [contact.position, contact.company].filter(Boolean).join(" · ") || "посада і компанія невідомі");
+  setText("contactCardPill", contactProspectId ? "уже в лідах" : "тільки в CRM");
+
+  const rows = Object.entries(contactFieldLabels)
+    .map(([key, label]) => {
+      const value = contact[key];
+      if (!value) return "";
+      const text = key === "created_at" ? new Date(value).toLocaleDateString([], { dateStyle: "medium" }) : String(value);
+      return `<div><dt>${escapeHtml(label)}</dt><dd>${linkIfUrl(text)}</dd></div>`;
+    })
+    .filter(Boolean)
+    .join("");
+
+  const custom = contact.custom_fields && typeof contact.custom_fields === "object" && Object.keys(contact.custom_fields).length
+    ? `<details class="contact-custom"><summary>Додаткові поля CRM</summary><pre>${escapeHtml(JSON.stringify(contact.custom_fields, null, 2))}</pre></details>`
+    : "";
+
+  setHtml("contactCardBody", `
+    <dl class="contact-fields">${rows || `<div><dt>Порожньо</dt><dd>CRM не знає про цю людину нічого, крім імені</dd></div>`}</dl>
+    ${contact.description ? `<div class="contact-note"><strong>Нотатка з CRM</strong><p>${escapeHtml(contact.description)}</p></div>` : ""}
+    ${custom}
+  `);
+}
+
+function renderContactDrafts() {
+  const productSelect = document.getElementById("contactProductSelect");
+  if (productSelect) {
+    fillSelect(productSelect, state?.products || [], (product) => product.id, (product) => product.name, productSelect.value || state?.selectedProductId);
+  }
+  const form = document.getElementById("contactDraftForm");
+  if (form) form.hidden = !contactRecord;
+
+  const drafts = contactDrafts;
+  setText("contactDraftsPill", drafts ? (drafts.provider === "openrouter" ? "AI" : "чернетка з брифу") : "немає");
+
+  if (!drafts) {
+    setHtml("contactDraftList", contactRecord
+      ? `<div class="empty-state">Ще не згенеровано. AI прочитає картку контакту, опис продукту й файли — і напише лист, повідомлення в Telegram і LinkedIn.</div>`
+      : `<div class="empty-state">Вибери контакт, щоб згенерувати повідомлення.</div>`);
+    return;
+  }
+
+  const emailText = [drafts.email?.subject ? `Тема: ${drafts.email.subject}` : "", drafts.email?.body || ""].filter(Boolean).join("\n\n");
+  setHtml("contactDraftList", `
+    <article class="contact-draft">
+      <header>
+        <div><strong>Пошта</strong><span>${escapeHtml(drafts.email?.subject || "без теми")}</span></div>
+        <button data-copy-text="${escapeAttr(emailText)}" data-copy-channel="email" data-copy-label="Лист для контакту"><i data-lucide="copy"></i><span>Копіювати</span></button>
+      </header>
+      <pre>${escapeHtml(drafts.email?.body || "")}</pre>
+      <small>${wordCountLabel(drafts.email?.body)}</small>
+    </article>
+    <article class="contact-draft">
+      <header>
+        <div><strong>Telegram</strong><span>${escapeHtml(contactRecord?.telegram || "юзернейм невідомий")}</span></div>
+        <button data-copy-text="${escapeAttr(drafts.telegram?.body || "")}" data-copy-channel="telegram" data-copy-label="Telegram для контакту"><i data-lucide="copy"></i><span>Копіювати</span></button>
+      </header>
+      <pre>${escapeHtml(drafts.telegram?.body || "")}</pre>
+      <small>${wordCountLabel(drafts.telegram?.body)}</small>
+    </article>
+    <article class="contact-draft">
+      <header>
+        <div><strong>LinkedIn · запрошення</strong><span>до 300 символів, без пропозиції</span></div>
+        <button data-copy-text="${escapeAttr(drafts.linkedin?.invite || "")}" data-copy-channel="linkedin" data-copy-label="Запрошення в LinkedIn"><i data-lucide="copy"></i><span>Копіювати</span></button>
+      </header>
+      <pre>${escapeHtml(drafts.linkedin?.invite || "")}</pre>
+      <small>${String(drafts.linkedin?.invite || "").length} символів</small>
+    </article>
+    <article class="contact-draft">
+      <header>
+        <div><strong>LinkedIn · перше повідомлення</strong><span>після прийняття запрошення</span></div>
+        <button data-copy-text="${escapeAttr(drafts.linkedin?.body || "")}" data-copy-channel="linkedin" data-copy-label="Повідомлення в LinkedIn"><i data-lucide="copy"></i><span>Копіювати</span></button>
+      </header>
+      <pre>${escapeHtml(drafts.linkedin?.body || "")}</pre>
+      <small>${wordCountLabel(drafts.linkedin?.body)}</small>
+    </article>
+    <div class="contact-draft-meta">
+      <span>${escapeHtml(drafts.productName || "продукт")} · ${escapeHtml(drafts.modelUsed || "локально")} · ${relativeTime(drafts.generatedAt)}</span>
+      ${(drafts.grounding || []).length ? `<div><strong>На чому тримається</strong><ul>${drafts.grounding.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>` : ""}
+      ${(drafts.verifyBeforeSending || []).length ? `<div class="contact-draft-warning"><strong>Перевір перед відправкою</strong><ul>${drafts.verifyBeforeSending.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>` : ""}
+    </div>
+  `);
+}
+
+function wordCountLabel(value) {
+  const words = String(value || "").trim().split(/\s+/).filter(Boolean).length;
+  return `${words} ${uaPlural(words, "слово", "слова", "слів")}`;
+}
+
+async function loadContactFolders({ force = false } = {}) {
+  if (contactFoldersLoaded && !force) return;
+  contactsLoading = true;
+  contactsError = "";
+  renderContacts();
+  try {
+    const { folders } = await api("/api/contacts/folders");
+    contactFolders = folders || [];
+    contactFoldersLoaded = true;
+    if (!contactFolderId && contactFolders.length) {
+      await selectContactFolder(contactFolders[0].id);
+      return;
+    }
+  } catch (error) {
+    contactsError = error.message || "CRM не відповіла.";
+  } finally {
+    contactsLoading = false;
+    renderContacts();
+    refreshIcons();
+  }
+}
+
+async function loadContactPage() {
+  if (!contactFolderId) return;
+  contactsLoading = true;
+  renderContacts();
+  try {
+    const params = new URLSearchParams({
+      folderId: contactFolderId,
+      limit: String(CONTACT_PAGE_SIZE),
+      offset: String(contactOffset)
+    });
+    if (contactSearch) params.set("search", contactSearch);
+    const page = await api(`/api/contacts?${params}`);
+    crmContactRows = page.contacts || [];
+    contactTotal = page.total || 0;
+    contactsError = "";
+  } catch (error) {
+    crmContactRows = [];
+    contactTotal = 0;
+    contactsError = error.message || "CRM не відповіла.";
+  } finally {
+    contactsLoading = false;
+    renderContacts();
+    refreshIcons();
+  }
+}
+
+async function selectContactFolder(folderId) {
+  contactFolderId = folderId;
+  contactOffset = 0;
+  await loadContactPage();
+}
+
+async function openContact(contactId) {
+  selectedContactId = contactId;
+  contactRecord = null;
+  contactDrafts = null;
+  contactProspectId = null;
+  renderContacts();
+  try {
+    const payload = await api(`/api/contacts/${encodeURIComponent(contactId)}`);
+    contactRecord = payload.contact;
+    contactDrafts = payload.drafts;
+    contactProspectId = payload.prospectId;
+    // Мова й продукт беруться з того, що вже писали цій людині, щоб повтор не
+    // починався з чужих налаштувань.
+    if (payload.drafts?.language) setFormValue("contactLanguageSelect", payload.drafts.language);
+    if (payload.drafts?.productId) setFormValue("contactProductSelect", payload.drafts.productId);
+  } catch (error) {
+    contactsError = error.message || "Не вдалося прочитати контакт.";
+  }
+  renderContacts();
+  refreshIcons();
+}
+
+document.getElementById("contactFolderList").addEventListener("click", async (event) => {
+  const row = event.target.closest("[data-contact-folder]");
+  if (!row || row.dataset.contactFolder === contactFolderId) return;
+  await selectContactFolder(row.dataset.contactFolder);
+});
+
+document.getElementById("contactFoldersRefreshBtn").addEventListener("click", async () => {
+  await loadContactFolders({ force: true });
+  await loadContactPage();
+});
+
+document.getElementById("crmContactList").addEventListener("click", async (event) => {
+  const row = event.target.closest("[data-contact]");
+  if (!row) return;
+  await openContact(row.dataset.contact);
+});
+
+document.getElementById("contactPager").addEventListener("click", async (event) => {
+  const button = event.target.closest("button");
+  if (!button || button.disabled) return;
+  contactOffset = button.id === "contactPrevBtn"
+    ? Math.max(0, contactOffset - CONTACT_PAGE_SIZE)
+    : contactOffset + CONTACT_PAGE_SIZE;
+  await loadContactPage();
+});
+
+// Пошук чекає, поки людина допише: кожна літера — це запит у CRM.
+let contactSearchTimer = null;
+document.getElementById("contactSearchInput").addEventListener("input", (event) => {
+  const value = event.target.value.trim();
+  window.clearTimeout(contactSearchTimer);
+  contactSearchTimer = window.setTimeout(async () => {
+    contactSearch = value;
+    contactOffset = 0;
+    await loadContactPage();
+  }, 350);
+});
+
+document.getElementById("contactDraftForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!selectedContactId) return;
+  await runUiAction("contact-drafts", "AI читає контакт, продукт і файли та пише чернетки...", async () => {
+    const payload = await api(`/api/contacts/${encodeURIComponent(selectedContactId)}/messages`, {
+      method: "POST",
+      body: JSON.stringify({
+        productId: document.getElementById("contactProductSelect").value,
+        language: document.getElementById("contactLanguageSelect").value,
+        instruction: document.getElementById("contactInstructionInput").value
+      })
+    });
+    contactDrafts = payload.drafts;
+  });
+  renderContacts();
+  refreshIcons();
+});
+
+document.getElementById("contactImportBtn").addEventListener("click", async () => {
+  if (!selectedContactId) return;
+  await runUiAction("contact-import", "Додаємо контакт у чергу лідів...", async () => {
+    const payload = await api(`/api/contacts/${encodeURIComponent(selectedContactId)}/import`, { method: "POST", body: "{}" });
+    contactProspectId = payload.prospectId;
+    selectedProspectId = payload.prospectId || selectedProspectId;
+    state = payload;
+  });
+  renderContacts();
   refreshIcons();
 });
 

@@ -6,6 +6,8 @@ import { createServer } from "node:http";
 import { connect as connectTcp } from "node:net";
 import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
+import { buildFallbackDrafts, draftsPromptPayload, normalizeDrafts, normalizeLanguage } from "./contacts/drafts.mjs";
+import { contactAsProspect, contactsConfigured, contactsMissingConfig, listContactFolders, listFolderContacts, readContact } from "./contacts/store.mjs";
 import { handleKnowledgeLibraryApi } from "./knowledge/api.mjs";
 import { knowledgeExcerptsForPrompt, knowledgeFilesForProduct, loadKnowledgeLibrary } from "./knowledge/library.mjs";
 import { handleWarmupApi } from "./warmup/api.mjs";
@@ -317,6 +319,10 @@ const state = {
       text: "Mock AI provider active. OpenRouter can be enabled from Settings."
     }
   ],
+  // The last three drafts written for a CRM contact, by contact id. Kept so
+  // reopening a contact shows what was already written for them rather than an
+  // empty page and a bill for writing it again.
+  contactDrafts: {},
   vault: null,
   apifyVault: null,
   contactEnrichmentVault: null,
@@ -570,6 +576,100 @@ async function handleApi(request, response, url) {
       actingUser: request.auth?.profile?.email || request.auth?.profile?.name || ""
     });
     if (handled) return;
+  }
+
+  // ── the CRM's contacts ────────────────────────────────────────────────────
+  //
+  // Read-only, straight out of the CRM: folders, one page of a folder, one
+  // person's whole record, and the three drafts written for them. Nothing is
+  // copied into the workspace until somebody takes the contact into the queue.
+  if (url.pathname === "/api/contacts" || url.pathname.startsWith("/api/contacts/")) {
+    if (!contactsConfigured()) {
+      sendJson(response, 503, { error: `CRM не налаштована: не задано ${contactsMissingConfig().join(", ")}.` });
+      return;
+    }
+    try {
+      if (request.method === "GET" && url.pathname === "/api/contacts/folders") {
+        sendJson(response, 200, { folders: await listContactFolders() });
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/contacts") {
+        sendJson(response, 200, await listFolderContacts({
+          folderId: cleanText(url.searchParams.get("folderId") || ""),
+          search: cleanText(url.searchParams.get("search") || ""),
+          limit: clampNumber(url.searchParams.get("limit"), 1, 100, 25),
+          offset: clampNumber(url.searchParams.get("offset"), 0, 100000, 0)
+        }));
+        return;
+      }
+
+      const contactMatch = url.pathname.match(/^\/api\/contacts\/([^/]+)(\/messages|\/import)?$/);
+      if (contactMatch) {
+        const contactId = decodeURIComponent(contactMatch[1]);
+        const contact = await readContact(contactId);
+        if (!contact) {
+          sendJson(response, 404, { error: "Контакт не знайдено в CRM." });
+          return;
+        }
+
+        if (request.method === "GET" && !contactMatch[2]) {
+          sendJson(response, 200, {
+            contact,
+            drafts: state.contactDrafts[contactId] || null,
+            prospectId: prospectForCrmContact(contactId)?.id || null
+          });
+          return;
+        }
+
+        if (request.method === "POST" && contactMatch[2] === "/messages") {
+          const body = await readJson(request);
+          const product = state.products.find((item) => item.id === (body.productId || state.selectedProductId)) || currentProduct();
+          const drafts = await generateContactDrafts(contact, product, {
+            language: body.language,
+            instruction: cleanLongText(body.instruction || "")
+          });
+          state.contactDrafts[contactId] = drafts;
+          // A workspace does not need last year's drafts, and the file it is
+          // saved in is read on every boot.
+          const kept = Object.entries(state.contactDrafts)
+            .sort((left, right) => new Date(right[1].generatedAt) - new Date(left[1].generatedAt))
+            .slice(0, 300);
+          state.contactDrafts = Object.fromEntries(kept);
+          addEvent("outreach", `Drafts written for ${contact.name || "a CRM contact"} (${product.name}).`);
+          await writePersistentWorkspaceState();
+          sendJson(response, 200, { drafts });
+          return;
+        }
+
+        if (request.method === "POST" && contactMatch[2] === "/import") {
+          const prospect = normalizeProspect(contactAsProspect(contact));
+          if (!prospect.name || !prospect.company) {
+            sendJson(response, 400, { error: "У контакту немає імені або компанії — у черзі лідів він був би порожнім рядком." });
+            return;
+          }
+          const existing = prospectForCrmContact(contactId)
+            || state.prospects.find((item) => item.dedupeKey === prospect.dedupeKey);
+          if (existing) {
+            Object.assign(existing, { ...prospect, id: existing.id, createdAt: existing.createdAt });
+          } else {
+            state.prospects.unshift(prospect);
+          }
+          addEvent("prospects", `${prospect.name} taken into the queue from the CRM.`);
+          await writePersistentWorkspaceState();
+          sendJson(response, 200, { ...publicState(), prospectId: (existing || prospect).id });
+          return;
+        }
+      }
+
+      sendJson(response, 404, { error: "Невідомий маршрут контактів." });
+      return;
+    } catch (error) {
+      // A CRM that is unreachable, or answering with a complaint, is not this
+      // app being broken — say which it is.
+      sendJson(response, Number(error?.status) === 503 ? 503 : 502, { error: crmErrorMessage(error) });
+      return;
+    }
   }
 
   if (request.method === "GET" && url.pathname === "/api/state") {
@@ -2855,6 +2955,9 @@ function applyPersistentWorkspaceState(saved = {}) {
   if (saved.selectedProductId && state.products.some((product) => product.id === saved.selectedProductId)) {
     state.selectedProductId = saved.selectedProductId;
   }
+  if (saved.contactDrafts && typeof saved.contactDrafts === "object" && !Array.isArray(saved.contactDrafts)) {
+    state.contactDrafts = saved.contactDrafts;
+  }
   if (Array.isArray(saved.prospects)) {
     state.prospects = saved.prospects.map(normalizeProspect).filter((prospect) => prospect.name && prospect.company).slice(0, 1000);
   }
@@ -3047,6 +3150,7 @@ async function writePersistentWorkspaceState() {
       historicalOutcomes: state.historicalOutcomes,
       scoringModel: state.scoringModel,
       researchJobs: state.researchJobs.slice(0, 100),
+      contactDrafts: state.contactDrafts,
       warmupCampaigns: state.warmupCampaigns,
       warmupTargeting: state.warmupTargeting,
       learning: {
@@ -11843,6 +11947,95 @@ function productForPrompt(product, context = "") {
     // nothing to do with the lead on the screen.
     knowledgeLibrary: knowledgeLibraryForPrompt(product, context)
   };
+}
+
+/**
+ * Three drafts for one CRM contact, from the contact record and the product.
+ *
+ * One call rather than three: an email, a Telegram message and a LinkedIn pair
+ * written together stay one argument told three ways, which is what a person
+ * would do, and what three separate calls reliably fail to do.
+ *
+ * Without a model it still answers — with the plain drafts the fallback builds
+ * from the brief. A page that offers nothing when OpenRouter is off would send
+ * somebody back to a blank message box, which is where they started.
+ */
+async function generateContactDrafts(contact, product, { language = "en", instruction = "" } = {}) {
+  const code = normalizeLanguage(language);
+  const fallback = buildFallbackDrafts({ contact, product, language: code });
+  const base = {
+    contactId: contact.id,
+    contactName: contact.name || "",
+    productId: product?.id || "",
+    productName: product?.name || "",
+    language: code,
+    instruction,
+    generatedAt: new Date().toISOString()
+  };
+
+  if (!state.vault || state.providerHealth.status !== "healthy") {
+    return { ...base, ...fallback, modelUsed: "local-draft", provider: "local" };
+  }
+
+  const context = {
+    name: contact.name,
+    title: contact.position,
+    company: contact.company,
+    location: contact.country,
+    website: contact.website,
+    notes: contact.description
+  };
+
+  try {
+    const { data, run } = await callOpenRouterJson({
+      model: outreachModelForProfile("balanced"),
+      taskType: "SEQUENCE_GENERATION",
+      profile: "balanced",
+      maxTokens: 1500,
+      messages: [
+        {
+          role: "system",
+          content: "You are a plain-spoken outbound writer. Return only strict JSON with escaped newlines inside string values. The copy sounds like one professional writing to another: calm, specific, low-pressure. Never invent a fact about the person or the company; the contact record and the product are the only sources. product.brief holds the team's own answers about what they sell, and product.knowledgeLibrary their written rules — follow both over your own habits. Avoid 'I hope this finds you well', compliments, three-adjective lists, sentences about the industry rather than the reader, and any request for a call in a first touch."
+        },
+        {
+          role: "user",
+          content: JSON.stringify(draftsPromptPayload({
+            contact,
+            product: productForPrompt(product, context),
+            language: code,
+            instruction
+          }))
+        }
+      ]
+    });
+    return { ...base, ...normalizeDrafts(data, fallback), modelUsed: run.modelUsed, provider: run.provider };
+  } catch (error) {
+    // The drafts still arrive, and they say why they are the plain ones.
+    return {
+      ...base,
+      ...fallback,
+      modelUsed: "local-draft",
+      provider: "local",
+      verifyBeforeSending: [
+        ...fallback.verifyBeforeSending,
+        `AI не відповів (${error instanceof Error ? error.message : "невідома помилка"}), тож це чернетка з брифу.`
+      ]
+    };
+  }
+}
+
+/** The workspace lead that came from this CRM contact, if somebody took it. */
+function prospectForCrmContact(contactId) {
+  if (!contactId) return null;
+  return state.prospects.find((prospect) => {
+    const source = prospect.crmSource || {};
+    return source.contact_id === contactId || source.contactId === contactId || source.id === contactId;
+  }) || null;
+}
+
+function crmErrorMessage(error) {
+  const message = error instanceof Error ? error.message : String(error || "");
+  return !message || message === "fetch failed" ? "CRM не відповіла." : message;
 }
 
 function briefForPrompt(product = {}) {

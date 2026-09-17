@@ -116,6 +116,16 @@ class Query {
     return this;
   }
 
+  /**
+   * Skip the first rows. PostgREST does this server-side, which is the point:
+   * paging a folder of twenty-two thousand people by fetching and slicing would
+   * carry the whole folder to page two.
+   */
+  offset(count) {
+    if (Number(count) > 0) this.params.set("offset", String(Math.trunc(Number(count))));
+    return this;
+  }
+
   insert(values) {
     this.method = "POST";
     this.payload = values;

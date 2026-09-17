@@ -24,6 +24,29 @@ Local outbound workspace for researching prospects, generating product-specific 
 - Use a cost-capped Apify waterfall for company people, work-email, and phone enrichment. It stops when verified email and phone are found, limits actors per lead, and reuses recent verified results.
 - Keep email, phone, WhatsApp, Telegram, and SMS locked until the seller approves the matched contact and channel.
 
+## Contacts
+
+The Contacts tab reads the CRM directly: its folders, one page of a folder at a
+time, and everything the CRM knows about one person. Nothing is written back —
+the CRM is somebody else's system of record — and nothing lands in this
+workspace until somebody presses **Додати в ліди**, which takes the contact into
+the lead queue carrying its CRM id, so importing the same person twice is still
+one lead.
+
+With a contact open, one call writes three drafts for three channels: an email
+(subject and body), a Telegram message, and LinkedIn (an invitation note plus
+the first message after it is accepted). The model is given the contact record,
+the product's eight answers and passages from that product's knowledge files,
+and it is told to invent nothing: a guess has to read as a guess. Each draft
+says what it leaned on and what a human should verify. Drafts are saved per
+contact, so reopening someone shows what was already written for them.
+
+Without OpenRouter the page still answers, with plain drafts assembled from the
+product brief and marked as such. Reading `WARMUP_CRM_SUPABASE_URL` /
+`WARMUP_CRM_SERVICE_ROLE_KEY` (falling back to `SUPABASE_URL` /
+`SUPABASE_API_KEY`); with neither set the tab says which variables are missing
+rather than looking broken.
+
 ## Products and Knowledge Base
 
 The workspace sells two things — **AdAction** and **advantage-course** — and one

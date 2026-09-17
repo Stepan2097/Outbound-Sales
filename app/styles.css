@@ -2635,6 +2635,213 @@ dialog {
   }
 }
 
+/* Контакти: зліва папки й список людей, справа картка і чернетки. Ті самі дві
+   колонки, що на «Продуктах» — вибирають завжди зліва, працюють завжди справа. */
+.contacts-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.44fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.contact-folder-list,
+.contact-list {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.contact-list {
+  /* Сторінка на двадцять п'ять рядків; далі — пагінація, а не нескінченний
+     сувій, бо в папці може бути двадцять дві тисячі людей. */
+  max-height: 480px;
+  overflow: auto;
+}
+
+.contact-folder-row,
+.contact-row {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-strong);
+  cursor: pointer;
+}
+
+.contact-folder-row span,
+.contact-row span,
+.contact-row small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.contact-folder-row.active,
+.contact-row.active {
+  border-color: var(--teal);
+  background: var(--teal-weak);
+}
+
+.contact-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  margin-bottom: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-strong);
+}
+
+.contact-search input {
+  border: none;
+  background: none;
+  padding: 8px 0;
+  width: 100%;
+  color: inherit;
+}
+
+.contact-search input:focus {
+  outline: none;
+}
+
+.contact-search i {
+  width: 15px;
+  height: 15px;
+  color: var(--muted);
+}
+
+.contact-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.contact-pager:empty {
+  display: none;
+}
+
+.contact-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.contact-fields div {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-strong);
+  min-width: 0;
+}
+
+.contact-fields dt {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.contact-fields dd {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.contact-note {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-strong);
+}
+
+.contact-note p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  white-space: pre-wrap;
+}
+
+.contact-custom {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.contact-custom pre {
+  margin: 6px 0 0;
+  max-height: 200px;
+  overflow: auto;
+}
+
+.contact-draft-form {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.contact-draft-list {
+  display: grid;
+  gap: 10px;
+}
+
+.contact-draft {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-strong);
+  padding: 12px;
+}
+
+.contact-draft header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.contact-draft header span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.contact-draft pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: inherit;
+  line-height: 1.55;
+}
+
+.contact-draft small {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.contact-draft-meta {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.contact-draft-meta ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.contact-draft-warning strong {
+  color: var(--amber);
+}
+
 /* Продукти: зліва вибір продукту і його файли, справа опис продукту й редактор
    файлу. Два вузькі списки в одній колонці, два робочі місця в другій — і те,
    що редагується, завжди ширше за те, з чого вибирають. */

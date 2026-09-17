@@ -21,6 +21,7 @@ COPY package.json ./
 COPY server.mjs ./
 COPY warmup ./warmup
 COPY knowledge ./knowledge
+COPY contacts ./contacts
 COPY app ./app
 COPY README.md INTEGRATION_HANDOFF.md ./
 
