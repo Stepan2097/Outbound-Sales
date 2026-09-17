@@ -138,6 +138,18 @@ svg {
   letter-spacing: 0;
 }
 
+/* Знак малюється маскою, а не картинкою: так він бере колір плитки з теми —
+   один файл на вкладку, сайдбар і екран входу, і жодної копії контуру в
+   розмітці. Ширина знака більша за висоту, тож частку від плитки задає вона. */
+.brand-mark::before {
+  content: "";
+  width: 68%;
+  height: 100%;
+  background: currentColor;
+  -webkit-mask: url("/brand-glyph.svg") center / contain no-repeat;
+  mask: url("/brand-glyph.svg") center / contain no-repeat;
+}
+
 .brand strong,
 .brand span {
   display: block;
