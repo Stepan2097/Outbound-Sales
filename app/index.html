@@ -820,189 +820,73 @@
         </section>
 
         <section class="view" id="view-database">
-          <div class="database-layout">
-            <section class="panel knowledge-inbox-panel span-2">
+          <div class="knowledge-library-layout">
+            <section class="panel knowledge-projects-panel">
               <div class="panel-heading">
                 <div>
-                  <h2>Поповнення бази знань</h2>
-                  <p>Закидай у пам'ять AI контекст продукту, висновки, скріншоти, посилання, заперечення і нотатки про ринок</p>
+                  <h2>Проєкти</h2>
+                  <p>Кожен проєкт — свій набір файлів. Агенти читають їх перед тим, як писати повідомлення.</p>
                 </div>
-                <span class="pill" id="knowledgeInboxStatusPill">готово</span>
+                <button class="text-button" id="knowledgeNewProjectBtn" type="button"><i data-lucide="plus"></i><span>Проєкт</span></button>
               </div>
-              <form class="knowledge-inbox-form" id="knowledgeInboxForm">
-                <div class="split-fields">
-                  <label>
-                    <span>Продукт</span>
-                    <select id="knowledgeInboxProductInput"></select>
-                  </label>
-                  <label>
-                    <span>Тип даних</span>
-                    <select id="knowledgeInboxTypeInput">
-                      <option value="product_knowledge">Знання про продукт</option>
-                      <option value="offer">Оферта / що входить</option>
-                      <option value="icp">ICP / гео / покупець</option>
-                      <option value="pricing">Ціни / комерційна модель</option>
-                      <option value="approved_claim">Погоджене твердження</option>
-                      <option value="case_study">Доказ / кейс</option>
-                      <option value="winning_outreach">Вдалий аутріч</option>
-                      <option value="bad_outreach">Невдалий аутріч / уникати</option>
-                      <option value="market_note">Нотатка про ринок</option>
-                      <option value="objection">Заперечення</option>
-                      <option value="icp_note">Нотатка про ICP</option>
-                      <option value="competitor_note">Нотатка про конкурента</option>
-                      <option value="platform_screenshot">Скріншот платформи</option>
-                    </select>
-                  </label>
-                </div>
+              <div class="knowledge-project-list" id="knowledgeProjectList"></div>
+              <form class="knowledge-project-form" id="knowledgeProjectForm" hidden>
                 <label>
-                  <span>Текст, посилання або висновок</span>
-                  <textarea id="knowledgeInboxTextInput" rows="5" placeholder="Встав нотатки, висновок про продукт, посилання, контекст скріншота, вдале повідомлення, заперечення, урок із CRM — усе, що AI має врахувати, перш ніж писати аутріч."></textarea>
-                </label>
-                <label class="file-drop screenshot-drop compact-drop">
-                  <input id="knowledgeInboxScreenshotInput" type="file" accept="image/*" />
-                  <i data-lucide="image-plus"></i>
-                  <strong>Додати скріншот</strong>
-                  <span id="knowledgeInboxScreenshotName">За бажанням PNG/JPG з платформи, SMS, LinkedIn, CRM чи документації продукту</span>
-                </label>
-                <div class="screenshot-preview" id="knowledgeInboxScreenshotPreview"></div>
-                <button class="primary-button" type="submit"><i data-lucide="brain-circuit"></i><span>Проаналізувати і навчити</span></button>
-              </form>
-              <div class="knowledge-inbox-result" id="knowledgeInboxResult"></div>
-            </section>
-
-            <section class="panel learning-ingest-panel">
-              <div class="panel-heading">
-                <div>
-                  <h2>База знань</h2>
-                  <p>Вдалі повідомлення, скріншоти, профілі, висновки і результати</p>
-                </div>
-                <span class="pill" id="learningStatusPill">порожньо</span>
-              </div>
-              <form class="learning-form" id="learningExampleForm">
-                <div class="split-fields">
-                  <label>
-                    <span>Продукт</span>
-                    <select id="learningProductInput"></select>
-                  </label>
-                  <label>
-                    <span>Канал</span>
-                    <select id="learningChannelInput">
-                      <option value="linkedin">LinkedIn</option>
-                      <option value="sms">SMS</option>
-                      <option value="whatsapp">WhatsApp</option>
-                      <option value="telegram">Telegram</option>
-                      <option value="email">Email</option>
-                      <option value="call_follow_up">Фолоу-ап після дзвінка</option>
-                    </select>
-                  </label>
-                </div>
-                <div class="split-fields">
-                  <label>
-                    <span>Персона</span>
-                    <input id="learningPersonaInput" type="text" placeholder="Founder, VP Sales, RevOps" />
-                  </label>
-                  <label>
-                    <span>Результат</span>
-                    <input id="learningOutcomeInput" type="text" placeholder="Відповідь, призначений дзвінок, закрита угода" />
-                  </label>
-                </div>
-                <div class="split-fields">
-                  <label>
-                    <span>Бал</span>
-                    <input id="learningOutcomeScoreInput" type="number" min="0" max="100" value="80" />
-                  </label>
-                  <label>
-                    <span>Посилання на профіль</span>
-                    <input id="learningProfileUrlInput" type="url" placeholder="Посилання на LinkedIn або на лід у CRM" />
-                  </label>
-                </div>
-                <label>
-                  <span>Текст повідомлення</span>
-                  <textarea id="learningMessageInput" rows="6" placeholder="Встав вдалу SMS, повідомлення в LinkedIn, лист або фолоу-ап"></textarea>
+                  <span>Назва проєкту</span>
+                  <input id="knowledgeProjectNameInput" type="text" placeholder="Назва нового проєкту" />
                 </label>
                 <label>
-                  <span>Нотатки</span>
-                  <textarea id="learningNotesInput" rows="3" placeholder="Контекст, крок послідовності, причина відповіді, опрацьоване заперечення"></textarea>
+                  <span>Продукт, для якого агенти читатимуть ці файли</span>
+                  <select id="knowledgeProjectProductInput"></select>
                 </label>
-                <label>
-                  <span>Теги</span>
-                  <input id="learningTagsInput" type="text" placeholder="короткий, через біль, засновник, після дзвінка" />
-                </label>
-                <label class="file-drop screenshot-drop">
-                  <input id="learningScreenshotInput" type="file" accept="image/*" />
-                  <i data-lucide="image-plus"></i>
-                  <strong>Завантажити скріншот</strong>
-                  <span id="learningScreenshotName">PNG або JPG із SMS, LinkedIn, WhatsApp, пошти, CRM</span>
-                </label>
-                <div class="screenshot-preview" id="learningScreenshotPreview"></div>
-                <button class="primary-button" type="submit"><i data-lucide="brain-circuit"></i><span>Зберегти і навчити</span></button>
+                <div class="button-row">
+                  <button class="primary-button" type="submit"><i data-lucide="check"></i><span>Створити</span></button>
+                  <button id="knowledgeProjectCancelBtn" type="button"><span>Скасувати</span></button>
+                </div>
               </form>
             </section>
 
-            <section class="panel learning-playbook-panel">
+            <section class="panel knowledge-files-panel">
               <div class="panel-heading">
                 <div>
-                  <h2>AI-плейбук</h2>
-                  <p>Патерни, які застосовуються до майбутнього аутрічу</p>
+                  <h2 id="knowledgeFilesTitle">Файли</h2>
+                  <p id="knowledgeFilesSubtitle">Джерела даних для агентів цього проєкту</p>
                 </div>
-                <button id="learningRetrainBtn" type="button"><i data-lucide="refresh-cw"></i><span>Перебудувати</span></button>
+                <button class="text-button" id="knowledgeNewFileBtn" type="button"><i data-lucide="file-plus"></i><span>Новий файл</span></button>
               </div>
-              <div class="learning-metric-grid">
-                <div><span>Приклади</span><strong id="learningExampleCount">0</strong></div>
-                <div><span>Успіхи</span><strong id="learningWinCount">0</strong></div>
-                <div><span>Скріншоти</span><strong id="learningScreenshotCount">0</strong></div>
-                <div><span>Топ-канал</span><strong id="learningTopChannel">немає</strong></div>
-              </div>
-              <div class="playbook-summary" id="learningPlaybookSummary"></div>
-              <div class="playbook-grid">
-                <div>
-                  <strong>Вдалі патерни</strong>
-                  <ul id="learningPatternList"></ul>
-                </div>
-                <div>
-                  <strong>Правила</strong>
-                  <ul id="learningRuleList"></ul>
-                </div>
-              </div>
-              <div class="channel-tip-list" id="learningChannelTips"></div>
+              <div class="knowledge-file-list" id="knowledgeFileList"></div>
             </section>
 
-            <section class="panel icp-panel span-2">
+            <section class="panel knowledge-editor-panel span-2">
               <div class="panel-heading">
                 <div>
-                  <h2>Еталонні ліди ICP</h2>
-                  <p>Завантаж ідеальні ліди, натренуй фільтри і знайди схожих через PipelineLabs Apify</p>
+                  <h2 id="knowledgeEditorTitle">Файл не вибрано</h2>
+                  <p id="knowledgeEditorSubtitle">Вибери файл зліва або створи новий</p>
                 </div>
-                <span class="pill" id="icpStatusPill">порожньо</span>
+                <span class="pill" id="knowledgeEditorPill">готово</span>
               </div>
-              <div class="icp-layout">
-                <form class="icp-seed-form" id="icpSeedForm">
-                  <textarea id="icpSeedTextInput" rows="7" placeholder="name,title,company,location,website,linkedin,notes&#10;Alex Morgan,Founder,Acme SaaS,New York,acme.com,https://linkedin.com/in/alex,Best customer profile"></textarea>
-                  <div class="assistant-controls">
-                    <input id="icpTotalResultsInput" type="number" min="1" max="50000" value="1000" aria-label="Кількість схожих результатів" />
-                    <button class="primary-button" type="submit"><i data-lucide="target"></i><span>Натренувати ICP</span></button>
-                    <button id="icpGenerateJsonBtn" type="button"><i data-lucide="file-json"></i><span>Згенерувати JSON</span></button>
+              <form class="knowledge-editor-form" id="knowledgeEditorForm" hidden>
+                <div class="split-fields">
+                  <label>
+                    <span>Назва файлу</span>
+                    <input id="knowledgeFileNameInput" type="text" placeholder="Назва.md" />
+                  </label>
+                  <div class="knowledge-project-picker">
+                    <span>Проєкти, яким належить файл</span>
+                    <div id="knowledgeFileProjectPicker"></div>
                   </div>
-                  <button id="icpRunApifyBtn" type="button"><i data-lucide="search"></i><span>Запустити пошук в Apify</span></button>
-                </form>
-                <div class="icp-profile-card">
-                  <strong id="icpProfileSummary">Завантаж ліди ICP, щоб натренувати фільтри схожих.</strong>
-                  <div class="icp-chip-row" id="icpChipRow"></div>
-                  <pre id="icpActorJson" class="jsonbox">{}</pre>
-                  <button id="copyIcpJsonBtn" type="button" data-copy-text="{}"><i data-lucide="copy"></i><span>Копіювати JSON</span></button>
                 </div>
-              </div>
-            </section>
-
-            <section class="panel learning-example-panel span-2">
-              <div class="panel-heading">
-                <div>
-                  <h2>Стрічка знань</h2>
-                  <p>Останні приклади, згодовані системі</p>
+                <label>
+                  <span>Вміст файлу</span>
+                  <textarea id="knowledgeFileContentInput" class="knowledge-file-textarea" rows="24" spellcheck="false" placeholder="Текст, який агенти читатимуть перед написанням повідомлень: правила, оферта, ICP, заперечення, приклади, FAQ."></textarea>
+                </label>
+                <div class="button-row knowledge-editor-actions">
+                  <button class="primary-button" type="submit"><i data-lucide="save"></i><span>Зберегти файл</span></button>
+                  <span class="knowledge-editor-meta" id="knowledgeEditorMeta"></span>
+                  <button class="danger-button" id="knowledgeDeleteFileBtn" type="button"><i data-lucide="trash-2"></i><span>Видалити</span></button>
                 </div>
-                <span class="pill" id="learningVersionPill">learning-local-v1</span>
-              </div>
-              <div class="learning-example-list" id="learningExampleList"></div>
+              </form>
+              <div class="empty-state" id="knowledgeEditorEmpty">Вибери файл, щоб редагувати його вміст.</div>
             </section>
           </div>
         </section>

@@ -25,6 +25,25 @@ Local outbound workspace for researching prospects, generating product-specific 
 - Use a cost-capped Apify waterfall for company people, work-email, and phone enrichment. It stops when verified email and phone are found, limits actors per lead, and reuses recent verified results.
 - Keep email, phone, WhatsApp, Telegram, and SMS locked until the seller approves the matched contact and channel.
 
+## Knowledge Base
+
+The Knowledge Base tab is a library of projects and the files they hold. It ships
+with two projects — **AdAction** and **advantage-course** — sharing one outbound
+playbook file, with the Black Affiliate training FAQ belonging to the course
+alone. A file can belong to several projects, so a document that is true for both
+is edited in one place.
+
+Files are plain Markdown on the server, beside the workspace state file
+(`<STATE_FILE_PATH dir>/knowledge/`), with a small `index.json` recording which
+file belongs to which project. They can be created, edited and deleted from the
+page; a project points at one workspace product.
+
+Every agent that writes for a product reads the files of the projects pointing at
+it, before it writes. Whole documents do not go into prompts: passages are
+selected against the lead in front of the model, one file never takes the whole
+budget, and a product no project points at gets nothing rather than somebody
+else's rules.
+
 ## LinkedIn Warm-up
 
 The Warm-up tab warms LinkedIn accounts on a schedule that is data rather than

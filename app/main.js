@@ -6,12 +6,18 @@ let busyAction = "";
 let busyMessage = "";
 let uiNotice = "";
 let pendingProductKnowledgeScreenshot = null;
-let pendingLearningScreenshot = null;
-let pendingKnowledgeInboxScreenshot = null;
 let activeLeadSectionId = "dashboard-account";
 let authState = null;
 let authMode = "login";
 let activeResearchJob = null;
+// База знань. Бібліотека живе на сервері, тож тут — тільки те, що зараз
+// відкрито: список, обраний проєкт і чернетка файлу в редакторі.
+let knowledgeLibrary = { projects: [], files: [] };
+let knowledgeLibraryLoaded = false;
+let knowledgeProjectId = null;
+let knowledgeFileId = null;
+let knowledgeDraft = null;
+let knowledgeEditorNeedsFill = false;
 // Екран профілю живе нижче по файлу, а `await bootApplication()` ділить модуль
 // надвоє: усе, оголошене після нього, під час завантаження ще в TDZ. Тому ці
 // дві змінні стоять тут — інакше перезавантаження на вкладці Профіль валить
@@ -76,7 +82,7 @@ function render() {
   renderProductContext();
   renderProductStudio();
   renderAccount();
-  renderLearningDatabase();
+  renderKnowledgeLibrary();
   renderProspects();
   renderLeadsPage();
   renderAssistant();
@@ -377,70 +383,6 @@ function renderAgents() {
     .join("");
 }
 
-function renderLearningDatabase() {
-  const learning = state.learning || {};
-  const stats = learning.stats || {};
-  const playbook = learning.playbook || {};
-  const productSelect = document.getElementById("learningProductInput");
-  if (productSelect) {
-    fillSelect(productSelect, state.products || [], (product) => product.id, (product) => product.name, state.selectedProductId);
-  }
-  const inboxProductSelect = document.getElementById("knowledgeInboxProductInput");
-  if (inboxProductSelect) {
-    fillSelect(inboxProductSelect, state.products || [], (product) => product.id, (product) => product.name, state.selectedProductId);
-  }
-
-  document.getElementById("learningStatusPill").textContent = playbook.status || "порожньо";
-  renderKnowledgeInboxResult(learning.lastInboxAnalysis);
-  document.getElementById("learningExampleCount").textContent = stats.totalExamples || 0;
-  document.getElementById("learningWinCount").textContent = stats.winningExamples || 0;
-  document.getElementById("learningScreenshotCount").textContent = stats.screenshotExamples || 0;
-  document.getElementById("learningTopChannel").textContent = titleCase(stats.topChannel || "немає");
-  document.getElementById("learningVersionPill").textContent = stats.modelVersion || learning.modelVersion || "learning-local-v1";
-  document.getElementById("learningPlaybookSummary").innerHTML = `
-    <strong>${escapeHtml(playbook.summary || "Вивчених патернів ще немає")}</strong>
-    <span>${playbook.updatedAt ? `Оновлено ${new Date(playbook.updatedAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}` : "Чекаємо на перший приклад"}</span>
-  `;
-  document.getElementById("learningPatternList").innerHTML = listItems(playbook.winningPatterns, "Переможних патернів ще немає");
-  document.getElementById("learningRuleList").innerHTML = listItems(playbook.reusableRules, "Правил ще не вивчено");
-  document.getElementById("learningChannelTips").innerHTML = (playbook.channelTips || []).length
-    ? playbook.channelTips.map((tip) => `
-        <div class="channel-tip">
-          <span class="pill">${escapeHtml(tip.channel)}</span>
-          <strong>${escapeHtml(tip.tip)}</strong>
-        </div>
-      `).join("")
-    : `<div class="empty-state">Поради по каналах з'являться, коли збережеш приклади</div>`;
-  document.getElementById("learningExampleList").innerHTML = (learning.examples || []).length
-    ? learning.examples.map(learningExampleRow).join("")
-    : `<div class="empty-state">Даних для навчання ще немає</div>`;
-  renderKnowledgeInboxScreenshotPreview();
-  renderIcpDatabase();
-}
-
-function renderIcpDatabase() {
-  const icp = state.icp || {};
-  const profile = icp.profile || {};
-  const lookalike = icp.lookalikeSearch || {};
-  const payload = lookalike.payload || {};
-  const prettyPayload = JSON.stringify(payload, null, 2);
-  document.getElementById("icpStatusPill").textContent = profile.status || "порожньо";
-  document.getElementById("icpProfileSummary").textContent = profile.summary || "Завантаж ICP-лідів, щоб навчити lookalike-фільтри.";
-  document.getElementById("icpActorJson").textContent = prettyPayload;
-  const copyButton = document.getElementById("copyIcpJsonBtn");
-  copyButton.dataset.copyText = prettyPayload;
-  const chips = [
-    ["Сіди", icp.seedLeadCount || 0],
-    ["Посади", (profile.titles || []).slice(0, 3).join(", ") || "-"],
-    ["Рівень", (profile.seniorities || []).join(", ") || "-"],
-    ["Функції", (profile.functions || []).join(", ") || "-"],
-    ["Індустрії", (profile.industries || []).slice(0, 2).join(", ") || "-"],
-    ["Пошук", lookalike.status || "not_ready"]
-  ];
-  document.getElementById("icpChipRow").innerHTML = chips
-    .map(([label, value]) => `<span class="cap"><strong>${escapeHtml(label)}</strong> ${escapeHtml(value)}</span>`)
-    .join("");
-}
 
 function listItems(items, emptyText) {
   return (items || []).length
@@ -448,60 +390,6 @@ function listItems(items, emptyText) {
     : `<li>${escapeHtml(emptyText)}</li>`;
 }
 
-function renderKnowledgeInboxResult(analysis) {
-  const result = document.getElementById("knowledgeInboxResult");
-  if (!result) return;
-  setText("knowledgeInboxStatusPill", analysis ? "навчено" : "готово");
-  if (!analysis) {
-    result.innerHTML = `<div class="empty-state">Встав або завантаж знання — AI-плейбук витягне з них патерни, правила й контекст продажів, який можна перевикористати.</div>`;
-    return;
-  }
-  const patterns = (analysis.patterns || []).slice(0, 5).map((item) => `<span class="cap">${escapeHtml(item)}</span>`).join("");
-  const rules = (analysis.rules || []).slice(0, 4).map((item) => `<li>${escapeHtml(item)}</li>`).join("");
-  result.innerHTML = `
-    <article class="knowledge-inbox-card">
-      <div>
-        <span class="pill">${escapeHtml(analysis.productName || "Продукт")}</span>
-        <strong>${escapeHtml(analysis.summary || "Знання проаналізовано й додано до плейбука.")}</strong>
-        <small>${analysis.updatedAt ? `Оновлено ${new Date(analysis.updatedAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}` : ""}</small>
-      </div>
-      <div class="cap-list">${patterns}</div>
-      <ul>${rules}</ul>
-    </article>
-  `;
-}
-
-function learningExampleRow(example) {
-  const image = example.screenshot?.dataUrl
-    ? `<img src="${escapeAttr(example.screenshot.dataUrl)}" alt="${escapeAttr(example.screenshot.name || "Скріншот для навчання")}" />`
-    : `<div class="learning-thumb-placeholder"><i data-lucide="${example.profileUrl || example.sourceUrl ? "link" : "file-text"}"></i></div>`;
-  const signals = example.signals
-    ? [
-        ...(example.signals.patterns || []).slice(0, 2),
-        ...(example.signals.hooks || []).slice(0, 1),
-        ...(example.signals.ctas || []).slice(0, 1)
-      ].map((signal) => `<span class="cap">${escapeHtml(signal)}</span>`).join("")
-    : "";
-  return `
-    <article class="learning-example-card">
-      <div class="learning-thumb">${image}</div>
-      <div>
-        <div class="learning-example-heading">
-          <span class="pill">${escapeHtml(example.channel)}</span>
-          <strong>${escapeHtml(example.productName || "Продукт")}</strong>
-          <small>${new Date(example.createdAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}</small>
-        </div>
-        <p>${escapeHtml(example.messageText || example.notes || example.profileUrl || example.sourceUrl || "Приклад-скріншот")}</p>
-        <div class="learning-meta-row">
-          <span>${escapeHtml(example.persona || "персона не визначена")}</span>
-          <span>${escapeHtml(example.outcome || "результат")}</span>
-          <strong>${Number(example.outcomeScore || 0)}%</strong>
-        </div>
-        <div class="cap-list">${signals}</div>
-      </div>
-    </article>
-  `;
-}
 
 function renderOverview() {
   const summary = state.usageSummary;
@@ -1975,6 +1863,12 @@ function setView(viewName) {
   if (viewName === "warmup") {
     loadWarmup();
   }
+
+  // Файли бази знань читаються з сервера, а не з /api/state: вкладку, яку
+  // ніхто не відкриває, не варто вантажити на кожен рефреш.
+  if (viewName === "database") {
+    void loadKnowledgeLibrary().catch(() => {});
+  }
 }
 
 function refreshIcons() {
@@ -2083,35 +1977,6 @@ function renderProductKnowledgeScreenshotPreview() {
   `;
 }
 
-function renderLearningScreenshotPreview() {
-  const preview = document.getElementById("learningScreenshotPreview");
-  const name = document.getElementById("learningScreenshotName");
-  if (!pendingLearningScreenshot) {
-    preview.innerHTML = "";
-    return;
-  }
-  name.textContent = `${pendingLearningScreenshot.name} · ${Math.round(pendingLearningScreenshot.size / 1024)} KB`;
-  preview.innerHTML = `
-    <img src="${escapeAttr(pendingLearningScreenshot.dataUrl)}" alt="${escapeAttr(pendingLearningScreenshot.name)}" />
-    <span>${escapeHtml(pendingLearningScreenshot.name)}</span>
-  `;
-}
-
-function renderKnowledgeInboxScreenshotPreview() {
-  const preview = document.getElementById("knowledgeInboxScreenshotPreview");
-  const name = document.getElementById("knowledgeInboxScreenshotName");
-  if (!preview || !name) return;
-  if (!pendingKnowledgeInboxScreenshot) {
-    preview.innerHTML = "";
-    name.textContent = "За бажанням: PNG/JPG з платформи, SMS, LinkedIn, CRM або доків продукту";
-    return;
-  }
-  name.textContent = `${pendingKnowledgeInboxScreenshot.name} · ${Math.round(pendingKnowledgeInboxScreenshot.size / 1024)} KB`;
-  preview.innerHTML = `
-    <img src="${escapeAttr(pendingKnowledgeInboxScreenshot.dataUrl)}" alt="${escapeAttr(pendingKnowledgeInboxScreenshot.name)}" />
-    <span>${escapeHtml(pendingKnowledgeInboxScreenshot.name)}</span>
-  `;
-}
 
 function initials(name) {
   return String(name || "?")
@@ -2709,155 +2574,282 @@ document.getElementById("exampleForm").addEventListener("submit", async (event) 
 });
 
 
-document.getElementById("knowledgeInboxScreenshotInput").addEventListener("change", async (event) => {
-  const file = event.target.files?.[0];
-  if (!file) {
-    pendingKnowledgeInboxScreenshot = null;
-    renderKnowledgeInboxScreenshotPreview();
+
+/**
+ * База знань: проєкти і файли, які агенти читають перед написанням повідомлень.
+ *
+ * Файли лежать на сервері; тут — тільки список, редактор і чернетка того, що
+ * зараз відкрито. Чернетка потрібна, бо render() викликається з десятка місць
+ * (кожна відповідь /api/state його смикає), і перемальовування textarea під
+ * час набору стерло б недописаний абзац.
+ */
+function renderKnowledgeLibrary() {
+  const projectList = document.getElementById("knowledgeProjectList");
+  if (!projectList) return;
+
+  const projects = knowledgeLibrary.projects || [];
+  const files = knowledgeLibrary.files || [];
+  if (knowledgeProjectId && !projects.some((project) => project.id === knowledgeProjectId)) {
+    knowledgeProjectId = null;
+  }
+  if (!knowledgeProjectId && projects.length) knowledgeProjectId = projects[0].id;
+
+  const productName = (productId) =>
+    (state?.products || []).find((product) => product.id === productId)?.name || "";
+
+  projectList.innerHTML = projects.length
+    ? projects.map((project) => `
+        <article class="knowledge-project-row ${project.id === knowledgeProjectId ? "active" : ""}" data-knowledge-project="${escapeAttr(project.id)}">
+          <div>
+            <strong>${escapeHtml(project.name)}</strong>
+            <span>${project.fileCount} ${uaPlural(project.fileCount, "файл", "файли", "файлів")}${project.productId ? ` · ${escapeHtml(productName(project.productId) || project.productId)}` : " · продукт не прив'язано"}</span>
+          </div>
+          <button class="icon-button" type="button" data-knowledge-project-delete="${escapeAttr(project.id)}" title="Видалити проєкт"><i data-lucide="trash-2"></i></button>
+        </article>
+      `).join("")
+    : `<div class="empty-state">Проєктів ще немає</div>`;
+
+  const projectProductSelect = document.getElementById("knowledgeProjectProductInput");
+  if (projectProductSelect) {
+    const options = [{ id: "", name: "Без прив'язки до продукту" }, ...(state?.products || [])];
+    fillSelect(projectProductSelect, options, (item) => item.id, (item) => item.name, projectProductSelect.value);
+  }
+
+  const activeProject = projects.find((project) => project.id === knowledgeProjectId) || null;
+  const projectFiles = files.filter((file) => (file.projectIds || []).includes(knowledgeProjectId));
+  setText("knowledgeFilesTitle", activeProject ? `Файли · ${activeProject.name}` : "Файли");
+  setText(
+    "knowledgeFilesSubtitle",
+    activeProject
+      ? `Агенти читають ці файли, коли пишуть для «${productName(activeProject.productId) || "непов'язаного продукту"}»`
+      : "Створи проєкт, щоб додавати файли"
+  );
+
+  setHtml("knowledgeFileList", projectFiles.length
+    ? projectFiles.map((file) => `
+        <article class="knowledge-file-row ${file.id === knowledgeFileId ? "active" : ""}" data-knowledge-file="${escapeAttr(file.id)}">
+          <div class="knowledge-file-heading">
+            <strong>${escapeHtml(file.name)}</strong>
+            ${(file.projectIds || []).length > 1 ? `<span class="pill">спільний</span>` : ""}
+          </div>
+          <p>${escapeHtml(file.excerpt || "Порожній файл")}</p>
+          <small>${Math.max(1, Math.round((file.bytes || 0) / 1024))} КБ · оновлено ${relativeTime(file.updatedAt)}</small>
+        </article>
+      `).join("")
+    : `<div class="empty-state">${activeProject ? "У цьому проєкті ще немає файлів" : "Немає проєкту"}</div>`);
+
+  renderKnowledgeEditor();
+}
+
+function renderKnowledgeEditor() {
+  const form = document.getElementById("knowledgeEditorForm");
+  const empty = document.getElementById("knowledgeEditorEmpty");
+  if (!form || !empty) return;
+
+  if (!knowledgeDraft) {
+    form.hidden = true;
+    empty.hidden = false;
+    setText("knowledgeEditorTitle", "Файл не вибрано");
+    setText("knowledgeEditorSubtitle", "Вибери файл зліва або створи новий");
+    setText("knowledgeEditorPill", "готово");
     return;
   }
-  if (!file.type.startsWith("image/")) {
-    window.alert("Завантаж скріншот у PNG або JPG.");
-    event.target.value = "";
-    return;
+
+  form.hidden = false;
+  empty.hidden = true;
+  setText("knowledgeEditorTitle", knowledgeDraft.id ? knowledgeDraft.name : "Новий файл");
+  setText(
+    "knowledgeEditorSubtitle",
+    knowledgeDraft.id
+      ? "Зміни зберігаються на сервері й одразу стають доступними агентам"
+      : "Файл з'явиться в бібліотеці після збереження"
+  );
+  setText("knowledgeEditorPill", knowledgeDraft.id ? "редагування" : "новий");
+  setText(
+    "knowledgeEditorMeta",
+    knowledgeDraft.id
+      ? `Оновлено ${relativeTime(knowledgeDraft.updatedAt)}${knowledgeDraft.updatedBy ? ` · ${knowledgeDraft.updatedBy}` : ""}`
+      : ""
+  );
+  const deleteButton = document.getElementById("knowledgeDeleteFileBtn");
+  if (deleteButton) deleteButton.hidden = !knowledgeDraft.id;
+
+  setHtml("knowledgeFileProjectPicker", (knowledgeLibrary.projects || []).length
+    ? knowledgeLibrary.projects.map((project) => `
+        <label class="knowledge-project-checkbox">
+          <input type="checkbox" value="${escapeAttr(project.id)}" ${knowledgeDraft.projectIds.includes(project.id) ? "checked" : ""} />
+          <span>${escapeHtml(project.name)}</span>
+        </label>
+      `).join("")
+    : `<span class="empty-state">Спочатку створи проєкт</span>`);
+
+  // Поля заповнюються лише коли відкрили інший файл. Інакше кожен render()
+  // під час набору повертав би textarea до збереженої версії.
+  if (knowledgeEditorNeedsFill) {
+    const nameInput = document.getElementById("knowledgeFileNameInput");
+    const contentInput = document.getElementById("knowledgeFileContentInput");
+    if (nameInput) nameInput.value = knowledgeDraft.name || "";
+    if (contentInput) contentInput.value = knowledgeDraft.content || "";
+    knowledgeEditorNeedsFill = false;
   }
-  if (file.size > 2_000_000) {
-    window.alert("Тримай скріншоти до 2 МБ — це локальний прототип.");
-    event.target.value = "";
-    return;
-  }
-  pendingKnowledgeInboxScreenshot = {
+}
+
+async function loadKnowledgeLibrary({ force = false } = {}) {
+  if (knowledgeLibraryLoaded && !force) return;
+  knowledgeLibrary = await api("/api/knowledge/library");
+  knowledgeLibraryLoaded = true;
+  renderKnowledgeLibrary();
+  refreshIcons();
+}
+
+async function openKnowledgeFile(fileId) {
+  const { file } = await api(`/api/knowledge/library/files/${encodeURIComponent(fileId)}`);
+  knowledgeFileId = file.id;
+  knowledgeDraft = {
+    id: file.id,
     name: file.name,
-    type: file.type,
-    size: file.size,
-    dataUrl: await fileToDataUrl(file)
+    projectIds: [...(file.projectIds || [])],
+    content: file.content || "",
+    updatedAt: file.updatedAt,
+    updatedBy: file.updatedBy
   };
-  renderKnowledgeInboxScreenshotPreview();
-});
+  knowledgeEditorNeedsFill = true;
+  renderKnowledgeLibrary();
+  refreshIcons();
+}
 
-document.getElementById("knowledgeInboxForm").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const text = document.getElementById("knowledgeInboxTextInput").value;
-  if (!text.trim() && !pendingKnowledgeInboxScreenshot) {
-    setHtml("knowledgeInboxResult", `<div class="empty-state">Спочатку встав текст, посилання чи урок або завантаж скріншот.</div>`);
+function startNewKnowledgeFile() {
+  if (!knowledgeProjectId) {
+    window.alert("Спочатку створи проєкт, якому належатиме файл.");
     return;
   }
-  await runUiAction("knowledge", "Аналізуємо знання й оновлюємо AI-плейбук...", async () => {
-    state = await api("/api/knowledge/feed", {
-      method: "POST",
-      body: JSON.stringify({
-        productId: document.getElementById("knowledgeInboxProductInput").value,
-        assetType: document.getElementById("knowledgeInboxTypeInput").value,
-        channel: document.getElementById("knowledgeInboxTypeInput").value,
-        messageText: text,
-        notes: text,
-        outcome: "knowledge_saved",
-        outcomeScore: 75,
-        tags: `knowledge,inbox,${document.getElementById("knowledgeInboxTypeInput").value}`,
-        screenshot: pendingKnowledgeInboxScreenshot
-      })
-    });
-    pendingKnowledgeInboxScreenshot = null;
-    document.getElementById("knowledgeInboxScreenshotInput").value = "";
-    document.getElementById("knowledgeInboxTextInput").value = "";
-  });
-});
-
-document.getElementById("learningScreenshotInput").addEventListener("change", async (event) => {
-  const file = event.target.files?.[0];
-  if (!file) {
-    pendingLearningScreenshot = null;
-    renderLearningScreenshotPreview();
-    return;
-  }
-  if (!file.type.startsWith("image/")) {
-    window.alert("Завантаж скріншот у PNG або JPG.");
-    event.target.value = "";
-    return;
-  }
-  if (file.size > 2_000_000) {
-    window.alert("Тримай скріншоти до 2 МБ — це локальний прототип.");
-    event.target.value = "";
-    return;
-  }
-  pendingLearningScreenshot = {
-    name: file.name,
-    type: file.type,
-    size: file.size,
-    dataUrl: await fileToDataUrl(file)
+  knowledgeFileId = null;
+  knowledgeDraft = {
+    id: "",
+    name: "",
+    projectIds: [knowledgeProjectId],
+    content: "",
+    updatedAt: new Date().toISOString(),
+    updatedBy: ""
   };
-  renderLearningScreenshotPreview();
+  knowledgeEditorNeedsFill = true;
+  renderKnowledgeLibrary();
+  refreshIcons();
+  document.getElementById("knowledgeFileNameInput")?.focus();
+}
+
+function selectedKnowledgeProjectIds() {
+  return [...document.querySelectorAll("#knowledgeFileProjectPicker input[type=checkbox]")]
+    .filter((input) => input.checked)
+    .map((input) => input.value);
+}
+
+document.getElementById("knowledgeProjectList").addEventListener("click", async (event) => {
+  const deleteButton = event.target.closest("[data-knowledge-project-delete]");
+  if (deleteButton) {
+    const projectId = deleteButton.dataset.knowledgeProjectDelete;
+    const project = (knowledgeLibrary.projects || []).find((item) => item.id === projectId);
+    if (!window.confirm(`Видалити проєкт «${project?.name || projectId}»? Файли, які більше нікуди не належать, буде видалено разом із ним.`)) return;
+    knowledgeLibrary = (await api(`/api/knowledge/library/projects/${encodeURIComponent(projectId)}/delete`, { method: "POST", body: "{}" })).library;
+    if (knowledgeProjectId === projectId) knowledgeProjectId = null;
+    if (knowledgeDraft?.id && !(knowledgeLibrary.files || []).some((file) => file.id === knowledgeDraft.id)) {
+      knowledgeDraft = null;
+      knowledgeFileId = null;
+    }
+    renderKnowledgeLibrary();
+    refreshIcons();
+    return;
+  }
+  const row = event.target.closest("[data-knowledge-project]");
+  if (!row) return;
+  knowledgeProjectId = row.dataset.knowledgeProject;
+  renderKnowledgeLibrary();
+  refreshIcons();
 });
 
-document.getElementById("learningExampleForm").addEventListener("submit", async (event) => {
+document.getElementById("knowledgeFileList").addEventListener("click", async (event) => {
+  const row = event.target.closest("[data-knowledge-file]");
+  if (!row) return;
+  await openKnowledgeFile(row.dataset.knowledgeFile);
+});
+
+document.getElementById("knowledgeNewFileBtn").addEventListener("click", () => {
+  startNewKnowledgeFile();
+});
+
+document.getElementById("knowledgeNewProjectBtn").addEventListener("click", () => {
+  const form = document.getElementById("knowledgeProjectForm");
+  form.hidden = !form.hidden;
+  if (!form.hidden) document.getElementById("knowledgeProjectNameInput").focus();
+});
+
+document.getElementById("knowledgeProjectCancelBtn").addEventListener("click", () => {
+  document.getElementById("knowledgeProjectForm").hidden = true;
+  document.getElementById("knowledgeProjectNameInput").value = "";
+});
+
+document.getElementById("knowledgeProjectForm").addEventListener("submit", async (event) => {
   event.preventDefault();
-  state = await api("/api/learning/examples", {
+  const name = document.getElementById("knowledgeProjectNameInput").value.trim();
+  if (!name) return;
+  const result = await api("/api/knowledge/library/projects", {
     method: "POST",
-    body: JSON.stringify({
-      productId: document.getElementById("learningProductInput").value,
-      channel: document.getElementById("learningChannelInput").value,
-      persona: document.getElementById("learningPersonaInput").value,
-      outcome: document.getElementById("learningOutcomeInput").value,
-      outcomeScore: Number(document.getElementById("learningOutcomeScoreInput").value),
-      profileUrl: document.getElementById("learningProfileUrlInput").value,
-      messageText: document.getElementById("learningMessageInput").value,
-      notes: document.getElementById("learningNotesInput").value,
-      tags: document.getElementById("learningTagsInput").value,
-      screenshot: pendingLearningScreenshot
-    })
+    body: JSON.stringify({ name, productId: document.getElementById("knowledgeProjectProductInput").value })
   });
-  pendingLearningScreenshot = null;
-  document.getElementById("learningScreenshotInput").value = "";
-  document.getElementById("learningMessageInput").value = "";
-  document.getElementById("learningNotesInput").value = "";
-  document.getElementById("learningTagsInput").value = "";
-  document.getElementById("learningProfileUrlInput").value = "";
-  document.getElementById("learningOutcomeInput").value = "";
-  document.getElementById("learningScreenshotName").textContent = "PNG або JPG з SMS, LinkedIn, WhatsApp, пошти, CRM";
-  renderLearningScreenshotPreview();
-  render();
+  knowledgeLibrary = result.library;
+  knowledgeProjectId = result.project.id;
+  document.getElementById("knowledgeProjectNameInput").value = "";
+  document.getElementById("knowledgeProjectForm").hidden = true;
+  renderKnowledgeLibrary();
+  refreshIcons();
 });
 
-document.getElementById("learningRetrainBtn").addEventListener("click", async () => {
-  state = await api("/api/learning/retrain", { method: "POST", body: "{}" });
-  render();
-});
-
-document.getElementById("icpSeedForm").addEventListener("submit", async (event) => {
+document.getElementById("knowledgeEditorForm").addEventListener("submit", async (event) => {
   event.preventDefault();
-  const textarea = document.getElementById("icpSeedTextInput");
-  const prospects = parseProfiles(textarea.value);
-  state = await api("/api/icp/seeds/import", {
-    method: "POST",
-    body: JSON.stringify({
-      prospects,
-      totalResults: Number(document.getElementById("icpTotalResultsInput").value)
-    })
+  if (!knowledgeDraft) return;
+  const name = document.getElementById("knowledgeFileNameInput").value;
+  const content = document.getElementById("knowledgeFileContentInput").value;
+  const projectIds = selectedKnowledgeProjectIds();
+  if (!projectIds.length) {
+    window.alert("Признач файл хоча б одному проєкту — інакше його ніхто не прочитає.");
+    return;
+  }
+  await runUiAction("knowledge-file", "Зберігаємо файл на сервері...", async () => {
+    const result = knowledgeDraft.id
+      ? await api(`/api/knowledge/library/files/${encodeURIComponent(knowledgeDraft.id)}`, {
+          method: "POST",
+          body: JSON.stringify({ name, content, projectIds })
+        })
+      : await api("/api/knowledge/library/files", {
+          method: "POST",
+          body: JSON.stringify({ name, content, projectIds })
+        });
+    knowledgeLibrary = result.library;
+    knowledgeFileId = result.file.id;
+    knowledgeDraft = {
+      id: result.file.id,
+      name: result.file.name,
+      projectIds: [...result.file.projectIds],
+      content: result.file.content ?? content,
+      updatedAt: result.file.updatedAt,
+      updatedBy: result.file.updatedBy
+    };
+    knowledgeEditorNeedsFill = true;
+    if (!knowledgeDraft.projectIds.includes(knowledgeProjectId)) {
+      knowledgeProjectId = knowledgeDraft.projectIds[0];
+    }
   });
-  selectedProspectId = state.icp.seedLeads?.[0]?.id || selectedProspectId;
-  textarea.value = "";
-  render();
 });
 
-document.getElementById("icpGenerateJsonBtn").addEventListener("click", async () => {
-  state = await api("/api/icp/lookalike-json", {
-    method: "POST",
-    body: JSON.stringify({ totalResults: Number(document.getElementById("icpTotalResultsInput").value) })
-  });
-  render();
-});
-
-document.getElementById("icpRunApifyBtn").addEventListener("click", async () => {
-  if (!window.confirm("Запустити налаштований актор Apify з поточними ICP-фільтрами? Це може витратити платні кредити Apify.")) return;
-  state = await api("/api/icp/lookalike-search", {
-    method: "POST",
-    body: JSON.stringify({
-      totalResults: Number(document.getElementById("icpTotalResultsInput").value),
-      limit: Math.min(Number(document.getElementById("icpTotalResultsInput").value) || 100, 100)
-    })
-  });
-  selectedProspectId = state.prospects[0]?.id || selectedProspectId;
-  render();
+document.getElementById("knowledgeDeleteFileBtn").addEventListener("click", async () => {
+  if (!knowledgeDraft?.id) return;
+  if (!window.confirm(`Видалити файл «${knowledgeDraft.name}» із сервера? Агенти більше не читатимуть його.`)) return;
+  const result = await api(`/api/knowledge/library/files/${encodeURIComponent(knowledgeDraft.id)}/delete`, { method: "POST", body: "{}" });
+  knowledgeLibrary = result.library;
+  knowledgeDraft = null;
+  knowledgeFileId = null;
+  renderKnowledgeLibrary();
+  refreshIcons();
 });
 
 document.getElementById("profileFileInput").addEventListener("change", async (event) => {

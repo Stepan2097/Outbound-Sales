@@ -424,7 +424,6 @@ canvas {
 .privacy-form,
 .paste-form,
 .linkedin-target-form,
-.learning-form,
 .product-form,
 .example-form,
 .integration-form {
@@ -2639,8 +2638,7 @@ button:disabled {
 
 .assistant-task-form,
 .crm-pull-form,
-.agent-run-form,
-.icp-seed-form {
+.agent-run-form {
   display: grid;
   gap: 10px;
 }
@@ -2924,78 +2922,149 @@ dialog {
   }
 }
 
-.database-layout {
+/* База знань: проєкти зліва, їхні файли поруч, редактор на всю ширину під
+   ними — редагується завжди один файл, і йому потрібне місце, а не колонка. */
+.knowledge-library-layout {
   display: grid;
-  grid-template-columns: minmax(360px, 0.9fr) minmax(0, 1.1fr);
+  grid-template-columns: minmax(260px, 0.42fr) minmax(0, 1fr);
   gap: 12px;
   align-items: start;
 }
 
-.database-layout .span-2 {
+.knowledge-library-layout .span-2 {
   grid-column: 1 / -1;
 }
 
-.knowledge-inbox-panel {
-  background:
-    linear-gradient(135deg, var(--surface-strong), var(--surface-sunk)),
-    var(--surface-sunk);
-}
-
-.knowledge-inbox-form {
+.knowledge-project-list,
+.knowledge-file-list {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.38fr);
-  gap: 12px;
-  align-items: start;
+  gap: 8px;
+  align-content: start;
+  max-height: 420px;
+  overflow: auto;
 }
 
-.knowledge-inbox-form > .split-fields,
-.knowledge-inbox-form > label:first-of-type,
-.knowledge-inbox-form > button {
-  grid-column: 1;
+.knowledge-project-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-strong);
+  cursor: pointer;
 }
 
-.knowledge-inbox-form .compact-drop,
-.knowledge-inbox-form .screenshot-preview {
-  grid-column: 2;
+.knowledge-project-row span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 2px;
 }
 
-.knowledge-inbox-form .compact-drop {
-  min-height: 126px;
+.knowledge-project-row.active,
+.knowledge-file-row.active {
+  border-color: var(--teal);
+  background: var(--teal-weak);
 }
 
-.knowledge-inbox-result {
-  margin-top: 14px;
-}
-
-
-
-
-
-
-.knowledge-inbox-card {
+.knowledge-project-form {
   display: grid;
-  gap: 10px;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
 }
 
-.knowledge-inbox-card ul {
+.knowledge-file-row {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-strong);
+  cursor: pointer;
+}
+
+.knowledge-file-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.knowledge-file-row p {
   margin: 0;
-  padding-left: 18px;
-  color: #d8e7f3;
-  line-height: 1.45;
+  color: var(--muted);
+  font-size: 12px;
+  /* Перший рядок файлу — підказка, а не прев'ю: два рядки і край. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
-.learning-form {
-  gap: 9px;
+.knowledge-file-row small {
+  color: var(--muted);
+  font-size: 11px;
 }
 
-.learning-form textarea {
-  min-height: 84px;
+.knowledge-editor-form {
+  display: grid;
+  gap: 12px;
 }
 
-.screenshot-drop {
-  min-height: 112px;
-  background: var(--surface-sunk);
-  border-color: rgba(104, 184, 255, 0.28);
+.knowledge-project-picker > span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.knowledge-project-picker > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.knowledge-project-checkbox {
+  display: inline-flex;
+  white-space: nowrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-strong);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.knowledge-project-checkbox input {
+  margin: 0;
+  width: 14px;
+  height: 14px;
+  accent-color: var(--teal);
+}
+
+.knowledge-file-textarea {
+  min-height: 460px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.knowledge-editor-actions {
+  align-items: center;
+  gap: 12px;
+}
+
+.knowledge-editor-meta {
+  color: var(--muted);
+  font-size: 12px;
+  margin-right: auto;
 }
 
 .screenshot-preview {
@@ -3010,8 +3079,7 @@ dialog {
   display: none;
 }
 
-.screenshot-preview img,
-.learning-thumb img {
+.screenshot-preview img {
   width: 100%;
   aspect-ratio: 1;
   object-fit: cover;
@@ -3022,170 +3090,6 @@ dialog {
 .screenshot-preview span {
   color: var(--muted);
   overflow-wrap: anywhere;
-}
-
-.learning-metric-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
-  margin-bottom: 10px;
-}
-
-.learning-metric-grid div,
-.playbook-grid > div,
-.channel-tip,
-.learning-example-card {
-  background:
-    linear-gradient(180deg, var(--surface-strong), var(--surface-sunk)),
-    var(--surface-sunk);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-}
-
-.learning-metric-grid div {
-  min-height: 72px;
-  padding: 10px;
-}
-
-.learning-metric-grid span,
-.learning-meta-row span,
-.learning-example-heading small,
-.playbook-summary span {
-  color: var(--muted);
-}
-
-.learning-metric-grid strong {
-  display: block;
-  margin-top: 6px;
-  font-size: 20px;
-}
-
-.playbook-summary {
-  display: grid;
-  gap: 4px;
-  margin: 10px 0;
-  line-height: 1.4;
-}
-
-.playbook-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  margin-top: 10px;
-}
-
-.playbook-grid > div {
-  padding: 12px;
-}
-
-.playbook-grid ul {
-  margin: 8px 0 0;
-  padding-left: 18px;
-  color: #d8e7f3;
-  line-height: 1.45;
-}
-
-.channel-tip-list {
-  display: grid;
-  gap: 8px;
-  margin-top: 10px;
-}
-
-.channel-tip {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 8px;
-  align-items: center;
-  padding: 10px;
-}
-
-.channel-tip strong {
-  font-size: 13px;
-  line-height: 1.35;
-}
-
-.learning-example-list {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.icp-layout {
-  display: grid;
-  grid-template-columns: minmax(320px, 0.85fr) minmax(0, 1.15fr);
-  gap: 12px;
-  align-items: start;
-}
-
-.icp-seed-form textarea {
-  min-height: 150px;
-}
-
-.icp-profile-card {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background:
-    linear-gradient(180deg, var(--surface-strong), var(--surface-sunk)),
-    var(--surface-sunk);
-  padding: 12px;
-  display: grid;
-  gap: 10px;
-}
-
-.icp-chip-row {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.icp-profile-card .jsonbox {
-  max-height: 280px;
-  overflow: auto;
-  margin: 0;
-  font-size: 12px;
-}
-
-.learning-example-card {
-  display: grid;
-  grid-template-columns: 92px minmax(0, 1fr);
-  gap: 12px;
-  padding: 10px;
-  min-height: 124px;
-}
-
-.learning-example-card p {
-  margin: 8px 0;
-  color: #d8e7f3;
-  line-height: 1.45;
-  max-height: 62px;
-  overflow: hidden;
-}
-
-.learning-example-heading {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.learning-meta-row {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  flex-wrap: wrap;
-  font-size: 12px;
-  margin-bottom: 8px;
-}
-
-.learning-thumb-placeholder {
-  width: 100%;
-  aspect-ratio: 1;
-  display: grid;
-  place-items: center;
-  border-radius: 8px;
-  border: 1px dashed var(--line);
-  color: #8fb1cf;
-  background: var(--surface-sunk);
 }
 
 .lead-workspace {
@@ -3695,8 +3599,7 @@ dialog {
 
 .company-summary article,
 .company-detail-grid section,
-.company-research-footer,
-.knowledge-inbox-card {
+.company-research-footer {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface-sunk);
@@ -3706,15 +3609,12 @@ dialog {
 .company-summary span,
 .company-summary strong,
 .company-detail-grid strong,
-.company-research-footer span,
-.knowledge-inbox-card strong,
-.knowledge-inbox-card small {
+.company-research-footer span {
   display: block;
 }
 
 .company-summary span,
-.company-research-footer span,
-.knowledge-inbox-card small {
+.company-research-footer span {
   color: var(--muted);
   font-size: 12px;
 }
@@ -4377,9 +4277,10 @@ dialog {
 }
 
 @media (max-width: 1080px) {
-  .database-layout,
-  .learning-example-list,
-  .icp-layout,
+  .knowledge-library-layout {
+    grid-template-columns: 1fr;
+  }
+
   .agent-grid,
   .lead-workbench-grid,
   .followup-grid,
@@ -4394,8 +4295,7 @@ dialog {
   .strategy-transition-grid,
   .strategy-score-grid,
   .company-summary,
-  .company-detail-grid,
-  .knowledge-inbox-form {
+  .company-detail-grid {
     grid-template-columns: 1fr;
   }
 
@@ -4403,14 +4303,6 @@ dialog {
   .strategy-stakeholder dl,
   .strategy-gate-checks {
     grid-template-columns: 1fr;
-  }
-
-  .knowledge-inbox-form > .split-fields,
-  .knowledge-inbox-form > label:first-of-type,
-  .knowledge-inbox-form > button,
-  .knowledge-inbox-form .compact-drop,
-  .knowledge-inbox-form .screenshot-preview {
-    grid-column: 1;
   }
 
   .product-management-row {
@@ -4450,15 +4342,11 @@ dialog {
     grid-template-columns: repeat(6, minmax(0, 1fr));
   }
 
-  .learning-metric-grid,
   .product-memory-segments,
   .lead-command-bar,
   .lead-hero,
   .lead-stats-strip,
   .score-breakdown-grid,
-  .playbook-grid,
-  .channel-tip,
-  .learning-example-card,
   .screenshot-preview,
   .agent-run-form {
     grid-template-columns: 1fr;
@@ -4665,9 +4553,13 @@ dialog {
    base .pill is written for the light palette, and a status nobody can read in
    the dark theme is a status column that does not work. */
 .pill.tone-live { background: var(--teal-weak); color: var(--teal); }
+
 .pill.tone-warn { background: rgba(183, 121, 31, 0.16); color: var(--amber); }
+
 .pill.tone-bad { background: rgba(194, 65, 53, 0.14); color: var(--red); }
+
 .pill.tone-done { background: rgba(37, 99, 235, 0.12); color: var(--blue); }
+
 .pill.tone-muted { background: var(--surface-strong); color: var(--muted); }
 
 .warmup-detail-controls {
@@ -4835,7 +4727,9 @@ dialog {
 }
 
 .warmup-field-name { grid-column: span 4; }
+
 .warmup-field-folder { grid-column: span 5; }
+
 .warmup-field-product { grid-column: span 3; }
 
 .warmup-field-filter { grid-column: span 3; }

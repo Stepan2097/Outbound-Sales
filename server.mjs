@@ -6,6 +6,8 @@ import { createServer } from "node:http";
 import { connect as connectTcp } from "node:net";
 import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
+import { handleKnowledgeLibraryApi } from "./knowledge/api.mjs";
+import { knowledgeExcerptsForPrompt, knowledgeFilesForProduct, loadKnowledgeLibrary } from "./knowledge/library.mjs";
 import { handleWarmupApi } from "./warmup/api.mjs";
 import { startScheduler } from "./warmup/scheduler.mjs";
 
@@ -321,6 +323,10 @@ const state = {
 // no screen to edit these on, the environment is the source of truth and is
 // applied last.
 await loadPersistentWorkspaceState();
+// The knowledge library lives beside the state file, so it is opened from the
+// same path and, on a volume that has never held one, seeded from the
+// documents shipped with the repo.
+await loadKnowledgeLibrary(stateFilePath);
 initializeRuntimeConfigFromEnv();
 void warmRuntimeConnections();
 // Read once at boot so the sign-in screen knows whether a user base exists
@@ -502,6 +508,20 @@ async function handleApi(request, response, url) {
     });
     if (!handled) sendJson(response, 404, { success: false, error: "Unknown warm-up endpoint." });
     return;
+  }
+
+  // The knowledge library: projects and the files every agent reads before it
+  // writes. Its own module, its own store on disk, mounted behind this gate.
+  if (url.pathname === "/api/knowledge/library" || url.pathname.startsWith("/api/knowledge/library/")) {
+    const handled = await handleKnowledgeLibraryApi({
+      request,
+      response,
+      url,
+      sendJson,
+      readJson,
+      actingUser: request.auth?.profile?.email || request.auth?.profile?.name || ""
+    });
+    if (handled) return;
   }
 
   if (request.method === "GET" && url.pathname === "/api/state") {
@@ -7368,12 +7388,12 @@ async function prepareOutreachWithAi(prospect, profile, taskType = "SEQUENCE_GEN
       messages: [
         {
           role: "system",
-          content: "You are an elite outbound strategist and plain-spoken sales writer. Return only strict JSON with escaped newlines inside string values. The copy must sound human, specific, calm, and low-pressure. Avoid salesy phrases like 'I help', 'we help', 'quick demo', 'revolutionize', 'streamline', 'unlock', 'synergy', 'touch base', 'just checking in', and generic ROI claims. Do not invent private contact data or company facts. Ground every personalization point in provided company context, lead context, product knowledge, or mark it as something to verify. First touch should usually be a LinkedIn profile review/warm-up and a short invitation, not a pitch."
+          content: "You are an elite outbound strategist and plain-spoken sales writer. Return only strict JSON with escaped newlines inside string values. The copy must sound human, specific, calm, and low-pressure. Avoid salesy phrases like 'I help', 'we help', 'quick demo', 'revolutionize', 'streamline', 'unlock', 'synergy', 'touch base', 'just checking in', and generic ROI claims. Do not invent private contact data or company facts. Ground every personalization point in provided company context, lead context, product knowledge, or the workspace knowledge files, or mark it as something to verify. The knowledge files in product.knowledgeLibrary are the team's own written rules and facts: follow them over your own habits. First touch should usually be a LinkedIn profile review/warm-up and a short invitation, not a pitch."
         },
         {
           role: "user",
           content: JSON.stringify({
-            instruction: "Create a product-specific outbound strategy for this exact lead. Start from company context, likely priorities, unknowns, contact evidence, product knowledge, and learning memory. Treat outreach examples with quality='winning' as style guidance, and quality='bad' as patterns to avoid. Write messages that feel like a researched note from one professional to another. Do not use broad claims. If company data is weak, make the first touch a research-based question and add a research gap instead of pretending. Include concise LinkedIn invite, LinkedIn follow-up, email, SMS, WhatsApp, Telegram, call opener, four LinkedIn variations, and practical next actions. SMS and messenger drafts must be short and only used after contact/permission review.",
+            instruction: "Create a product-specific outbound strategy for this exact lead. Start from company context, likely priorities, unknowns, contact evidence, product knowledge, the workspace knowledge files in product.knowledgeLibrary, and learning memory. Treat outreach examples with quality='winning' as style guidance, and quality='bad' as patterns to avoid. Write messages that feel like a researched note from one professional to another. Do not use broad claims. If company data is weak, make the first touch a research-based question and add a research gap instead of pretending. Include concise LinkedIn invite, LinkedIn follow-up, email, SMS, WhatsApp, Telegram, call opener, four LinkedIn variations, and practical next actions. SMS and messenger drafts must be short and only used after contact/permission review.",
             requiredJsonShape: {
               recommendedChannel: "linkedin | email | sms | whatsapp | telegram | manual_research",
               qualificationRationale: "short rationale",
@@ -11654,7 +11674,30 @@ function productForPrompt(product, context = "") {
     differentiators: product.differentiators,
     objections: product.objections,
     memory: product.memory || synthesizeProductMemory(product),
-    knowledge: productKnowledgeForPrompt(product, 10, context)
+    knowledge: productKnowledgeForPrompt(product, 10, context),
+    // The knowledge library, filtered to this lead. Everything a person put in
+    // the project's files reaches the model here — as passages, not as the
+    // whole document, because the documents are long and most of each one has
+    // nothing to do with the lead on the screen.
+    knowledgeLibrary: knowledgeLibraryForPrompt(product, context)
+  };
+}
+
+/**
+ * Library passages for the projects pointed at this product, plus the names of
+ * every file they came from. The names matter: a model that can see it was
+ * given three passages out of a file called "FAQ — Training Black Affiliate"
+ * writes differently from one handed anonymous text.
+ */
+function knowledgeLibraryForPrompt(product, context = "") {
+  const productId = product?.id || "";
+  if (!productId) return null;
+  const excerpts = knowledgeExcerptsForPrompt(productId, context);
+  if (!excerpts.length) return null;
+  return {
+    usage: "Workspace knowledge files, written by the team. Treat them as internal source material: follow their rules and tone, use their facts, and never contradict them. They are not the lead's words and must not be quoted at the lead as if public.",
+    files: knowledgeFilesForProduct(productId).map((file) => file.name),
+    passages: excerpts
   };
 }
 
