@@ -104,6 +104,17 @@ test.beforeEach(() => {
 // than left to whenever the suite happens to run.
 const insideTheWindow = () => { const at = new Date(); at.setHours(10, 0, 0, 0); return at; };
 
+/**
+ * The two tests that go through the route cannot pass a time in — the route
+ * reads the clock itself, which is the whole point of it. So they pin the
+ * clock instead. Without this the suite is green before 13:00 and red after,
+ * which is worse than having no test: it teaches people that a red run is the
+ * time of day rather than a fault.
+ */
+function freezeInsideTheWindow(t) {
+  t.mock.timers.enable({ apis: ["Date"], now: insideTheWindow().getTime() });
+}
+
 test("asking who is next takes nothing, however often it is asked", async () => {
   const now = insideTheWindow();
 
@@ -165,7 +176,8 @@ test("an account that stopped being due between the poll and the lease is a 409,
   assert.equal(activeLease(now.getTime()), null);
 });
 
-test("the poll answers 200 and the whole envelope even when nobody owes work", async () => {
+test("the poll answers 200 and the whole envelope even when nobody owes work", async (t) => {
+  freezeInsideTheWindow(t);
   process.env.WARMUP_SCHEDULER_DISABLED = "1";
   const answer = await call({ method: "GET", path: "/api/warmup/agent/due" });
   assert.equal(answer.status, 200);
@@ -264,7 +276,8 @@ test("nothing left in today's quota reads as nothing owing, not as a fault", asy
   assert.ok(answer.retryAfterSeconds >= 300 && answer.retryAfterSeconds <= 540);
 });
 
-test("the route takes the account only on the POST", async () => {
+test("the route takes the account only on the POST", async (t) => {
+  freezeInsideTheWindow(t);
   const shown = await call({ method: "GET", path: "/api/warmup/agent/due" });
   assert.equal(shown.status, 200);
   assert.equal(shown.payload.next.leaseId, null);
