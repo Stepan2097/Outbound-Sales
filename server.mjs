@@ -6,6 +6,7 @@ import { connect as connectTcp } from "node:net";
 import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { handleWarmupApi } from "./warmup/api.mjs";
+import { startScheduler } from "./warmup/scheduler.mjs";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 const appRoot = join(root, "app");
@@ -318,6 +319,10 @@ const server = createServer(async (request, response) => {
 
 server.listen(port, () => {
   console.log(`OpenRouter orchestration platform running at http://localhost:${port}`);
+  // The warm-up's clock. It launches nothing — the Mac's worker asks this
+  // process what to do — but the leases and cool-offs it keeps are in memory,
+  // so they begin and end with the process that serves /agent/due.
+  startScheduler();
 });
 
 async function handleApi(request, response, url) {

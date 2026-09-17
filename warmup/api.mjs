@@ -18,6 +18,7 @@ import {
   AUDIT_HIDDEN_TYPES, MAX_THREADS_PER_RUN, lastSyncedAt, listThreads, markRead, markSynced, normalizeThreadInput,
   outreachFor, readThread, storeThread, syncSummary, threadKeyOf, unreadCount
 } from "./inbox.mjs";
+import { decideNext, finishRun } from "./scheduler.mjs";
 import {
   allowanceReason, claimCapacity, claimCutoff, defaultFilters, describeCampaign, isCampaignState,
   migrateCampaigns, moveTo, nextOrder, normalizeCampaign, progressApproximate, progressFrom, renumber,
@@ -1748,6 +1749,23 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       return true;
     }
 
+    // The worker's only question, and the whole of the pacing.
+    //
+    // It answers 200 in every state — "nobody owes work" is an answer, not an
+    // error — because the thing asking has no window, no order and no gap of
+    // its own, and a 4xx would leave it with nothing to sleep on.
+    //
+    // `?peek=1` asks the same question without taking the account. Asking
+    // normally hands out a lease, which is the right shape for a worker and a
+    // trap for everything else: a curl while debugging, a health check or a tab
+    // left open on this URL would otherwise park a real account for the length
+    // of a lease, in the middle of the morning, with a quiet morning as the only
+    // symptom.
+    if (method === "GET" && path === "/agent/due") {
+      sendJson(response, 200, await decideNext({ peek: url.searchParams.get("peek") === "1" }));
+      return true;
+    }
+
     if (method === "GET" && path === "/agent") {
       const accountId = url.searchParams.get("accountId");
       // Without an account, the one thing worth answering is whether the agent
@@ -1903,6 +1921,30 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           meta: { sessionId: existing.id, durationMin: minutes, actions: existing.actions || {}, note }
         });
         sendJson(response, 200, { success: true, closed: true, durationMin: minutes });
+        return true;
+      }
+
+      // The other half of /agent/due: the lease comes back, and with it the one
+      // thing only the worker knows — whether the session actually happened.
+      //
+      // An unknown or expired lease is accepted rather than refused. A run that
+      // overran its lease is still a run, and its failure is still worth a
+      // cool-off; refusing the report would throw away the only account of it
+      // anybody has.
+      if (action === "run.finished") {
+        const run = await activeRun(account.id);
+        const outcome = await finishRun({
+          account,
+          run,
+          leaseId: typeof body.leaseId === "string" ? body.leaseId : null,
+          ok: body.ok !== false,
+          note: typeof body.note === "string" ? body.note.slice(0, 300) : null
+        });
+        sendJson(response, 200, {
+          success: true,
+          nextInSeconds: outcome.nextInSeconds,
+          released: outcome.released
+        });
         return true;
       }
 
