@@ -302,3 +302,45 @@ test("a user who has chosen no model falls back to the workspace default and can
     await server.stop();
   }
 });
+
+test("a saved workspace whose people chose a thinking level still comes back after a restart", async () => {
+  // The restore reads every person's model through normalizeUserModelId, which
+  // reads REASONING_EFFORTS. While that list was declared below the top-level
+  // await that starts the restore, it was still in its temporal dead zone — so
+  // the first user carrying a "#effort" choice threw, the whole saved
+  // workspace was dropped, and the first thing to save overwrote the file with
+  // an empty one. A model without an effort never reached that line, which is
+  // why the choice with one is the case worth keeping a test on.
+  const server = await startServer({
+    port: 43267,
+    savedState: {
+      version: 1,
+      users: [{
+        id: devUserId,
+        email: "developer@localhost",
+        name: "Local Tester",
+        role: "admin",
+        status: "active",
+        modelId: "anthropic/claude-sonnet-5#high",
+        modelChosenAt: new Date().toISOString(),
+        createdAt: "2026-01-01T00:00:00.000Z"
+      }],
+      usage: [usageRow({ at: `${dayKey(2)}T09:00:00.000Z`, costUsd: 1.5 })],
+      userActivity: {
+        [devUserId]: { userId: devUserId, days: { [dayKey(2)]: 3600 }, tabs: {}, lastCreditedAt: null, lastSeenAt: null }
+      }
+    }
+  });
+
+  try {
+    const { status, payload } = await server.get("/api/account/profile");
+    assert.equal(status, 200);
+    assert.equal(payload.model.modelId, "anthropic/claude-sonnet-5#high", "the choice survived the restart");
+    assert.equal(payload.model.effort, "high");
+    assert.equal(payload.user.createdAt, "2026-01-01T00:00:00.000Z", "and so did the profile it was on");
+    assert.equal(payload.spend.allTimeCostUsd, 1.5, "and the spend beside it");
+    assert.equal(payload.time.totalSeconds, 3600, "and the time");
+  } finally {
+    await server.stop();
+  }
+});

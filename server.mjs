@@ -2180,7 +2180,7 @@ async function workspaceDirectory() {
     return {
       id: user.id,
       email,
-      name: cleanText(known?.name || metadata.full_name || metadata.name || email.split("@")[0] || ""),
+      name: personName(email, known?.name, metadata.full_name, metadata.name),
       role: known?.role || roleFromCrm(crm),
       // The model each person works with, shown in the list so the workspace's
       // spread of choices is one glance rather than fourteen clicks.
@@ -2190,17 +2190,97 @@ async function workspaceDirectory() {
       blocked,
       crmRole: cleanText(crm?.role || ""),
       approvalStatus: approval,
+      // Other addresses that reach this same person. Empty for almost everybody.
+      aliases: [],
       lastSignInAt: user.last_sign_in_at || crm?.last_sign_in_at || null,
       createdAt: user.created_at || null
     };
   });
 
+  const collapsed = collapseByMailbox(people);
   // Those who can work first, then by how recently they used the CRM.
-  people.sort((left, right) => {
+  collapsed.sort((left, right) => {
     if (Boolean(left.blocked) !== Boolean(right.blocked)) return left.blocked ? 1 : -1;
     return String(right.lastSignInAt || right.createdAt || "").localeCompare(String(left.lastSignInAt || left.createdAt || ""));
   });
-  return { people, canSignIn: people.filter((person) => !person.blocked).length };
+  return { people: collapsed, canSignIn: collapsed.filter((person) => !person.blocked).length };
+}
+
+/**
+ * A name is a name. A fragment of an address is not one.
+ *
+ * Almost nobody in this base ever filled in a display name, and standing in for
+ * it with the part before the @ put "pavlo.work.101" directly above
+ * "pavlo.work.101@gmail.com" — the same address twice, which is exactly how it
+ * reads. Nothing is better than that: the row then shows the address once.
+ *
+ * Only a local part that reads as an address is thrown away — one carrying a
+ * dot, a digit, an underscore or a hyphen. "Stepan" at stepan@… is a name that
+ * happens to match his address, and it stays a name.
+ */
+function personName(email, ...candidates) {
+  const address = cleanText(email || "").toLowerCase();
+  const local = address.split("@")[0];
+  const localReadsAsAddress = /[._\-\d]/.test(local);
+  for (const candidate of candidates) {
+    const name = cleanText(candidate || "");
+    if (!name) continue;
+    const lowered = name.toLowerCase();
+    if (lowered === address) continue;
+    if (localReadsAsAddress && lowered === local) continue;
+    return name;
+  }
+  return "";
+}
+
+/**
+ * Two addresses, one mailbox.
+ *
+ * Gmail delivers pavlo.work.101+outbound@gmail.com and pavlo.work.101@gmail.com
+ * to the same inbox, and ignores dots in the name as well. Supabase holds them
+ * as two rows, so a list of people showed one person twice. This key only
+ * recognises them; signing in is still by the exact address, and this lets
+ * nobody in.
+ */
+function mailboxKey(emailValue) {
+  const email = cleanText(emailValue || "").toLowerCase();
+  const at = email.lastIndexOf("@");
+  if (at === -1) return email;
+  const domain = email.slice(at + 1);
+  let local = email.slice(0, at);
+  const plus = local.indexOf("+");
+  if (plus !== -1) local = local.slice(0, plus);
+  if (domain === "gmail.com" || domain === "googlemail.com") local = local.replace(/\./g, "");
+  return `${local}@${domain}`;
+}
+
+/**
+ * One row per mailbox — unless more than one of them has actually been used
+ * here. An account with a profile has its own chosen model, its own spend and
+ * its own hours; folding it into another row would hide them. So duplicates
+ * are folded only into a row that keeps everything there was to keep, and the
+ * addresses that were folded in stay named on it.
+ */
+function collapseByMailbox(people) {
+  const groups = new Map();
+  for (const person of people) {
+    const key = mailboxKey(person.email);
+    groups.set(key, [...(groups.get(key) || []), person]);
+  }
+  const collapsed = [];
+  for (const group of groups.values()) {
+    if (group.length === 1) {
+      collapsed.push(group[0]);
+      continue;
+    }
+    const working = group.filter((person) => person.signedInHere);
+    const kept = working.length ? working : [group.find((person) => !person.blocked) || group[0]];
+    for (const person of kept) {
+      person.aliases = group.filter((other) => other !== person).map((other) => other.email);
+    }
+    collapsed.push(...kept);
+  }
+  return collapsed;
 }
 
 /**
@@ -2635,7 +2715,7 @@ async function resolveAccountTarget(request, identifier, { create = false } = {}
   return {
     id: user.id,
     email,
-    name: cleanText(metadata.full_name || metadata.name || email.split("@")[0] || ""),
+    name: personName(email, metadata.full_name, metadata.name),
     title: "",
     role: "seller",
     status: "active",

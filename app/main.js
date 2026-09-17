@@ -189,10 +189,26 @@ function renderAccount() {
  */
 const ROLE_LABEL = { admin: "Адміністратор", seller: "Продавець" };
 
+/**
+ * Ім'я, тільки якщо воно ім'я. Уламок адреси ним не є: «pavlo.work.101» над
+ * «pavlo.work.101@gmail.com» — це одна адреса, написана двічі. А «Stepan» на
+ * stepan@… — ім'я, яке просто збіглося з адресою, і воно лишається.
+ */
+function personDisplayName(name, email) {
+  const clean = String(name || "").trim().toLowerCase();
+  const address = String(email || "").trim().toLowerCase();
+  const local = address.split("@")[0];
+  if (!clean || clean === address) return "";
+  if (clean === local && /[._\-\d]/.test(local)) return "";
+  return String(name).trim();
+}
+
 function teamRowHtml(person, selfEmail, { canSetRole = false } = {}) {
   const self = person.email === selfEmail;
+  const name = personDisplayName(person.name, person.email);
   const facts = [
     person.blocked,
+    (person.aliases || []).length ? `та сама скринька, що ${person.aliases.join(", ")}` : "",
     person.crmRole ? `у CRM ${person.crmRole}` : "",
     person.signedInHere ? "" : "тут ще не заходив",
     person.lastSignInAt ? `вхід ${warmupAgo(person.lastSignInAt)}` : "жодного входу"
@@ -203,8 +219,8 @@ function teamRowHtml(person, selfEmail, { canSetRole = false } = {}) {
   const open = String(person.id || "") === String(profileUserId || "");
   return `<article class="team-row${person.blocked ? " team-row-outside" : ""}${open ? " team-row-open" : ""}" data-team-user="${escapeAttr(person.id || "")}" tabindex="0" role="button" aria-pressed="${open ? "true" : "false"}">
     <div class="team-who">
-      <strong>${escapeHtml(person.name || person.email)}${self ? " · це ти" : ""}</strong>
-      <span>${escapeHtml(person.email)}</span>
+      <strong>${escapeHtml(name || person.email)}${self ? " · це ти" : ""}</strong>
+      ${name ? `<span>${escapeHtml(person.email)}</span>` : ""}
       ${facts ? `<span>${escapeHtml(facts)}</span>` : ""}
     </div>
     <span class="team-model">${person.modelLabel ? escapeHtml(person.modelLabel) : "модель робочого простору"}</span>
@@ -233,17 +249,28 @@ async function loadTeamDirectory() {
   }
   try {
     teamDirectory = await api("/api/account/directory");
-    setHtml("teamUserList", teamDirectory.people.map((person) => teamRowHtml(person, selfEmail, { canSetRole: true })).join(""));
-    const blocked = teamDirectory.people.length - teamDirectory.canSignIn;
-    setText("teamUserNote", blocked
-      ? `Увійти ${uaPlural(teamDirectory.canSignIn, "може", "можуть", "можуть")} ${teamDirectory.canSignIn} з ${teamDirectory.people.length}; решту тримає CRM. Вибери людину — нижче її модель, кредити і час.`
-      : `Усі ${teamDirectory.people.length} ${uaPlural(teamDirectory.people.length, "акаунт", "акаунти", "акаунтів")} CRM можуть увійти. Вибери людину — нижче її модель, кредити і час.`);
+    // Команда — це ті, хто тут працює. Решта акаунтів Supabase — залишки
+    // тестів і випадкові реєстрації, яких CRM усе одно не пускає: вони не
+    // зникають, але й не стоять між живими людьми.
+    const working = teamDirectory.people.filter((person) => !person.blocked);
+    const outside = teamDirectory.people.filter((person) => person.blocked);
+    setHtml("teamUserList", [
+      working.map((person) => teamRowHtml(person, selfEmail, { canSetRole: true })).join(""),
+      outside.length
+        ? `<details class="profile-details team-outside-group">
+            <summary><span>Ще ${outside.length} ${uaPlural(outside.length, "акаунт", "акаунти", "акаунтів")} Supabase, ${uaPlural(outside.length, "якого", "яких", "яких")} CRM сюди не пускає</span><i data-lucide="chevron-down"></i></summary>
+            <div class="profile-details-body">${outside.map((person) => teamRowHtml(person, selfEmail, { canSetRole: true })).join("")}</div>
+          </details>`
+        : ""
+    ].join(""));
+    setText("teamUserNote", `${working.length} ${uaPlural(working.length, "людина працює", "людини працюють", "людей працюють")} у цьому робочому просторі. Вибери людину — нижче її модель, кредити і час.`);
   } catch (error) {
     // Список приходить із Supabase, і без нього тут була б порожня вкладка. Своя
     // картка є завжди — вона лежить у цьому ж застосунку.
     teamDirectory = null;
     showSelfOnly(`Список команди зараз недоступний: ${error.message}`);
   }
+  refreshIcons();
 }
 
 function selfDirectoryRow(user) {
@@ -5509,8 +5536,13 @@ function renderProfileScreen() {
   if (!profileData) return;
   const { model, spend, time, user } = profileData;
 
-  setText("profileName", user?.name || user?.email || "Профіль");
-  setText("profileEmail", user?.email || "—");
+  // Пошта показується один раз: як заголовок, коли імені немає, і як підпис,
+  // коли ім'я є.
+  const displayName = personDisplayName(user?.name, user?.email);
+  setText("profileName", displayName || user?.email || "Профіль");
+  const emailLine = document.getElementById("profileEmail");
+  emailLine.textContent = displayName ? user?.email || "" : "";
+  emailLine.hidden = !emailLine.textContent;
   setText("accountRolePill", ROLE_LABEL[user?.role] || user?.role || "seller");
   // Пароль і вихід — завжди про того, хто зараз у застосунку. Коли відкрито
   // чужу картку, їм там не місце: адміністратор не змінює чужий пароль звідси.

@@ -5754,6 +5754,21 @@ dialog {
   background: rgba(101, 240, 219, 0.08);
 }
 
+/* Згорнута група чужих акаунтів стоїть у тому ж списку, тож тримає той самий
+   відступ, що й рядки над нею. */
+.team-outside-group {
+  border: 1px solid rgba(143, 177, 207, 0.18);
+  border-radius: 8px;
+  background: rgba(4, 16, 29, 0.35);
+  padding: 12px;
+}
+
+.team-outside-group .profile-details-body {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
 .team-model {
   flex: 0 0 auto;
   max-width: 220px;
