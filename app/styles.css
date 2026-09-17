@@ -1621,6 +1621,27 @@ output {
   background: linear-gradient(135deg, rgba(11, 44, 69, 0.97), rgba(7, 29, 52, 0.94));
 }
 
+.team-who {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.team-who strong,
+.team-who span {
+  overflow-wrap: anywhere;
+}
+
+.team-row-outside strong {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.team-access {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 150px;
+}
+
 .research-progress-heading,
 .message-angle-heading,
 .angle-footer,

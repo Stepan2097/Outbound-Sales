@@ -483,14 +483,21 @@
                   <button class="danger-button" id="logoutBtn" type="button"><i data-lucide="log-out"></i><span>Вийти</span></button>
                   <div class="profile-team" id="adminTeamPanel" hidden>
                     <h3>Акаунти команди</h3>
-                    <form class="integration-form" id="teamUserForm">
-                      <input id="teamUserNameInput" type="text" placeholder="Ім'я продавця" required />
-                      <input id="teamUserEmailInput" type="email" placeholder="Робоча пошта" required />
-                      <input id="teamUserPasswordInput" type="password" minlength="10" placeholder="Тимчасовий пароль" required />
-                      <select id="teamUserRoleInput"><option value="seller">Продавець</option><option value="admin">Адміністратор</option></select>
-                      <button type="submit"><i data-lucide="user-plus"></i><span>Створити користувача</span></button>
-                    </form>
+                    <p class="profile-chart-note" id="teamUserNote">Усі, хто має акаунт у CRM. Доступ до Outbound OS вмикається тут.</p>
                     <div class="team-list" id="teamUserList"></div>
+                    <details class="profile-details">
+                      <summary><span>Створити новий акаунт</span><i data-lucide="chevron-down"></i></summary>
+                      <div class="profile-details-body">
+                        <p class="profile-chart-note">Потрібно лише тому, кого ще немає в CRM — інакше просто дай доступ у списку вище.</p>
+                        <form class="integration-form" id="teamUserForm">
+                          <input id="teamUserNameInput" type="text" placeholder="Ім'я продавця" required />
+                          <input id="teamUserEmailInput" type="email" placeholder="Робоча пошта" required />
+                          <input id="teamUserPasswordInput" type="password" minlength="10" placeholder="Тимчасовий пароль" required />
+                          <select id="teamUserRoleInput"><option value="seller">Продавець</option><option value="admin">Адміністратор</option></select>
+                          <button type="submit"><i data-lucide="user-plus"></i><span>Створити користувача</span></button>
+                        </form>
+                      </div>
+                    </details>
                   </div>
                 </div>
               </details>

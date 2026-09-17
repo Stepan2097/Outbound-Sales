@@ -12,6 +12,12 @@ let activeLeadSectionId = "dashboard-account";
 let authState = null;
 let authMode = "login";
 let activeResearchJob = null;
+// Екран профілю живе нижче по файлу, а `await bootApplication()` ділить модуль
+// надвоє: усе, оголошене після нього, під час завантаження ще в TDZ. Тому ці
+// дві змінні стоять тут — інакше перезавантаження на вкладці Профіль валить
+// увесь застосунок, а не лише її.
+let profileData = null;
+let profileTabId = null;
 
 const views = [...document.querySelectorAll(".view")];
 const navItems = [...document.querySelectorAll(".nav-item")];
@@ -163,10 +169,65 @@ function renderAccount() {
   document.getElementById("accountEmailInput").value = user.email || "";
   const adminPanel = document.getElementById("adminTeamPanel");
   adminPanel.hidden = user.role !== "admin";
-  setHtml("teamUserList", (authState.team || []).map((member) => `
-    <article class="team-row"><div><strong>${escapeHtml(member.name)}</strong><span>${escapeHtml(member.email)}</span></div><span class="pill">${escapeHtml(member.role)}</span></article>
-  `).join(""));
 }
+
+/**
+ * Хто взагалі є, а не лише хто вже запрошений.
+ *
+ * Увійти можна тільки маючи і акаунт у Supabase, і профіль у цьому просторі,
+ * тож колега, який щодня сидить у CRM, до запрошення тут просто відсутній.
+ * Раніше про це не було ані натяку — панель показувала двох і мовчала про решту.
+ */
+const ACCESS_LABEL = { admin: "Адміністратор", seller: "Продавець", none: "Без доступу" };
+
+function teamRowHtml(person, selfEmail) {
+  const self = person.email === selfEmail;
+  const facts = [
+    person.crmRole ? `у CRM ${person.crmRole}` : "",
+    person.approvalStatus === "pending" ? "не підтверджений у CRM" : "",
+    person.disabled ? "доступ вимкнено" : "",
+    person.lastSignInAt ? `вхід ${warmupAgo(person.lastSignInAt)}` : "жодного входу"
+  ].filter(Boolean).join(" · ");
+  const options = ["admin", "seller", "none"].map((value) => {
+    const current = person.access || "none";
+    return `<option value="${value}"${value === current ? " selected" : ""}>${ACCESS_LABEL[value]}</option>`;
+  }).join("");
+  return `<article class="team-row${person.access ? "" : " team-row-outside"}">
+    <div class="team-who">
+      <strong>${escapeHtml(person.name || person.email)}</strong>
+      <span>${escapeHtml(person.email)}</span>
+      ${facts ? `<span>${escapeHtml(facts)}</span>` : ""}
+    </div>
+    <select class="team-access" data-email="${escapeHtml(person.email)}"${self ? " disabled title=\"Свій доступ змінює інший адміністратор\"" : ""}>${options}</select>
+  </article>`;
+}
+
+async function loadTeamDirectory() {
+  if (authState?.user?.role !== "admin") return;
+  try {
+    const directory = await api("/api/account/directory");
+    const selfEmail = String(authState.user.email || "").toLowerCase();
+    setHtml("teamUserList", directory.people.map((person) => teamRowHtml(person, selfEmail)).join(""));
+    setText("teamUserNote", `З ${directory.people.length} ${uaPlural(directory.people.length, "акаунта", "акаунтів", "акаунтів")} CRM доступ до Outbound OS ${uaPlural(directory.withAccess, "має", "мають", "мають")} ${directory.withAccess}.`);
+  } catch (error) {
+    setText("teamUserNote", error.message);
+  }
+}
+
+document.getElementById("teamUserList")?.addEventListener("change", async (event) => {
+  const select = event.target.closest(".team-access");
+  if (!select) return;
+  select.disabled = true;
+  try {
+    await api("/api/account/access", {
+      method: "POST",
+      body: JSON.stringify({ email: select.dataset.email, access: select.value })
+    });
+  } catch (error) {
+    setText("teamUserNote", error.message);
+  }
+  await loadTeamDirectory();
+});
 
 function renderProductContext() {
   const selected = state.prospects?.find((prospect) => prospect.id === selectedProspectId);
@@ -5596,7 +5657,6 @@ startWarmupBadge();
  * трьома робочими днями має виглядати як місяць із трьома робочими днями, а
  * не як три дні поспіль.
  */
-let profileData = null;
 
 function formatSeconds(seconds) {
   const total = Math.max(0, Math.round(Number(seconds) || 0));
@@ -5681,6 +5741,7 @@ async function loadProfileScreen() {
   try {
     profileData = await api("/api/account/profile");
     renderProfileScreen();
+    loadTeamDirectory();
   } catch (error) {
     setText("profileModelNote", error.message);
   }
@@ -5699,8 +5760,6 @@ document.getElementById("profileModelSelect")?.addEventListener("change", async 
  * Б'ється лише поки вкладку видно. Скільки з цього зарахувати — вирішує
  * сервер; тут немає жодного припущення про час.
  */
-let profileTabId = null;
-
 function startActivityHeartbeat() {
   try {
     profileTabId = window.sessionStorage.getItem("outboundTabId");

@@ -555,6 +555,27 @@ async function handleApi(request, response, url) {
     return;
   }
 
+  if (request.method === "GET" && url.pathname === "/api/account/directory") {
+    if (request.auth.profile.role !== "admin") {
+      sendJson(response, 403, { error: "Список команди бачить лише адміністратор робочого простору." });
+      return;
+    }
+    sendJson(response, 200, await workspaceDirectory());
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/account/access") {
+    if (request.auth.profile.role !== "admin") {
+      sendJson(response, 403, { error: "Змінювати доступи може лише адміністратор робочого простору." });
+      return;
+    }
+    const body = await readJson(request);
+    const profile = await setWorkspaceAccess(request.auth.profile, body.email, cleanText(body.access || ""));
+    await writePersistentWorkspaceState();
+    sendJson(response, 200, { user: publicUserProfile(profile) });
+    return;
+  }
+
   if (request.method === "POST" && url.pathname === "/api/account/users") {
     if (request.auth.profile.role !== "admin") {
       sendJson(response, 403, { error: "Додавати користувачів може лише адміністратор робочого простору." });
@@ -1977,6 +1998,99 @@ async function findSupabaseUserByEmail(emailValue) {
   if (!email) return null;
   const result = await supabaseAuthRequest("admin/users?page=1&per_page=1000");
   return (result.users || []).find((user) => String(user.email || "").toLowerCase() === email) || null;
+}
+
+/** Rows from a CRM table, using the same credentials as Auth. */
+async function supabaseRestRows(table, columns) {
+  const config = supabaseAuthConfig();
+  const response = await fetch(`${config.url}/rest/v1/${table}?select=${encodeURIComponent(columns)}&limit=1000`, {
+    headers: { apikey: config.apiKey, Authorization: `Bearer ${config.apiKey}` }
+  });
+  if (!response.ok) throw apiError(`Supabase REST HTTP ${response.status}`, 502);
+  return response.json();
+}
+
+/**
+ * Everybody who has an account in the CRM, and whether they can get into
+ * Outbound OS.
+ *
+ * The workspace list is a list of invitations, not a list of people. Signing in
+ * needs two things — a Supabase account and a profile here — so a colleague who
+ * uses the CRM daily is simply absent from "Акаунти команди" until somebody
+ * invites them. That was invisible: the panel showed the two invited names and
+ * gave no hint that a dozen more accounts existed. So the panel now shows all of
+ * them, each marked with the access it has.
+ *
+ * Supabase Auth is the authority on who exists and must be reachable. The CRM's
+ * own `profiles` table only decorates the rows with a CRM role and approval
+ * state, and belongs to the CRM app rather than to us, so its absence costs a
+ * column, not the list.
+ */
+async function workspaceDirectory() {
+  const authUsers = (await supabaseAuthRequest("admin/users?page=1&per_page=1000")).users || [];
+  const crmProfiles = await supabaseRestRows("profiles", "id,email,role,approval_status,last_sign_in_at").catch(() => []);
+  const crmByEmail = new Map(crmProfiles.map((row) => [cleanText(row.email || "").toLowerCase(), row]));
+
+  const people = authUsers.map((user) => {
+    const email = cleanText(user.email || "").toLowerCase();
+    const metadata = user.user_metadata || {};
+    const invited = state.users.find((item) => item.id === user.id || item.email === email) || null;
+    const crm = crmByEmail.get(email) || {};
+    return {
+      id: user.id,
+      email,
+      name: cleanText(invited?.name || metadata.full_name || metadata.name || email.split("@")[0] || ""),
+      // "" means no access at all, which is the state of most rows here.
+      access: invited && invited.status !== "disabled" ? invited.role || "seller" : "",
+      disabled: Boolean(invited && invited.status === "disabled"),
+      crmRole: cleanText(crm.role || ""),
+      approvalStatus: cleanText(crm.approval_status || ""),
+      lastSignInAt: user.last_sign_in_at || crm.last_sign_in_at || null,
+      createdAt: user.created_at || null
+    };
+  });
+
+  // Those who can work first; the rest by how recently they signed into the CRM,
+  // because that is the ordering an admin deciding whom to invite reads by.
+  people.sort((left, right) => {
+    if (Boolean(left.access) !== Boolean(right.access)) return left.access ? -1 : 1;
+    return String(right.lastSignInAt || right.createdAt || "").localeCompare(String(left.lastSignInAt || left.createdAt || ""));
+  });
+  return { people, withAccess: people.filter((person) => person.access).length };
+}
+
+/**
+ * Grant, change or withdraw one person's access. Withdrawing disables the
+ * profile instead of removing it: the id is what spend and activity are
+ * recorded against, and deleting it would silently rewrite history.
+ */
+async function setWorkspaceAccess(actor, emailValue, accessValue) {
+  const email = cleanText(emailValue || "").toLowerCase();
+  const access = ["admin", "seller", "none"].includes(accessValue) ? accessValue : "";
+  if (!email) throw apiError("Вкажи email.");
+  if (!access) throw apiError("Доступ буває лише admin, seller або none.");
+  // Nobody edits their own row. That is also what keeps the workspace from
+  // ending up with no admin: every caller here is an active admin, so the one
+  // admin who could be left alone is the one who cannot be switched off.
+  if (email === cleanText(actor.email || "").toLowerCase()) {
+    throw apiError("Свій власний доступ змінити не можна — попроси іншого адміністратора.", 400);
+  }
+
+  const existing = state.users.find((item) => item.email === email) || null;
+  if (access === "none") {
+    if (!existing) throw apiError("У цього акаунта й так немає доступу.", 404);
+    existing.status = "disabled";
+    existing.updatedAt = new Date().toISOString();
+    return existing;
+  }
+
+  const user = existing ? { id: existing.id, email, user_metadata: {} } : await findSupabaseUserByEmail(email);
+  if (!user) throw apiError("Такого акаунта немає в Supabase — його спершу треба створити.", 404);
+  const profile = ensureWorkspaceUserProfile(user, { role: access });
+  profile.role = access;
+  profile.status = "active";
+  profile.updatedAt = new Date().toISOString();
+  return profile;
 }
 
 function publicUserProfile(profile = {}) {
