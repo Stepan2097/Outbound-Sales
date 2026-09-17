@@ -323,6 +323,9 @@ const state = {
 await loadPersistentWorkspaceState();
 initializeRuntimeConfigFromEnv();
 void warmRuntimeConnections();
+// Read once at boot so the sign-in screen knows whether a user base exists
+// before anybody has signed in. A failure here only means "not known yet".
+void crmProfilesByEmail().catch(() => {});
 
 const server = createServer(async (request, response) => {
   try {
@@ -564,13 +567,13 @@ async function handleApi(request, response, url) {
     return;
   }
 
-  if (request.method === "POST" && url.pathname === "/api/account/access") {
+  if (request.method === "POST" && url.pathname === "/api/account/role") {
     if (request.auth.profile.role !== "admin") {
-      sendJson(response, 403, { error: "Змінювати доступи може лише адміністратор робочого простору." });
+      sendJson(response, 403, { error: "Змінювати ролі може лише адміністратор робочого простору." });
       return;
     }
     const body = await readJson(request);
-    const profile = await setWorkspaceAccess(request.auth.profile, body.email, cleanText(body.access || ""));
+    const profile = await setWorkspaceRole(request.auth.profile, body.email, cleanText(body.role || ""));
     await writePersistentWorkspaceState();
     sendJson(response, 200, { user: publicUserProfile(profile) });
     return;
@@ -1868,11 +1871,10 @@ async function loginWorkspaceUser(emailValue, passwordValue, options = {}) {
     body: { email, password }
   });
   const user = session.user || await verifySupabaseAccessToken(session.access_token);
-  const existingProfile = findWorkspaceUserProfile(user);
-  if (!existingProfile && !options.allowUnregistered) {
-    throw apiError("Цей акаунт не запрошено в робочий простір Outbound OS.", 403);
-  }
-  const profile = existingProfile || ensureWorkspaceUserProfile(user, options.defaults || {});
+  // Bootstrap is the one path that predates the CRM having anything to say.
+  const profile = options.allowUnregistered
+    ? ensureWorkspaceUserProfile(user, options.defaults || {})
+    : await admitWorkspaceUser(user, options.defaults || {});
   if (profile.status === "disabled") throw apiError("Цей акаунт у робочому просторі вимкнено.", 403);
   cacheAuthSession(session.access_token, user);
   return { session, user, profile };
@@ -1883,7 +1885,7 @@ async function authenticateApiRequest(request, response, options = {}) {
     const user = { id: "dev-user", email: "developer@localhost", user_metadata: { name: "Local Tester", role: "admin" } };
     return { user, profile: ensureWorkspaceUserProfile(user, { role: "admin" }), accessToken: "dev-bypass" };
   }
-  if (!state.users.some((user) => user.status !== "disabled")) {
+  if (!state.users.some((user) => user.status !== "disabled") && !crmBaseHasPeople) {
     if (options.optional) return null;
     sendJson(response, 401, { error: "Створи перший акаунт власника робочого простору.", bootstrapRequired: true });
     return null;
@@ -1919,11 +1921,13 @@ async function authenticateApiRequest(request, response, options = {}) {
     sendJson(response, 401, { error: "Сесія завершилася. Увійди знову." });
     return null;
   }
-  const profile = findWorkspaceUserProfile(user);
-  if (!profile) {
+  let profile = null;
+  try {
+    profile = await admitWorkspaceUser(user);
+  } catch (error) {
     if (options.optional) return null;
     clearAuthSessionCookies(request, response);
-    sendJson(response, 403, { error: "Цей акаунт не запрошено в робочий простір Outbound OS." });
+    sendJson(response, Number(error?.statusCode) || 403, { error: error.message });
     return null;
   }
   if (profile.status === "disabled") {
@@ -2000,6 +2004,57 @@ async function findSupabaseUserByEmail(emailValue) {
   return (result.users || []).find((user) => String(user.email || "").toLowerCase() === email) || null;
 }
 
+/**
+ * There is one user base, and it is the CRM's.
+ *
+ * Outbound OS keeps a profile row per person, but that row is a record — a
+ * model choice, spend, time — and never a gate. Whether somebody may sign in is
+ * answered by the CRM's own `profiles` table, which already carries the
+ * approval flag the CRM uses for exactly this question. Signing up to this
+ * Supabase project is open and self-confirming, so "anybody with an account"
+ * would mean anybody at all; "anybody the CRM approved" is the same base with
+ * the gate that base already has.
+ *
+ * Held for a minute because a sign-in should wait on this at most once.
+ */
+let crmProfileCache = { at: 0, byEmail: new Map() };
+let crmBaseHasPeople = false;
+
+async function crmProfilesByEmail({ maxAgeMs = 60000 } = {}) {
+  if (Date.now() - crmProfileCache.at < maxAgeMs) return crmProfileCache.byEmail;
+  const rows = await supabaseRestRows("profiles", "id,email,role,approval_status,last_sign_in_at");
+  const byEmail = new Map(rows.map((row) => [cleanText(row.email || "").toLowerCase(), row]));
+  crmProfileCache = { at: Date.now(), byEmail };
+  crmBaseHasPeople = crmBaseHasPeople || byEmail.size > 0;
+  return byEmail;
+}
+
+/** What this person's role here would be, going by what they are in the CRM. */
+function roleFromCrm(crmProfile) {
+  return cleanText(crmProfile?.role || "") === "admin" ? "admin" : "seller";
+}
+
+/**
+ * Let somebody in, or say plainly why not.
+ *
+ * Somebody already known here keeps their profile untouched — including a role
+ * an admin set by hand, which must not be overwritten by the CRM on every
+ * sign-in. Everybody else is admitted on the CRM's word and given the role that
+ * matches what they are there.
+ */
+async function admitWorkspaceUser(user, defaults = {}) {
+  const email = cleanText(user?.email || "").toLowerCase();
+  const existing = findWorkspaceUserProfile(user);
+  if (existing) return existing;
+  const crm = (await crmProfilesByEmail()).get(email) || null;
+  if (!crm) throw apiError("Цього акаунта немає в базі користувачів CRM.", 403);
+  const approval = cleanText(crm.approval_status || "");
+  if (approval && approval !== "approved") {
+    throw apiError("Акаунт ще не підтверджений у CRM — підтверди його там, і вхід запрацює.", 403);
+  }
+  return ensureWorkspaceUserProfile(user, { role: roleFromCrm(crm), ...defaults });
+}
+
 /** Rows from a CRM table, using the same credentials as Auth. */
 async function supabaseRestRows(table, columns) {
   const config = supabaseAuthConfig();
@@ -2011,83 +2066,75 @@ async function supabaseRestRows(table, columns) {
 }
 
 /**
- * Everybody who has an account in the CRM, and whether they can get into
- * Outbound OS.
- *
- * The workspace list is a list of invitations, not a list of people. Signing in
- * needs two things — a Supabase account and a profile here — so a colleague who
- * uses the CRM daily is simply absent from "Акаунти команди" until somebody
- * invites them. That was invisible: the panel showed the two invited names and
- * gave no hint that a dozen more accounts existed. So the panel now shows all of
- * them, each marked with the access it has.
+ * Everybody in the user base, and what each of them is here.
  *
  * Supabase Auth is the authority on who exists and must be reachable. The CRM's
- * own `profiles` table only decorates the rows with a CRM role and approval
- * state, and belongs to the CRM app rather than to us, so its absence costs a
- * column, not the list.
+ * `profiles` table decides who may sign in; without it nobody new can be let
+ * in, so its absence is reported rather than swallowed — a silently empty
+ * approval table would read as "everybody is locked out".
+ *
+ * Someone with no profile here has simply never signed in. That is not a state
+ * anybody has to fix: the role shown for them is the one they would be given
+ * the moment they do.
  */
 async function workspaceDirectory() {
   const authUsers = (await supabaseAuthRequest("admin/users?page=1&per_page=1000")).users || [];
-  const crmProfiles = await supabaseRestRows("profiles", "id,email,role,approval_status,last_sign_in_at").catch(() => []);
-  const crmByEmail = new Map(crmProfiles.map((row) => [cleanText(row.email || "").toLowerCase(), row]));
+  const crmByEmail = await crmProfilesByEmail({ maxAgeMs: 0 });
 
   const people = authUsers.map((user) => {
     const email = cleanText(user.email || "").toLowerCase();
     const metadata = user.user_metadata || {};
-    const invited = state.users.find((item) => item.id === user.id || item.email === email) || null;
-    const crm = crmByEmail.get(email) || {};
+    const known = state.users.find((item) => item.id === user.id || item.email === email) || null;
+    const crm = crmByEmail.get(email) || null;
+    const approval = cleanText(crm?.approval_status || "");
+    const blocked = known ? "" : !crm ? "немає в базі CRM" : approval && approval !== "approved" ? "не підтверджений у CRM" : "";
     return {
       id: user.id,
       email,
-      name: cleanText(invited?.name || metadata.full_name || metadata.name || email.split("@")[0] || ""),
-      // "" means no access at all, which is the state of most rows here.
-      access: invited && invited.status !== "disabled" ? invited.role || "seller" : "",
-      disabled: Boolean(invited && invited.status === "disabled"),
-      crmRole: cleanText(crm.role || ""),
-      approvalStatus: cleanText(crm.approval_status || ""),
-      lastSignInAt: user.last_sign_in_at || crm.last_sign_in_at || null,
+      name: cleanText(known?.name || metadata.full_name || metadata.name || email.split("@")[0] || ""),
+      role: known?.role || roleFromCrm(crm),
+      signedInHere: Boolean(known),
+      blocked,
+      crmRole: cleanText(crm?.role || ""),
+      approvalStatus: approval,
+      lastSignInAt: user.last_sign_in_at || crm?.last_sign_in_at || null,
       createdAt: user.created_at || null
     };
   });
 
-  // Those who can work first; the rest by how recently they signed into the CRM,
-  // because that is the ordering an admin deciding whom to invite reads by.
+  // Those who can work first, then by how recently they used the CRM.
   people.sort((left, right) => {
-    if (Boolean(left.access) !== Boolean(right.access)) return left.access ? -1 : 1;
+    if (Boolean(left.blocked) !== Boolean(right.blocked)) return left.blocked ? 1 : -1;
     return String(right.lastSignInAt || right.createdAt || "").localeCompare(String(left.lastSignInAt || left.createdAt || ""));
   });
-  return { people, withAccess: people.filter((person) => person.access).length };
+  return { people, canSignIn: people.filter((person) => !person.blocked).length };
 }
 
 /**
- * Grant, change or withdraw one person's access. Withdrawing disables the
- * profile instead of removing it: the id is what spend and activity are
- * recorded against, and deleting it would silently rewrite history.
+ * Set what somebody is in this app. Who may sign in is not settable here — that
+ * is the CRM's answer — so a role is the only thing this changes.
+ *
+ * Setting a role for somebody who has never signed in writes their profile
+ * early, which is the point: an admin should be able to decide in advance that
+ * a new colleague arrives as an admin.
  */
-async function setWorkspaceAccess(actor, emailValue, accessValue) {
+async function setWorkspaceRole(actor, emailValue, roleValue) {
   const email = cleanText(emailValue || "").toLowerCase();
-  const access = ["admin", "seller", "none"].includes(accessValue) ? accessValue : "";
+  const role = ["admin", "seller"].includes(roleValue) ? roleValue : "";
   if (!email) throw apiError("Вкажи email.");
-  if (!access) throw apiError("Доступ буває лише admin, seller або none.");
+  if (!role) throw apiError("Роль буває лише admin або seller.");
   // Nobody edits their own row. That is also what keeps the workspace from
   // ending up with no admin: every caller here is an active admin, so the one
-  // admin who could be left alone is the one who cannot be switched off.
+  // admin who could be left alone is the one who cannot demote themselves.
   if (email === cleanText(actor.email || "").toLowerCase()) {
-    throw apiError("Свій власний доступ змінити не можна — попроси іншого адміністратора.", 400);
+    throw apiError("Свою власну роль змінити не можна — попроси іншого адміністратора.", 400);
   }
 
   const existing = state.users.find((item) => item.email === email) || null;
-  if (access === "none") {
-    if (!existing) throw apiError("У цього акаунта й так немає доступу.", 404);
-    existing.status = "disabled";
-    existing.updatedAt = new Date().toISOString();
-    return existing;
-  }
-
   const user = existing ? { id: existing.id, email, user_metadata: {} } : await findSupabaseUserByEmail(email);
   if (!user) throw apiError("Такого акаунта немає в Supabase — його спершу треба створити.", 404);
-  const profile = ensureWorkspaceUserProfile(user, { role: access });
-  profile.role = access;
+  const profile = ensureWorkspaceUserProfile(user, { role });
+  profile.role = role;
   profile.status = "active";
   profile.updatedAt = new Date().toISOString();
   return profile;
@@ -2463,7 +2510,10 @@ function publicAuthStatus(auth = null) {
   const profile = auth?.profile || null;
   return {
     configured: Boolean(state.integrations.supabase.url && state.supabaseVault),
-    bootstrapRequired: !state.users.some((user) => user.status !== "disabled"),
+    // Asking for a first owner is only right when there is no user base at all.
+    // A fresh deployment over an existing CRM has fourteen people already; they
+    // sign in, they do not get created again.
+    bootstrapRequired: !state.users.some((user) => user.status !== "disabled") && !crmBaseHasPeople,
     authenticated: Boolean(profile),
     user: profile ? publicUserProfile(profile) : null,
     team: profile?.role === "admin" ? state.users.map(publicUserProfile) : [],

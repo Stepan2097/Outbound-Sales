@@ -172,33 +172,33 @@ function renderAccount() {
 }
 
 /**
- * Хто взагалі є, а не лише хто вже запрошений.
+ * База користувачів одна — та, що в CRM.
  *
- * Увійти можна тільки маючи і акаунт у Supabase, і профіль у цьому просторі,
- * тож колега, який щодня сидить у CRM, до запрошення тут просто відсутній.
- * Раніше про це не було ані натяку — панель показувала двох і мовчала про решту.
+ * Цей застосунок нікого не запрошує: хто є в CRM і підтверджений там, той
+ * входить своїм акаунтом CRM. Профіль тут — це запис (обрана модель, витрати,
+ * час), а не пропуск. Єдине, що ставиться в цьому списку, — роль у цьому
+ * застосунку; кого пускати, відповідає CRM.
  */
-const ACCESS_LABEL = { admin: "Адміністратор", seller: "Продавець", none: "Без доступу" };
+const ROLE_LABEL = { admin: "Адміністратор", seller: "Продавець" };
 
 function teamRowHtml(person, selfEmail) {
   const self = person.email === selfEmail;
   const facts = [
+    person.blocked,
     person.crmRole ? `у CRM ${person.crmRole}` : "",
-    person.approvalStatus === "pending" ? "не підтверджений у CRM" : "",
-    person.disabled ? "доступ вимкнено" : "",
+    person.signedInHere ? "" : "тут ще не заходив",
     person.lastSignInAt ? `вхід ${warmupAgo(person.lastSignInAt)}` : "жодного входу"
   ].filter(Boolean).join(" · ");
-  const options = ["admin", "seller", "none"].map((value) => {
-    const current = person.access || "none";
-    return `<option value="${value}"${value === current ? " selected" : ""}>${ACCESS_LABEL[value]}</option>`;
-  }).join("");
-  return `<article class="team-row${person.access ? "" : " team-row-outside"}">
+  const options = ["admin", "seller"].map((value) =>
+    `<option value="${value}"${value === person.role ? " selected" : ""}>${ROLE_LABEL[value]}</option>`
+  ).join("");
+  return `<article class="team-row${person.blocked ? " team-row-outside" : ""}">
     <div class="team-who">
       <strong>${escapeHtml(person.name || person.email)}</strong>
       <span>${escapeHtml(person.email)}</span>
       ${facts ? `<span>${escapeHtml(facts)}</span>` : ""}
     </div>
-    <select class="team-access" data-email="${escapeHtml(person.email)}"${self ? " disabled title=\"Свій доступ змінює інший адміністратор\"" : ""}>${options}</select>
+    <select class="team-access" data-email="${escapeHtml(person.email)}"${self ? " disabled title=\"Свою роль змінює інший адміністратор\"" : ""}>${options}</select>
   </article>`;
 }
 
@@ -208,7 +208,10 @@ async function loadTeamDirectory() {
     const directory = await api("/api/account/directory");
     const selfEmail = String(authState.user.email || "").toLowerCase();
     setHtml("teamUserList", directory.people.map((person) => teamRowHtml(person, selfEmail)).join(""));
-    setText("teamUserNote", `З ${directory.people.length} ${uaPlural(directory.people.length, "акаунта", "акаунтів", "акаунтів")} CRM доступ до Outbound OS ${uaPlural(directory.withAccess, "має", "мають", "мають")} ${directory.withAccess}.`);
+    const blocked = directory.people.length - directory.canSignIn;
+    setText("teamUserNote", blocked
+      ? `Увійти ${uaPlural(directory.canSignIn, "може", "можуть", "можуть")} ${directory.canSignIn} з ${directory.people.length}; решту тримає CRM.`
+      : `Усі ${directory.people.length} ${uaPlural(directory.people.length, "акаунт", "акаунти", "акаунтів")} CRM можуть увійти.`);
   } catch (error) {
     setText("teamUserNote", error.message);
   }
@@ -219,9 +222,9 @@ document.getElementById("teamUserList")?.addEventListener("change", async (event
   if (!select) return;
   select.disabled = true;
   try {
-    await api("/api/account/access", {
+    await api("/api/account/role", {
       method: "POST",
-      body: JSON.stringify({ email: select.dataset.email, access: select.value })
+      body: JSON.stringify({ email: select.dataset.email, role: select.value })
     });
   } catch (error) {
     setText("teamUserNote", error.message);
