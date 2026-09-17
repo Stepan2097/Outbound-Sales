@@ -71,7 +71,6 @@ function render() {
   renderProductStudio();
   renderAccount();
   renderLearningDatabase();
-  renderIntegrations();
   renderProspects();
   renderLeadsPage();
   renderAssistant();
@@ -125,6 +124,7 @@ async function enterWorkspace() {
   document.getElementById("appShell").hidden = false;
   authState = await api("/api/auth/status");
   await refresh();
+  startActivityHeartbeat();
   const saved = rememberedView();
   if (saved) setView(saved);
 }
@@ -156,6 +156,8 @@ function renderAccount() {
   const user = authState?.user;
   if (!user) return;
   setText("accountRolePill", user.role || "seller");
+  setText("profileName", user.name || "Профіль");
+  setText("profileEmail", user.email || "—");
   document.getElementById("accountNameInput").value = user.name || "";
   document.getElementById("accountTitleInput").value = user.title || "";
   document.getElementById("accountEmailInput").value = user.email || "";
@@ -244,71 +246,6 @@ function memorySegmentCard(label, values) {
   `;
 }
 
-function renderIntegrations() {
-  document.getElementById("aiRuntimeStatus").textContent = state.aiRuntime?.mode === "openrouter" ? "OpenRouter активний" : "Мок-AI";
-  document.getElementById("openRouterModelCount").textContent = `${state.aiRuntime?.syncedOpenRouterModels || 0} синхронізовано`;
-  document.getElementById("apifyStatus").textContent = state.integrations?.apify?.status || "not_configured";
-  document.getElementById("contactEnrichmentStatus").textContent = state.integrations?.apify?.configured
-    ? state.integrations.apify.enrichmentMode || "Apify з лімітом витрат"
-    : "не налаштовано";
-  document.getElementById("crmStatus").textContent = state.integrations?.crm?.status || "not_configured";
-  document.getElementById("transcriptStatus").textContent = state.integrations?.transcripts?.status || "manual_paste";
-  document.getElementById("notificationStatus").textContent = state.integrations?.notifications?.status || "in_app";
-  document.getElementById("supabaseStatus").textContent = state.integrations?.supabase?.status || "not_configured";
-  document.getElementById("postgresStatus").textContent = state.integrations?.postgres?.status || "not_configured";
-  document.getElementById("knowledgeDatabaseStatus").textContent = state.integrations?.knowledgeDatabase?.status || "not_configured";
-
-  document.getElementById("analysisModelInput").value = state.aiModelDefaults?.analysisModel || "anthropic/claude-haiku-4.5";
-  document.getElementById("writingModelInput").value = state.aiModelDefaults?.writingModel || "anthropic/claude-sonnet-5";
-
-  const apify = state.integrations?.apify;
-  document.getElementById("leadDatabaseActorInput").value = apify?.actorIds?.leadDatabase || "";
-  document.getElementById("leadDatabaseInputTemplate").value = apify?.actorInputTemplates?.leadDatabase || "";
-  document.getElementById("linkedinActorInput").value = apify?.actorIds?.linkedinProfile || "";
-  document.getElementById("contactFinderActorInput").value = apify?.actorIds?.contactFinder || "inexhaustible_glass/linkedin-email-finder";
-  document.getElementById("apolloActorInput").value = apify?.actorIds?.apollo || "";
-  document.getElementById("zoominfoActorInput").value = apify?.actorIds?.zoominfo || "";
-  document.getElementById("facebookProfileActorInput").value = apify?.actorIds?.facebookProfile || "";
-  document.getElementById("emailPhoneFinderActorInput").value = apify?.actorIds?.emailPhoneFinder || "";
-  document.getElementById("phoneMessengerCheckActorInput").value = apify?.actorIds?.phoneMessengerCheck || "";
-  document.getElementById("whatsappCheckerActorInput").value = apify?.actorIds?.whatsappChecker || "vtrdev/whatsapp-number-validator";
-  document.getElementById("telegramCheckerActorInput").value = apify?.actorIds?.telegramChecker || "akula.marketing/telegram-get-phone-info";
-  document.getElementById("companyPeopleActorInput").value = apify?.actorIds?.companyPeople || "harvestapi/linkedin-company-employees";
-  document.getElementById("companyPeopleSecondaryActorInput").value = apify?.actorIds?.companyPeopleSecondary || "scraper-engine/linkedin-company-employees-scraper";
-  document.getElementById("personEnrichmentActorInput").value = apify?.actorIds?.personEnrichment || "enrich-crm/enrich-crm-enrich-contact";
-  document.getElementById("companyPeopleInputTemplate").value = apify?.actorInputTemplates?.companyPeople || "";
-  document.getElementById("apifyMaxChargeInput").value = apify?.maxChargeUsd || 1.5;
-  document.getElementById("apifyContactMaxChargeInput").value = apify?.contactMaxChargeUsd || 0.2;
-  document.getElementById("apifyMaxActorsInput").value = apify?.maxActorsPerLead || 3;
-  document.getElementById("apifyCacheDaysInput").value = apify?.cacheDays || 30;
-
-  document.getElementById("mcpBaseUrlInput").value = state.mcpSync?.baseUrl || "";
-  document.getElementById("mcpNamespaceInput").value = state.mcpSync?.resourceNamespace || "";
-
-  const crm = state.integrations?.crm;
-  document.getElementById("crmNameInput").value = crm?.name || "";
-  document.getElementById("crmBaseUrlInput").value = crm?.baseUrl || "";
-  document.getElementById("crmLeadObjectInput").value = crm?.leadObject || "Lead";
-  document.getElementById("crmContactObjectInput").value = crm?.contactObject || "Contact";
-  document.getElementById("crmActivityObjectInput").value = crm?.activityObject || "Activity";
-
-  const supabase = state.integrations?.supabase;
-  document.getElementById("supabaseUrlInput").value = supabase?.url || "";
-
-  const postgres = state.integrations?.postgres;
-  document.getElementById("pgHostInput").value = postgres?.host || "";
-  document.getElementById("pgPortInput").value = postgres?.port || 55432;
-  document.getElementById("pgDatabaseInput").value = postgres?.database || "";
-  document.getElementById("pgUserInput").value = postgres?.user || "";
-
-  const transcripts = state.integrations?.transcripts;
-  document.getElementById("transcriptProviderInput").value = transcripts?.provider || "manual";
-  document.getElementById("transcriptWebhookInput").value = transcripts?.webhookUrl || "";
-
-  const notifications = state.integrations?.notifications;
-  document.getElementById("notificationChannelInput").value = notifications?.channel || "in_app";
-  document.getElementById("notificationTargetInput").value = notifications?.target || "";
-}
 
 function renderAssistant() {
   const runtime = state.aiRuntime?.mode === "openrouter" ? "OpenRouter активний" : "Мок-AI";
@@ -1948,7 +1885,6 @@ function setView(viewName) {
       database: "База знань",
       products: "Продукти",
       account: "Профіль",
-      integrations: "Налаштування",
       overview: "Керування AI-оркестрацією",
       models: "Реєстр моделей",
       routing: "Маршрутизація задач",
@@ -1968,6 +1904,10 @@ function setView(viewName) {
   }
   // Loaded when the tab is opened rather than at boot: it talks to a different
   // database, and a workspace that never warms an account should not pay for it.
+  if (viewName === "account") {
+    loadProfileScreen();
+  }
+
   if (viewName === "warmup") {
     loadWarmup();
   }
@@ -2704,116 +2644,6 @@ document.getElementById("exampleForm").addEventListener("submit", async (event) 
   render();
 });
 
-document.getElementById("mcpConfigForm").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  state = await api("/api/integrations/mcp/configure", {
-    method: "POST",
-    body: JSON.stringify({
-      baseUrl: document.getElementById("mcpBaseUrlInput").value,
-      resourceNamespace: document.getElementById("mcpNamespaceInput").value,
-      apiToken: document.getElementById("mcpTokenInput").value
-    })
-  });
-  document.getElementById("mcpTokenInput").value = "";
-  render();
-});
-
-document.getElementById("openRouterConfigForm").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  state = await api("/api/openrouter/configure", {
-    method: "POST",
-    body: JSON.stringify({
-      apiKey: document.getElementById("openRouterKeyInput").value,
-      analysisModel: document.getElementById("analysisModelInput").value,
-      writingModel: document.getElementById("writingModelInput").value
-    })
-  });
-  document.getElementById("openRouterKeyInput").value = "";
-  render();
-});
-
-document.getElementById("apifyConfigForm").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  state = await api("/api/integrations/apify/configure", {
-    method: "POST",
-    body: JSON.stringify({
-      apiToken: document.getElementById("apifyTokenInput").value,
-      leadDatabaseActorId: document.getElementById("leadDatabaseActorInput").value,
-      leadDatabaseInputTemplate: document.getElementById("leadDatabaseInputTemplate").value,
-      linkedinProfileActorId: document.getElementById("linkedinActorInput").value,
-      contactFinderActorId: document.getElementById("contactFinderActorInput").value,
-      apolloActorId: document.getElementById("apolloActorInput").value,
-      zoominfoActorId: document.getElementById("zoominfoActorInput").value,
-      facebookProfileActorId: document.getElementById("facebookProfileActorInput").value,
-      emailPhoneFinderActorId: document.getElementById("emailPhoneFinderActorInput").value,
-      phoneMessengerCheckActorId: document.getElementById("phoneMessengerCheckActorInput").value,
-      whatsappCheckerActorId: document.getElementById("whatsappCheckerActorInput").value,
-      telegramCheckerActorId: document.getElementById("telegramCheckerActorInput").value,
-      companyPeopleActorId: document.getElementById("companyPeopleActorInput").value,
-      companyPeopleSecondaryActorId: document.getElementById("companyPeopleSecondaryActorInput").value,
-      personEnrichmentActorId: document.getElementById("personEnrichmentActorInput").value,
-      companyPeopleInputTemplate: document.getElementById("companyPeopleInputTemplate").value,
-      maxChargeUsd: Number(document.getElementById("apifyMaxChargeInput").value),
-      contactMaxChargeUsd: Number(document.getElementById("apifyContactMaxChargeInput").value),
-      maxActorsPerLead: Number(document.getElementById("apifyMaxActorsInput").value),
-      cacheDays: Number(document.getElementById("apifyCacheDaysInput").value)
-    })
-  });
-  document.getElementById("apifyTokenInput").value = "";
-  render();
-});
-
-document.getElementById("crmConfigForm").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  state = await api("/api/integrations/crm/configure", {
-    method: "POST",
-    body: JSON.stringify({
-      name: document.getElementById("crmNameInput").value,
-      baseUrl: document.getElementById("crmBaseUrlInput").value,
-      apiToken: document.getElementById("crmTokenInput").value,
-      leadObject: document.getElementById("crmLeadObjectInput").value,
-      contactObject: document.getElementById("crmContactObjectInput").value,
-      activityObject: document.getElementById("crmActivityObjectInput").value
-    })
-  });
-  document.getElementById("crmTokenInput").value = "";
-  render();
-});
-
-document.getElementById("transcriptConfigForm").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  state = await api("/api/integrations/transcripts/configure", {
-    method: "POST",
-    body: JSON.stringify({
-      provider: document.getElementById("transcriptProviderInput").value,
-      webhookUrl: document.getElementById("transcriptWebhookInput").value,
-      apiToken: document.getElementById("transcriptTokenInput").value,
-      notificationChannel: document.getElementById("notificationChannelInput").value,
-      notificationTarget: document.getElementById("notificationTargetInput").value
-    })
-  });
-  document.getElementById("transcriptTokenInput").value = "";
-  render();
-});
-
-document.getElementById("dataConfigForm").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  state = await api("/api/integrations/data/configure", {
-    method: "POST",
-    body: JSON.stringify({
-      supabaseUrl: document.getElementById("supabaseUrlInput").value,
-      supabaseApiKey: document.getElementById("supabaseApiKeyInput").value,
-      pgHost: document.getElementById("pgHostInput").value,
-      pgPort: Number(document.getElementById("pgPortInput").value),
-      pgDatabase: document.getElementById("pgDatabaseInput").value,
-      pgUser: document.getElementById("pgUserInput").value,
-      pgPassword: document.getElementById("pgPasswordInput").value
-    })
-  });
-  document.getElementById("supabaseApiKeyInput").value = "";
-  document.getElementById("pgPasswordInput").value = "";
-  render();
-});
 
 document.getElementById("knowledgeInboxScreenshotInput").addEventListener("change", async (event) => {
   const file = event.target.files?.[0];
@@ -5757,3 +5587,124 @@ document.getElementById("warmupInboxBody")?.addEventListener("click", (event) =>
 });
 
 startWarmupBadge();
+
+
+/* ── Профіль: модель, витрати, час ─────────────────────────────────────────
+ *
+ * Усе на цьому екрані читається з одного запиту. Кошики приходять уже
+ * порізані по днях і завжди на всі 30 — включно з порожніми, бо місяць із
+ * трьома робочими днями має виглядати як місяць із трьома робочими днями, а
+ * не як три дні поспіль.
+ */
+let profileData = null;
+
+function formatSeconds(seconds) {
+  const total = Math.max(0, Math.round(Number(seconds) || 0));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.round((total % 3600) / 60);
+  if (hours && minutes) return `${hours} год ${minutes} хв`;
+  if (hours) return `${hours} год`;
+  if (minutes) return `${minutes} хв`;
+  return total ? `${total} с` : "—";
+}
+
+function formatMoney(value) {
+  const amount = Number(value) || 0;
+  return amount >= 1 ? `$${amount.toFixed(2)}` : amount > 0 ? `$${amount.toFixed(4)}` : "$0";
+}
+
+/**
+ * Один стовпчик на день. Порожній день лишається стовпчиком нульової висоти,
+ * щоб пропуск було видно як пропуск, а не як зсув.
+ */
+function profileChartHtml(buckets, valueOf, labelOf) {
+  const peak = Math.max(...buckets.map(valueOf), 0);
+  return buckets
+    .map((bucket) => {
+      const value = valueOf(bucket);
+      const height = peak > 0 ? Math.round((value / peak) * 100) : 0;
+      const day = String(bucket.date || "").slice(8);
+      return `<div class="profile-bar${value > 0 ? " has-value" : ""}" title="${escapeAttr(`${bucket.date}: ${labelOf(bucket)}`)}">
+        <span style="height:${Math.max(height, value > 0 ? 4 : 0)}%"></span>
+        <small>${escapeHtml(day)}</small>
+      </div>`;
+    })
+    .join("");
+}
+
+function renderProfileScreen() {
+  if (!profileData) return;
+  const { model, spend, time } = profileData;
+
+  const options = (model.options || []).map((option) => {
+    const id = typeof option === "string" ? option : option.id;
+    const label = typeof option === "string" ? option : option.label || option.id;
+    return `<option value="${escapeAttr(id)}"${id === model.modelId ? " selected" : ""}>${escapeHtml(label)}</option>`;
+  });
+  setHtml("profileModelSelect", `<option value=""${model.modelId ? "" : " selected"}>За замовчуванням робочого простору</option>${options.join("")}`);
+  setText("profileModelNote", model.source === "user"
+    ? `Обрано для цього акаунта. Аналіз: ${model.effective?.analysisModel || "—"}, написання: ${model.effective?.writingModel || "—"}.`
+    : `Своєї моделі не обрано, тож працює модель робочого простору — аналіз: ${model.effective?.analysisModel || "—"}, написання: ${model.effective?.writingModel || "—"}.`);
+
+  setText("profileSpendTotal", formatMoney(spend.totalCostUsd));
+  setHtml("profileSpendChart", profileChartHtml(
+    spend.buckets || [],
+    (b) => Number(b.costUsd) || 0,
+    (b) => `${formatMoney(b.costUsd)} · ${b.requests || 0} ${uaPlural(b.requests || 0, "запит", "запити", "запитів")}`
+  ));
+  setText("profileSpendNote", spend.requests
+    ? `${spend.requests} ${uaPlural(spend.requests, "запит", "запити", "запитів")} за 30 днів · за весь час ${formatMoney(spend.allTimeCostUsd)}`
+    : "За 30 днів жодного запиту до моделі з цього акаунта.");
+
+  setText("profileTimeTotal", formatSeconds(time.totalSeconds));
+  setHtml("profileTimeChart", profileChartHtml(
+    time.buckets || [],
+    (b) => Number(b.seconds) || 0,
+    (b) => formatSeconds(b.seconds)
+  ));
+  setText("profileTimeNote", time.activeDays
+    ? `Сьогодні ${formatSeconds(time.todaySeconds)} · активних днів ${time.activeDays} · у середньому ${formatSeconds(time.averageSecondsPerActiveDay)} на день`
+    : "Час рахується з моменту, коли це запрацювало — попередніх днів у нас просто немає.");
+}
+
+async function loadProfileScreen() {
+  try {
+    profileData = await api("/api/account/profile");
+    renderProfileScreen();
+  } catch (error) {
+    setText("profileModelNote", error.message);
+  }
+}
+
+document.getElementById("profileModelSelect")?.addEventListener("change", async (event) => {
+  try {
+    await api("/api/account/model", { method: "POST", body: JSON.stringify({ modelId: event.target.value }) });
+    await loadProfileScreen();
+  } catch (error) {
+    setText("profileModelNote", error.message);
+  }
+});
+
+/**
+ * Б'ється лише поки вкладку видно. Скільки з цього зарахувати — вирішує
+ * сервер; тут немає жодного припущення про час.
+ */
+let profileTabId = null;
+
+function startActivityHeartbeat() {
+  try {
+    profileTabId = window.sessionStorage.getItem("outboundTabId");
+    if (!profileTabId) {
+      profileTabId = crypto.randomUUID();
+      window.sessionStorage.setItem("outboundTabId", profileTabId);
+    }
+  } catch {
+    profileTabId = "default";
+  }
+  const beat = () => {
+    if (document.visibilityState !== "visible") return;
+    api("/api/account/heartbeat", { method: "POST", body: JSON.stringify({ tabId: profileTabId }) }).catch(() => {});
+  };
+  beat();
+  setInterval(beat, 60000);
+}

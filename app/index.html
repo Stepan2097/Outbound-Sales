@@ -47,7 +47,6 @@
           <button class="nav-item" data-view="database"><i data-lucide="book-open"></i><span>База знань</span></button>
           <button class="nav-item" data-view="products"><i data-lucide="package"></i><span>Продукти</span></button>
           <button class="nav-item" data-view="account"><i data-lucide="circle-user-round"></i><span>Профіль</span></button>
-          <button class="nav-item" data-view="integrations"><i data-lucide="settings"></i><span>Налаштування</span></button>
         </nav>
         <div class="sidebar-footer">
           <span class="status-dot"></span>
@@ -425,34 +424,76 @@
 
         <section class="view" id="view-account">
           <div class="account-layout">
-            <section class="panel">
-              <div class="panel-heading"><div><h2>Особистий профіль</h2><p>Твоє ім'я проставляється в діях продавця і в записах CRM</p></div><span class="pill" id="accountRolePill">seller</span></div>
-              <form class="integration-form" id="accountProfileForm">
-                <label><span>Ім'я</span><input id="accountNameInput" type="text" autocomplete="name" required /></label>
-                <label><span>Посада</span><input id="accountTitleInput" type="text" autocomplete="organization-title" /></label>
-                <label><span>Email</span><input id="accountEmailInput" type="email" disabled /></label>
-                <button class="primary-button" type="submit"><i data-lucide="save"></i><span>Зберегти профіль</span></button>
-              </form>
+            <section class="panel profile-identity span-2">
+              <div class="panel-heading">
+                <div>
+                  <h2 id="profileName">Профіль</h2>
+                  <p id="profileEmail">—</p>
+                </div>
+                <span class="pill" id="accountRolePill">seller</span>
+              </div>
+              <div class="profile-model">
+                <label>
+                  <span>Модель для цього акаунта</span>
+                  <select id="profileModelSelect" aria-label="Модель для цього акаунта"></select>
+                </label>
+                <p class="profile-model-note" id="profileModelNote">—</p>
+              </div>
             </section>
-            <section class="panel">
-              <div class="panel-heading"><div><h2>Пароль</h2><p>Мінімум 10 символів</p></div></div>
-              <form class="integration-form" id="accountPasswordForm">
-                <input id="accountPasswordInput" type="password" autocomplete="new-password" minlength="10" placeholder="Новий пароль" required />
-                <input id="accountPasswordConfirmInput" type="password" autocomplete="new-password" minlength="10" placeholder="Підтвердь новий пароль" required />
-                <button type="submit"><i data-lucide="key-round"></i><span>Змінити пароль</span></button>
-              </form>
-              <button class="danger-button" id="logoutBtn" type="button"><i data-lucide="log-out"></i><span>Вийти</span></button>
+
+            <section class="panel profile-spend">
+              <div class="panel-heading">
+                <div>
+                  <h2>Витрачено кредитів</h2>
+                  <p>За день, останні 30 днів</p>
+                </div>
+                <strong class="profile-figure" id="profileSpendTotal">$0</strong>
+              </div>
+              <div class="profile-chart" id="profileSpendChart"></div>
+              <p class="profile-chart-note" id="profileSpendNote">—</p>
             </section>
-            <section class="panel admin-team-panel" id="adminTeamPanel" hidden>
-              <div class="panel-heading"><div><h2>Акаунти команди</h2><p>Створюй доступи продавцям і розподіляй зони відповідальності</p></div></div>
-              <form class="integration-form" id="teamUserForm">
-                <input id="teamUserNameInput" type="text" placeholder="Ім'я продавця" required />
-                <input id="teamUserEmailInput" type="email" placeholder="Робоча пошта" required />
-                <input id="teamUserPasswordInput" type="password" minlength="10" placeholder="Тимчасовий пароль" required />
-                <select id="teamUserRoleInput"><option value="seller">Продавець</option><option value="admin">Адміністратор</option></select>
-                <button type="submit"><i data-lucide="user-plus"></i><span>Створити користувача</span></button>
-              </form>
-              <div class="team-list" id="teamUserList"></div>
+
+            <section class="panel profile-time">
+              <div class="panel-heading">
+                <div>
+                  <h2>Час у застосунку</h2>
+                  <p>За день, останні 30 днів</p>
+                </div>
+                <strong class="profile-figure" id="profileTimeTotal">0 год</strong>
+              </div>
+              <div class="profile-chart" id="profileTimeChart"></div>
+              <p class="profile-chart-note" id="profileTimeNote">—</p>
+            </section>
+
+            <section class="panel profile-admin span-2">
+              <details class="profile-details">
+                <summary><span>Пароль, вихід і команда</span><i data-lucide="chevron-down"></i></summary>
+                <div class="profile-details-body">
+                  <form class="integration-form" id="accountProfileForm">
+                    <label><span>Ім'я</span><input id="accountNameInput" type="text" autocomplete="name" required /></label>
+                    <label><span>Посада</span><input id="accountTitleInput" type="text" autocomplete="organization-title" /></label>
+                    <label hidden><span>Email</span><input id="accountEmailInput" type="email" disabled /></label>
+                    <button type="submit"><i data-lucide="save"></i><span>Зберегти</span></button>
+                  </form>
+                  <form class="integration-form" id="accountPasswordForm">
+                    <input id="accountPasswordInput" type="password" autocomplete="new-password" minlength="10" placeholder="Новий пароль" required />
+                    <input id="accountPasswordConfirmInput" type="password" autocomplete="new-password" minlength="10" placeholder="Підтвердь новий пароль" required />
+                    <button type="submit"><i data-lucide="key-round"></i><span>Змінити пароль</span></button>
+                  </form>
+                  <button class="danger-button" id="logoutBtn" type="button"><i data-lucide="log-out"></i><span>Вийти</span></button>
+                  <div class="profile-team" id="adminTeamPanel" hidden>
+                    <h3>Акаунти команди</h3>
+                    <form class="integration-form" id="teamUserForm">
+                      <input id="teamUserNameInput" type="text" placeholder="Ім'я продавця" required />
+                      <input id="teamUserEmailInput" type="email" placeholder="Робоча пошта" required />
+                      <input id="teamUserPasswordInput" type="password" minlength="10" placeholder="Тимчасовий пароль" required />
+                      <select id="teamUserRoleInput"><option value="seller">Продавець</option><option value="admin">Адміністратор</option></select>
+                      <button type="submit"><i data-lucide="user-plus"></i><span>Створити користувача</span></button>
+                    </form>
+                    <div class="team-list" id="teamUserList"></div>
+                  </div>
+                </div>
+              </details>
             </section>
           </div>
         </section>
@@ -1049,175 +1090,6 @@
                 <button type="submit"><i data-lucide="brain-circuit"></i><span>Додати приклад</span></button>
               </form>
               <div class="example-list" id="exampleList"></div>
-            </section>
-          </div>
-        </section>
-
-        <section class="view" id="view-integrations">
-          <div class="integrations-layout">
-            <section class="panel">
-              <div class="panel-heading">
-                <div>
-                  <h2>Стан середовища</h2>
-                  <p>AI-шлюз і конектори даних</p>
-                </div>
-              </div>
-              <div class="integration-status-grid">
-                <div><span>AI-середовище</span><strong id="aiRuntimeStatus">mock</strong></div>
-                <div><span>Моделі OpenRouter</span><strong id="openRouterModelCount">0</strong></div>
-                <div><span>Apify</span><strong id="apifyStatus">не налаштовано</strong></div>
-                <div><span>Збагачення контактів</span><strong id="contactEnrichmentStatus">не налаштовано</strong></div>
-                <div><span>CRM</span><strong id="crmStatus">не налаштовано</strong></div>
-                <div><span>Дзвінки</span><strong id="transcriptStatus">вставка вручну</strong></div>
-                <div><span>Задачі</span><strong id="notificationStatus">у застосунку</strong></div>
-                <div><span>Supabase</span><strong id="supabaseStatus">не налаштовано</strong></div>
-                <div><span>Postgres</span><strong id="postgresStatus">не налаштовано</strong></div>
-                <div><span>Пам'ять продукту</span><strong id="knowledgeDatabaseStatus">не налаштовано</strong></div>
-              </div>
-            </section>
-
-            <section class="panel">
-              <div class="panel-heading">
-                <div>
-                  <h2>OpenRouter AI</h2>
-                  <p>Haiku 4.5 для аналізу, Sonnet 5 для письма</p>
-                </div>
-              </div>
-              <form class="integration-form" id="openRouterConfigForm">
-                <input id="openRouterKeyInput" type="password" autocomplete="off" placeholder="Ключ API OpenRouter" aria-label="Ключ API OpenRouter" />
-                <div class="split-fields">
-                  <input id="analysisModelInput" type="text" placeholder="anthropic/claude-haiku-4.5" aria-label="Модель для аналізу" />
-                  <input id="writingModelInput" type="text" placeholder="anthropic/claude-sonnet-5" aria-label="Модель для письма" />
-                </div>
-                <button class="primary-button" type="submit"><i data-lucide="plug-zap"></i><span>Підключити OpenRouter</span></button>
-              </form>
-            </section>
-
-            <section class="panel">
-              <div class="panel-heading">
-                <div>
-                  <h2>MCP + База знань</h2>
-                  <p>Продукти, контекст лідів і погоджені докази</p>
-                </div>
-              </div>
-              <form class="integration-form" id="mcpConfigForm">
-                <input id="mcpBaseUrlInput" type="url" placeholder="https://mcp.yourcompany.com" aria-label="Базовий URL MCP" />
-                <input id="mcpNamespaceInput" type="text" placeholder="Неймспейс продуктів, лідів, бази знань" aria-label="Неймспейс MCP" />
-                <input id="mcpTokenInput" type="password" autocomplete="off" placeholder="Токен API MCP" aria-label="Токен API MCP" />
-                <button class="primary-button" type="submit"><i data-lucide="save"></i><span>Зберегти MCP</span></button>
-              </form>
-            </section>
-
-            <section class="panel">
-              <div class="panel-heading">
-                <div>
-                  <h2>Дослідження і збагачення контактів</h2>
-                  <p>Каскад Apify з лімітом витрат і перевикористанням результатів 30 днів</p>
-                </div>
-              </div>
-              <form class="integration-form" id="apifyConfigForm">
-                <input id="apifyTokenInput" type="password" autocomplete="off" placeholder="Токен API Apify" aria-label="Токен API Apify" />
-                <input id="leadDatabaseActorInput" type="text" placeholder="URL або ID актора бази лідів" />
-                <details class="optional-fields">
-                  <summary>Шаблон вхідних даних актора</summary>
-                  <textarea id="leadDatabaseInputTemplate" rows="5" spellcheck="false" placeholder='{"search":"{{name}} {{company}}","linkedinUrl":"{{linkedinUrl}}","limit":1}'></textarea>
-                </details>
-                <details class="optional-fields">
-                  <summary>Спеціалізовані актори</summary>
-                  <input id="linkedinActorInput" type="text" placeholder="ID актора LinkedIn, напр. user~linkedin-profile" />
-                  <input id="contactFinderActorInput" type="text" placeholder="inexhaustible_glass/linkedin-email-finder" />
-                  <input id="apolloActorInput" type="text" placeholder="ID актора Apollo" />
-                  <input id="zoominfoActorInput" type="text" placeholder="ID актора ZoomInfo" />
-                  <input id="facebookProfileActorInput" type="text" placeholder="ID актора зіставлення Facebook/людини" />
-                  <input id="emailPhoneFinderActorInput" type="text" placeholder="ID актора пошуку пошти й телефону" />
-                  <input id="phoneMessengerCheckActorInput" type="text" placeholder="ID актора перевірки номера у WhatsApp/Telegram" />
-                  <input id="whatsappCheckerActorInput" type="text" placeholder="vtrdev/whatsapp-number-validator" />
-                  <input id="telegramCheckerActorInput" type="text" placeholder="akula.marketing/telegram-get-phone-info" />
-                  <input id="companyPeopleActorInput" type="text" placeholder="harvestapi/linkedin-company-employees" />
-                  <input id="companyPeopleSecondaryActorInput" type="text" placeholder="scraper-engine/linkedin-company-employees-scraper" />
-                  <input id="personEnrichmentActorInput" type="text" placeholder="enrich-crm/enrich-crm-enrich-contact" />
-                  <textarea id="companyPeopleInputTemplate" rows="5" spellcheck="false" placeholder='{"leadTargets":["{{linkedinPeopleUrl}}"],"maxLeadsPerCompany":12,"jobTitleKeywords":["Founder","Head of Affiliates"],"includeOnlyDecisionMakers":false}'></textarea>
-                </details>
-                <input id="apifyMaxChargeInput" type="number" min="0.05" step="0.05" />
-                <input id="apifyContactMaxChargeInput" type="number" min="0.05" max="5" step="0.05" aria-label="Максимальна вартість одного прогону перевірки контакту" />
-                <div class="split-fields">
-                  <input id="apifyMaxActorsInput" type="number" min="1" max="6" step="1" aria-label="Максимум акторів на лід" placeholder="Макс. акторів на лід" />
-                  <input id="apifyCacheDaysInput" type="number" min="1" max="120" step="1" aria-label="Днів кешу збагачення" placeholder="Днів кешу" />
-                </div>
-                <button class="primary-button" type="submit"><i data-lucide="save"></i><span>Зберегти Apify</span></button>
-              </form>
-            </section>
-
-            <section class="panel">
-              <div class="panel-heading">
-                <div>
-                  <h2>Власна CRM</h2>
-                  <p>Відправляй ліди, підтягуй історію, синхронізуй результати</p>
-                </div>
-              </div>
-              <form class="integration-form" id="crmConfigForm">
-                <input id="crmNameInput" type="text" placeholder="Назва CRM" />
-                <input id="crmBaseUrlInput" type="url" placeholder="https://crm.yourcompany.com/api" />
-                <input id="crmTokenInput" type="password" autocomplete="off" placeholder="Токен API CRM" />
-                <div class="split-fields">
-                  <input id="crmLeadObjectInput" type="text" placeholder="Об'єкт ліда" />
-                  <input id="crmContactObjectInput" type="text" placeholder="Об'єкт контакту" />
-                </div>
-                <input id="crmActivityObjectInput" type="text" placeholder="Об'єкт активності або задачі" />
-                <button class="primary-button" type="submit"><i data-lucide="save"></i><span>Зберегти CRM</span></button>
-              </form>
-            </section>
-
-            <section class="panel">
-              <div class="panel-heading">
-                <div>
-                  <h2>Supabase + Postgres</h2>
-                  <p>Постійне сховище для лідів, продуктів та історії</p>
-                </div>
-              </div>
-              <form class="integration-form" id="dataConfigForm">
-                <input id="supabaseUrlInput" type="url" placeholder="http://144.91.104.211:8200" aria-label="URL API Supabase" />
-                <input id="supabaseApiKeyInput" type="password" autocomplete="off" placeholder="Anon- або service-role-ключ Supabase" aria-label="Ключ API Supabase" />
-                <div class="split-fields">
-                  <input id="pgHostInput" type="text" placeholder="Хост PostgreSQL" />
-                  <input id="pgPortInput" type="number" min="1" max="65535" placeholder="55432" />
-                </div>
-                <div class="split-fields">
-                  <input id="pgDatabaseInput" type="text" placeholder="База даних" />
-                  <input id="pgUserInput" type="text" placeholder="Користувач" />
-                </div>
-                <input id="pgPasswordInput" type="password" autocomplete="off" placeholder="Пароль PostgreSQL" />
-                <button class="primary-button" type="submit"><i data-lucide="database-zap"></i><span>Підключити дані</span></button>
-              </form>
-            </section>
-
-            <section class="panel">
-              <div class="panel-heading">
-                <div>
-                  <h2>Дзвінки і фолоу-апи</h2>
-                  <p>Потік транскриптів і сповіщення про задачі</p>
-                </div>
-              </div>
-              <form class="integration-form" id="transcriptConfigForm">
-                <select id="transcriptProviderInput" aria-label="Провайдер транскриптів">
-                  <option value="manual">Вставка вручну</option>
-                  <option value="gong">Gong</option>
-                  <option value="zoom">Zoom</option>
-                  <option value="aircall">Aircall</option>
-                  <option value="twilio">Twilio</option>
-                  <option value="custom">Власний вебхук</option>
-                </select>
-                <input id="transcriptWebhookInput" type="url" placeholder="https://calls.yourcompany.com/webhooks/transcripts" />
-                <input id="transcriptTokenInput" type="password" autocomplete="off" placeholder="Токен API транскриптів" />
-                <select id="notificationChannelInput" aria-label="Канал сповіщень">
-                  <option value="in_app">Задачі в застосунку</option>
-                  <option value="crm_task">Задачі в CRM</option>
-                  <option value="slack">Slack</option>
-                  <option value="email">Email</option>
-                </select>
-                <input id="notificationTargetInput" type="text" placeholder="Канал у Slack, пошта або черга в CRM" />
-                <button class="primary-button" type="submit"><i data-lucide="bell-plus"></i><span>Зберегти дзвінки</span></button>
-              </form>
             </section>
           </div>
         </section>
