@@ -1544,8 +1544,8 @@ output {
   display: grid;
   grid-template-columns: minmax(260px, 0.72fr) minmax(360px, 1fr);
   align-items: stretch;
-  background: #061321;
-  color: #eff8ff;
+  background: var(--bg);
+  color: var(--ink);
 }
 
 .auth-brand {
@@ -1553,7 +1553,9 @@ output {
   display: flex;
   align-items: flex-start;
   gap: 14px;
-  background: linear-gradient(145deg, #07182b, #0d3152 68%, #0c5361);
+  /* The one place a gradient earns its keep: half a screen with nothing on
+      it. Kept inside the palette rather than reaching for a second hue. */
+  background: linear-gradient(160deg, var(--surface) 0%, var(--surface-sunk) 55%, #0d2a27 100%);
   border-right: 1px solid rgba(143, 177, 207, 0.18);
 }
 
@@ -1944,22 +1946,39 @@ output {
   }
 }
 
-/* Dark sales workspace */
+/* Dark sales workspace.
+ *
+ * This block is unconditional and overrides the light palette above it, so the
+ * workspace is always dark and these are the only colours that reach a screen.
+ * color-scheme says so too: it was declaring light while painting dark, which
+ * is why selects, scrollbars and every other native control came back pale.
+ *
+ * The ground carries a faint green rather than navy so the teal accent sits
+ * inside the palette instead of against it, and the three steps — ground,
+ * surface, raised — are opaque and far enough apart to carry the hierarchy on
+ * their own. They used to be translucent over a four-stop page gradient, so
+ * the same panel was a different colour at the top of a page and the bottom.
+ *
+ * Teal is the accent. Blue is for links and information and is not a second
+ * one: two accents of equal weight means neither is the accent.
+ */
 :root {
-  --bg: #061322;
-  --surface: rgba(10, 27, 48, 0.86);
-  --surface-strong: rgba(16, 42, 72, 0.92);
-  --ink: #eef6ff;
-  --muted: #94a9be;
-  --line: rgba(137, 168, 194, 0.22);
-  --teal: #28d4bf;
-  --teal-weak: rgba(40, 212, 191, 0.16);
-  --blue: #4f8cff;
-  --green: #63d471;
-  --amber: #f4bd50;
-  --red: #ff6b61;
-  --violet: #b89cff;
-  --shadow: 0 18px 52px rgba(0, 0, 0, 0.34);
+  color-scheme: dark;
+  --bg: #091211;
+  --surface: #111c1b;
+  --surface-strong: #182524;
+  --surface-sunk: #0b1413;
+  --ink: #e9f1ef;
+  --muted: #90a5a1;
+  --line: rgba(150, 178, 173, 0.16);
+  --teal: #34d6bd;
+  --teal-weak: rgba(52, 214, 189, 0.13);
+  --blue: #6aa5ff;
+  --green: #5ec98a;
+  --amber: #e0b25e;
+  --red: #ef7c72;
+  --violet: #a996f0;
+  --shadow: 0 18px 44px rgba(0, 0, 0, 0.44);
 }
 
 html {
@@ -1970,29 +1989,29 @@ body {
   font-size: 13px;
   overflow-x: clip;
   background:
-    linear-gradient(135deg, #07182a 0%, #071426 42%, #0b1e3d 72%, #13204b 100%);
+    var(--bg);
   color: var(--ink);
 }
 
 button {
   min-height: 32px;
   padding: 0 10px;
-  border-color: rgba(143, 177, 207, 0.22);
-  background: rgba(13, 35, 61, 0.72);
+  border-color: var(--line);
+  background: var(--surface-strong);
   color: #edf7ff;
 }
 
 button:hover {
-  border-color: rgba(40, 212, 191, 0.55);
-  background: rgba(22, 55, 92, 0.9);
+  border-color: rgba(52, 214, 189, 0.55);
+  background: var(--surface-strong);
 }
 
 input,
 select,
 textarea {
   min-height: 34px;
-  border-color: rgba(143, 177, 207, 0.24);
-  background: rgba(5, 18, 32, 0.76);
+  border-color: var(--line);
+  background: var(--surface-sunk);
   color: #eef6ff;
 }
 
@@ -2017,14 +2036,14 @@ label span,
 }
 
 .sidebar {
-  background: linear-gradient(180deg, rgba(4, 17, 31, 0.98), rgba(9, 26, 48, 0.94));
-  border-right: 1px solid rgba(143, 177, 207, 0.18);
+  background: var(--bg);
+  border-right: 1px solid var(--line);
   padding: 16px 10px;
 }
 
 .brand-mark {
-  background: linear-gradient(135deg, #29e0c7, #80a8ff);
-  color: #031421;
+  background: var(--teal);
+  color: #06201c;
 }
 
 .brand span,
@@ -2054,9 +2073,9 @@ td span,
 
 .nav-item.active,
 .nav-item:hover {
-  background: linear-gradient(90deg, rgba(40, 212, 191, 0.18), rgba(79, 140, 255, 0.12));
+  background: var(--teal-weak);
   color: #f6fbff;
-  border-color: rgba(40, 212, 191, 0.34);
+  border-color: rgba(52, 214, 189, 0.34);
 }
 
 .workspace {
@@ -2083,13 +2102,16 @@ td span,
 }
 
 .primary-button {
-  background: linear-gradient(135deg, #18bda9, #397cff);
-  border-color: rgba(104, 184, 255, 0.5);
-  color: white;
+  background: var(--teal);
+  border-color: var(--teal);
+  /* Dark ink on the accent: white on teal is the weaker pair at this
+     lightness, and the button is the one thing on the page that should not
+     have to be squinted at. */
+  color: #06201c;
 }
 
 .primary-button:hover {
-  background: linear-gradient(135deg, #24d7c0, #5c93ff);
+  background: #46e2cb;
 }
 
 button:disabled {
@@ -2107,8 +2129,16 @@ button:disabled {
   }
 }
 
+/* Three steps, not one: the ground, a panel on it, a card inside the panel.
+   These all shared a single background before, so depth was carried by
+   hairlines alone and the page read flat. */
 .metric,
-.panel,
+.panel {
+  background: var(--surface);
+  border-color: var(--line);
+  box-shadow: var(--shadow);
+}
+
 .subpanel,
 .policy-grid div,
 .signal-list div,
@@ -2121,11 +2151,9 @@ button:disabled {
 .task-row,
 .prospect-card,
 .qualification-strip div {
-  background:
-    linear-gradient(180deg, rgba(16, 43, 75, 0.88), rgba(8, 24, 44, 0.9)),
-    rgba(10, 27, 48, 0.88);
-  border-color: rgba(143, 177, 207, 0.18);
-  box-shadow: var(--shadow);
+  background: var(--surface-strong);
+  border-color: var(--line);
+  box-shadow: none;
 }
 
 .panel {
@@ -2176,9 +2204,9 @@ button:disabled {
 }
 
 .product-context-grid div {
-  border: 1px solid rgba(143, 177, 207, 0.18);
+  border: 1px solid var(--line);
   border-radius: 8px;
-  background: rgba(4, 16, 29, 0.5);
+  background: var(--surface-sunk);
   padding: 8px;
   min-height: 58px;
 }
@@ -2226,8 +2254,8 @@ button:disabled {
 
 .file-drop {
   min-height: 94px;
-  background: rgba(5, 18, 32, 0.58);
-  border-color: rgba(40, 212, 191, 0.34);
+  background: var(--surface-sunk);
+  border-color: rgba(52, 214, 189, 0.34);
 }
 
 .linkedin-target-form {
@@ -2241,9 +2269,9 @@ button:disabled {
 }
 
 .optional-fields {
-  border: 1px solid rgba(143, 177, 207, 0.16);
+  border: 1px solid var(--line);
   border-radius: 8px;
-  background: rgba(4, 16, 29, 0.38);
+  background: var(--surface-sunk);
   padding: 7px 9px;
 }
 
@@ -2302,7 +2330,7 @@ button:disabled {
 .prospect-queue-row.active .prospect-card,
 .prospect-card.active,
 .task-row.active {
-  border-color: rgba(40, 212, 191, 0.7);
+  border-color: rgba(52, 214, 189, 0.7);
   box-shadow: inset 3px 0 0 var(--teal), var(--shadow);
 }
 
@@ -2355,9 +2383,9 @@ button:disabled {
   display: grid;
   grid-template-columns: 148px 148px minmax(0, 1fr);
   gap: 10px;
-  border: 1px solid rgba(143, 177, 207, 0.18);
+  border: 1px solid var(--line);
   border-radius: 8px;
-  background: linear-gradient(135deg, rgba(40, 212, 191, 0.12), rgba(79, 140, 255, 0.1));
+  background: var(--teal-weak);
   padding: 10px;
 }
 
@@ -2380,7 +2408,7 @@ button:disabled {
 
 .meter.compact {
   height: 6px;
-  background: rgba(143, 177, 207, 0.18);
+  background: var(--line);
 }
 
 .meter.compact span {
@@ -2412,7 +2440,7 @@ button:disabled {
 
 .pill,
 .cap {
-  background: rgba(40, 212, 191, 0.14);
+  background: rgba(52, 214, 189, 0.14);
   color: #65f0db;
 }
 
@@ -2448,9 +2476,9 @@ button:disabled {
 }
 
 .call-score-row div {
-  border: 1px solid rgba(143, 177, 207, 0.18);
+  border: 1px solid var(--line);
   border-radius: 8px;
-  background: rgba(4, 16, 29, 0.5);
+  background: var(--surface-sunk);
   padding: 8px;
 }
 
@@ -2490,16 +2518,16 @@ button:disabled {
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
-  border: 1px solid rgba(40, 212, 191, 0.28);
+  border: 1px solid rgba(52, 214, 189, 0.28);
   border-radius: 8px;
-  background: rgba(40, 212, 191, 0.1);
+  background: rgba(52, 214, 189, 0.1);
   padding: 9px;
 }
 
 .task-alert.done {
   opacity: 0.72;
-  border-color: rgba(143, 177, 207, 0.16);
-  background: rgba(4, 16, 29, 0.5);
+  border-color: var(--line);
+  background: var(--surface-sunk);
 }
 
 .task-alert strong,
@@ -2540,7 +2568,7 @@ button:disabled {
   margin-top: 6px;
   border-radius: 50%;
   background: var(--teal);
-  box-shadow: 0 0 0 4px rgba(40, 212, 191, 0.12);
+  box-shadow: 0 0 0 4px rgba(52, 214, 189, 0.12);
 }
 
 .timeline-item strong,
@@ -2631,9 +2659,9 @@ button:disabled {
 }
 
 .connector-status-grid div {
-  border: 1px solid rgba(143, 177, 207, 0.18);
+  border: 1px solid var(--line);
   border-radius: 8px;
-  background: rgba(4, 16, 29, 0.5);
+  background: var(--surface-sunk);
   padding: 9px;
 }
 
@@ -2661,9 +2689,9 @@ button:disabled {
 
 .agent-card {
   min-height: 124px;
-  border: 1px solid rgba(143, 177, 207, 0.18);
+  border: 1px solid var(--line);
   border-radius: 8px;
-  background: rgba(4, 16, 29, 0.5);
+  background: var(--surface-sunk);
   padding: 10px;
   display: grid;
   gap: 7px;
@@ -2686,11 +2714,11 @@ button:disabled {
 }
 
 .assistant-action-card {
-  border: 1px solid rgba(143, 177, 207, 0.18);
+  border: 1px solid var(--line);
   border-radius: 8px;
   background:
-    linear-gradient(180deg, rgba(16, 43, 75, 0.88), rgba(8, 24, 44, 0.9)),
-    rgba(10, 27, 48, 0.88);
+    linear-gradient(180deg, var(--surface-strong), var(--surface-sunk)),
+    var(--surface-sunk);
   padding: 12px;
 }
 
@@ -2773,33 +2801,33 @@ button:disabled {
 
 .empty-state {
   min-height: 54px;
-  border-color: rgba(143, 177, 207, 0.24);
+  border-color: var(--line);
 }
 
 .table-wrap {
-  border-color: rgba(143, 177, 207, 0.18);
+  border-color: var(--line);
 }
 
 table {
-  background: rgba(6, 19, 34, 0.5);
+  background: var(--surface-sunk);
 }
 
 th {
-  background: rgba(14, 36, 62, 0.92);
+  background: var(--surface-strong);
   color: #aac2d8;
 }
 
 td {
-  border-color: rgba(143, 177, 207, 0.14);
+  border-color: var(--line);
 }
 
 canvas {
-  border-color: rgba(143, 177, 207, 0.18);
-  background: rgba(5, 18, 32, 0.72);
+  border-color: var(--line);
+  background: var(--surface-sunk);
 }
 
 dialog {
-  background: #0a1b30;
+  background: var(--surface);
   color: var(--ink);
 }
 
@@ -2888,8 +2916,8 @@ dialog {
 
 .knowledge-inbox-panel {
   background:
-    linear-gradient(135deg, rgba(18, 53, 91, 0.94), rgba(7, 25, 47, 0.92)),
-    rgba(10, 27, 48, 0.9);
+    linear-gradient(135deg, var(--surface-strong), var(--surface-sunk)),
+    var(--surface-sunk);
 }
 
 .knowledge-inbox-form {
@@ -2945,7 +2973,7 @@ dialog {
 
 .screenshot-drop {
   min-height: 112px;
-  background: rgba(7, 22, 40, 0.64);
+  background: var(--surface-sunk);
   border-color: rgba(104, 184, 255, 0.28);
 }
 
@@ -2967,7 +2995,7 @@ dialog {
   aspect-ratio: 1;
   object-fit: cover;
   border-radius: 8px;
-  border: 1px solid rgba(143, 177, 207, 0.2);
+  border: 1px solid var(--line);
 }
 
 .screenshot-preview span {
@@ -2987,9 +3015,9 @@ dialog {
 .channel-tip,
 .learning-example-card {
   background:
-    linear-gradient(180deg, rgba(16, 43, 75, 0.9), rgba(8, 24, 44, 0.94)),
-    rgba(10, 27, 48, 0.9);
-  border: 1px solid rgba(143, 177, 207, 0.18);
+    linear-gradient(180deg, var(--surface-strong), var(--surface-sunk)),
+    var(--surface-sunk);
+  border: 1px solid var(--line);
   border-radius: 8px;
 }
 
@@ -3073,11 +3101,11 @@ dialog {
 }
 
 .icp-profile-card {
-  border: 1px solid rgba(143, 177, 207, 0.18);
+  border: 1px solid var(--line);
   border-radius: 8px;
   background:
-    linear-gradient(180deg, rgba(16, 43, 75, 0.9), rgba(8, 24, 44, 0.94)),
-    rgba(10, 27, 48, 0.9);
+    linear-gradient(180deg, var(--surface-strong), var(--surface-sunk)),
+    var(--surface-sunk);
   padding: 12px;
   display: grid;
   gap: 10px;
@@ -3134,9 +3162,9 @@ dialog {
   display: grid;
   place-items: center;
   border-radius: 8px;
-  border: 1px dashed rgba(143, 177, 207, 0.28);
+  border: 1px dashed var(--line);
   color: #8fb1cf;
-  background: rgba(7, 22, 40, 0.64);
+  background: var(--surface-sunk);
 }
 
 .lead-workspace {
@@ -3154,8 +3182,8 @@ dialog {
   gap: 12px;
   padding: 12px;
   background:
-    linear-gradient(135deg, rgba(8, 31, 58, 0.96), rgba(9, 48, 77, 0.9)),
-    rgba(5, 18, 32, 0.95);
+    var(--surface-strong),
+    var(--surface-sunk);
   backdrop-filter: blur(16px);
 }
 
@@ -3190,8 +3218,8 @@ dialog {
   align-items: center;
   min-height: 148px;
   background:
-    radial-gradient(circle at 8% 20%, rgba(40, 212, 191, 0.18), transparent 32%),
-    linear-gradient(135deg, rgba(16, 43, 75, 0.94), rgba(8, 24, 44, 0.9));
+    radial-gradient(circle at 8% 20%, rgba(52, 214, 189, 0.18), transparent 32%),
+    linear-gradient(135deg, var(--surface-strong), var(--surface-sunk));
 }
 
 .lead-avatar {
@@ -3202,9 +3230,9 @@ dialog {
   place-items: center;
   font-weight: 900;
   font-size: 18px;
-  background: linear-gradient(135deg, #24d7c0, #5c93ff);
+  background: #46e2cb;
   color: #031421;
-  box-shadow: 0 16px 32px rgba(40, 212, 191, 0.2);
+  box-shadow: 0 16px 32px rgba(52, 214, 189, 0.2);
 }
 
 .lead-hero-main {
@@ -3224,7 +3252,7 @@ dialog {
   align-items: center;
   border-radius: 99px;
   padding: 0 9px;
-  background: rgba(40, 212, 191, 0.12);
+  background: rgba(52, 214, 189, 0.12);
   color: #84f6e4;
   font-size: 11px;
   font-weight: 800;
@@ -3245,7 +3273,7 @@ dialog {
 
 .lead-score-block {
   min-height: 112px;
-  border-left: 1px solid rgba(143, 177, 207, 0.18);
+  border-left: 1px solid var(--line);
   padding-left: 18px;
   display: grid;
   align-content: center;
@@ -3271,9 +3299,9 @@ dialog {
   gap: 8px;
   overflow-x: auto;
   padding: 10px;
-  border: 1px solid rgba(143, 177, 207, 0.18);
+  border: 1px solid var(--line);
   border-radius: 8px;
-  background: rgba(5, 18, 32, 0.82);
+  background: var(--surface-sunk);
   backdrop-filter: blur(14px);
 }
 
@@ -3295,13 +3323,13 @@ dialog {
 .lead-section-nav button:hover,
 .lead-section-nav button.active {
   color: #f6fbff;
-  background: rgba(40, 212, 191, 0.12);
+  background: rgba(52, 214, 189, 0.12);
 }
 
 .lead-section-nav button.active {
-  border-color: rgba(101, 240, 219, 0.38);
+  border-color: rgba(52, 214, 189, 0.38);
   color: #65f0db;
-  box-shadow: inset 0 0 0 1px rgba(101, 240, 219, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(52, 214, 189, 0.12);
 }
 
 .lead-main-stack .lead-section {
@@ -3378,9 +3406,9 @@ dialog {
 .lead-stats-strip div,
 .score-breakdown-grid div {
   min-height: 82px;
-  border: 1px solid rgba(143, 177, 207, 0.18);
+  border: 1px solid var(--line);
   border-radius: 8px;
-  background: rgba(4, 16, 29, 0.5);
+  background: var(--surface-sunk);
   padding: 12px;
 }
 
@@ -3404,9 +3432,9 @@ dialog {
 .source-row,
 .next-action-card,
 .cycle-row {
-  border: 1px solid rgba(143, 177, 207, 0.18);
+  border: 1px solid var(--line);
   border-radius: 8px;
-  background: rgba(4, 16, 29, 0.46);
+  background: var(--surface-sunk);
   padding: 10px;
 }
 
@@ -3459,7 +3487,7 @@ dialog {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
   align-items: center;
-  background: linear-gradient(135deg, rgba(40, 212, 191, 0.13), rgba(79, 140, 255, 0.1));
+  background: var(--teal-weak);
 }
 
 .committee-directory-card strong,
@@ -3477,7 +3505,7 @@ dialog {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  border: 1px solid rgba(101, 240, 219, 0.28);
+  border: 1px solid rgba(52, 214, 189, 0.28);
   border-radius: 8px;
   padding: 0 12px;
   color: #65f0db;
@@ -3500,7 +3528,7 @@ dialog {
   grid-template-columns: auto minmax(0, 1fr);
   gap: 10px;
   align-items: start;
-  background: linear-gradient(135deg, rgba(40, 212, 191, 0.14), rgba(79, 140, 255, 0.12));
+  background: var(--teal-weak);
 }
 
 .next-action-card p {
@@ -3516,18 +3544,18 @@ dialog {
 }
 
 .channel-order span {
-  border: 1px solid rgba(101, 240, 219, 0.26);
+  border: 1px solid rgba(52, 214, 189, 0.26);
   border-radius: 999px;
   color: #d7f7ff;
-  background: rgba(40, 212, 191, 0.08);
+  background: rgba(52, 214, 189, 0.08);
   padding: 4px 8px;
   font-size: 11px;
 }
 
 .next-action-follow {
-  border: 1px solid rgba(143, 177, 207, 0.16);
+  border: 1px solid var(--line);
   border-radius: 8px;
-  background: rgba(4, 16, 29, 0.42);
+  background: var(--surface-sunk);
   margin-top: 10px;
   padding: 9px;
 }
@@ -3561,7 +3589,7 @@ dialog {
 
 .cycle-row.done > span {
   background: var(--teal);
-  box-shadow: 0 0 0 4px rgba(40, 212, 191, 0.12);
+  box-shadow: 0 0 0 4px rgba(52, 214, 189, 0.12);
 }
 
 .source-row {
@@ -3629,8 +3657,8 @@ dialog {
 
 .company-panel {
   background:
-    linear-gradient(135deg, rgba(20, 49, 84, 0.94), rgba(8, 24, 44, 0.92)),
-    rgba(10, 27, 48, 0.9);
+    linear-gradient(135deg, var(--surface-strong), var(--surface-sunk)),
+    var(--surface-sunk);
 }
 
 .company-brief {
@@ -3648,9 +3676,9 @@ dialog {
 .company-detail-grid section,
 .company-research-footer,
 .knowledge-inbox-card {
-  border: 1px solid rgba(143, 177, 207, 0.18);
+  border: 1px solid var(--line);
   border-radius: 8px;
-  background: rgba(4, 16, 29, 0.5);
+  background: var(--surface-sunk);
   padding: 12px;
 }
 
@@ -3712,13 +3740,13 @@ dialog {
 
 .cap.muted {
   color: #9db0c2;
-  background: rgba(143, 177, 207, 0.12);
+  background: var(--line);
 }
 
 .intelligence-panel {
   background:
-    linear-gradient(135deg, rgba(16, 43, 75, 0.94), rgba(6, 28, 49, 0.92)),
-    rgba(10, 27, 48, 0.9);
+    linear-gradient(135deg, var(--surface-strong), var(--surface-sunk)),
+    var(--surface-sunk);
 }
 
 .intelligence-actions {
@@ -3743,9 +3771,9 @@ dialog {
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 12px;
   align-items: center;
-  border: 1px dashed rgba(101, 240, 219, 0.28);
+  border: 1px dashed rgba(52, 214, 189, 0.28);
   border-radius: 8px;
-  background: rgba(4, 16, 29, 0.42);
+  background: var(--surface-sunk);
   padding: 14px;
 }
 
@@ -3800,9 +3828,9 @@ dialog {
 .intel-contact,
 .intel-objection,
 .intel-source-row {
-  border: 1px solid rgba(143, 177, 207, 0.18);
+  border: 1px solid var(--line);
   border-radius: 8px;
-  background: rgba(4, 16, 29, 0.48);
+  background: var(--surface-sunk);
 }
 
 .intelligence-score-grid div {
@@ -3904,7 +3932,7 @@ dialog {
 }
 
 .strategy-panel {
-  background: linear-gradient(145deg, rgba(9, 32, 56, 0.96), rgba(7, 24, 43, 0.96));
+  background: linear-gradient(145deg, rgba(9, 32, 56, 0.96), var(--surface-sunk));
 }
 
 .strategy-content,
@@ -3931,9 +3959,9 @@ dialog {
 .strategy-transition-grid > article,
 .strategy-sequence-row,
 .strategy-score {
-  border: 1px solid rgba(143, 177, 207, 0.18);
+  border: 1px solid var(--line);
   border-radius: 8px;
-  background: rgba(4, 16, 29, 0.5);
+  background: var(--surface-sunk);
 }
 
 .strategy-decision-grid > div {
@@ -4010,7 +4038,7 @@ dialog {
 }
 
 .strategy-section-body {
-  border-top: 1px solid rgba(143, 177, 207, 0.14);
+  border-top: 1px solid var(--line);
   padding: 12px;
 }
 
@@ -4192,7 +4220,7 @@ dialog {
 }
 
 .message-evidence {
-  border-top: 1px solid rgba(143, 177, 207, 0.14);
+  border-top: 1px solid var(--line);
   padding-top: 8px;
 }
 
@@ -4300,7 +4328,7 @@ dialog {
   display: flex;
   justify-content: space-between;
   gap: 8px;
-  border: 1px solid rgba(143, 177, 207, 0.14);
+  border: 1px solid var(--line);
   border-radius: 6px;
   padding: 8px;
 }
@@ -4323,8 +4351,8 @@ dialog {
   display: grid;
   align-items: start;
   margin-top: 2px;
-  border-color: rgba(143, 177, 207, 0.18);
-  background: rgba(4, 16, 29, 0.48);
+  border-color: var(--line);
+  background: var(--surface-sunk);
 }
 
 @media (max-width: 1080px) {
@@ -4391,7 +4419,7 @@ dialog {
     grid-column: 1 / -1;
     min-height: 72px;
     border-left: 0;
-    border-top: 1px solid rgba(143, 177, 207, 0.18);
+    border-top: 1px solid var(--line);
     padding: 12px 0 0;
   }
 }
@@ -4467,7 +4495,7 @@ dialog {
     min-height: auto;
     padding: 7px 8px max(7px, env(safe-area-inset-bottom));
     border-right: 0;
-    border-top: 1px solid rgba(143, 177, 207, 0.22);
+    border-top: 1px solid var(--line);
   }
 
   .sidebar .brand,
