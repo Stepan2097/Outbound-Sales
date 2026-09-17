@@ -45,9 +45,8 @@
           <button class="nav-item" data-view="leads"><i data-lucide="users"></i><span>Ліди</span></button>
           <button class="nav-item" data-view="ai"><i data-lucide="bot"></i><span>AI-оператор</span></button>
           <button class="nav-item" data-view="warmup"><i data-lucide="flame"></i><span>Прогрів</span><span class="nav-badge" id="warmupNavBadge" hidden></span></button>
-          <button class="nav-item" data-view="database"><i data-lucide="book-open"></i><span>База знань</span></button>
-          <button class="nav-item" data-view="products"><i data-lucide="package"></i><span>Продукти</span></button>
-          <button class="nav-item" data-view="account"><i data-lucide="circle-user-round"></i><span>Профіль</span></button>
+          <button class="nav-item" data-view="products"><i data-lucide="book-open"></i><span>Продукти</span></button>
+          <button class="nav-item" data-view="account"><i data-lucide="users-round"></i><span>Користувачі</span></button>
         </nav>
         <div class="sidebar-footer">
           <span class="status-dot"></span>
@@ -63,7 +62,7 @@
           </div>
           <div class="topbar-actions">
             <select id="productSelect" aria-label="Продукт для аутрічу"></select>
-            <button class="icon-button" id="accountMenuBtn" type="button" title="Профіль" aria-label="Відкрити профіль"><i data-lucide="circle-user-round"></i></button>
+            <button class="icon-button" id="accountMenuBtn" type="button" title="Користувачі" aria-label="Відкрити користувачів"><i data-lucide="users-round"></i></button>
             <button class="primary-button" id="quickPrepareBtn"><i data-lucide="wand-sparkles"></i><span>Запустити дослідження</span></button>
             <button class="utility-hidden" id="syncMcpBtn"><i data-lucide="database-zap"></i><span>Синхронізувати MCP</span></button>
             <button class="icon-button utility-hidden" id="syncModelsBtn" title="Синхронізувати моделі" aria-label="Синхронізувати моделі">
@@ -425,6 +424,30 @@
 
         <section class="view" id="view-account">
           <div class="account-layout">
+            <section class="panel users-panel span-2">
+              <div class="panel-heading">
+                <div>
+                  <h2>Команда</h2>
+                  <p id="teamUserNote">База користувачів одна — та, що в CRM.</p>
+                </div>
+                <button class="danger-button" id="logoutBtn" type="button"><i data-lucide="log-out"></i><span>Вийти</span></button>
+              </div>
+              <div class="team-list" id="teamUserList"></div>
+              <details class="profile-details" id="teamCreatePanel" hidden>
+                <summary><span>Створити новий акаунт</span><i data-lucide="chevron-down"></i></summary>
+                <div class="profile-details-body">
+                  <p class="profile-chart-note">Потрібно лише тому, кого ще немає в CRM — решта входить своїм акаунтом CRM.</p>
+                  <form class="integration-form" id="teamUserForm">
+                    <input id="teamUserNameInput" type="text" placeholder="Ім'я продавця" required />
+                    <input id="teamUserEmailInput" type="email" placeholder="Робоча пошта" required />
+                    <input id="teamUserPasswordInput" type="password" minlength="10" placeholder="Тимчасовий пароль" required />
+                    <select id="teamUserRoleInput"><option value="seller">Продавець</option><option value="admin">Адміністратор</option></select>
+                    <button type="submit"><i data-lucide="user-plus"></i><span>Створити користувача</span></button>
+                  </form>
+                </div>
+              </details>
+            </section>
+
             <section class="panel profile-identity span-2">
               <div class="panel-heading">
                 <div>
@@ -435,8 +458,8 @@
               </div>
               <div class="profile-model">
                 <label>
-                  <span>Модель для цього акаунта</span>
-                  <select id="profileModelSelect" aria-label="Модель для цього акаунта"></select>
+                  <span>Модель цього користувача</span>
+                  <select id="profileModelSelect" aria-label="Модель цього користувача"></select>
                 </label>
                 <p class="profile-model-note" id="profileModelNote">—</p>
               </div>
@@ -466,40 +489,15 @@
               <p class="profile-chart-note" id="profileTimeNote">—</p>
             </section>
 
-            <section class="panel profile-admin span-2">
+            <section class="panel profile-admin span-2" id="accountSelfPanel">
               <details class="profile-details">
-                <summary><span>Пароль, вихід і команда</span><i data-lucide="chevron-down"></i></summary>
+                <summary><span>Свій пароль</span><i data-lucide="chevron-down"></i></summary>
                 <div class="profile-details-body">
-                  <form class="integration-form" id="accountProfileForm">
-                    <label><span>Ім'я</span><input id="accountNameInput" type="text" autocomplete="name" required /></label>
-                    <label><span>Посада</span><input id="accountTitleInput" type="text" autocomplete="organization-title" /></label>
-                    <label hidden><span>Email</span><input id="accountEmailInput" type="email" disabled /></label>
-                    <button type="submit"><i data-lucide="save"></i><span>Зберегти</span></button>
-                  </form>
                   <form class="integration-form" id="accountPasswordForm">
                     <input id="accountPasswordInput" type="password" autocomplete="new-password" minlength="10" placeholder="Новий пароль" required />
                     <input id="accountPasswordConfirmInput" type="password" autocomplete="new-password" minlength="10" placeholder="Підтвердь новий пароль" required />
                     <button type="submit"><i data-lucide="key-round"></i><span>Змінити пароль</span></button>
                   </form>
-                  <button class="danger-button" id="logoutBtn" type="button"><i data-lucide="log-out"></i><span>Вийти</span></button>
-                  <div class="profile-team" id="adminTeamPanel" hidden>
-                    <h3>Акаунти команди</h3>
-                    <p class="profile-chart-note" id="teamUserNote">База користувачів одна — та, що в CRM. Тут ставиться лише роль у цьому застосунку.</p>
-                    <div class="team-list" id="teamUserList"></div>
-                    <details class="profile-details">
-                      <summary><span>Створити новий акаунт</span><i data-lucide="chevron-down"></i></summary>
-                      <div class="profile-details-body">
-                        <p class="profile-chart-note">Потрібно лише тому, кого ще немає в CRM — решта входить своїм акаунтом CRM.</p>
-                        <form class="integration-form" id="teamUserForm">
-                          <input id="teamUserNameInput" type="text" placeholder="Ім'я продавця" required />
-                          <input id="teamUserEmailInput" type="email" placeholder="Робоча пошта" required />
-                          <input id="teamUserPasswordInput" type="password" minlength="10" placeholder="Тимчасовий пароль" required />
-                          <select id="teamUserRoleInput"><option value="seller">Продавець</option><option value="admin">Адміністратор</option></select>
-                          <button type="submit"><i data-lucide="user-plus"></i><span>Створити користувача</span></button>
-                        </form>
-                      </div>
-                    </details>
-                  </div>
                 </div>
               </details>
             </section>
@@ -820,29 +818,75 @@
           </div>
         </section>
 
-        <section class="view" id="view-database">
-          <div class="knowledge-library-layout">
-            <section class="panel knowledge-projects-panel">
+        <section class="view" id="view-products">
+          <div class="product-workspace-layout">
+            <section class="panel product-picker-panel">
               <div class="panel-heading">
                 <div>
-                  <h2>Проєкти</h2>
-                  <p>Кожен проєкт — свій набір файлів. Агенти читають їх перед тим, як писати повідомлення.</p>
+                  <h2>Продукти</h2>
+                  <p>Вибір тут змінює продукт для всього робочого простору</p>
                 </div>
-                <button class="text-button" id="knowledgeNewProjectBtn" type="button"><i data-lucide="plus"></i><span>Проєкт</span></button>
               </div>
-              <div class="knowledge-project-list" id="knowledgeProjectList"></div>
-              <form class="knowledge-project-form" id="knowledgeProjectForm" hidden>
-                <label>
-                  <span>Назва проєкту</span>
-                  <input id="knowledgeProjectNameInput" type="text" placeholder="Назва нового проєкту" />
+              <div class="product-picker-list" id="productPickerList"></div>
+            </section>
+
+            <section class="panel product-brief-panel">
+              <div class="panel-heading">
+                <div>
+                  <h2 id="productBriefTitle">Продукт</h2>
+                  <p>Вісім відповідей, з яких AI складає всю картину продукту. Краще три речення правди, ніж сторінка гасел.</p>
+                </div>
+                <span class="pill" id="productBriefPill">0/8</span>
+              </div>
+              <form class="product-brief-form" id="productBriefForm">
+                <label class="brief-field">
+                  <span>Назва продукту</span>
+                  <small>Як його називає команда</small>
+                  <input id="productNameInput" type="text" placeholder="AdAction" />
                 </label>
-                <label>
-                  <span>Продукт, для якого агенти читатимуть ці файли</span>
-                  <select id="knowledgeProjectProductInput"></select>
+                <label class="brief-field">
+                  <span>Що ми продаємо і що людина з цього має</span>
+                  <small>Два-три речення без гасел: що це, як працює, який результат отримує клієнт</small>
+                  <textarea id="brief-offer" rows="4" placeholder="Наприклад: рекламна мережа value-exchange для мобільних застосунків. Рекламодавець платить за конкретну подію в застосунку, а не за покази."></textarea>
                 </label>
-                <div class="button-row">
-                  <button class="primary-button" type="submit"><i data-lucide="check"></i><span>Створити</span></button>
-                  <button id="knowledgeProjectCancelBtn" type="button"><span>Скасувати</span></button>
+                <label class="brief-field">
+                  <span>Кому це підходить</span>
+                  <small>Тип компанії або людини, розмір, гео, стадія. По одному рядку — за цими ознаками система впізнає ліда</small>
+                  <textarea id="brief-icp" rows="4" placeholder="Студії мобільних ігор, 20+ людей&#10;Ринки: US, UK, DACH&#10;Уже купують трафік і мають MMP"></textarea>
+                </label>
+                <label class="brief-field">
+                  <span>Хто ухвалює рішення і що для нього важливо</span>
+                  <small>Посада плюс те, за що цю людину оцінюють. По одному рядку</small>
+                  <textarea id="brief-buyers" rows="4" placeholder="Head of UA — вартість інсталу і якість когорти&#10;CMO — передбачуваність бюджету"></textarea>
+                </label>
+                <label class="brief-field">
+                  <span>Який біль розв'язуємо і коли він загострюється</span>
+                  <small>Проблема і момент, у який вона стає нагальною. Саме звідси береться причина написати саме зараз</small>
+                  <textarea id="brief-pain" rows="4" placeholder="Канали вигоряють, CPI росте, а план по інсталах не змінюють&#10;Загострюється після релізу або після підняття бюджету"></textarea>
+                </label>
+                <label class="brief-field">
+                  <span>Чим доводимо</span>
+                  <small>Цифри, кейси й факти, які можна називати вголос. Якщо цифра приблизна — пиши точну або не пиши зовсім</small>
+                  <textarea id="brief-proof" rows="4" placeholder="Студія на 60 людей: 40% інсталів із value-exchange за два квартали&#10;12 активних рекламодавців у категорії"></textarea>
+                </label>
+                <label class="brief-field">
+                  <span>З чого починаємо</span>
+                  <small>Маленький перший крок замість дзвінка на пів години. Те, що має цінність, навіть якщо далі нічого не буде</small>
+                  <textarea id="brief-firstStep" rows="3" placeholder="Тестова кампанія на одну країну і одну подію, зі стоп-правилами на папері"></textarea>
+                </label>
+                <label class="brief-field">
+                  <span>Що зазвичай відповідають і наша чесна відповідь</span>
+                  <small>Заперечення та відповідь без суперечки. По одному на рядок</small>
+                  <textarea id="brief-objections" rows="4" placeholder="«У нас уже є партнер» — питаємо, що з роадмапу лишається за бортом&#10;«Rewarded-трафік гірший» — розділяємо платіжну подію і показник якості"></textarea>
+                </label>
+                <label class="brief-field">
+                  <span>Кому не продаємо і чого не обіцяємо</span>
+                  <small>Стоп-лист: непідхожі клієнти і твердження, які заборонені</small>
+                  <textarea id="brief-limits" rows="3" placeholder="Не працюємо з дитячими застосунками&#10;Не обіцяємо ROAS і retention без погодженого кейсу"></textarea>
+                </label>
+                <div class="button-row brief-actions">
+                  <button class="primary-button" type="submit"><i data-lucide="save"></i><span>Зберегти продукт</span></button>
+                  <span class="brief-meta" id="productBriefMeta"></span>
                 </div>
               </form>
             </section>
@@ -851,14 +895,14 @@
               <div class="panel-heading">
                 <div>
                   <h2 id="knowledgeFilesTitle">Файли</h2>
-                  <p id="knowledgeFilesSubtitle">Джерела даних для агентів цього проєкту</p>
+                  <p id="knowledgeFilesSubtitle">Агенти читають ці файли перед тим, як писати повідомлення</p>
                 </div>
                 <button class="text-button" id="knowledgeNewFileBtn" type="button"><i data-lucide="file-plus"></i><span>Новий файл</span></button>
               </div>
               <div class="knowledge-file-list" id="knowledgeFileList"></div>
             </section>
 
-            <section class="panel knowledge-editor-panel span-2">
+            <section class="panel knowledge-editor-panel">
               <div class="panel-heading">
                 <div>
                   <h2 id="knowledgeEditorTitle">Файл не вибрано</h2>
@@ -872,9 +916,9 @@
                     <span>Назва файлу</span>
                     <input id="knowledgeFileNameInput" type="text" placeholder="Назва.md" />
                   </label>
-                  <div class="knowledge-project-picker">
-                    <span>Проєкти, яким належить файл</span>
-                    <div id="knowledgeFileProjectPicker"></div>
+                  <div class="knowledge-product-picker">
+                    <span>Для яких продуктів цей файл</span>
+                    <div id="knowledgeFileProductPicker"></div>
                   </div>
                 </div>
                 <label>
@@ -888,100 +932,6 @@
                 </div>
               </form>
               <div class="empty-state" id="knowledgeEditorEmpty">Вибери файл, щоб редагувати його вміст.</div>
-            </section>
-          </div>
-        </section>
-
-        <section class="view" id="view-products">
-          <div class="product-studio-layout">
-            <section class="panel product-teach-panel">
-              <div class="panel-heading">
-                <div>
-                  <h2>Продукт</h2>
-                  <p>Опиши продукт один раз. Усе інше на цій сторінці читається з цього опису.</p>
-                </div>
-                <div class="button-row">
-                  <span class="pill" id="productStudioSelected">вибрано</span>
-                </div>
-              </div>
-              <div class="product-management-row">
-                <label>
-                  <span>Продукт</span>
-                  <select id="productStudioProductSelect" aria-label="Продукт для редагування"></select>
-                </label>
-                <button id="newProductBtn" type="button"><i data-lucide="plus"></i><span>Новий</span></button>
-                <button class="danger-button" id="deleteProductBtn" type="button"><i data-lucide="trash-2"></i><span>Видалити</span></button>
-              </div>
-              <form class="product-form" id="productForm">
-                <label>
-                  <span>Усе про цей продукт, своїми словами</span>
-                  <textarea id="productContextInput" class="product-context-textarea" rows="14" placeholder="Встав сюди весь контекст продукту: назву, що він робить, ICP, хто купує, болі, сценарії використання, докази, логіку цін, заперечення, твердження, яких треба уникати, як його продавати, тон повідомлень, конкурентів і те, що робить лід придатним або непридатним. Система проаналізує цей текст, створить або оновить продукт, розкладе знання по сегментах і братиме їх для аутрічу."></textarea>
-                </label>
-                <button class="primary-button" id="productTeachBtn" type="submit"><i data-lucide="brain-circuit"></i><span>Проаналізувати і зберегти продукт</span></button>
-              </form>
-            </section>
-
-            <section class="panel product-intelligence-panel">
-              <div class="panel-heading">
-                <div>
-                  <h2>Дані про продукт</h2>
-                  <p>Внутрішня пам'ять, з якої система бере дані для скорингу й аутрічу</p>
-                </div>
-                <span class="pill" id="productMemoryStatus">не навчено</span>
-              </div>
-              <div class="product-memory-summary" id="productMemorySummary"></div>
-              <div class="product-score-list" id="productScoreList"></div>
-              <details class="product-more-info">
-                <summary><span>Детальніше</span><i data-lucide="chevron-down"></i></summary>
-                <div class="product-memory-segments" id="productMemorySegments"></div>
-                <div class="knowledge-list compact" id="productKnowledgeList"></div>
-              </details>
-            </section>
-
-            <section class="panel">
-              <div class="panel-heading">
-                <div>
-                  <h2>Приклади аутрічу</h2>
-                  <p>Навчальні приклади для цього продукту</p>
-                </div>
-              </div>
-              <form class="example-form" id="exampleForm">
-                <div class="split-fields">
-                  <label>
-                    <span>Канал</span>
-                    <select id="exampleChannelInput">
-                      <option value="linkedin">LinkedIn</option>
-                      <option value="email">Email</option>
-                      <option value="sms">SMS</option>
-                      <option value="whatsapp">WhatsApp</option>
-                      <option value="telegram">Telegram</option>
-                      <option value="call">Дзвінок</option>
-                    </select>
-                  </label>
-                  <label>
-                    <span>Тип прикладу</span>
-                    <select id="exampleQualityInput">
-                      <option value="winning">Вдалий / писати так</option>
-                      <option value="bad">Невдалий / так не писати</option>
-                      <option value="neutral">Нейтральна нотатка</option>
-                    </select>
-                  </label>
-                  <label>
-                    <span>Персона</span>
-                    <input id="examplePersonaInput" type="text" placeholder="VP Sales" />
-                  </label>
-                </div>
-                <label>
-                  <span>Приклад повідомлення</span>
-                  <textarea id="exampleMessageInput" rows="6"></textarea>
-                </label>
-                <label>
-                  <span>Результат або нотатка</span>
-                  <input id="exampleOutcomeInput" type="text" placeholder="Багато відповідей, призначена зустріч, погоджений тон" />
-                </label>
-                <button type="submit"><i data-lucide="brain-circuit"></i><span>Додати приклад</span></button>
-              </form>
-              <div class="example-list" id="exampleList"></div>
             </section>
           </div>
         </section>

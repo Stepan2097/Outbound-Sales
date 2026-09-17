@@ -1,6 +1,5 @@
 import {
-  createKnowledgeFile, createKnowledgeProject, deleteKnowledgeFile, deleteKnowledgeProject,
-  publicLibrary, readKnowledgeFile, updateKnowledgeFile, updateKnowledgeProject
+  createKnowledgeFile, deleteKnowledgeFile, publicLibrary, readKnowledgeFile, updateKnowledgeFile
 } from "./library.mjs";
 
 /**
@@ -21,7 +20,6 @@ export async function handleKnowledgeLibraryApi({ request, response, url, sendJs
     }
 
     const fileMatch = path.match(/^\/api\/knowledge\/library\/files\/([^/]+)(\/delete)?$/);
-    const projectMatch = path.match(/^\/api\/knowledge\/library\/projects\/([^/]+)(\/delete)?$/);
 
     if (request.method === "GET" && fileMatch && !fileMatch[2]) {
       const file = readKnowledgeFile(decodeURIComponent(fileMatch[1]));
@@ -51,26 +49,6 @@ export async function handleKnowledgeLibraryApi({ request, response, url, sendJs
     // rest of this app's API and keeping the browser call one shape.
     if (request.method === "POST" && fileMatch && fileMatch[2]) {
       const result = await deleteKnowledgeFile(decodeURIComponent(fileMatch[1]));
-      sendJson(response, 200, { ...result, library: publicLibrary() });
-      return true;
-    }
-
-    if (request.method === "POST" && path === "/api/knowledge/library/projects") {
-      const body = await readJson(request);
-      const project = await createKnowledgeProject(body);
-      sendJson(response, 201, { project, library: publicLibrary() });
-      return true;
-    }
-
-    if (request.method === "POST" && projectMatch && !projectMatch[2]) {
-      const body = await readJson(request);
-      const project = await updateKnowledgeProject(decodeURIComponent(projectMatch[1]), body);
-      sendJson(response, 200, { project, library: publicLibrary() });
-      return true;
-    }
-
-    if (request.method === "POST" && projectMatch && projectMatch[2]) {
-      const result = await deleteKnowledgeProject(decodeURIComponent(projectMatch[1]));
       sendJson(response, 200, { ...result, library: publicLibrary() });
       return true;
     }

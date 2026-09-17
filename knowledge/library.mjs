@@ -4,19 +4,18 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /**
- * The knowledge library: projects, and the files an agent reads before it
- * writes anything.
+ * The knowledge library: the files an agent reads before it writes anything.
+ *
+ * A file belongs to products, not to a folder. One file can belong to several:
+ * that is the whole point — the outbound playbook is the same document for
+ * everything the team sells, and a copy per product would mean editing it twice
+ * and finding out months later that the copies disagree.
  *
  * Files live on disk beside the workspace state file — in production that is
  * the container's /data volume, so a document written here survives a deploy
- * the way the workspace does. The index (which file belongs to which project)
+ * the way the workspace does. The index (which file belongs to which product)
  * is a small JSON next to them; the documents themselves stay plain Markdown
  * on purpose, so somebody can read, diff, or rescue one without this app.
- *
- * One file can belong to several projects. That is the whole reason this is a
- * library and not a folder per project: the outbound playbook is the same
- * document for every project, and copying it would mean editing it twice and
- * finding out months later that the copies disagree.
  */
 
 const moduleRoot = fileURLToPath(new URL(".", import.meta.url));
@@ -24,7 +23,6 @@ const seedRoot = join(moduleRoot, "seed");
 
 const MAX_FILE_BYTES = 400_000;
 const MAX_FILES = 200;
-const MAX_PROJECTS = 40;
 
 // What one message-writing call is allowed to spend on library text. Files run
 // to tens of thousands of characters; the whole library in every prompt would
@@ -33,11 +31,18 @@ const MAX_PROJECTS = 40;
 const PROMPT_CHAR_BUDGET = 6000;
 const MAX_CHUNK_CHARS = 1600;
 
+const ADACTION_PRODUCT_ID = "adaction-value-exchange-ua";
+const COURSE_PRODUCT_ID = "black-affiliate";
+
 let dataDir = "";
 let indexPath = "";
 let filesDir = "";
 let loaded = false;
-let library = { version: 1, projects: [], files: [] };
+let library = { version: 2, files: [] };
+// Which product ids exist, asked of the workspace rather than copied from it:
+// a file may only point at a product that is really for sale, and products come
+// and go while this module stays loaded.
+let knownProductIds = () => [];
 // File bodies, by file id. Kept in memory because the prompt builders that need
 // them are synchronous and sit deep inside the research path; a few hundred
 // kilobytes of Markdown is a cheap thing to hold and a painful thing to await.
@@ -67,13 +72,10 @@ function normalizeFileName(value, fallback = "Новий файл") {
   return /\.[a-z0-9]{1,8}$/i.test(name) ? name : `${name}.md`;
 }
 
-function projectById(id) {
-  return library.projects.find((project) => project.id === id) || null;
-}
-
-function normalizeProjectIds(ids) {
+function normalizeProductIds(ids) {
   const wanted = Array.isArray(ids) ? ids : [ids];
-  return [...new Set(wanted.map((id) => cleanLine(id, 60)).filter((id) => projectById(id)))];
+  const known = new Set(knownProductIds());
+  return [...new Set(wanted.map((id) => cleanLine(id, 60)).filter((id) => known.has(id)))];
 }
 
 export function knowledgeDataDir() {
@@ -82,25 +84,25 @@ export function knowledgeDataDir() {
 
 /**
  * Called once at boot with the directory the workspace state lives in, so the
- * library follows STATE_FILE_PATH into whatever volume a deployment mounted.
+ * library follows STATE_FILE_PATH into whatever volume a deployment mounted,
+ * and with a way to ask which products currently exist.
  */
-export async function loadKnowledgeLibrary(stateFilePath) {
+export async function loadKnowledgeLibrary(stateFilePath, listProductIds) {
+  if (typeof listProductIds === "function") knownProductIds = listProductIds;
   dataDir = join(dirname(stateFilePath), "knowledge");
   indexPath = join(dataDir, "index.json");
   filesDir = join(dataDir, "files");
   await mkdir(filesDir, { recursive: true });
 
+  let saved = null;
   try {
-    const saved = JSON.parse(await readFile(indexPath, "utf8"));
-    library = {
-      version: 1,
-      projects: Array.isArray(saved.projects) ? saved.projects : [],
-      files: Array.isArray(saved.files) ? saved.files : []
-    };
+    saved = JSON.parse(await readFile(indexPath, "utf8"));
   } catch {
     // No index yet: a fresh workspace, or a volume mounted for the first time.
-    library = { version: 1, projects: [], files: [] };
+    saved = null;
   }
+  library = { version: 2, files: Array.isArray(saved?.files) ? saved.files : [] };
+  contents.clear();
 
   for (const file of library.files) {
     try {
@@ -114,11 +116,37 @@ export async function loadKnowledgeLibrary(stateFilePath) {
   }
   library.files = library.files.filter((file) => contents.get(file.id) !== "" || file.bytes === 0);
 
-  if (!library.projects.length && !library.files.length) {
+  const migrated = migrateProjectsToProducts(saved);
+  if (!library.files.length) {
     await seedLibrary();
+  } else if (migrated) {
+    await persistIndex();
   }
   loaded = true;
   return publicLibrary();
+}
+
+/**
+ * The first version of this library put files in projects, and a project
+ * pointed at a product. Products turned out to be the only thing a project ever
+ * meant, so the indirection is read once here and then gone. Files whose
+ * project pointed nowhere keep every product, rather than silently becoming
+ * unreadable to every agent.
+ */
+function migrateProjectsToProducts(saved) {
+  if (!Array.isArray(saved?.projects) || !saved.projects.length) return false;
+  const productOfProject = new Map(saved.projects.map((project) => [project.id, project.productId || ""]));
+  let changed = false;
+  for (const file of library.files) {
+    if (Array.isArray(file.productIds) && file.productIds.length) continue;
+    const mapped = (file.projectIds || [])
+      .map((projectId) => productOfProject.get(projectId) || "")
+      .filter(Boolean);
+    file.productIds = [...new Set(mapped.length ? mapped : knownProductIds())];
+    delete file.projectIds;
+    changed = true;
+  }
+  return changed;
 }
 
 /**
@@ -126,34 +154,17 @@ export async function loadKnowledgeLibrary(stateFilePath) {
  * rather than from an empty page nobody would know what to put on.
  */
 async function seedLibrary() {
-  const seeds = [
-    {
-      project: { id: "adaction", name: "AdAction", productId: "adaction-value-exchange-ua" },
-      files: []
-    },
-    {
-      project: { id: "advantage-course", name: "advantage-course", productId: "black-affiliate" },
-      files: []
-    }
-  ];
-  library.projects = seeds.map(({ project }) => ({
-    ...project,
-    description: "",
-    createdAt: nowIso(),
-    updatedAt: nowIso()
-  }));
-
   const documents = [
     {
       file: "outbound-knowledge-base.md",
       name: "Outbound-knowledge-base.md",
-      // The shared one. Both projects sell outbound the same way.
-      projectIds: ["adaction", "advantage-course"]
+      // The shared one: how this team writes outbound, whatever it is selling.
+      productIds: [ADACTION_PRODUCT_ID, COURSE_PRODUCT_ID]
     },
     {
       file: "faq-training-black-affiliate.md",
       name: "FAQ — Training Black Affiliate.md",
-      projectIds: ["advantage-course"]
+      productIds: [COURSE_PRODUCT_ID]
     }
   ];
 
@@ -169,7 +180,7 @@ async function seedLibrary() {
     library.files.push({
       id,
       name: document.name,
-      projectIds: document.projectIds,
+      productIds: document.productIds,
       bytes: Buffer.byteLength(text, "utf8"),
       createdAt: nowIso(),
       updatedAt: nowIso(),
@@ -197,10 +208,6 @@ function persistIndex() {
 
 export function publicLibrary() {
   return {
-    projects: library.projects.map((project) => ({
-      ...project,
-      fileCount: library.files.filter((file) => file.projectIds.includes(project.id)).length
-    })),
     files: library.files
       .map((file) => ({ ...file, excerpt: cleanLine(contents.get(file.id) || "", 220) }))
       .sort((left, right) => left.name.localeCompare(right.name, "uk"))
@@ -213,62 +220,7 @@ export function readKnowledgeFile(id) {
   return { ...file, content: contents.get(file.id) ?? "" };
 }
 
-export async function createKnowledgeProject({ name, productId = "", description = "" } = {}) {
-  if (library.projects.length >= MAX_PROJECTS) {
-    throw fail(400, "Досягнуто ліміт проєктів.");
-  }
-  const cleanName = cleanLine(name, 80);
-  if (!cleanName) throw fail(400, "Назви проєкт.");
-  const project = {
-    id: newId("kproj"),
-    name: cleanName,
-    productId: cleanLine(productId, 60),
-    description: cleanLine(description, 240),
-    createdAt: nowIso(),
-    updatedAt: nowIso()
-  };
-  library.projects.push(project);
-  await persistIndex();
-  return project;
-}
-
-export async function updateKnowledgeProject(id, patch = {}) {
-  const project = projectById(id);
-  if (!project) throw fail(404, "Проєкт не знайдено.");
-  if (patch.name !== undefined) {
-    const cleanName = cleanLine(patch.name, 80);
-    if (!cleanName) throw fail(400, "Назва проєкту не може бути порожньою.");
-    project.name = cleanName;
-  }
-  if (patch.productId !== undefined) project.productId = cleanLine(patch.productId, 60);
-  if (patch.description !== undefined) project.description = cleanLine(patch.description, 240);
-  project.updatedAt = nowIso();
-  await persistIndex();
-  return project;
-}
-
-/**
- * Deleting a project leaves its files alone unless they belonged to nothing
- * else. A shared document is shared: dropping the project that happened to be
- * open must not take the other project's playbook with it.
- */
-export async function deleteKnowledgeProject(id) {
-  const project = projectById(id);
-  if (!project) throw fail(404, "Проєкт не знайдено.");
-  library.projects = library.projects.filter((item) => item.id !== id);
-  const orphans = [];
-  for (const file of library.files) {
-    file.projectIds = file.projectIds.filter((projectId) => projectId !== id);
-    if (!file.projectIds.length) orphans.push(file.id);
-  }
-  for (const fileId of orphans) {
-    await removeFile(fileId);
-  }
-  await persistIndex();
-  return { deletedProjectId: id, deletedFileIds: orphans };
-}
-
-export async function createKnowledgeFile({ name, projectIds = [], content = "", updatedBy = "" } = {}) {
+export async function createKnowledgeFile({ name, productIds = [], content = "", updatedBy = "" } = {}) {
   if (library.files.length >= MAX_FILES) {
     throw fail(400, "Досягнуто ліміт файлів у бібліотеці.");
   }
@@ -276,13 +228,13 @@ export async function createKnowledgeFile({ name, projectIds = [], content = "",
   if (Buffer.byteLength(text, "utf8") > MAX_FILE_BYTES) {
     throw fail(413, "Файл завеликий. Розбий його на кілька.");
   }
-  const projects = normalizeProjectIds(projectIds);
-  if (!projects.length) throw fail(400, "Обери хоча б один проєкт для файлу.");
+  const products = normalizeProductIds(productIds);
+  if (!products.length) throw fail(400, "Обери хоча б один продукт, для якого цей файл.");
   const id = newId("kfile");
   const file = {
     id,
     name: normalizeFileName(name),
-    projectIds: projects,
+    productIds: products,
     bytes: Buffer.byteLength(text, "utf8"),
     createdAt: nowIso(),
     updatedAt: nowIso(),
@@ -299,10 +251,10 @@ export async function updateKnowledgeFile(id, patch = {}) {
   const file = library.files.find((item) => item.id === id);
   if (!file) throw fail(404, "Файл не знайдено.");
   if (patch.name !== undefined) file.name = normalizeFileName(patch.name, file.name);
-  if (patch.projectIds !== undefined) {
-    const projects = normalizeProjectIds(patch.projectIds);
-    if (!projects.length) throw fail(400, "Файл має належати хоча б одному проєкту.");
-    file.projectIds = projects;
+  if (patch.productIds !== undefined) {
+    const products = normalizeProductIds(patch.productIds);
+    if (!products.length) throw fail(400, "Файл має належати хоча б одному продукту.");
+    file.productIds = products;
   }
   if (patch.content !== undefined) {
     const text = String(patch.content ?? "");
@@ -322,12 +274,6 @@ export async function updateKnowledgeFile(id, patch = {}) {
 export async function deleteKnowledgeFile(id) {
   const file = library.files.find((item) => item.id === id);
   if (!file) throw fail(404, "Файл не знайдено.");
-  await removeFile(id);
-  await persistIndex();
-  return { deletedFileId: id };
-}
-
-async function removeFile(id) {
   library.files = library.files.filter((item) => item.id !== id);
   contents.delete(id);
   try {
@@ -335,6 +281,8 @@ async function removeFile(id) {
   } catch {
     // A document that is already gone from disk is the state we wanted.
   }
+  await persistIndex();
+  return { deletedFileId: id };
 }
 
 function fail(status, message) {
@@ -343,13 +291,11 @@ function fail(status, message) {
   return error;
 }
 
-/** Every file a product's projects point at, newest edit first. */
+/** Every file this product carries, newest edit first. */
 export function knowledgeFilesForProduct(productId = "") {
   if (!loaded || !productId) return [];
-  const projectIds = library.projects.filter((project) => project.productId === productId).map((project) => project.id);
-  if (!projectIds.length) return [];
   return library.files
-    .filter((file) => file.projectIds.some((id) => projectIds.includes(id)))
+    .filter((file) => (file.productIds || []).includes(productId))
     .map((file) => ({ ...file, content: contents.get(file.id) ?? "" }))
     .sort((left, right) => new Date(right.updatedAt) - new Date(left.updatedAt));
 }
@@ -487,5 +433,5 @@ export async function knowledgeDiagnostics() {
   } catch {
     onDisk = [];
   }
-  return { dataDir, indexedFiles: library.files.length, projects: library.projects.length, onDisk: onDisk.length };
+  return { dataDir, indexedFiles: library.files.length, onDisk: onDisk.length };
 }

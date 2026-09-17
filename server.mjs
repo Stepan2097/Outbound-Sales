@@ -50,6 +50,18 @@ const activityDayCapSeconds = 16 * 60 * 60;
 const activityTabIdleSeconds = 5 * 60;
 const activityRetentionDays = 400;
 const profileSpendWindowDays = 30;
+// These two are read while the saved workspace is restored, and the restore runs
+// at the top level of this module — before anything declared further down has
+// been initialized. Stated here, where they are in scope by the time the boot
+// reaches them; below, they were a ReferenceError that swallowed the whole
+// snapshot and quietly handed the workspace its seed data instead.
+//
+// The workspace sells two things. These three were demo products that shipped
+// with the first version, so a saved snapshot that still carries them is read
+// without them.
+const retiredProductIds = new Set(["outbound-sales-os", "ai-revops-copilot", "relationship-intelligence"]);
+// The eight answers a product is described by. See normalizeProductBrief.
+const productBriefFields = ["offer", "icp", "buyers", "pain", "proof", "firstStep", "objections", "limits"];
 const authAccessCookie = "outbound_os_access";
 const authRefreshCookie = "outbound_os_refresh";
 const authSessionCache = new Map();
@@ -165,7 +177,7 @@ const state = {
     lastTrainedAt: null
   },
   products: seedProducts(),
-  selectedProductId: "outbound-sales-os",
+  selectedProductId: "adaction-value-exchange-ua",
   // Which CRM folders the LinkedIn warm-up works, narrowed how, by which
   // accounts. They live here rather than in the Anty database because that
   // database takes no migrations, and because this is a choice somebody made
@@ -316,6 +328,42 @@ const state = {
   postgresVault: null
 };
 
+/**
+ * A model choice is a model and, optionally, how hard it should think.
+ *
+ * Reasoning effort is not a separate model on OpenRouter — it is a parameter on
+ * the same id — so the two travel as one string and split by splitModelChoice().
+ * "#" is the separator because an OpenRouter id never contains one: they are
+ * built from word characters, dots, colons, dashes and a single slash.
+ *
+ * These three live above the top-level await below, and they have to. Restoring
+ * the saved workspace reads every person's model through normalizeUserModelId(),
+ * which is to say through REASONING_EFFORTS — and a `const` declared after an
+ * `await` at module top level is still in its temporal dead zone while that
+ * await runs. Declared further down, the restore threw on its first user and
+ * the whole saved workspace — products, prospects, people, usage — was silently
+ * dropped and then overwritten by the first thing that saved.
+ */
+const REASONING_EFFORTS = ["low", "medium", "high"];
+
+/**
+ * The models this workspace offers, and the thinking levels worth offering on
+ * each. Prices are per million tokens, read from the live OpenRouter catalogue
+ * — they are shown so a choice is made with its cost visible rather than after
+ * the invoice. Luna's output is ten times cheaper than Terra's, and a picker
+ * that hid that would be the reason somebody picked wrong.
+ */
+const CURATED_MODEL_CHOICES = [
+  { id: "openai/gpt-5.6-luna-pro", label: "GPT 5.6 Luna", efforts: REASONING_EFFORTS, lastKnownPrice: [0.2, 1.2] },
+  { id: "openai/gpt-5.6-terra-pro", label: "GPT 5.6 Terra", efforts: REASONING_EFFORTS, lastKnownPrice: [2, 12] },
+  { id: "openai/gpt-5.6-sol-pro", label: "GPT 5.6 Sol", efforts: REASONING_EFFORTS, lastKnownPrice: [2, 10] },
+  { id: "anthropic/claude-haiku-4.5", label: "Claude Haiku 4.5", efforts: REASONING_EFFORTS, lastKnownPrice: [1, 5] },
+  { id: "anthropic/claude-sonnet-5", label: "Claude Sonnet 5", efforts: REASONING_EFFORTS, lastKnownPrice: [2, 10] },
+  { id: "deepseek/deepseek-v4-pro", label: "DeepSeek V4 Pro", efforts: REASONING_EFFORTS, lastKnownPrice: [1.6, 3.2] }
+];
+
+const EFFORT_LABEL = { low: "швидко", medium: "середнє думання", high: "глибоке думання" };
+
 // Order matters, and it changed when the Settings page went away. The saved
 // snapshot holds integration settings without their secrets, so restoring it
 // after the environment was read put back a "not configured" flag while the
@@ -326,7 +374,7 @@ await loadPersistentWorkspaceState();
 // The knowledge library lives beside the state file, so it is opened from the
 // same path and, on a volume that has never held one, seeded from the
 // documents shipped with the repo.
-await loadKnowledgeLibrary(stateFilePath);
+await loadKnowledgeLibrary(stateFilePath, () => state.products.map((product) => product.id));
 initializeRuntimeConfigFromEnv();
 void warmRuntimeConnections();
 // Read once at boot so the sign-in screen knows whether a user base exists
@@ -529,15 +577,19 @@ async function handleApi(request, response, url) {
     return;
   }
 
-  // Everything the Profile screen shows, in one call: who you are, the model
-  // you picked, thirty days of your own spend, and your time in the app.
+  // Everything one person's card shows, in one call: who they are, the model
+  // picked for them, thirty days of their spend, and their time in the app.
+  // Without ?user it is your own card; with it, somebody else's, which only an
+  // admin may ask for.
   if (request.method === "GET" && url.pathname === "/api/account/profile") {
-    sendJson(response, 200, buildAccountProfileView(request.auth.profile));
+    const target = await resolveAccountTarget(request, url.searchParams.get("user"));
+    sendJson(response, 200, buildAccountProfileView(target, { self: target === request.auth.profile }));
     return;
   }
 
-  // The model is chosen per person now. An empty value hands the choice back
-  // to the workspace default rather than leaving the person without one.
+  // The model is chosen per person, one person at a time. An empty value hands
+  // the choice back to the workspace default rather than leaving somebody
+  // without one; an admin may make the choice for anybody in the directory.
   if (request.method === "POST" && url.pathname === "/api/account/model") {
     const body = await readJson(request);
     const modelId = normalizeUserModelId(body.modelId ?? body.model ?? "");
@@ -545,11 +597,15 @@ async function handleApi(request, response, url) {
       sendJson(response, 400, { error: "Не впізнаю цю модель. Вибери одну зі списку або лиши поле порожнім, щоб узяти модель робочого простору." });
       return;
     }
-    request.auth.profile.modelId = modelId;
-    request.auth.profile.modelChosenAt = modelId ? new Date().toISOString() : null;
-    request.auth.profile.updatedAt = new Date().toISOString();
+    // Choosing for somebody who has never signed in here writes their profile
+    // early — the same thing setting their role does, and for the same reason:
+    // an admin should be able to decide before the person arrives.
+    const target = await resolveAccountTarget(request, body.userId ?? body.user ?? body.email, { create: true });
+    target.modelId = modelId;
+    target.modelChosenAt = modelId ? new Date().toISOString() : null;
+    target.updatedAt = new Date().toISOString();
     await writePersistentWorkspaceState();
-    sendJson(response, 200, { ok: true, model: accountModelView(request.auth.profile) });
+    sendJson(response, 200, { ok: true, model: accountModelView(target) });
     return;
   }
 
@@ -558,16 +614,6 @@ async function handleApi(request, response, url) {
   if (request.method === "POST" && url.pathname === "/api/account/heartbeat") {
     const body = await readJson(request).catch(() => ({}));
     sendJson(response, 200, recordUserHeartbeat(request.auth.profile, { tabId: body?.tabId }));
-    return;
-  }
-
-  if (request.method === "POST" && url.pathname === "/api/account/profile") {
-    const body = await readJson(request);
-    request.auth.profile.name = cleanText(body.name || request.auth.profile.name).slice(0, 120);
-    request.auth.profile.title = cleanText(body.title || request.auth.profile.title).slice(0, 120);
-    request.auth.profile.updatedAt = new Date().toISOString();
-    await writePersistentWorkspaceState();
-    sendJson(response, 200, publicState());
     return;
   }
 
@@ -831,6 +877,29 @@ async function handleApi(request, response, url) {
     }
     state.selectedProductId = product.id;
     addEvent("product", `${product.name} ${existing ? "updated" : "added"}.`);
+    await writePersistentWorkspaceState();
+    sendJson(response, 200, publicState());
+    return;
+  }
+
+  // The eight answers, saved as they were typed. Everything the rest of the app
+  // reads about a product is derived from them right here.
+  if (request.method === "POST" && url.pathname === "/api/products/brief") {
+    const body = await readJson(request);
+    const product = state.products.find((item) => item.id === (body.productId || state.selectedProductId));
+    if (!product) {
+      sendJson(response, 404, { error: "Продукт не знайдено." });
+      return;
+    }
+    const brief = normalizeProductBrief(body.brief || body);
+    if (!brief) {
+      sendJson(response, 400, { error: "Заповни хоча б одну відповідь про продукт." });
+      return;
+    }
+    const name = cleanText(body.name || "");
+    if (name) product.name = name;
+    applyBriefToProduct(product, brief);
+    addEvent("product", `${product.name} brief updated (${briefFilledCount(brief)}/8 answers).`);
     await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
@@ -2113,6 +2182,10 @@ async function workspaceDirectory() {
       email,
       name: cleanText(known?.name || metadata.full_name || metadata.name || email.split("@")[0] || ""),
       role: known?.role || roleFromCrm(crm),
+      // The model each person works with, shown in the list so the workspace's
+      // spread of choices is one glance rather than fourteen clicks.
+      modelId: cleanText(known?.modelId || ""),
+      modelLabel: modelChoiceLabel(known?.modelId),
       signedInHere: Boolean(known),
       blocked,
       crmRole: cleanText(crm?.role || ""),
@@ -2178,16 +2251,6 @@ function publicUserProfile(profile = {}) {
 
 // Returns "" for "use the workspace default" and null for "this is not a model
 // id I will store", which the endpoint turns into a 400.
-/**
- * A choice is a model and, optionally, how hard it should think.
- *
- * Reasoning effort is not a separate model on OpenRouter — it is a parameter on
- * the same id — so the two travel as one string and split here. "#" is the
- * separator because an OpenRouter id never contains one: they are built from
- * word characters, dots, colons, dashes and a single slash.
- */
-const REASONING_EFFORTS = ["low", "medium", "high"];
-
 function splitModelChoice(value) {
   const raw = cleanText(value || "");
   if (!raw) return { modelId: "", effort: "" };
@@ -2198,22 +2261,19 @@ function splitModelChoice(value) {
 }
 
 /**
- * The models this workspace offers, and the thinking levels worth offering on
- * each. Prices are per million tokens, read from the live OpenRouter catalogue
- * — they are shown so a choice is made with its cost visible rather than after
- * the invoice. Luna's output is ten times cheaper than Terra's, and a picker
- * that hid that would be the reason somebody picked wrong.
+ * A model choice as a person reads it: the curated name where there is one,
+ * the catalogue's display name otherwise, and the thinking level beside it.
+ * The raw id is the fallback rather than the answer — "openai/gpt-5.6-luna-pro#high"
+ * in a list of people is a string nobody scans.
  */
-const CURATED_MODEL_CHOICES = [
-  { id: "openai/gpt-5.6-luna-pro", label: "GPT 5.6 Luna", efforts: REASONING_EFFORTS, lastKnownPrice: [0.2, 1.2] },
-  { id: "openai/gpt-5.6-terra-pro", label: "GPT 5.6 Terra", efforts: REASONING_EFFORTS, lastKnownPrice: [2, 12] },
-  { id: "openai/gpt-5.6-sol-pro", label: "GPT 5.6 Sol", efforts: REASONING_EFFORTS, lastKnownPrice: [2, 10] },
-  { id: "anthropic/claude-haiku-4.5", label: "Claude Haiku 4.5", efforts: REASONING_EFFORTS, lastKnownPrice: [1, 5] },
-  { id: "anthropic/claude-sonnet-5", label: "Claude Sonnet 5", efforts: REASONING_EFFORTS, lastKnownPrice: [2, 10] },
-  { id: "deepseek/deepseek-v4-pro", label: "DeepSeek V4 Pro", efforts: REASONING_EFFORTS, lastKnownPrice: [1.6, 3.2] }
-];
-
-const EFFORT_LABEL = { low: "швидко", medium: "середнє думання", high: "глибоке думання" };
+function modelChoiceLabel(value) {
+  const { modelId, effort } = splitModelChoice(value);
+  if (!modelId) return "";
+  const curated = CURATED_MODEL_CHOICES.find((choice) => choice.id === modelId);
+  const known = (state.models || []).find((model) => model.id === modelId);
+  const base = curated?.label || cleanText(known?.displayName || "") || modelId;
+  return effort ? `${base} · ${EFFORT_LABEL[effort]}` : base;
+}
 
 function normalizeUserModelId(value) {
   const raw = cleanText(value || "").slice(0, 180);
@@ -2286,11 +2346,16 @@ function accountModelView(profile = {}) {
       enabled: Boolean(model.enabled)
     }));
   // Until OpenRouter is connected the catalogue is nothing but mock rows, and
-  // a Profile screen with an empty list would offer no choice at all. The two
-  // models the workspace actually calls are always offerable.
+  // a card with an empty list would offer no choice at all. The two models the
+  // workspace actually calls are always offerable — and so is whatever this
+  // person already chose, unless it is one of the curated pairs above. Adding
+  // it twice put the raw id next to the named one, both marked selected, and a
+  // browser keeps the last: the picker then read "openai/gpt-5.6-luna-pro#medium"
+  // to somebody who had chosen "GPT 5.6 Luna · середнє думання".
   for (const id of [state.aiModelDefaults.analysisModel, state.aiModelDefaults.writingModel, chosen]) {
     const modelId = cleanText(id || "");
     if (!modelId || catalogue.some((model) => model.id === modelId)) continue;
+    if (curated.some((option) => option.id === modelId)) continue;
     catalogue.push({
       id: modelId,
       displayName: modelId,
@@ -2516,13 +2581,70 @@ function userTimeSummary(profile, { days = profileSpendWindowDays, endValue = ne
   };
 }
 
-function buildAccountProfileView(profile = {}, { endValue = new Date() } = {}) {
+function buildAccountProfileView(profile = {}, { endValue = new Date(), self = true } = {}) {
   return {
     user: publicUserProfile(profile),
+    // A card opened by an admin on somebody else is the same card: the person
+    // reading it just is not the person it is about, and the screen says so
+    // rather than pretending the password and the sign-out belong to them.
+    self,
+    signedInHere: !profile.ephemeral,
     model: accountModelView(profile),
     spend: userSpendSummary(cleanText(profile.id || "") || null, { endValue }),
     time: userTimeSummary(profile, { endValue }),
     generatedAt: new Date().toISOString()
+  };
+}
+
+/**
+ * Whose card a request is about.
+ *
+ * No identifier means your own. An identifier means somebody else's, and that
+ * is an admin's question to ask — a seller asking it gets their own card's
+ * door closed rather than a quiet substitution, because a screen that silently
+ * shows the wrong person's spend is worse than one that refuses.
+ *
+ * Somebody in the directory who has never signed in here has no profile row.
+ * A read must not create one — nobody's record should appear because it was
+ * looked at — so it is answered from Supabase with an empty record. A write
+ * does create it, the way setting a role does.
+ */
+async function resolveAccountTarget(request, identifier, { create = false } = {}) {
+  const self = request.auth.profile;
+  const wanted = cleanText(identifier || "").toLowerCase();
+  const isSelf = !wanted
+    || wanted === cleanText(self.id || "").toLowerCase()
+    || wanted === cleanText(self.email || "").toLowerCase();
+  if (isSelf) return self;
+  if (self.role !== "admin") throw apiError("Чужу картку відкриває лише адміністратор робочого простору.", 403);
+
+  const known = state.users.find((user) =>
+    cleanText(user.id || "").toLowerCase() === wanted || cleanText(user.email || "").toLowerCase() === wanted);
+  if (known) return known;
+
+  // One listing answers both spellings — an id from the directory rows and an
+  // email typed by hand — and it is the same call the directory itself makes.
+  const authUsers = (await supabaseAuthRequest("admin/users?page=1&per_page=1000")).users || [];
+  const user = authUsers.find((item) =>
+    String(item.id || "").toLowerCase() === wanted || cleanText(item.email || "").toLowerCase() === wanted);
+  if (!user?.id) throw apiError("Такого акаунта немає в Supabase.", 404);
+  if (create) return ensureWorkspaceUserProfile(user, {});
+
+  const metadata = user.user_metadata || {};
+  const email = cleanText(user.email || "").toLowerCase();
+  return {
+    id: user.id,
+    email,
+    name: cleanText(metadata.full_name || metadata.name || email.split("@")[0] || ""),
+    title: "",
+    role: "seller",
+    status: "active",
+    modelId: "",
+    modelChosenAt: null,
+    createdAt: user.created_at || null,
+    lastLoginAt: user.last_sign_in_at || null,
+    // Not a row in state.users: read-only, and never written back.
+    ephemeral: true
   };
 }
 
@@ -2632,6 +2754,7 @@ function applyPersistentWorkspaceState(saved = {}) {
     const idAliases = new Map();
     for (const input of saved.products) {
       const product = normalizeProduct(input);
+      if (retiredProductIds.has(product.id)) continue;
       const key = productCanonicalKey(product);
       const existing = byKey.get(key);
       const merged = existing ? mergeProductMemory(existing, product) : product;
@@ -3368,154 +3491,10 @@ function seedProducts() {
   const now = new Date().toISOString();
   return [
     {
-      id: "outbound-sales-os",
-      name: "Outbound Sales OS",
-      category: "AI sales execution platform",
-      analysisProfileId: "general-b2b-outbound",
-      positioning: "Turns prospect research, contact search, outreach drafting, and follow-up coaching into one fast workflow.",
-      targetPersonas: ["VP Sales", "Head of Growth", "Revenue Operations", "Founder-led sales"],
-      useCases: ["AI outbound preparation", "contact discovery review", "follow-up task creation", "sales coaching"],
-      proofPoints: ["reduces manual research time", "prepares product-specific messages", "turns calls into next-step tasks"],
-      differentiators: ["two-click lead preparation", "MCP product context sync", "CRM and call transcript context", "human review before send"],
-      objections: ["already have a sequencer", "worried about AI quality", "contact data compliance"],
-      examples: [
-        {
-          id: "ex-outbound-1",
-          channel: "linkedin",
-          persona: "VP Sales",
-          label: "concise scaling pain",
-          message: "Saw your team is scaling outbound. Curious how you are keeping research quality and sequence review consistent as volume grows.",
-          createdAt: now
-        }
-      ],
-      knowledge: [
-        {
-          id: "know-outbound-1",
-          type: "lesson",
-          title: "Core workflow",
-          url: "",
-          text: "Lead intake should move from LinkedIn profile to contact review, tailored messages, CRM activity logging, and follow-up task creation in as few clicks as possible.",
-          tags: ["workflow", "positioning"],
-          priority: 92,
-          screenshot: null,
-          createdAt: now
-        },
-        {
-          id: "know-outbound-2",
-          type: "platform_note",
-          title: "Human review rule",
-          url: "",
-          text: "The product helps discover contact candidates and messenger check links, but the salesperson must review identity, permission, and source confidence before sending.",
-          tags: ["compliance", "contact-data"],
-          priority: 88,
-          screenshot: null,
-          createdAt: now
-        }
-      ],
-      mcpContext: {
-        version: "mcp-v3.4",
-        freshness: "fresh",
-        lastSyncedAt: now,
-        sources: [
-          { name: "Product positioning brief", type: "MCP doc", confidence: 96 },
-          { name: "Sales playbook", type: "MCP knowledge", confidence: 91 },
-          { name: "Approved objection handling", type: "MCP policy", confidence: 94 }
-        ]
-      }
-    },
-    {
-      id: "ai-revops-copilot",
-      name: "AI RevOps Copilot",
-      category: "Revenue operations assistant",
-      analysisProfileId: "general-b2b-outbound",
-      positioning: "Helps RevOps teams clean CRM notes, score leads, identify next actions, and keep reps moving.",
-      targetPersonas: ["Revenue Operations", "Sales Operations", "CRM Admin", "GTM Analytics"],
-      useCases: ["CRM note summarization", "lead scoring", "follow-up hygiene", "forecast hygiene"],
-      proofPoints: ["standardizes CRM summaries", "flags low-confidence lead data", "connects scoring to follow-up actions"],
-      differentiators: ["clean CRM summaries", "historical activity analysis", "clear next action recommendations"],
-      objections: ["CRM already has AI", "data quality is messy", "lead scores are not trusted"],
-      examples: [
-        {
-          id: "ex-revops-1",
-          channel: "linkedin",
-          persona: "Revenue Operations",
-          label: "CRM hygiene angle",
-          message: "Noticed your RevOps scope. I’m looking at how teams turn messy CRM notes into reliable next actions without adding admin work.",
-          createdAt: now
-        }
-      ],
-      knowledge: [
-        {
-          id: "know-revops-1",
-          type: "lesson",
-          title: "RevOps value",
-          url: "",
-          text: "Prioritize CRM hygiene, activity summaries, next-action clarity, and trusted lead scoring over generic AI productivity claims.",
-          tags: ["revops", "positioning"],
-          priority: 88,
-          screenshot: null,
-          createdAt: now
-        }
-      ],
-      mcpContext: {
-        version: "mcp-v2.8",
-        freshness: "fresh",
-        lastSyncedAt: now,
-        sources: [
-          { name: "RevOps ICP definition", type: "MCP doc", confidence: 93 },
-          { name: "CRM workflow map", type: "MCP resource", confidence: 87 },
-          { name: "Lead scoring examples", type: "MCP dataset", confidence: 89 }
-        ]
-      }
-    },
-    {
-      id: "relationship-intelligence",
-      name: "Relationship Intelligence Graph",
-      category: "Warm intro and account mapping",
-      analysisProfileId: "general-b2b-outbound",
-      positioning: "Finds relationship paths, scores introduction strength, and recommends account-entry actions.",
-      targetPersonas: ["Enterprise AE", "Strategic Accounts", "Partnerships", "Founder"],
-      useCases: ["relationship path analysis", "intro scoring", "account planning", "executive outreach"],
-      proofPoints: ["ranks warm paths by strength", "separates evidence from guesses", "creates explainable account-entry plans"],
-      differentiators: ["source-attributed relationship logic", "explainable account entry", "relationship context for outreach"],
-      objections: ["relationship data is incomplete", "executive outreach must be precise", "warm intro asks are sensitive"],
-      examples: [
-        {
-          id: "ex-rel-1",
-          channel: "linkedin",
-          persona: "Partnerships",
-          label: "warm path angle",
-          message: "I’m exploring how partnership teams identify credible warm paths into strategic accounts without over-claiming relationship strength.",
-          createdAt: now
-        }
-      ],
-      knowledge: [
-        {
-          id: "know-rel-1",
-          type: "lesson",
-          title: "Relationship evidence",
-          url: "",
-          text: "Messages must separate confirmed relationship paths from weak signals and should never over-claim warm introduction strength.",
-          tags: ["relationships", "proof"],
-          priority: 90,
-          screenshot: null,
-          createdAt: now
-        }
-      ],
-      mcpContext: {
-        version: "mcp-v1.9",
-        freshness: "fresh",
-        lastSyncedAt: now,
-        sources: [
-          { name: "Relationship graph schema", type: "MCP schema", confidence: 88 },
-          { name: "Executive messaging guide", type: "MCP doc", confidence: 92 },
-          { name: "Intro scoring rubric", type: "MCP policy", confidence: 90 }
-        ]
-      }
-    },
-    {
       id: "black-affiliate",
-      name: "Black Affiliate",
+      // The course the team sells. The id stays as it was: the iGaming scoring
+      // profile, the outreach rules and the saved workspace all key on it.
+      name: "advantage-course",
       category: "iGaming affiliate and performance marketing",
       analysisProfileId: "adaction-mobile-games-value-exchange-ua",
       positioning: "Product context needs precise training data before the system should make claims. Use the product training text field to define the offer, ICP, proof, objections, and sales rules.",
@@ -3573,7 +3552,7 @@ function seedProducts() {
     },
     {
       id: "adaction-value-exchange-ua",
-      name: "AdAction - Value Exchange UA",
+      name: "AdAction",
       category: "Mobile games/apps user acquisition",
       analysisProfileId: "adaction-mobile-games-value-exchange-ua",
       positioning: "Helps mobile game and app teams test value-exchange/rewarded user acquisition with clear event economics, quality controls, and capped pilot rules.",
@@ -3930,6 +3909,7 @@ function normalizeProduct(input) {
     examples: Array.isArray(input.examples) ? input.examples.map(normalizeOutreachExample) : [],
     knowledge: Array.isArray(input.knowledge) ? input.knowledge.map(normalizeProductKnowledge).filter(Boolean) : [],
     rawContext: cleanLongText(input.rawContext || input.context || ""),
+    brief: normalizeProductBrief(input.brief),
     memory: normalizeProductMemory(input.memory),
     createdAt: input.createdAt || now,
     updatedAt: input.updatedAt || now,
@@ -3948,6 +3928,105 @@ function normalizeProduct(input) {
   };
   product.memory ||= synthesizeProductMemory(product);
   return product;
+}
+
+/**
+ * The product brief: eight answers, and the whole of what a person is asked to
+ * write about a product.
+ *
+ * The page this replaces asked for one long free-text dump and then guessed at
+ * its parts with a model. What the writing actually needs is small and always
+ * the same — what this is, who it fits, who decides, what hurts and when, what
+ * we can prove, what we ask for first, what they object to, and what we must
+ * never say. Eight questions, each one of them load-bearing in a first message.
+ */
+function normalizeProductBrief(input) {
+  if (!input || typeof input !== "object") return null;
+  const brief = {};
+  let filled = 0;
+  for (const field of productBriefFields) {
+    brief[field] = cleanLongText(input[field] || "").slice(0, 4000);
+    if (brief[field]) filled += 1;
+  }
+  if (!filled) return null;
+  brief.updatedAt = input.updatedAt || new Date().toISOString();
+  return brief;
+}
+
+/** Answers split into lines, because half the product record is a list. */
+function briefLines(value = "") {
+  return String(value || "")
+    .split(/\r?\n+/)
+    .map((line) => cleanText(line.replace(/^[-*\u2022\d.\s]+/, "")))
+    .filter(Boolean)
+    .slice(0, 12);
+}
+
+function briefFilledCount(brief) {
+  return productBriefFields.filter((field) => cleanText(brief?.[field] || "")).length;
+}
+
+/**
+ * The brief is the source; everything the rest of the app already reads —
+ * positioning, personas, use cases, proof, objections and the memory segments
+ * scoring runs on — is derived from it here. Nothing downstream has to learn
+ * about the new shape, and nothing upstream has to be asked twice.
+ */
+function applyBriefToProduct(product, brief) {
+  const filled = briefFilledCount(brief);
+  product.brief = brief;
+  product.positioning = cleanLongText(brief.offer) || product.positioning;
+  product.targetPersonas = briefLines(brief.buyers).length ? briefLines(brief.buyers) : product.targetPersonas;
+  product.useCases = briefLines(brief.pain).length ? briefLines(brief.pain) : product.useCases;
+  product.proofPoints = briefLines(brief.proof);
+  product.objections = briefLines(brief.objections);
+  product.rawContext = renderBriefAsText(product, brief);
+
+  const previous = product.memory || {};
+  const segments = { ...(previous.segments || {}) };
+  segments.idealCustomers = briefLines(brief.icp);
+  segments.buyerPersonas = briefLines(brief.buyers);
+  segments.painPoints = briefLines(brief.pain);
+  segments.proofPoints = briefLines(brief.proof);
+  segments.objections = briefLines(brief.objections);
+  segments.salesAngles = briefLines(brief.firstStep);
+  // One answer, two segments: what we refuse to sell and what we refuse to
+  // claim are the same sentence in a person's head and two different guards in
+  // the prompts.
+  segments.exclusions = briefLines(brief.limits);
+  segments.claimsToAvoid = briefLines(brief.limits);
+
+  product.memory = {
+    ...previous,
+    // Eight of eight is not a quality bar, so this never claims more than it
+    // knows: it says how much of the brief exists, and the writing paths
+    // already refuse to invent what is missing.
+    status: filled >= 6 ? "trained" : filled ? "partial" : "needs_training",
+    summary: cleanText(String(brief.offer || "").split(/(?<=[.!?])\s/)[0] || previous.summary || ""),
+    confidence: Math.max(20, Math.round((filled / productBriefFields.length) * 100)),
+    source: "product_brief",
+    analyzedAt: new Date().toISOString(),
+    segments,
+    scoring: previous.scoring || []
+  };
+  product.updatedAt = new Date().toISOString();
+  return product;
+}
+
+function renderBriefAsText(product, brief) {
+  const labels = {
+    offer: "What we sell and what the buyer gets",
+    icp: "Who it fits",
+    buyers: "Who decides and what they care about",
+    pain: "The pain and when it gets loud",
+    proof: "Proof we are allowed to use",
+    firstStep: "The first small step we ask for",
+    objections: "Objections and our honest answer",
+    limits: "Who we do not sell to and what we never claim"
+  };
+  return [`${product.name}`, ...productBriefFields
+    .filter((field) => cleanText(brief[field] || ""))
+    .map((field) => `${labels[field]}:\n${brief[field]}`)].join("\n\n");
 }
 
 function normalizeProductMemory(memory) {
@@ -7388,12 +7467,12 @@ async function prepareOutreachWithAi(prospect, profile, taskType = "SEQUENCE_GEN
       messages: [
         {
           role: "system",
-          content: "You are an elite outbound strategist and plain-spoken sales writer. Return only strict JSON with escaped newlines inside string values. The copy must sound human, specific, calm, and low-pressure. Avoid salesy phrases like 'I help', 'we help', 'quick demo', 'revolutionize', 'streamline', 'unlock', 'synergy', 'touch base', 'just checking in', and generic ROI claims. Do not invent private contact data or company facts. Ground every personalization point in provided company context, lead context, product knowledge, or the workspace knowledge files, or mark it as something to verify. The knowledge files in product.knowledgeLibrary are the team's own written rules and facts: follow them over your own habits. First touch should usually be a LinkedIn profile review/warm-up and a short invitation, not a pitch."
+          content: "You are an elite outbound strategist and plain-spoken sales writer. Return only strict JSON with escaped newlines inside string values. The copy must sound human, specific, calm, and low-pressure. Avoid salesy phrases like 'I help', 'we help', 'quick demo', 'revolutionize', 'streamline', 'unlock', 'synergy', 'touch base', 'just checking in', and generic ROI claims. Do not invent private contact data or company facts. Ground every personalization point in provided company context, lead context, product knowledge, or the workspace knowledge files, or mark it as something to verify. product.brief holds the team's own eight answers about the product, and product.knowledgeLibrary their written rules and facts: follow both over your own habits, and never claim what neither supports. First touch should usually be a LinkedIn profile review/warm-up and a short invitation, not a pitch."
         },
         {
           role: "user",
           content: JSON.stringify({
-            instruction: "Create a product-specific outbound strategy for this exact lead. Start from company context, likely priorities, unknowns, contact evidence, product knowledge, the workspace knowledge files in product.knowledgeLibrary, and learning memory. Treat outreach examples with quality='winning' as style guidance, and quality='bad' as patterns to avoid. Write messages that feel like a researched note from one professional to another. Do not use broad claims. If company data is weak, make the first touch a research-based question and add a research gap instead of pretending. Include concise LinkedIn invite, LinkedIn follow-up, email, SMS, WhatsApp, Telegram, call opener, four LinkedIn variations, and practical next actions. SMS and messenger drafts must be short and only used after contact/permission review.",
+            instruction: "Create a product-specific outbound strategy for this exact lead. Start from company context, likely priorities, unknowns, contact evidence, the product brief in product.brief, product knowledge, the workspace knowledge files in product.knowledgeLibrary, and learning memory. Treat outreach examples with quality='winning' as style guidance, and quality='bad' as patterns to avoid. Write messages that feel like a researched note from one professional to another. Do not use broad claims. If company data is weak, make the first touch a research-based question and add a research gap instead of pretending. Include concise LinkedIn invite, LinkedIn follow-up, email, SMS, WhatsApp, Telegram, call opener, four LinkedIn variations, and practical next actions. SMS and messenger drafts must be short and only used after contact/permission review.",
             requiredJsonShape: {
               recommendedChannel: "linkedin | email | sms | whatsapp | telegram | manual_research",
               qualificationRationale: "short rationale",
@@ -11674,6 +11753,9 @@ function productForPrompt(product, context = "") {
     differentiators: product.differentiators,
     objections: product.objections,
     memory: product.memory || synthesizeProductMemory(product),
+    // The team's own answers, in their own words. Everything below this is
+    // derived from them, so when the two disagree, this is the one that is true.
+    brief: briefForPrompt(product),
     knowledge: productKnowledgeForPrompt(product, 10, context),
     // The knowledge library, filtered to this lead. Everything a person put in
     // the project's files reaches the model here — as passages, not as the
@@ -11681,6 +11763,22 @@ function productForPrompt(product, context = "") {
     // nothing to do with the lead on the screen.
     knowledgeLibrary: knowledgeLibraryForPrompt(product, context)
   };
+}
+
+function briefForPrompt(product = {}) {
+  const brief = product.brief;
+  if (!brief) return null;
+  const answers = {
+    whatWeSellAndWhatTheBuyerGets: brief.offer,
+    whoItFits: brief.icp,
+    whoDecidesAndWhatTheyCareAbout: brief.buyers,
+    painAndWhenItGetsLoud: brief.pain,
+    proofWeAreAllowedToUse: brief.proof,
+    firstSmallStepWeAskFor: brief.firstStep,
+    objectionsAndOurHonestAnswer: brief.objections,
+    neverSellToOrClaim: brief.limits
+  };
+  return Object.fromEntries(Object.entries(answers).filter(([, value]) => cleanText(value || "")));
 }
 
 /**

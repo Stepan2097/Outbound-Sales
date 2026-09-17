@@ -436,8 +436,6 @@ canvas {
 .privacy-form,
 .paste-form,
 .linkedin-target-form,
-.product-form,
-.example-form,
 .integration-form {
   display: grid;
   gap: 12px;
@@ -984,7 +982,6 @@ tbody tr:last-child td {
   gap: 8px;
 }
 
-.product-studio-layout,
 .integrations-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.05fr) minmax(360px, 0.95fr);
@@ -996,64 +993,8 @@ tbody tr:last-child td {
   grid-column: 1 / -1;
 }
 
-.knowledge-form {
-  display: grid;
-  gap: 12px;
-}
-
-.knowledge-form > label,
-.knowledge-form > .split-fields,
-.knowledge-form > button {
+.knowledge-form > .split-fields {
   grid-column: 1;
-}
-
-.product-context-textarea {
-  min-height: 220px;
-  line-height: 1.55;
-}
-
-.product-management-row {
-  display: grid;
-  grid-template-columns: minmax(180px, 1fr) auto auto auto;
-  gap: 8px;
-  align-items: end;
-  margin: 12px 0;
-}
-
-.product-management-row label {
-  min-width: 0;
-}
-
-.product-management-row button {
-  min-height: 42px;
-}
-
-.product-teach-panel,
-.product-intelligence-panel {
-  min-width: 0;
-}
-
-.product-memory-summary {
-  margin-bottom: 12px;
-}
-
-.product-memory-card {
-  border: 1px solid rgba(104, 184, 255, 0.2);
-  border-radius: 8px;
-  background: rgba(5, 18, 35, 0.68);
-  padding: 14px;
-}
-
-.product-memory-card strong {
-  display: block;
-  font-size: 18px;
-  margin-bottom: 8px;
-}
-
-.product-memory-card p {
-  color: var(--muted);
-  line-height: 1.55;
-  margin: 0 0 12px;
 }
 
 .mini-facts {
@@ -1070,193 +1011,8 @@ tbody tr:last-child td {
   font-size: 12px;
 }
 
-.product-score-list {
-  display: grid;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.product-score-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 42px;
-  gap: 6px 10px;
-  align-items: center;
-  border: 1px solid rgba(143, 177, 207, 0.16);
-  border-radius: 8px;
-  background: rgba(7, 22, 40, 0.48);
-  padding: 10px 12px;
-}
-
-.product-score-row span,
-.product-score-row small {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.product-score-row strong {
-  color: #4ade80;
-  text-align: right;
-}
-
-.product-score-row small {
-  grid-column: 1 / -1;
-  color: var(--muted);
-}
-
-.product-more-info {
-  border-top: 1px solid var(--line);
-  padding-top: 10px;
-}
-
-.product-more-info summary {
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  color: #6ee7b7;
-  font-weight: 700;
-  list-style: none;
-}
-
-.product-more-info summary::-webkit-details-marker {
-  display: none;
-}
-
-.product-memory-segments {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 12px;
-}
-
-.memory-segment-card {
-  border: 1px solid rgba(143, 177, 207, 0.16);
-  border-radius: 8px;
-  background: rgba(7, 22, 40, 0.46);
-  padding: 12px;
-  min-width: 0;
-}
-
-.memory-segment-card strong {
-  display: block;
-  margin-bottom: 8px;
-}
-
-.memory-segment-card ul {
-  margin: 0;
-  padding-left: 18px;
-  color: var(--muted);
-  line-height: 1.5;
-}
-
-.memory-segment-card li {
-  overflow-wrap: anywhere;
-}
-
-.memory-segment-card p {
-  color: var(--muted);
-  margin: 0;
-}
-
 .knowledge-list.compact {
   grid-template-columns: 1fr;
-}
-
-.knowledge-upload-row {
-  grid-column: 2;
-  grid-row: 1 / span 5;
-  display: grid;
-  gap: 10px;
-  align-content: start;
-}
-
-.knowledge-list {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 14px;
-}
-
-.knowledge-card {
-  display: grid;
-  grid-template-columns: 84px minmax(0, 1fr);
-  gap: 12px;
-  min-width: 0;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: rgba(7, 22, 40, 0.5);
-  padding: 12px;
-}
-
-.knowledge-thumb img,
-.knowledge-thumb-placeholder {
-  width: 84px;
-  aspect-ratio: 1;
-  border-radius: 8px;
-  border: 1px solid rgba(143, 177, 207, 0.22);
-  object-fit: cover;
-}
-
-.knowledge-thumb-placeholder {
-  display: grid;
-  place-items: center;
-  color: #8fb1cf;
-  background: rgba(4, 13, 25, 0.7);
-}
-
-.knowledge-card-heading {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-bottom: 8px;
-}
-
-.knowledge-card-heading strong {
-  overflow-wrap: anywhere;
-}
-
-.knowledge-card-heading small,
-.knowledge-card p {
-  color: var(--muted);
-}
-
-.knowledge-card p {
-  margin: 0 0 8px;
-  line-height: 1.45;
-  display: -webkit-box;
-  -webkit-line-clamp: 4;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.example-list {
-  display: grid;
-  gap: 10px;
-  margin-top: 12px;
-}
-
-.example-card {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #fff;
-  padding: 12px;
-}
-
-.example-card strong,
-.example-card small,
-.example-card p {
-  display: block;
-}
-
-.example-card p {
-  margin: 8px 0;
-  color: #40505a;
-  line-height: 1.45;
-}
-
-.example-card small {
-  color: var(--muted);
 }
 
 .integration-status-grid {
@@ -1976,6 +1732,16 @@ output {
   .angle-footer {
     align-items: stretch;
   }
+
+  /* На вузькому екрані модель і роль ідуть під іменем, а не тиснуть його. */
+  .team-row {
+    flex-wrap: wrap;
+  }
+
+  .team-model {
+    max-width: none;
+    text-align: left;
+  }
 }
 
 /* Dark sales workspace.
@@ -2176,7 +1942,6 @@ button:disabled {
 .signal-list div,
 .comparison-card,
 .message-card,
-.example-card,
 .integration-status-grid div,
 .contact-card,
 .provider-card,
@@ -2222,42 +1987,6 @@ button:disabled {
     "import detail"
     "list detail";
   gap: 12px;
-}
-
-.product-panel {
-  grid-area: product;
-}
-
-.product-context-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.product-context-grid div {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface-sunk);
-  padding: 8px;
-  min-height: 58px;
-}
-
-.product-context-grid span,
-.product-context-grid strong {
-  display: block;
-}
-
-.product-context-grid span {
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.product-context-grid strong {
-  margin-top: 4px;
-  color: #eef6ff;
-  font-size: 12px;
-  line-height: 1.25;
 }
 
 .mcp-source-list {
@@ -2632,7 +2361,6 @@ button:disabled {
   line-height: 1.35;
 }
 
-.product-studio-layout,
 .integrations-layout {
   gap: 12px;
 }
@@ -2784,24 +2512,8 @@ button:disabled {
   gap: 5px;
 }
 
-.product-form,
-.example-form,
 .integration-form {
   gap: 9px;
-}
-
-.product-form textarea,
-.example-form textarea {
-  min-height: 78px;
-}
-
-.example-card {
-  padding: 10px;
-}
-
-.example-card p {
-  color: #d5e3f2;
-  font-size: 12.5px;
 }
 
 .integration-status-grid {
@@ -2874,20 +2586,9 @@ dialog {
 
   .analysis-card,
   .ai-layout,
-  .product-context-grid,
-  .product-studio-layout,
-  .product-management-row,
-  .knowledge-form,
-  .knowledge-list,
-  .product-memory-segments,
   .integrations-layout,
   .integration-status-grid {
     grid-template-columns: 1fr;
-  }
-
-  .knowledge-upload-row {
-    grid-column: 1;
-    grid-row: auto;
   }
 }
 
@@ -2934,33 +2635,25 @@ dialog {
   }
 }
 
-/* База знань: проєкти зліва, їхні файли поруч, редактор на всю ширину під
-   ними — редагується завжди один файл, і йому потрібне місце, а не колонка. */
-.knowledge-library-layout {
+/* Продукти: зліва вибір продукту і його файли, справа опис продукту й редактор
+   файлу. Два вузькі списки в одній колонці, два робочі місця в другій — і те,
+   що редагується, завжди ширше за те, з чого вибирають. */
+.product-workspace-layout {
   display: grid;
   grid-template-columns: minmax(260px, 0.42fr) minmax(0, 1fr);
   gap: 12px;
   align-items: start;
 }
 
-.knowledge-library-layout .span-2 {
-  grid-column: 1 / -1;
-}
-
-.knowledge-project-list,
-.knowledge-file-list {
+.product-picker-list {
   display: grid;
   gap: 8px;
   align-content: start;
-  max-height: 420px;
-  overflow: auto;
 }
 
-.knowledge-project-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+.product-picker-row {
+  display: grid;
+  gap: 2px;
   padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -2968,25 +2661,56 @@ dialog {
   cursor: pointer;
 }
 
-.knowledge-project-row span {
-  display: block;
+.product-picker-row span {
   color: var(--muted);
   font-size: 12px;
-  margin-top: 2px;
 }
 
-.knowledge-project-row.active,
+.product-picker-row.active,
 .knowledge-file-row.active {
   border-color: var(--teal);
   background: var(--teal-weak);
 }
 
-.knowledge-project-form {
+.product-brief-form {
+  display: grid;
+  gap: 14px;
+}
+
+/* Питання, підказка, поле. Підказка мусить стояти над полем, а не під ним:
+   вона пояснює, що саме писати, і читати її після написаного вже пізно. */
+.brief-field {
+  display: grid;
+  gap: 4px;
+}
+
+.brief-field > small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.brief-field textarea {
+  min-height: 84px;
+  line-height: 1.5;
+}
+
+.brief-actions {
+  align-items: center;
+  gap: 12px;
+}
+
+.brief-meta {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.knowledge-file-list {
   display: grid;
   gap: 8px;
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--line);
+  align-content: start;
+  max-height: 420px;
+  overflow: auto;
 }
 
 .knowledge-file-row {
@@ -3027,20 +2751,20 @@ dialog {
   gap: 12px;
 }
 
-.knowledge-project-picker > span {
+.knowledge-product-picker > span {
   display: block;
   color: var(--muted);
   font-size: 12px;
   margin-bottom: 6px;
 }
 
-.knowledge-project-picker > div {
+.knowledge-product-picker > div {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-.knowledge-project-checkbox {
+.knowledge-product-checkbox {
   display: inline-flex;
   white-space: nowrap;
   align-items: center;
@@ -3053,7 +2777,7 @@ dialog {
   font-size: 13px;
 }
 
-.knowledge-project-checkbox input {
+.knowledge-product-checkbox input {
   margin: 0;
   width: 14px;
   height: 14px;
@@ -4289,9 +4013,6 @@ dialog {
 }
 
 @media (max-width: 1080px) {
-  .knowledge-library-layout {
-    grid-template-columns: 1fr;
-  }
 
   .agent-grid,
   .lead-workbench-grid,
@@ -4314,10 +4035,6 @@ dialog {
   .strategy-title-row dl,
   .strategy-stakeholder dl,
   .strategy-gate-checks {
-    grid-template-columns: 1fr;
-  }
-
-  .product-management-row {
     grid-template-columns: 1fr;
   }
 
@@ -6021,9 +5738,29 @@ dialog {
   margin-top: 16px;
 }
 
-.profile-team h3 {
-  margin: 0 0 10px;
-  font-size: 15px;
+/* Рядок списку — це двері в картку, тож він поводиться як кнопка, а відкритий
+   лишається підсвіченим: інакше графіки внизу невідомо про кого. */
+.team-row[data-team-user] {
+  cursor: pointer;
+}
+
+.team-row[data-team-user]:hover,
+.team-row[data-team-user]:focus-visible {
+  border-color: rgba(101, 240, 219, 0.45);
+}
+
+.team-row-open {
+  border-color: var(--teal);
+  background: rgba(101, 240, 219, 0.08);
+}
+
+.team-model {
+  flex: 0 0 auto;
+  max-width: 220px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: right;
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 900px) {

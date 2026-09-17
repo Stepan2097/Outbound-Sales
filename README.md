@@ -6,8 +6,7 @@ Local outbound workspace for researching prospects, generating product-specific 
 
 - Upload or paste people profiles as CSV or JSON.
 - Select the product being sold so outreach changes by product.
-- Add or edit product definitions directly in Product Studio.
-- Load approved outreach examples per product as training context.
+- Describe each product with the eight answers on the Products page, and keep its knowledge files beside them.
 - Paste a LinkedIn profile URL to create a target, find contact candidates, and generate LinkedIn message variations.
 - Sync product positioning, ICP, use cases, proof points, objection handling, and approved context from the MCP Product Context Portal.
 - Save MCP, Apify, CRM, transcript, and follow-up notification settings in one Settings area.
@@ -25,24 +24,31 @@ Local outbound workspace for researching prospects, generating product-specific 
 - Use a cost-capped Apify waterfall for company people, work-email, and phone enrichment. It stops when verified email and phone are found, limits actors per lead, and reuses recent verified results.
 - Keep email, phone, WhatsApp, Telegram, and SMS locked until the seller approves the matched contact and channel.
 
-## Knowledge Base
+## Products and Knowledge Base
 
-The Knowledge Base tab is a library of projects and the files they hold. It ships
-with two projects — **AdAction** and **advantage-course** — sharing one outbound
-playbook file, with the Black Affiliate training FAQ belonging to the course
-alone. A file can belong to several projects, so a document that is true for both
-is edited in one place.
+The workspace sells two things — **AdAction** and **advantage-course** — and one
+page holds both what they are and what the agents read about them.
 
-Files are plain Markdown on the server, beside the workspace state file
+A product is described by eight answers, and nothing else: what we sell and what
+the buyer gets, who it fits, who decides and what they care about, the pain and
+when it gets loud, the proof we may use, the first small step we ask for, the
+objections and our honest answer, and who we never sell to or claim to. Saving
+them derives everything the rest of the app already reads — positioning,
+personas, use cases, proof, objections and the memory segments scoring runs on —
+so the answers are the source and the derived record is never edited by hand.
+
+Below the answers sits that product's file library. Files are plain Markdown on
+the server, beside the workspace state file
 (`<STATE_FILE_PATH dir>/knowledge/`), with a small `index.json` recording which
-file belongs to which project. They can be created, edited and deleted from the
-page; a project points at one workspace product.
+file belongs to which product. They can be created, edited and deleted from the
+page. One file can belong to several products: the outbound playbook ships that
+way, shared by both, because a copy per product is two documents that disagree
+within a month.
 
-Every agent that writes for a product reads the files of the projects pointing at
-it, before it writes. Whole documents do not go into prompts: passages are
-selected against the lead in front of the model, one file never takes the whole
-budget, and a product no project points at gets nothing rather than somebody
-else's rules.
+Every agent that writes for a product reads that product's brief and files
+before it writes. Whole documents do not go into prompts: passages are selected
+against the lead in front of the model, one file never takes the whole budget,
+and a product with no files gets nothing rather than somebody else's rules.
 
 ## LinkedIn Warm-up
 

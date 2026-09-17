@@ -1,29 +1,31 @@
 let state = null;
 let selectedTaskType = "COLD_EMAIL";
 let selectedProspectId = null;
-let creatingNewProduct = false;
 let busyAction = "";
 let busyMessage = "";
 let uiNotice = "";
-let pendingProductKnowledgeScreenshot = null;
 let activeLeadSectionId = "dashboard-account";
 let authState = null;
 let authMode = "login";
 let activeResearchJob = null;
-// База знань. Бібліотека живе на сервері, тож тут — тільки те, що зараз
-// відкрито: список, обраний проєкт і чернетка файлу в редакторі.
-let knowledgeLibrary = { projects: [], files: [] };
+// Продукти і база знань. І опис продукту, і файли живуть на сервері, тож тут —
+// тільки те, що зараз відкрито: список файлів, чернетка файлу в редакторі та
+// продукт, з якого востаннє заповнювали форму опису.
+let knowledgeLibrary = { files: [] };
 let knowledgeLibraryLoaded = false;
-let knowledgeProjectId = null;
 let knowledgeFileId = null;
 let knowledgeDraft = null;
 let knowledgeEditorNeedsFill = false;
-// Екран профілю живе нижче по файлу, а `await bootApplication()` ділить модуль
-// надвоє: усе, оголошене після нього, під час завантаження ще в TDZ. Тому ці
-// дві змінні стоять тут — інакше перезавантаження на вкладці Профіль валить
+let productBriefLoadedFor = null;
+// Вкладка «Користувачі» живе нижче по файлу, а `await bootApplication()` ділить
+// модуль надвоє: усе, оголошене після нього, під час завантаження ще в TDZ.
+// Тому ці змінні стоять тут — інакше перезавантаження на цій вкладці валить
 // увесь застосунок, а не лише її.
 let profileData = null;
 let profileTabId = null;
+// Чию картку зараз відкрито. Порожньо — свою власну.
+let profileUserId = "";
+let teamDirectory = null;
 
 const views = [...document.querySelectorAll(".view")];
 const navItems = [...document.querySelectorAll(".nav-item")];
@@ -80,9 +82,8 @@ async function refresh() {
 function render() {
   renderTopbar();
   renderProductContext();
-  renderProductStudio();
   renderAccount();
-  renderKnowledgeLibrary();
+  renderProductWorkspace();
   renderProspects();
   renderLeadsPage();
   renderAssistant();
@@ -99,8 +100,13 @@ function render() {
 }
 
 function renderTopbar() {
-  const runtime = state.aiRuntime?.mode === "openrouter" ? "OpenRouter активний" : "Мок-AI";
-  document.getElementById("workspaceMeta").textContent = busyMessage || uiNotice || `${runtime} · ${state.prospects?.length || 0} ${uaPlural(state.prospects?.length || 0, "лід", "ліди", "лідів")} · ${state.followUpTasks?.length || 0} ${uaPlural(state.followUpTasks?.length || 0, "фолоу-ап", "фолоу-апи", "фолоу-апів")}`;
+  // Цей рядок під заголовком — місце для того, що зараз відбувається: прогрес
+  // довгої дії або підсумок останньої. Коли не відбувається нічого, він зникає
+  // замість того, щоб показувати лічильники, які й так видно на своїх екранах.
+  const meta = document.getElementById("workspaceMeta");
+  const line = busyMessage || uiNotice || "";
+  meta.textContent = line;
+  meta.hidden = !line;
   document.getElementById("providerStatus").textContent = state.providerHealth.status;
   document.getElementById("healthPill").textContent = state.providerHealth.status;
   document.getElementById("keyState").textContent = state.hasOpenRouterKey
@@ -167,27 +173,23 @@ function renderAuthForm() {
 function renderAccount() {
   const user = authState?.user;
   if (!user) return;
-  setText("accountRolePill", user.role || "seller");
-  setText("profileName", user.name || "Профіль");
-  setText("profileEmail", user.email || "—");
-  document.getElementById("accountNameInput").value = user.name || "";
-  document.getElementById("accountTitleInput").value = user.title || "";
-  document.getElementById("accountEmailInput").value = user.email || "";
-  const adminPanel = document.getElementById("adminTeamPanel");
-  adminPanel.hidden = user.role !== "admin";
+  document.getElementById("teamCreatePanel").hidden = user.role !== "admin";
 }
 
 /**
  * База користувачів одна — та, що в CRM.
  *
  * Цей застосунок нікого не запрошує: хто є в CRM і підтверджений там, той
- * входить своїм акаунтом CRM. Профіль тут — це запис (обрана модель, витрати,
+ * входить своїм акаунтом CRM. Картка тут — це запис (обрана модель, витрати,
  * час), а не пропуск. Єдине, що ставиться в цьому списку, — роль у цьому
  * застосунку; кого пускати, відповідає CRM.
+ *
+ * Список — вхід у картку: рядок відкриває людину нижче, і саме там для неї
+ * вибирається модель. Кожному свою, бо витрати теж рахуються кожному свої.
  */
 const ROLE_LABEL = { admin: "Адміністратор", seller: "Продавець" };
 
-function teamRowHtml(person, selfEmail) {
+function teamRowHtml(person, selfEmail, { canSetRole = false } = {}) {
   const self = person.email === selfEmail;
   const facts = [
     person.blocked,
@@ -198,30 +200,87 @@ function teamRowHtml(person, selfEmail) {
   const options = ["admin", "seller"].map((value) =>
     `<option value="${value}"${value === person.role ? " selected" : ""}>${ROLE_LABEL[value]}</option>`
   ).join("");
-  return `<article class="team-row${person.blocked ? " team-row-outside" : ""}">
+  const open = String(person.id || "") === String(profileUserId || "");
+  return `<article class="team-row${person.blocked ? " team-row-outside" : ""}${open ? " team-row-open" : ""}" data-team-user="${escapeAttr(person.id || "")}" tabindex="0" role="button" aria-pressed="${open ? "true" : "false"}">
     <div class="team-who">
-      <strong>${escapeHtml(person.name || person.email)}</strong>
+      <strong>${escapeHtml(person.name || person.email)}${self ? " · це ти" : ""}</strong>
       <span>${escapeHtml(person.email)}</span>
       ${facts ? `<span>${escapeHtml(facts)}</span>` : ""}
     </div>
-    <select class="team-access" data-email="${escapeHtml(person.email)}"${self ? " disabled title=\"Свою роль змінює інший адміністратор\"" : ""}>${options}</select>
+    <span class="team-model">${person.modelLabel ? escapeHtml(person.modelLabel) : "модель робочого простору"}</span>
+    ${canSetRole
+      ? `<select class="team-access" data-email="${escapeAttr(person.email)}"${self ? " disabled title=\"Свою роль змінює інший адміністратор\"" : ""}>${options}</select>`
+      : `<span class="team-model">${escapeHtml(ROLE_LABEL[person.role] || person.role || "")}</span>`}
   </article>`;
 }
 
+/**
+ * Адміністратор бачить усю базу CRM; продавець — себе, бо чужі витрати не його
+ * справа, а вкладка без жодного рядка була б порожньою сторінкою замість
+ * власної картки.
+ */
 async function loadTeamDirectory() {
-  if (authState?.user?.role !== "admin") return;
+  const user = authState?.user;
+  if (!user) return;
+  const selfEmail = String(user.email || "").toLowerCase();
+  const showSelfOnly = (note) => {
+    setHtml("teamUserList", teamRowHtml(selfDirectoryRow(user), selfEmail));
+    setText("teamUserNote", note);
+  };
+  if (user.role !== "admin") {
+    showSelfOnly("Своя картка: обрана модель, витрачені кредити і час у застосунку.");
+    return;
+  }
   try {
-    const directory = await api("/api/account/directory");
-    const selfEmail = String(authState.user.email || "").toLowerCase();
-    setHtml("teamUserList", directory.people.map((person) => teamRowHtml(person, selfEmail)).join(""));
-    const blocked = directory.people.length - directory.canSignIn;
+    teamDirectory = await api("/api/account/directory");
+    setHtml("teamUserList", teamDirectory.people.map((person) => teamRowHtml(person, selfEmail, { canSetRole: true })).join(""));
+    const blocked = teamDirectory.people.length - teamDirectory.canSignIn;
     setText("teamUserNote", blocked
-      ? `Увійти ${uaPlural(directory.canSignIn, "може", "можуть", "можуть")} ${directory.canSignIn} з ${directory.people.length}; решту тримає CRM.`
-      : `Усі ${directory.people.length} ${uaPlural(directory.people.length, "акаунт", "акаунти", "акаунтів")} CRM можуть увійти.`);
+      ? `Увійти ${uaPlural(teamDirectory.canSignIn, "може", "можуть", "можуть")} ${teamDirectory.canSignIn} з ${teamDirectory.people.length}; решту тримає CRM. Вибери людину — нижче її модель, кредити і час.`
+      : `Усі ${teamDirectory.people.length} ${uaPlural(teamDirectory.people.length, "акаунт", "акаунти", "акаунтів")} CRM можуть увійти. Вибери людину — нижче її модель, кредити і час.`);
   } catch (error) {
-    setText("teamUserNote", error.message);
+    // Список приходить із Supabase, і без нього тут була б порожня вкладка. Своя
+    // картка є завжди — вона лежить у цьому ж застосунку.
+    teamDirectory = null;
+    showSelfOnly(`Список команди зараз недоступний: ${error.message}`);
   }
 }
+
+function selfDirectoryRow(user) {
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    modelLabel: profileData?.user?.id === user.id ? modelChoiceLabelFromView(profileData) : "",
+    signedInHere: true,
+    blocked: "",
+    crmRole: "",
+    lastSignInAt: user.lastLoginAt || null
+  };
+}
+
+/** Підпис моделі з уже завантаженої картки — для рядка самого себе. */
+function modelChoiceLabelFromView(view) {
+  const chosen = view?.model?.modelId || "";
+  if (!chosen) return "";
+  return view.model.options?.find((option) => option.id === chosen)?.label || chosen;
+}
+
+document.getElementById("teamUserList")?.addEventListener("click", (event) => {
+  if (event.target.closest("select")) return;
+  const row = event.target.closest("[data-team-user]");
+  if (!row) return;
+  void loadProfileFor(row.dataset.teamUser);
+});
+
+document.getElementById("teamUserList")?.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  const row = event.target.closest("[data-team-user]");
+  if (!row) return;
+  event.preventDefault();
+  void loadProfileFor(row.dataset.teamUser);
+});
 
 document.getElementById("teamUserList")?.addEventListener("change", async (event) => {
   const select = event.target.closest(".team-access");
@@ -243,77 +302,6 @@ function renderProductContext() {
   setHtml("companyBriefContent", companyBriefRows(selected));
   setText("companyConfidencePill", companyConfidenceLabel(selected));
   setText("companyBriefMeta", selected?.company ? `Контекст акаунта ${selected.company} для продукту ${state.selectedProduct?.name || "вибраного"}` : "Чим займається компанія, кому вона продає і чому цей лід може бути вартим уваги");
-}
-
-function renderProductStudio() {
-  const product = creatingNewProduct ? emptyProductDraft() : state.selectedProduct;
-  if (!product) return;
-
-  const studioSelect = document.getElementById("productStudioProductSelect");
-  if (studioSelect) fillSelect(studioSelect, state.products || [], (item) => item.id, (item) => item.name, state.selectedProductId);
-  document.getElementById("productStudioSelected").textContent = product.name || "вибраний продукт";
-  const deleteButton = document.getElementById("deleteProductBtn");
-  if (deleteButton) deleteButton.disabled = creatingNewProduct || (state.products || []).length <= 1;
-  const teachButtonText = document.querySelector("#productTeachBtn span");
-  if (teachButtonText) teachButtonText.textContent = creatingNewProduct ? "Проаналізувати і створити продукт" : "Проаналізувати і оновити продукт";
-  renderProductMemory(product);
-  document.getElementById("exampleList").innerHTML = (product.examples || []).length
-    ? product.examples.map(exampleRow).join("")
-    : `<div class="empty-state">Для цього продукту ще не завантажено прикладів</div>`;
-}
-
-function renderProductMemory(product) {
-  const memory = product.memory || {};
-  const segments = memory.segments || {};
-  setText("productMemoryStatus", `${memory.status || "не навчено"} · ${Number(memory.confidence || 0)}%`);
-  setHtml("productMemorySummary", `
-    <div class="product-memory-card">
-      <strong>${escapeHtml(product.name || "Продукт")}</strong>
-      <p>${escapeHtml(memory.summary || product.positioning || "Встав контекст продукту, щоб навчити системну пам'ять.")}</p>
-      <div class="mini-facts">
-        <span>${escapeHtml(product.category || "Продукт")}</span>
-        <span>${escapeHtml((product.targetPersonas || [])[0] || "потрібна персона покупця")}</span>
-        <span>${escapeHtml((product.useCases || [])[0] || "потрібен сценарій використання")}</span>
-      </div>
-    </div>
-  `);
-  setHtml("productScoreList", (memory.scoring || []).length
-    ? memory.scoring.map((item) => `
-      <div class="product-score-row">
-        <span>${escapeHtml(item.label)}</span>
-        <strong>${Number(item.score || 0)}</strong>
-        <small>${escapeHtml(item.rationale || "")}</small>
-      </div>
-    `).join("")
-    : `<div class="empty-state">Рубрики скорингу ще немає. Встав контекст продукту, щоб її створити.</div>`);
-  const segmentLabels = {
-    idealCustomers: "Ідеальні клієнти",
-    buyerPersonas: "Персони покупців",
-    painPoints: "Болі",
-    buyingTriggers: "Тригери до покупки",
-    exclusions: "Винятки",
-    salesAngles: "Кути продажу",
-    proofPoints: "Докази",
-    objections: "Заперечення",
-    discoveryQuestions: "Питання для дискавері",
-    claimsToAvoid: "Твердження, яких уникати",
-    qualificationCriteria: "Критерії кваліфікації"
-  };
-  setHtml("productMemorySegments", Object.entries(segmentLabels).map(([key, label]) => memorySegmentCard(label, segments[key] || [])).join(""));
-  const knowledge = product.knowledge || [];
-  setHtml("productKnowledgeList", knowledge.length
-    ? knowledge.slice(0, 8).map(productKnowledgeRow).join("")
-    : `<div class="empty-state">Збережених оновлень контексту продукту ще немає</div>`);
-}
-
-function memorySegmentCard(label, values) {
-  const items = (values || []).slice(0, 8);
-  return `
-    <article class="memory-segment-card">
-      <strong>${escapeHtml(label)}</strong>
-      ${items.length ? `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : `<p>Бракує даних про продукт.</p>`}
-    </article>
-  `;
 }
 
 
@@ -1521,41 +1509,6 @@ function warmupIcon(channel) {
   return "mouse-pointer-click";
 }
 
-function exampleRow(example) {
-  return `
-    <article class="example-card">
-      <div>
-        <span class="pill">${escapeHtml(example.channel)}</span>
-        <strong>${escapeHtml(example.label || example.persona || "Приклад")}</strong>
-        <p>${escapeHtml(example.message)}</p>
-      </div>
-      <small>${escapeHtml(example.outcome || "навчальний контекст")}</small>
-    </article>
-  `;
-}
-
-function productKnowledgeRow(item) {
-  const image = item.screenshot?.dataUrl
-    ? `<img src="${escapeAttr(item.screenshot.dataUrl)}" alt="${escapeAttr(item.screenshot.name || "Скріншот продукту")}" />`
-    : `<div class="knowledge-thumb-placeholder"><i data-lucide="${knowledgeIcon(item.type)}"></i></div>`;
-  const tags = (item.tags || []).slice(0, 6).map((tag) => `<span class="cap">${escapeHtml(tag)}</span>`).join("");
-  const body = item.text || item.url || item.screenshot?.name || "";
-  return `
-    <article class="knowledge-card">
-      <div class="knowledge-thumb">${image}</div>
-      <div>
-        <div class="knowledge-card-heading">
-          <span class="pill">${escapeHtml(titleCase(item.type || "урок"))}</span>
-          <strong>${escapeHtml(item.title || "Знання про продукт")}</strong>
-          <small>пріоритет ${Number(item.priority || 0)}</small>
-        </div>
-        <p>${linkIfUrl(body)}</p>
-        ${item.url && item.text ? `<a href="${escapeAttr(item.url)}" target="_blank" rel="noreferrer">${escapeHtml(shortUrl(item.url))}</a>` : ""}
-        <div class="cap-list">${tags}</div>
-      </div>
-    </article>
-  `;
-}
 
 function knowledgeIcon(type) {
   const icons = {
@@ -1570,22 +1523,6 @@ function knowledgeIcon(type) {
     competitor: "swords"
   };
   return icons[type] || "file-text";
-}
-
-function emptyProductDraft() {
-  return {
-    id: "",
-    name: "",
-    category: "",
-    positioning: "",
-    targetPersonas: [],
-    useCases: [],
-    proofPoints: [],
-    differentiators: [],
-    objections: [],
-    knowledge: [],
-    examples: []
-  };
 }
 
 function interactionRows(prospect) {
@@ -1834,9 +1771,8 @@ function setView(viewName) {
       leads: "Ліди",
       warmup: "Прогрів LinkedIn",
       ai: "AI-оператор",
-      database: "База знань",
-      products: "Продукти",
-      account: "Профіль",
+      products: "Продукти і база знань",
+      account: "Користувачі",
       overview: "Керування AI-оркестрацією",
       models: "Реєстр моделей",
       routing: "Маршрутизація задач",
@@ -1849,11 +1785,6 @@ function setView(viewName) {
   if (viewName === "overview") {
     drawTrafficChart();
   }
-  // Opening Products shows the selected product, but only into an empty box:
-  // coming back to the tab must not throw away something half-typed.
-  if (viewName === "products" && !document.getElementById("productContextInput")?.value) {
-    fillProductEditor(state.selectedProduct);
-  }
   // Loaded when the tab is opened rather than at boot: it talks to a different
   // database, and a workspace that never warms an account should not pay for it.
   if (viewName === "account") {
@@ -1864,9 +1795,9 @@ function setView(viewName) {
     loadWarmup();
   }
 
-  // Файли бази знань читаються з сервера, а не з /api/state: вкладку, яку
-  // ніхто не відкриває, не варто вантажити на кожен рефреш.
-  if (viewName === "database") {
+  // Файли читаються з сервера, а не з /api/state: вкладку, яку ніхто не
+  // відкриває, не варто вантажити на кожен рефреш.
+  if (viewName === "products") {
     void loadKnowledgeLibrary().catch(() => {});
   }
 }
@@ -1960,23 +1891,6 @@ function fileToDataUrl(file) {
     reader.readAsDataURL(file);
   });
 }
-
-function renderProductKnowledgeScreenshotPreview() {
-  const preview = document.getElementById("productKnowledgeScreenshotPreview");
-  const name = document.getElementById("productKnowledgeScreenshotName");
-  if (!preview || !name) return;
-  if (!pendingProductKnowledgeScreenshot) {
-    preview.innerHTML = "";
-    name.textContent = "PNG або JPG з продукту, демо, CRM, доків";
-    return;
-  }
-  name.textContent = `${pendingProductKnowledgeScreenshot.name} · ${Math.round(pendingProductKnowledgeScreenshot.size / 1024)} KB`;
-  preview.innerHTML = `
-    <img src="${escapeAttr(pendingProductKnowledgeScreenshot.dataUrl)}" alt="${escapeAttr(pendingProductKnowledgeScreenshot.name)}" />
-    <span>${escapeHtml(pendingProductKnowledgeScreenshot.name)}</span>
-  `;
-}
-
 
 function initials(name) {
   return String(name || "?")
@@ -2115,13 +2029,6 @@ document.getElementById("authForm").addEventListener("submit", async (event) => 
   }
 });
 
-document.getElementById("accountProfileForm").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  await api("/api/account/profile", { method: "POST", body: JSON.stringify({ name: document.getElementById("accountNameInput").value, title: document.getElementById("accountTitleInput").value }) });
-  authState = await api("/api/auth/status");
-  render();
-});
-
 document.getElementById("accountPasswordForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const password = document.getElementById("accountPasswordInput").value;
@@ -2174,7 +2081,6 @@ document.getElementById("modelTierFilter").addEventListener("change", renderMode
 document.getElementById("prospectSearch").addEventListener("input", renderProspects);
 document.getElementById("prospectStatusFilter").addEventListener("change", renderProspects);
 document.getElementById("productSelect").addEventListener("change", async (event) => {
-  creatingNewProduct = false;
   await runUiAction("product", "Перемикаємо контекст продукту...", async () => {
     state = await api("/api/products/select", {
       method: "POST",
@@ -2183,18 +2089,6 @@ document.getElementById("productSelect").addEventListener("change", async (event
   });
 });
 
-document.getElementById("productStudioProductSelect")?.addEventListener("change", async (event) => {
-  creatingNewProduct = false;
-  await runUiAction("product", "Перемикаємо контекст продукту...", async () => {
-    state = await api("/api/products/select", {
-      method: "POST",
-      body: JSON.stringify({ productId: event.target.value })
-    });
-  });
-  // Choosing a product shows it. This is what the Edit button used to be for,
-  // and a chooser that leaves the box empty is a chooser that chose nothing.
-  fillProductEditor(state.selectedProduct);
-});
 
 document.getElementById("syncMcpBtn").addEventListener("click", async () => {
   state = await api("/api/products/sync-mcp", { method: "POST", body: "{}" });
@@ -2484,47 +2378,6 @@ document.getElementById("runPipelineBtn").addEventListener("click", async () => 
   render();
 });
 
-document.getElementById("newProductBtn")?.addEventListener("click", () => {
-  creatingNewProduct = true;
-  clearProductTrainingField();
-  renderProductStudio();
-  refreshIcons();
-});
-
-document.getElementById("deleteProductBtn")?.addEventListener("click", async () => {
-  const product = state.selectedProduct;
-  if (!product) return;
-  if (!window.confirm(`Видалити ${product.name}? Це прибере з Outbound OS його пам'ять, знання та приклади.`)) return;
-  await runUiAction("product", "Видаляємо пам'ять продукту...", async () => {
-    state = await api("/api/products/delete", {
-      method: "POST",
-      body: JSON.stringify({ productId: product.id })
-    });
-    creatingNewProduct = false;
-    clearProductTrainingField();
-  });
-});
-
-document.getElementById("productForm").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const structuredText = productTrainingText();
-  await runUiAction("product", "Аналізуємо текст продукту й оновлюємо системну пам'ять...", async () => {
-    state = await api("/api/products/teach", {
-      method: "POST",
-      body: JSON.stringify({
-        productId: creatingNewProduct ? "" : state.selectedProductId,
-        text: structuredText,
-        forceSelectedProduct: !creatingNewProduct,
-        createNewProduct: creatingNewProduct
-      })
-    });
-    // Show what was just saved rather than emptying the box. The box is the
-    // product now, so clearing it after a save reads as the product having
-    // gone — which was survivable when this was one field among seven.
-    fillProductEditor(state.selectedProduct);
-  });
-  creatingNewProduct = false;
-});
 
 /**
  * What gets taught. One box, because the server only ever saw one string: the
@@ -2532,113 +2385,102 @@ document.getElementById("productForm").addEventListener("submit", async (event) 
  * and on edit they were filled with the product own derived positioning,
  * personas and proof — so saving fed the analysis its own output back as input.
  */
-function productTrainingText() {
-  return String(document.getElementById("productContextInput").value || "").trim();
-}
-
-function clearProductTrainingField() {
-  const element = document.getElementById("productContextInput");
-  if (element) element.value = "";
-}
 
 /** The text this product was taught from, which is the only thing to edit. */
-function fillProductEditor(product) {
-  setFormValue("productContextInput", product?.rawContext || product?.positioning || "");
-}
 
 function setFormValue(id, value) {
   const element = document.getElementById(id);
   if (element) element.value = value || "";
 }
 
-document.getElementById("exampleForm").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  if (creatingNewProduct) {
-    document.getElementById("exampleList").innerHTML = `<div class="empty-state">Спочатку збережи новий продукт, потім додавай приклади</div>`;
-    return;
-  }
-  state = await api("/api/products/examples", {
-    method: "POST",
-    body: JSON.stringify({
-      productId: state.selectedProductId,
-      channel: document.getElementById("exampleChannelInput").value,
-      quality: document.getElementById("exampleQualityInput").value,
-      persona: document.getElementById("examplePersonaInput").value,
-      message: document.getElementById("exampleMessageInput").value,
-      outcome: document.getElementById("exampleOutcomeInput").value
-    })
-  });
-  document.getElementById("exampleMessageInput").value = "";
-  document.getElementById("exampleOutcomeInput").value = "";
-  render();
-});
-
-
 
 /**
- * База знань: проєкти і файли, які агенти читають перед написанням повідомлень.
+ * Продукти: вісім відповідей про продукт і файли, які агенти читають перед тим,
+ * як писати повідомлення. Одна сторінка, бо це одна відповідь на одне питання —
+ * що система знає про те, що ми продаємо.
  *
- * Файли лежать на сервері; тут — тільки список, редактор і чернетка того, що
- * зараз відкрито. Чернетка потрібна, бо render() викликається з десятка місць
- * (кожна відповідь /api/state його смикає), і перемальовування textarea під
- * час набору стерло б недописаний абзац.
+ * Файли й відповіді лежать на сервері; тут — тільки списки, редактор і чернетка
+ * того, що зараз відкрито. Чернетка потрібна, бо render() смикається з десятка
+ * місць (кожна відповідь /api/state його викликає), і перемальовування textarea
+ * під час набору стерло б недописаний абзац.
  */
-function renderKnowledgeLibrary() {
-  const projectList = document.getElementById("knowledgeProjectList");
-  if (!projectList) return;
+const productBriefQuestions = ["offer", "icp", "buyers", "pain", "proof", "firstStep", "objections", "limits"];
 
-  const projects = knowledgeLibrary.projects || [];
+function renderProductWorkspace() {
+  const picker = document.getElementById("productPickerList");
+  if (!picker) return;
+
+  const products = [...(state.products || [])].sort((left, right) => left.name.localeCompare(right.name, "uk"));
   const files = knowledgeLibrary.files || [];
-  if (knowledgeProjectId && !projects.some((project) => project.id === knowledgeProjectId)) {
-    knowledgeProjectId = null;
-  }
-  if (!knowledgeProjectId && projects.length) knowledgeProjectId = projects[0].id;
+  const selectedId = state.selectedProductId;
 
-  const productName = (productId) =>
-    (state?.products || []).find((product) => product.id === productId)?.name || "";
+  picker.innerHTML = products.length
+    ? products.map((product) => {
+        const fileCount = files.filter((file) => (file.productIds || []).includes(product.id)).length;
+        const answered = productBriefQuestions.filter((field) => String(product.brief?.[field] || "").trim()).length;
+        return `
+          <article class="product-picker-row ${product.id === selectedId ? "active" : ""}" data-product="${escapeAttr(product.id)}">
+            <strong>${escapeHtml(product.name)}</strong>
+            <span>${answered}/8 ${uaPlural(answered, "відповідь", "відповіді", "відповідей")} · ${fileCount} ${uaPlural(fileCount, "файл", "файли", "файлів")}</span>
+          </article>
+        `;
+      }).join("")
+    : `<div class="empty-state">Продуктів ще немає</div>`;
 
-  projectList.innerHTML = projects.length
-    ? projects.map((project) => `
-        <article class="knowledge-project-row ${project.id === knowledgeProjectId ? "active" : ""}" data-knowledge-project="${escapeAttr(project.id)}">
-          <div>
-            <strong>${escapeHtml(project.name)}</strong>
-            <span>${project.fileCount} ${uaPlural(project.fileCount, "файл", "файли", "файлів")}${project.productId ? ` · ${escapeHtml(productName(project.productId) || project.productId)}` : " · продукт не прив'язано"}</span>
-          </div>
-          <button class="icon-button" type="button" data-knowledge-project-delete="${escapeAttr(project.id)}" title="Видалити проєкт"><i data-lucide="trash-2"></i></button>
-        </article>
-      `).join("")
-    : `<div class="empty-state">Проєктів ще немає</div>`;
+  renderProductBrief();
+  renderKnowledgeFiles();
+  renderKnowledgeEditor();
+}
 
-  const projectProductSelect = document.getElementById("knowledgeProjectProductInput");
-  if (projectProductSelect) {
-    const options = [{ id: "", name: "Без прив'язки до продукту" }, ...(state?.products || [])];
-    fillSelect(projectProductSelect, options, (item) => item.id, (item) => item.name, projectProductSelect.value);
-  }
+function renderProductBrief() {
+  const product = state.selectedProduct;
+  const form = document.getElementById("productBriefForm");
+  if (!form || !product) return;
 
-  const activeProject = projects.find((project) => project.id === knowledgeProjectId) || null;
-  const projectFiles = files.filter((file) => (file.projectIds || []).includes(knowledgeProjectId));
-  setText("knowledgeFilesTitle", activeProject ? `Файли · ${activeProject.name}` : "Файли");
+  const answered = productBriefQuestions.filter((field) => String(product.brief?.[field] || "").trim()).length;
+  setText("productBriefTitle", product.name || "Продукт");
+  setText("productBriefPill", `${answered}/8`);
   setText(
-    "knowledgeFilesSubtitle",
-    activeProject
-      ? `Агенти читають ці файли, коли пишуть для «${productName(activeProject.productId) || "непов'язаного продукту"}»`
-      : "Створи проєкт, щоб додавати файли"
+    "productBriefMeta",
+    product.brief?.updatedAt
+      ? `Оновлено ${relativeTime(product.brief.updatedAt)}`
+      : "Ще не заповнено — AI поки спирається лише на файли"
   );
 
-  setHtml("knowledgeFileList", projectFiles.length
-    ? projectFiles.map((file) => `
+  // Поля заповнюються тільки коли змінився продукт: інакше кожен render() під
+  // час набору повертав би текст до збереженої версії.
+  if (productBriefLoadedFor !== product.id) {
+    setFormValue("productNameInput", product.name || "");
+    for (const field of productBriefQuestions) {
+      setFormValue(`brief-${field}`, product.brief?.[field] || "");
+    }
+    productBriefLoadedFor = product.id;
+  }
+}
+
+function renderKnowledgeFiles() {
+  const product = state.selectedProduct;
+  const files = (knowledgeLibrary.files || []).filter((file) => (file.productIds || []).includes(product?.id));
+  setText("knowledgeFilesTitle", product ? `Файли · ${product.name}` : "Файли");
+  setText(
+    "knowledgeFilesSubtitle",
+    product
+      ? `Агенти читають ці файли, коли пишуть для «${product.name}»`
+      : "Агенти читають ці файли перед тим, як писати повідомлення"
+  );
+
+  setHtml("knowledgeFileList", files.length
+    ? files.map((file) => `
         <article class="knowledge-file-row ${file.id === knowledgeFileId ? "active" : ""}" data-knowledge-file="${escapeAttr(file.id)}">
           <div class="knowledge-file-heading">
             <strong>${escapeHtml(file.name)}</strong>
-            ${(file.projectIds || []).length > 1 ? `<span class="pill">спільний</span>` : ""}
+            ${(file.productIds || []).length > 1 ? `<span class="pill">спільний</span>` : ""}
           </div>
           <p>${escapeHtml(file.excerpt || "Порожній файл")}</p>
           <small>${Math.max(1, Math.round((file.bytes || 0) / 1024))} КБ · оновлено ${relativeTime(file.updatedAt)}</small>
         </article>
       `).join("")
-    : `<div class="empty-state">${activeProject ? "У цьому проєкті ще немає файлів" : "Немає проєкту"}</div>`);
-
-  renderKnowledgeEditor();
+    : `<div class="empty-state">Для цього продукту ще немає файлів</div>`);
 }
 
 function renderKnowledgeEditor() {
@@ -2674,22 +2516,16 @@ function renderKnowledgeEditor() {
   const deleteButton = document.getElementById("knowledgeDeleteFileBtn");
   if (deleteButton) deleteButton.hidden = !knowledgeDraft.id;
 
-  setHtml("knowledgeFileProjectPicker", (knowledgeLibrary.projects || []).length
-    ? knowledgeLibrary.projects.map((project) => `
-        <label class="knowledge-project-checkbox">
-          <input type="checkbox" value="${escapeAttr(project.id)}" ${knowledgeDraft.projectIds.includes(project.id) ? "checked" : ""} />
-          <span>${escapeHtml(project.name)}</span>
-        </label>
-      `).join("")
-    : `<span class="empty-state">Спочатку створи проєкт</span>`);
+  setHtml("knowledgeFileProductPicker", (state.products || []).map((product) => `
+    <label class="knowledge-product-checkbox">
+      <input type="checkbox" value="${escapeAttr(product.id)}" ${knowledgeDraft.productIds.includes(product.id) ? "checked" : ""} />
+      <span>${escapeHtml(product.name)}</span>
+    </label>
+  `).join(""));
 
-  // Поля заповнюються лише коли відкрили інший файл. Інакше кожен render()
-  // під час набору повертав би textarea до збереженої версії.
   if (knowledgeEditorNeedsFill) {
-    const nameInput = document.getElementById("knowledgeFileNameInput");
-    const contentInput = document.getElementById("knowledgeFileContentInput");
-    if (nameInput) nameInput.value = knowledgeDraft.name || "";
-    if (contentInput) contentInput.value = knowledgeDraft.content || "";
+    setFormValue("knowledgeFileNameInput", knowledgeDraft.name || "");
+    setFormValue("knowledgeFileContentInput", knowledgeDraft.content || "");
     knowledgeEditorNeedsFill = false;
   }
 }
@@ -2698,7 +2534,7 @@ async function loadKnowledgeLibrary({ force = false } = {}) {
   if (knowledgeLibraryLoaded && !force) return;
   knowledgeLibrary = await api("/api/knowledge/library");
   knowledgeLibraryLoaded = true;
-  renderKnowledgeLibrary();
+  renderProductWorkspace();
   refreshIcons();
 }
 
@@ -2708,63 +2544,75 @@ async function openKnowledgeFile(fileId) {
   knowledgeDraft = {
     id: file.id,
     name: file.name,
-    projectIds: [...(file.projectIds || [])],
+    productIds: [...(file.productIds || [])],
     content: file.content || "",
     updatedAt: file.updatedAt,
     updatedBy: file.updatedBy
   };
   knowledgeEditorNeedsFill = true;
-  renderKnowledgeLibrary();
+  renderProductWorkspace();
   refreshIcons();
 }
 
 function startNewKnowledgeFile() {
-  if (!knowledgeProjectId) {
-    window.alert("Спочатку створи проєкт, якому належатиме файл.");
-    return;
-  }
+  if (!state.selectedProductId) return;
   knowledgeFileId = null;
   knowledgeDraft = {
     id: "",
     name: "",
-    projectIds: [knowledgeProjectId],
+    productIds: [state.selectedProductId],
     content: "",
     updatedAt: new Date().toISOString(),
     updatedBy: ""
   };
   knowledgeEditorNeedsFill = true;
-  renderKnowledgeLibrary();
+  renderProductWorkspace();
   refreshIcons();
   document.getElementById("knowledgeFileNameInput")?.focus();
 }
 
-function selectedKnowledgeProjectIds() {
-  return [...document.querySelectorAll("#knowledgeFileProjectPicker input[type=checkbox]")]
+function selectedKnowledgeProductIds() {
+  return [...document.querySelectorAll("#knowledgeFileProductPicker input[type=checkbox]")]
     .filter((input) => input.checked)
     .map((input) => input.value);
 }
 
-document.getElementById("knowledgeProjectList").addEventListener("click", async (event) => {
-  const deleteButton = event.target.closest("[data-knowledge-project-delete]");
-  if (deleteButton) {
-    const projectId = deleteButton.dataset.knowledgeProjectDelete;
-    const project = (knowledgeLibrary.projects || []).find((item) => item.id === projectId);
-    if (!window.confirm(`Видалити проєкт «${project?.name || projectId}»? Файли, які більше нікуди не належать, буде видалено разом із ним.`)) return;
-    knowledgeLibrary = (await api(`/api/knowledge/library/projects/${encodeURIComponent(projectId)}/delete`, { method: "POST", body: "{}" })).library;
-    if (knowledgeProjectId === projectId) knowledgeProjectId = null;
-    if (knowledgeDraft?.id && !(knowledgeLibrary.files || []).some((file) => file.id === knowledgeDraft.id)) {
-      knowledgeDraft = null;
-      knowledgeFileId = null;
-    }
-    renderKnowledgeLibrary();
-    refreshIcons();
+document.getElementById("productPickerList").addEventListener("click", async (event) => {
+  const row = event.target.closest("[data-product]");
+  if (!row || row.dataset.product === state.selectedProductId) return;
+  await runUiAction("product", "Перемикаємо контекст продукту...", async () => {
+    state = await api("/api/products/select", {
+      method: "POST",
+      body: JSON.stringify({ productId: row.dataset.product })
+    });
+    // Відкритий файл належить попередньому продукту — редактор закривається,
+    // щоб ніхто не зберіг чужий файл у чужому контексті.
+    knowledgeDraft = null;
+    knowledgeFileId = null;
+  });
+});
+
+document.getElementById("productBriefForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const brief = Object.fromEntries(
+    productBriefQuestions.map((field) => [field, document.getElementById(`brief-${field}`).value])
+  );
+  if (!productBriefQuestions.some((field) => brief[field].trim())) {
+    window.alert("Заповни хоча б одну відповідь про продукт.");
     return;
   }
-  const row = event.target.closest("[data-knowledge-project]");
-  if (!row) return;
-  knowledgeProjectId = row.dataset.knowledgeProject;
-  renderKnowledgeLibrary();
-  refreshIcons();
+  await runUiAction("product", "Зберігаємо опис продукту...", async () => {
+    state = await api("/api/products/brief", {
+      method: "POST",
+      body: JSON.stringify({
+        productId: state.selectedProductId,
+        name: document.getElementById("productNameInput").value,
+        brief
+      })
+    });
+    // Перечитуємо збережене: сервер міг почистити назву або порожні рядки.
+    productBriefLoadedFor = null;
+  });
 });
 
 document.getElementById("knowledgeFileList").addEventListener("click", async (event) => {
@@ -2777,67 +2625,37 @@ document.getElementById("knowledgeNewFileBtn").addEventListener("click", () => {
   startNewKnowledgeFile();
 });
 
-document.getElementById("knowledgeNewProjectBtn").addEventListener("click", () => {
-  const form = document.getElementById("knowledgeProjectForm");
-  form.hidden = !form.hidden;
-  if (!form.hidden) document.getElementById("knowledgeProjectNameInput").focus();
-});
-
-document.getElementById("knowledgeProjectCancelBtn").addEventListener("click", () => {
-  document.getElementById("knowledgeProjectForm").hidden = true;
-  document.getElementById("knowledgeProjectNameInput").value = "";
-});
-
-document.getElementById("knowledgeProjectForm").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const name = document.getElementById("knowledgeProjectNameInput").value.trim();
-  if (!name) return;
-  const result = await api("/api/knowledge/library/projects", {
-    method: "POST",
-    body: JSON.stringify({ name, productId: document.getElementById("knowledgeProjectProductInput").value })
-  });
-  knowledgeLibrary = result.library;
-  knowledgeProjectId = result.project.id;
-  document.getElementById("knowledgeProjectNameInput").value = "";
-  document.getElementById("knowledgeProjectForm").hidden = true;
-  renderKnowledgeLibrary();
-  refreshIcons();
-});
-
 document.getElementById("knowledgeEditorForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!knowledgeDraft) return;
   const name = document.getElementById("knowledgeFileNameInput").value;
   const content = document.getElementById("knowledgeFileContentInput").value;
-  const projectIds = selectedKnowledgeProjectIds();
-  if (!projectIds.length) {
-    window.alert("Признач файл хоча б одному проєкту — інакше його ніхто не прочитає.");
+  const productIds = selectedKnowledgeProductIds();
+  if (!productIds.length) {
+    window.alert("Признач файл хоча б одному продукту — інакше його ніхто не прочитає.");
     return;
   }
   await runUiAction("knowledge-file", "Зберігаємо файл на сервері...", async () => {
     const result = knowledgeDraft.id
       ? await api(`/api/knowledge/library/files/${encodeURIComponent(knowledgeDraft.id)}`, {
           method: "POST",
-          body: JSON.stringify({ name, content, projectIds })
+          body: JSON.stringify({ name, content, productIds })
         })
       : await api("/api/knowledge/library/files", {
           method: "POST",
-          body: JSON.stringify({ name, content, projectIds })
+          body: JSON.stringify({ name, content, productIds })
         });
     knowledgeLibrary = result.library;
     knowledgeFileId = result.file.id;
     knowledgeDraft = {
       id: result.file.id,
       name: result.file.name,
-      projectIds: [...result.file.projectIds],
+      productIds: [...result.file.productIds],
       content: result.file.content ?? content,
       updatedAt: result.file.updatedAt,
       updatedBy: result.file.updatedBy
     };
     knowledgeEditorNeedsFill = true;
-    if (!knowledgeDraft.projectIds.includes(knowledgeProjectId)) {
-      knowledgeProjectId = knowledgeDraft.projectIds[0];
-    }
   });
 });
 
@@ -2848,7 +2666,7 @@ document.getElementById("knowledgeDeleteFileBtn").addEventListener("click", asyn
   knowledgeLibrary = result.library;
   knowledgeDraft = null;
   knowledgeFileId = null;
-  renderKnowledgeLibrary();
+  renderProductWorkspace();
   refreshIcons();
 });
 
@@ -5689,7 +5507,14 @@ function profileChartHtml(buckets, valueOf, labelOf) {
 
 function renderProfileScreen() {
   if (!profileData) return;
-  const { model, spend, time } = profileData;
+  const { model, spend, time, user } = profileData;
+
+  setText("profileName", user?.name || user?.email || "Профіль");
+  setText("profileEmail", user?.email || "—");
+  setText("accountRolePill", ROLE_LABEL[user?.role] || user?.role || "seller");
+  // Пароль і вихід — завжди про того, хто зараз у застосунку. Коли відкрито
+  // чужу картку, їм там не місце: адміністратор не змінює чужий пароль звідси.
+  document.getElementById("accountSelfPanel").hidden = profileData.self === false;
 
   // Price in the option itself: a choice made without it is a choice made
   // before the invoice rather than with it. Curated pairs first, then the rest.
@@ -5708,7 +5533,7 @@ function renderProfileScreen() {
     : rest;
   setHtml("profileModelSelect", `<option value=""${model.modelId ? "" : " selected"}>За замовчуванням робочого простору</option>${options.join("")}`);
   setText("profileModelNote", model.source === "user"
-    ? `Обрано для цього акаунта. Аналіз: ${model.effective?.analysisModel || "—"}, написання: ${model.effective?.writingModel || "—"}.`
+    ? `Обрано для цього користувача. Аналіз: ${model.effective?.analysisModel || "—"}, написання: ${model.effective?.writingModel || "—"}.`
     : `Своєї моделі не обрано, тож працює модель робочого простору — аналіз: ${model.effective?.analysisModel || "—"}, написання: ${model.effective?.writingModel || "—"}.`);
 
   setText("profileSpendTotal", formatMoney(spend.totalCostUsd));
@@ -5719,7 +5544,9 @@ function renderProfileScreen() {
   ));
   setText("profileSpendNote", spend.requests
     ? `${spend.requests} ${uaPlural(spend.requests, "запит", "запити", "запитів")} за 30 днів · за весь час ${formatMoney(spend.allTimeCostUsd)}`
-    : "За 30 днів жодного запиту до моделі з цього акаунта.");
+    : profileData.signedInHere === false
+      ? "Ця людина ще жодного разу не заходила сюди — витрат за нею немає."
+      : "За 30 днів жодного запиту до моделі з цього акаунта.");
 
   setText("profileTimeTotal", formatSeconds(time.totalSeconds));
   setHtml("profileTimeChart", profileChartHtml(
@@ -5729,23 +5556,37 @@ function renderProfileScreen() {
   ));
   setText("profileTimeNote", time.activeDays
     ? `Сьогодні ${formatSeconds(time.todaySeconds)} · активних днів ${time.activeDays} · у середньому ${formatSeconds(time.averageSecondsPerActiveDay)} на день`
-    : "Час рахується з моменту, коли це запрацювало — попередніх днів у нас просто немає.");
+    : profileData.signedInHere === false
+      ? "Ця людина ще жодного разу не заходила сюди."
+      : "Час рахується з моменту, коли це запрацювало — попередніх днів у нас просто немає.");
 }
 
-async function loadProfileScreen() {
+/** Відкриває картку однієї людини. Порожній id — свою власну. */
+async function loadProfileFor(userId) {
+  profileUserId = String(userId || "");
   try {
-    profileData = await api("/api/account/profile");
+    const query = profileUserId ? `?user=${encodeURIComponent(profileUserId)}` : "";
+    profileData = await api(`/api/account/profile${query}`);
+    profileUserId = profileData.user?.id || profileUserId;
     renderProfileScreen();
-    loadTeamDirectory();
+    await loadTeamDirectory();
+    refreshIcons();
   } catch (error) {
     setText("profileModelNote", error.message);
   }
 }
 
+async function loadProfileScreen() {
+  await loadProfileFor(profileUserId || authState?.user?.id || "");
+}
+
 document.getElementById("profileModelSelect")?.addEventListener("change", async (event) => {
   try {
-    await api("/api/account/model", { method: "POST", body: JSON.stringify({ modelId: event.target.value }) });
-    await loadProfileScreen();
+    await api("/api/account/model", {
+      method: "POST",
+      body: JSON.stringify({ modelId: event.target.value, userId: profileUserId || authState?.user?.id || "" })
+    });
+    await loadProfileFor(profileUserId);
   } catch (error) {
     setText("profileModelNote", error.message);
   }
