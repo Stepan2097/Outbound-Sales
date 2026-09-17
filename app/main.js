@@ -112,6 +112,8 @@ async function enterWorkspace() {
   document.getElementById("appShell").hidden = false;
   authState = await api("/api/auth/status");
   await refresh();
+  const saved = rememberedView();
+  if (saved) setView(saved);
 }
 
 function renderAuthForm() {
@@ -1899,6 +1901,28 @@ async function runUiAction(actionName, message, work) {
   }
 }
 
+const VIEW_MEMORY_KEY = "outboundActiveView";
+
+/**
+ * The tab survives a reload. Reopening on the dashboard threw away where
+ * somebody was working, and the longer the tab takes to be useful — the warm-up
+ * reloads two databases — the more that costs.
+ *
+ * Wrapped because storage throws in a private window and when site data is
+ * blocked, and a workspace that cannot remember a tab must still open on one.
+ */
+function rememberView(viewName) {
+  try { window.localStorage.setItem(VIEW_MEMORY_KEY, viewName); } catch {}
+}
+
+function rememberedView() {
+  let saved = null;
+  try { saved = window.localStorage.getItem(VIEW_MEMORY_KEY); } catch {}
+  // Only a tab that still exists: a view removed in an update must not leave
+  // somebody staring at a blank shell with no way back.
+  return saved && document.getElementById(`view-${saved}`) ? saved : null;
+}
+
 function setView(viewName) {
   views.forEach((view) => view.classList.toggle("active", view.id === `view-${viewName}`));
   navItems.forEach((item) => item.classList.toggle("active", item.dataset.view === viewName));
@@ -1919,16 +1943,18 @@ function setView(viewName) {
       privacy: "Privacy Policy",
       evaluation: "Model Evaluation"
     }[viewName] || "Outbound Sales OS";
+  rememberView(viewName);
+
   if (viewName === "overview") {
     drawTrafficChart();
   }
-  // Loaded when the tab is opened rather than at boot: it talks to a different
-  // database, and a workspace that never warms an account should not pay for it.
   // Opening Products shows the selected product, but only into an empty box:
   // coming back to the tab must not throw away something half-typed.
   if (viewName === "products" && !document.getElementById("productContextInput")?.value) {
     fillProductEditor(state.selectedProduct);
   }
+  // Loaded when the tab is opened rather than at boot: it talks to a different
+  // database, and a workspace that never warms an account should not pay for it.
   if (viewName === "warmup") {
     loadWarmup();
   }
