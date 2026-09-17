@@ -18,6 +18,19 @@ const navItems = [...document.querySelectorAll(".nav-item")];
 
 const formatUsd = (value) => `$${Number(value || 0).toFixed(4)}`;
 const formatPct = (value) => `${Math.round((value || 0) * 100)}%`;
+/**
+ * Українська множина: 1 контакт, 2 контакти, 5 контактів. Англійський оригінал
+ * обходився одним "s", тут без трьох форм виходить безграмотно.
+ */
+const uaPlural = (count, one, few, many) => {
+  const number = Math.abs(Math.trunc(Number(count) || 0));
+  const mod10 = number % 10;
+  const mod100 = number % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+  return many;
+};
+
 const titleCase = (value) =>
   value
     .toLowerCase()
@@ -75,13 +88,13 @@ function render() {
 }
 
 function renderTopbar() {
-  const runtime = state.aiRuntime?.mode === "openrouter" ? "OpenRouter live" : "Mock AI";
-  document.getElementById("workspaceMeta").textContent = busyMessage || uiNotice || `${runtime} · ${state.prospects?.length || 0} leads · ${state.followUpTasks?.length || 0} follow-ups`;
+  const runtime = state.aiRuntime?.mode === "openrouter" ? "OpenRouter активний" : "Мок-AI";
+  document.getElementById("workspaceMeta").textContent = busyMessage || uiNotice || `${runtime} · ${state.prospects?.length || 0} ${uaPlural(state.prospects?.length || 0, "лід", "ліди", "лідів")} · ${state.followUpTasks?.length || 0} ${uaPlural(state.followUpTasks?.length || 0, "фолоу-ап", "фолоу-апи", "фолоу-апів")}`;
   document.getElementById("providerStatus").textContent = state.providerHealth.status;
   document.getElementById("healthPill").textContent = state.providerHealth.status;
   document.getElementById("keyState").textContent = state.hasOpenRouterKey
-    ? `Key version ${state.keyMetadata.keyVersion} · ${state.keyMetadata.environment}`
-    : "No key configured";
+    ? `Версія ключа ${state.keyMetadata.keyVersion} · ${state.keyMetadata.environment}`
+    : "Ключ не налаштовано";
   fillSelect(document.getElementById("productSelect"), state.products, (product) => product.id, (product) => product.name, state.selectedProductId);
 }
 
@@ -120,9 +133,9 @@ function renderAuthForm() {
   const bootstrap = authMode === "bootstrap";
   const recover = authMode === "recover";
   const reset = authMode === "reset";
-  setText("authEyebrow", bootstrap ? "Create workspace owner" : recover || reset ? "Account recovery" : "Secure workspace");
-  setText("authTitle", bootstrap ? "Set up Outbound OS" : recover ? "Recover password" : reset ? "Choose a new password" : "Sign in");
-  setText("authDescription", bootstrap ? "Create the first administrator account for your team." : recover ? "We will request a secure reset link from Supabase." : reset ? "Set a new password for your account." : "Use your company account to continue.");
+  setText("authEyebrow", bootstrap ? "Створення власника робочого простору" : recover || reset ? "Відновлення доступу" : "Захищений робочий простір");
+  setText("authTitle", bootstrap ? "Налаштувати Outbound OS" : recover ? "Відновити пароль" : reset ? "Вибери новий пароль" : "Вхід");
+  setText("authDescription", bootstrap ? "Створи перший адміністраторський акаунт для своєї команди." : recover ? "Запитаємо в Supabase захищене посилання для скидання пароля." : reset ? "Задай новий пароль для свого акаунта." : "Заходь робочим акаунтом компанії.");
   document.querySelector(".auth-name-field").hidden = !bootstrap;
   document.querySelector(".auth-email-field").hidden = reset;
   document.querySelector(".auth-password-field").hidden = recover;
@@ -133,10 +146,10 @@ function renderAuthForm() {
   document.getElementById("authNameInput").required = bootstrap;
   document.getElementById("authPasswordInput").autocomplete = bootstrap || reset ? "new-password" : "current-password";
   setText("authSubmitBtn", "");
-  document.getElementById("authSubmitBtn").innerHTML = `<i data-lucide="${recover ? "mail" : reset ? "key-round" : bootstrap ? "shield-check" : "log-in"}"></i><span>${recover ? "Send reset link" : reset ? "Save new password" : bootstrap ? "Create workspace" : "Sign in"}</span>`;
+  document.getElementById("authSubmitBtn").innerHTML = `<i data-lucide="${recover ? "mail" : reset ? "key-round" : bootstrap ? "shield-check" : "log-in"}"></i><span>${recover ? "Надіслати посилання" : reset ? "Зберегти новий пароль" : bootstrap ? "Створити робочий простір" : "Увійти"}</span>`;
   const modeButton = document.getElementById("authModeBtn");
   modeButton.hidden = bootstrap || reset;
-  modeButton.textContent = recover ? "Back to sign in" : "Forgot password?";
+  modeButton.textContent = recover ? "Назад до входу" : "Забув пароль?";
 }
 
 function renderAccount() {
@@ -157,7 +170,7 @@ function renderProductContext() {
   const selected = state.prospects?.find((prospect) => prospect.id === selectedProspectId);
   setHtml("companyBriefContent", companyBriefRows(selected));
   setText("companyConfidencePill", companyConfidenceLabel(selected));
-  setText("companyBriefMeta", selected?.company ? `${selected.company} account context for ${state.selectedProduct?.name || "selected product"}` : "What this company does, who they sell to, and why this lead may matter");
+  setText("companyBriefMeta", selected?.company ? `Контекст акаунта ${selected.company} для продукту ${state.selectedProduct?.name || "вибраного"}` : "Чим займається компанія, кому вона продає і чому цей лід може бути вартим уваги");
 }
 
 function renderProductStudio() {
@@ -166,29 +179,29 @@ function renderProductStudio() {
 
   const studioSelect = document.getElementById("productStudioProductSelect");
   if (studioSelect) fillSelect(studioSelect, state.products || [], (item) => item.id, (item) => item.name, state.selectedProductId);
-  document.getElementById("productStudioSelected").textContent = product.name || "selected product";
+  document.getElementById("productStudioSelected").textContent = product.name || "вибраний продукт";
   const deleteButton = document.getElementById("deleteProductBtn");
   if (deleteButton) deleteButton.disabled = creatingNewProduct || (state.products || []).length <= 1;
   const teachButtonText = document.querySelector("#productTeachBtn span");
-  if (teachButtonText) teachButtonText.textContent = creatingNewProduct ? "Analyze & Create Product" : "Analyze & Update Product";
+  if (teachButtonText) teachButtonText.textContent = creatingNewProduct ? "Проаналізувати і створити продукт" : "Проаналізувати і оновити продукт";
   renderProductMemory(product);
   document.getElementById("exampleList").innerHTML = (product.examples || []).length
     ? product.examples.map(exampleRow).join("")
-    : `<div class="empty-state">No examples loaded for this product</div>`;
+    : `<div class="empty-state">Для цього продукту ще не завантажено прикладів</div>`;
 }
 
 function renderProductMemory(product) {
   const memory = product.memory || {};
   const segments = memory.segments || {};
-  setText("productMemoryStatus", `${memory.status || "not trained"} · ${Number(memory.confidence || 0)}%`);
+  setText("productMemoryStatus", `${memory.status || "не навчено"} · ${Number(memory.confidence || 0)}%`);
   setHtml("productMemorySummary", `
     <div class="product-memory-card">
-      <strong>${escapeHtml(product.name || "Product")}</strong>
-      <p>${escapeHtml(memory.summary || product.positioning || "Paste product context to train the system memory.")}</p>
+      <strong>${escapeHtml(product.name || "Продукт")}</strong>
+      <p>${escapeHtml(memory.summary || product.positioning || "Встав контекст продукту, щоб навчити системну пам'ять.")}</p>
       <div class="mini-facts">
-        <span>${escapeHtml(product.category || "Product")}</span>
-        <span>${escapeHtml((product.targetPersonas || [])[0] || "buyer persona needed")}</span>
-        <span>${escapeHtml((product.useCases || [])[0] || "use case needed")}</span>
+        <span>${escapeHtml(product.category || "Продукт")}</span>
+        <span>${escapeHtml((product.targetPersonas || [])[0] || "потрібна персона покупця")}</span>
+        <span>${escapeHtml((product.useCases || [])[0] || "потрібен сценарій використання")}</span>
       </div>
     </div>
   `);
@@ -200,25 +213,25 @@ function renderProductMemory(product) {
         <small>${escapeHtml(item.rationale || "")}</small>
       </div>
     `).join("")
-    : `<div class="empty-state">No scoring rubric yet. Paste product context to create one.</div>`);
+    : `<div class="empty-state">Рубрики скорингу ще немає. Встав контекст продукту, щоб її створити.</div>`);
   const segmentLabels = {
-    idealCustomers: "Ideal Customers",
-    buyerPersonas: "Buyer Personas",
-    painPoints: "Pain Points",
-    buyingTriggers: "Buying Triggers",
-    exclusions: "Exclusions",
-    salesAngles: "Sales Angles",
-    proofPoints: "Proof",
-    objections: "Objections",
-    discoveryQuestions: "Discovery Questions",
-    claimsToAvoid: "Claims To Avoid",
-    qualificationCriteria: "Qualification Criteria"
+    idealCustomers: "Ідеальні клієнти",
+    buyerPersonas: "Персони покупців",
+    painPoints: "Болі",
+    buyingTriggers: "Тригери до покупки",
+    exclusions: "Винятки",
+    salesAngles: "Кути продажу",
+    proofPoints: "Докази",
+    objections: "Заперечення",
+    discoveryQuestions: "Питання для дискавері",
+    claimsToAvoid: "Твердження, яких уникати",
+    qualificationCriteria: "Критерії кваліфікації"
   };
   setHtml("productMemorySegments", Object.entries(segmentLabels).map(([key, label]) => memorySegmentCard(label, segments[key] || [])).join(""));
   const knowledge = product.knowledge || [];
   setHtml("productKnowledgeList", knowledge.length
     ? knowledge.slice(0, 8).map(productKnowledgeRow).join("")
-    : `<div class="empty-state">No saved product context updates yet</div>`);
+    : `<div class="empty-state">Збережених оновлень контексту продукту ще немає</div>`);
 }
 
 function memorySegmentCard(label, values) {
@@ -226,18 +239,18 @@ function memorySegmentCard(label, values) {
   return `
     <article class="memory-segment-card">
       <strong>${escapeHtml(label)}</strong>
-      ${items.length ? `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : `<p>Needs product data.</p>`}
+      ${items.length ? `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : `<p>Бракує даних про продукт.</p>`}
     </article>
   `;
 }
 
 function renderIntegrations() {
-  document.getElementById("aiRuntimeStatus").textContent = state.aiRuntime?.mode === "openrouter" ? "OpenRouter live" : "Mock AI";
-  document.getElementById("openRouterModelCount").textContent = `${state.aiRuntime?.syncedOpenRouterModels || 0} synced`;
+  document.getElementById("aiRuntimeStatus").textContent = state.aiRuntime?.mode === "openrouter" ? "OpenRouter активний" : "Мок-AI";
+  document.getElementById("openRouterModelCount").textContent = `${state.aiRuntime?.syncedOpenRouterModels || 0} синхронізовано`;
   document.getElementById("apifyStatus").textContent = state.integrations?.apify?.status || "not_configured";
   document.getElementById("contactEnrichmentStatus").textContent = state.integrations?.apify?.configured
-    ? state.integrations.apify.enrichmentMode || "cost-capped Apify"
-    : "not configured";
+    ? state.integrations.apify.enrichmentMode || "Apify з лімітом витрат"
+    : "не налаштовано";
   document.getElementById("crmStatus").textContent = state.integrations?.crm?.status || "not_configured";
   document.getElementById("transcriptStatus").textContent = state.integrations?.transcripts?.status || "manual_paste";
   document.getElementById("notificationStatus").textContent = state.integrations?.notifications?.status || "in_app";
@@ -298,12 +311,12 @@ function renderIntegrations() {
 }
 
 function renderAssistant() {
-  const runtime = state.aiRuntime?.mode === "openrouter" ? "OpenRouter live" : "Mock AI";
+  const runtime = state.aiRuntime?.mode === "openrouter" ? "OpenRouter активний" : "Мок-AI";
   document.getElementById("aiRuntimePill").textContent = runtime;
   document.getElementById("crmImportStatus").innerHTML = crmImportStatusRows();
   document.getElementById("assistantActionList").innerHTML = (state.aiActions || []).length
     ? state.aiActions.map(assistantActionRow).join("")
-    : `<div class="empty-state">No AI actions executed yet</div>`;
+    : `<div class="empty-state">Жодної AI-дії ще не виконано</div>`;
 }
 
 function crmImportStatusRows() {
@@ -313,7 +326,7 @@ function crmImportStatusRows() {
     <div class="connector-status-grid">
       <div><span>Supabase</span><strong>${escapeHtml(supabase?.status || "not_configured")}</strong></div>
       <div><span>CRM API</span><strong>${escapeHtml(crm?.status || "not_configured")}</strong></div>
-      <div><span>Loaded leads</span><strong>${state.prospects?.length || 0}</strong></div>
+      <div><span>Завантажено лідів</span><strong>${state.prospects?.length || 0}</strong></div>
     </div>
   `;
 }
@@ -321,7 +334,7 @@ function crmImportStatusRows() {
 function assistantActionRow(action) {
   const results = (action.results || [])
     .slice(0, 8)
-    .map((result) => `<li><strong>${escapeHtml(result.type || "action")}</strong><span>${escapeHtml(result.message || result.status || "")}</span></li>`)
+    .map((result) => `<li><strong>${escapeHtml(result.type || "дія")}</strong><span>${escapeHtml(result.message || result.status || "")}</span></li>`)
     .join("");
   const warnings = (action.warnings || [])
     .map((warning) => `<span class="warning-chip">${escapeHtml(warning)}</span>`)
@@ -330,10 +343,10 @@ function assistantActionRow(action) {
     <article class="assistant-action-card">
       <div class="assistant-action-heading">
         <div>
-          <strong>${escapeHtml(action.summary || "AI action")}</strong>
-          <span>${new Date(action.at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })} · ${escapeHtml(action.status || "completed")}</span>
+          <strong>${escapeHtml(action.summary || "AI-дія")}</strong>
+          <span>${new Date(action.at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })} · ${escapeHtml(action.status || "завершено")}</span>
         </div>
-        <span class="pill">${escapeHtml(action.modelUsed || "local")}</span>
+        <span class="pill">${escapeHtml(action.modelUsed || "локально")}</span>
       </div>
       <p>${escapeHtml(action.instruction || "")}</p>
       <ul>${results}</ul>
@@ -376,19 +389,19 @@ function renderLearningDatabase() {
     fillSelect(inboxProductSelect, state.products || [], (product) => product.id, (product) => product.name, state.selectedProductId);
   }
 
-  document.getElementById("learningStatusPill").textContent = playbook.status || "empty";
+  document.getElementById("learningStatusPill").textContent = playbook.status || "порожньо";
   renderKnowledgeInboxResult(learning.lastInboxAnalysis);
   document.getElementById("learningExampleCount").textContent = stats.totalExamples || 0;
   document.getElementById("learningWinCount").textContent = stats.winningExamples || 0;
   document.getElementById("learningScreenshotCount").textContent = stats.screenshotExamples || 0;
-  document.getElementById("learningTopChannel").textContent = titleCase(stats.topChannel || "none");
+  document.getElementById("learningTopChannel").textContent = titleCase(stats.topChannel || "немає");
   document.getElementById("learningVersionPill").textContent = stats.modelVersion || learning.modelVersion || "learning-local-v1";
   document.getElementById("learningPlaybookSummary").innerHTML = `
-    <strong>${escapeHtml(playbook.summary || "No learned patterns yet")}</strong>
-    <span>${playbook.updatedAt ? `Updated ${new Date(playbook.updatedAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}` : "Waiting for first example"}</span>
+    <strong>${escapeHtml(playbook.summary || "Вивчених патернів ще немає")}</strong>
+    <span>${playbook.updatedAt ? `Оновлено ${new Date(playbook.updatedAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}` : "Чекаємо на перший приклад"}</span>
   `;
-  document.getElementById("learningPatternList").innerHTML = listItems(playbook.winningPatterns, "No winning patterns yet");
-  document.getElementById("learningRuleList").innerHTML = listItems(playbook.reusableRules, "No rules learned yet");
+  document.getElementById("learningPatternList").innerHTML = listItems(playbook.winningPatterns, "Переможних патернів ще немає");
+  document.getElementById("learningRuleList").innerHTML = listItems(playbook.reusableRules, "Правил ще не вивчено");
   document.getElementById("learningChannelTips").innerHTML = (playbook.channelTips || []).length
     ? playbook.channelTips.map((tip) => `
         <div class="channel-tip">
@@ -396,10 +409,10 @@ function renderLearningDatabase() {
           <strong>${escapeHtml(tip.tip)}</strong>
         </div>
       `).join("")
-    : `<div class="empty-state">Channel tips appear after examples are saved</div>`;
+    : `<div class="empty-state">Поради по каналах з'являться, коли збережеш приклади</div>`;
   document.getElementById("learningExampleList").innerHTML = (learning.examples || []).length
     ? learning.examples.map(learningExampleRow).join("")
-    : `<div class="empty-state">No training data yet</div>`;
+    : `<div class="empty-state">Даних для навчання ще немає</div>`;
   renderKnowledgeInboxScreenshotPreview();
   renderIcpDatabase();
 }
@@ -410,18 +423,18 @@ function renderIcpDatabase() {
   const lookalike = icp.lookalikeSearch || {};
   const payload = lookalike.payload || {};
   const prettyPayload = JSON.stringify(payload, null, 2);
-  document.getElementById("icpStatusPill").textContent = profile.status || "empty";
-  document.getElementById("icpProfileSummary").textContent = profile.summary || "Upload ICP leads to train lookalike filters.";
+  document.getElementById("icpStatusPill").textContent = profile.status || "порожньо";
+  document.getElementById("icpProfileSummary").textContent = profile.summary || "Завантаж ICP-лідів, щоб навчити lookalike-фільтри.";
   document.getElementById("icpActorJson").textContent = prettyPayload;
   const copyButton = document.getElementById("copyIcpJsonBtn");
   copyButton.dataset.copyText = prettyPayload;
   const chips = [
-    ["Seeds", icp.seedLeadCount || 0],
-    ["Titles", (profile.titles || []).slice(0, 3).join(", ") || "-"],
-    ["Seniority", (profile.seniorities || []).join(", ") || "-"],
-    ["Functions", (profile.functions || []).join(", ") || "-"],
-    ["Industries", (profile.industries || []).slice(0, 2).join(", ") || "-"],
-    ["Search", lookalike.status || "not_ready"]
+    ["Сіди", icp.seedLeadCount || 0],
+    ["Посади", (profile.titles || []).slice(0, 3).join(", ") || "-"],
+    ["Рівень", (profile.seniorities || []).join(", ") || "-"],
+    ["Функції", (profile.functions || []).join(", ") || "-"],
+    ["Індустрії", (profile.industries || []).slice(0, 2).join(", ") || "-"],
+    ["Пошук", lookalike.status || "not_ready"]
   ];
   document.getElementById("icpChipRow").innerHTML = chips
     .map(([label, value]) => `<span class="cap"><strong>${escapeHtml(label)}</strong> ${escapeHtml(value)}</span>`)
@@ -437,9 +450,9 @@ function listItems(items, emptyText) {
 function renderKnowledgeInboxResult(analysis) {
   const result = document.getElementById("knowledgeInboxResult");
   if (!result) return;
-  setText("knowledgeInboxStatusPill", analysis ? "learned" : "ready");
+  setText("knowledgeInboxStatusPill", analysis ? "навчено" : "готово");
   if (!analysis) {
-    result.innerHTML = `<div class="empty-state">Paste or upload knowledge and the AI playbook will extract patterns, rules, and reusable sales context.</div>`;
+    result.innerHTML = `<div class="empty-state">Встав або завантаж знання — AI-плейбук витягне з них патерни, правила й контекст продажів, який можна перевикористати.</div>`;
     return;
   }
   const patterns = (analysis.patterns || []).slice(0, 5).map((item) => `<span class="cap">${escapeHtml(item)}</span>`).join("");
@@ -447,9 +460,9 @@ function renderKnowledgeInboxResult(analysis) {
   result.innerHTML = `
     <article class="knowledge-inbox-card">
       <div>
-        <span class="pill">${escapeHtml(analysis.productName || "Product")}</span>
-        <strong>${escapeHtml(analysis.summary || "Knowledge analyzed and added to the playbook.")}</strong>
-        <small>${analysis.updatedAt ? `Updated ${new Date(analysis.updatedAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}` : ""}</small>
+        <span class="pill">${escapeHtml(analysis.productName || "Продукт")}</span>
+        <strong>${escapeHtml(analysis.summary || "Знання проаналізовано й додано до плейбука.")}</strong>
+        <small>${analysis.updatedAt ? `Оновлено ${new Date(analysis.updatedAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}` : ""}</small>
       </div>
       <div class="cap-list">${patterns}</div>
       <ul>${rules}</ul>
@@ -459,7 +472,7 @@ function renderKnowledgeInboxResult(analysis) {
 
 function learningExampleRow(example) {
   const image = example.screenshot?.dataUrl
-    ? `<img src="${escapeAttr(example.screenshot.dataUrl)}" alt="${escapeAttr(example.screenshot.name || "Training screenshot")}" />`
+    ? `<img src="${escapeAttr(example.screenshot.dataUrl)}" alt="${escapeAttr(example.screenshot.name || "Скріншот для навчання")}" />`
     : `<div class="learning-thumb-placeholder"><i data-lucide="${example.profileUrl || example.sourceUrl ? "link" : "file-text"}"></i></div>`;
   const signals = example.signals
     ? [
@@ -474,13 +487,13 @@ function learningExampleRow(example) {
       <div>
         <div class="learning-example-heading">
           <span class="pill">${escapeHtml(example.channel)}</span>
-          <strong>${escapeHtml(example.productName || "Product")}</strong>
+          <strong>${escapeHtml(example.productName || "Продукт")}</strong>
           <small>${new Date(example.createdAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}</small>
         </div>
-        <p>${escapeHtml(example.messageText || example.notes || example.profileUrl || example.sourceUrl || "Screenshot example")}</p>
+        <p>${escapeHtml(example.messageText || example.notes || example.profileUrl || example.sourceUrl || "Приклад-скріншот")}</p>
         <div class="learning-meta-row">
-          <span>${escapeHtml(example.persona || "persona open")}</span>
-          <span>${escapeHtml(example.outcome || "outcome")}</span>
+          <span>${escapeHtml(example.persona || "персона не визначена")}</span>
+          <span>${escapeHtml(example.outcome || "результат")}</span>
           <strong>${Number(example.outcomeScore || 0)}%</strong>
         </div>
         <div class="cap-list">${signals}</div>
@@ -493,7 +506,7 @@ function renderOverview() {
   const summary = state.usageSummary;
   document.getElementById("totalCost").textContent = formatUsd(summary.totalCostUsd);
   document.getElementById("tokenVolume").textContent = summary.totalTokens.toLocaleString();
-  document.getElementById("avgLatency").textContent = `${summary.avgLatencyMs.toLocaleString()} ms`;
+  document.getElementById("avgLatency").textContent = `${summary.avgLatencyMs.toLocaleString()} мс`;
   document.getElementById("fallbackRate").textContent = formatPct(summary.fallbackRate);
   document.getElementById("schemaRate").textContent = formatPct(summary.schemaRate);
   document.getElementById("budgetMeter").style.width = `${Math.min(100, summary.budgetUsedPercent)}%`;
@@ -573,12 +586,12 @@ function renderModels() {
           <td><span class="pill">${model.tier}</span></td>
           <td>${Number(model.contextWindow).toLocaleString()}</td>
           <td><div class="cap-list">${capabilities(model).map((cap) => `<span class="cap">${cap}</span>`).join("")}</div></td>
-          <td><strong>$${model.inputPrice} / $${model.outputPrice}</strong><span>input / output</span></td>
+          <td><strong>$${model.inputPrice} / $${model.outputPrice}</strong><span>вхід / вихід</span></td>
           <td>${model.qualityScore}%</td>
           <td>
             <button class="toggle" data-model-toggle="${escapeAttr(model.id)}" data-enabled="${!model.enabled}">
               <i data-lucide="${model.enabled ? "toggle-right" : "toggle-left"}"></i>
-              <span>${model.enabled ? "Enabled" : "Disabled"}</span>
+              <span>${model.enabled ? "Увімкнено" : "Вимкнено"}</span>
             </button>
           </td>
         </tr>
@@ -619,7 +632,7 @@ function renderRouting() {
 
   fillSelect(document.getElementById("runTaskSelect"), state.tasks, (task) => task.taskType, (task) => titleCase(task.taskType), selectedTaskType);
   document.getElementById("runPreferredModelSelect").innerHTML =
-    `<option value="">Automatic routing</option>` +
+    `<option value="">Автоматична маршрутизація</option>` +
     state.models
       .filter((model) => model.enabled)
       .map((model) => `<option value="${escapeAttr(model.id)}">${escapeHtml(model.displayName)}</option>`)
@@ -665,9 +678,9 @@ function renderEvaluation() {
             <p>${comparisonCopy(index)}</p>
           </div>
           <div>
-            <div class="score-line"><span>Commercial relevance</span><strong>${model.qualityScore}%</strong></div>
-            <div class="score-line"><span>Latency</span><strong>${model.latencyMs || 880} ms</strong></div>
-            <div class="score-line"><span>Cost</span><strong>$${model.inputPrice}/${model.outputPrice}</strong></div>
+            <div class="score-line"><span>Комерційна релевантність</span><strong>${model.qualityScore}%</strong></div>
+            <div class="score-line"><span>Затримка</span><strong>${model.latencyMs || 880} мс</strong></div>
+            <div class="score-line"><span>Вартість</span><strong>$${model.inputPrice}/${model.outputPrice}</strong></div>
           </div>
         </article>
       `
@@ -691,10 +704,10 @@ function renderProspects() {
     return matchesSearch && matchesStatus;
   });
 
-  document.getElementById("prospectCount").textContent = `${filtered.length} records`;
+  document.getElementById("prospectCount").textContent = `${filtered.length} ${uaPlural(filtered.length, "запис", "записи", "записів")}`;
   document.getElementById("prospectList").innerHTML = filtered.length
     ? filtered.map((prospect) => prospectCard(prospect)).join("")
-    : `<div class="empty-state">No matching prospects</div>`;
+    : `<div class="empty-state">Немає проспектів під цей фільтр</div>`;
 
   const selected = state.prospects?.find((prospect) => prospect.id === selectedProspectId);
   renderSelectedProspect(selected);
@@ -708,11 +721,11 @@ function prospectCard(prospect) {
         <div>
           <strong>${escapeHtml(prospect.name)}</strong>
           <span>${escapeHtml([prospect.title, prospect.company].filter(Boolean).join(" · "))}</span>
-          <small>${escapeHtml(prospect.location || "No location")} · ${escapeHtml(prospect.status)} · reach ${prospect.analysis?.reachProbability ?? 0}%</small>
+          <small>${escapeHtml(prospect.location || "Без локації")} · ${escapeHtml(prospect.status)} · досяжність ${prospect.analysis?.reachProbability ?? 0}%</small>
         </div>
         <b>${prospect.score}</b>
       </button>
-      <button class="icon-button queue-remove danger-button" type="button" data-remove-prospect-id="${escapeAttr(prospect.id)}" title="Remove from queue" aria-label="Remove from queue">
+      <button class="icon-button queue-remove danger-button" type="button" data-remove-prospect-id="${escapeAttr(prospect.id)}" title="Прибрати з черги" aria-label="Прибрати з черги">
         <i data-lucide="trash-2"></i>
       </button>
     </article>
@@ -732,18 +745,18 @@ function renderSelectedProspect(prospect) {
   if (analyzeQuickButton) analyzeQuickButton.disabled = !prospect;
 
   if (!prospect) {
-    document.getElementById("selectedProspectName").textContent = "Select a prospect";
-    document.getElementById("selectedProspectMeta").textContent = "Contact discovery and AI outreach";
+    document.getElementById("selectedProspectName").textContent = "Вибери проспекта";
+    document.getElementById("selectedProspectMeta").textContent = "Пошук контактів і AI-аутріч";
     document.getElementById("selectedProspectScore").textContent = "0";
-    document.getElementById("selectedProspectStatus").textContent = "empty";
+    document.getElementById("selectedProspectStatus").textContent = "порожньо";
     document.getElementById("profileFields").innerHTML = "";
-    document.getElementById("contactList").innerHTML = `<div class="empty-state">No prospect selected</div>`;
-    document.getElementById("outreachContent").innerHTML = `<div class="empty-state">No outreach prepared</div>`;
+    document.getElementById("contactList").innerHTML = `<div class="empty-state">Проспекта не вибрано</div>`;
+    document.getElementById("outreachContent").innerHTML = `<div class="empty-state">Аутріч не підготовлено</div>`;
     document.getElementById("leadAnalytics").innerHTML = "";
-    document.getElementById("interactionList").innerHTML = `<div class="empty-state">No interactions logged</div>`;
-    setHtml("taskInteractionList", `<div class="empty-state">No interactions logged</div>`);
-    document.getElementById("taskNotificationList").innerHTML = `<div class="empty-state">No follow-up tasks</div>`;
-    document.getElementById("outreachModel").textContent = "not prepared";
+    document.getElementById("interactionList").innerHTML = `<div class="empty-state">Взаємодій не зафіксовано</div>`;
+    setHtml("taskInteractionList", `<div class="empty-state">Взаємодій не зафіксовано</div>`);
+    document.getElementById("taskNotificationList").innerHTML = `<div class="empty-state">Фолоу-апів немає</div>`;
+    document.getElementById("outreachModel").textContent = "не підготовлено";
     renderLeadWorkspaceExtras(null);
     return;
   }
@@ -752,7 +765,7 @@ function renderSelectedProspect(prospect) {
   document.getElementById("selectedProspectMeta").textContent = [prospect.title, prospect.company, prospect.location].filter(Boolean).join(" · ");
   document.getElementById("selectedProspectScore").textContent = `${prospect.score}`;
   document.getElementById("selectedProspectStatus").textContent = prospect.status;
-  document.getElementById("contactPolicy").textContent = prospect.contactDiscovery?.policy || "public review";
+  document.getElementById("contactPolicy").textContent = prospect.contactDiscovery?.policy || "перевірка публічних джерел";
   document.getElementById("profileFields").innerHTML = profileFieldRows(prospect);
   document.getElementById("contactList").innerHTML = contactRows(prospect);
   document.getElementById("leadAnalytics").innerHTML = analyticsRows(prospect);
@@ -760,29 +773,29 @@ function renderSelectedProspect(prospect) {
   setHtml("taskInteractionList", interactionRows(prospect));
   document.getElementById("taskNotificationList").innerHTML = taskNotificationRows(prospect);
   document.getElementById("outreachContent").innerHTML = outreachRows(prospect);
-  document.getElementById("outreachModel").textContent = prospect.outreach?.modelUsed || "not prepared";
+  document.getElementById("outreachModel").textContent = prospect.outreach?.modelUsed || "не підготовлено";
   renderLeadWorkspaceExtras(prospect);
 }
 
 function renderLeadWorkspaceExtras(prospect) {
   const prospects = state.prospects || [];
   const index = prospect ? prospects.findIndex((item) => item.id === prospect.id) : -1;
-  const analysis = prospect?.analysis || { reachProbability: 0, closeProbability: 0, recommendedAction: "Run research", reasoning: [] };
+  const analysis = prospect?.analysis || { reachProbability: 0, closeProbability: 0, recommendedAction: "Запусти дослідження", reasoning: [] };
   const confidence = bestContactConfidence(prospect);
-  const latest = prospect?.updatedAt ? `Updated ${relativeTime(prospect.updatedAt)}` : "Research not run";
+  const latest = prospect?.updatedAt ? `Оновлено ${relativeTime(prospect.updatedAt)}` : "Дослідження не запускалося";
 
-  setText("leadWorkspaceQueue", prospects.length ? `Lead ${index + 1 || 1} of ${prospects.length}` : "No leads loaded");
+  setText("leadWorkspaceQueue", prospects.length ? `Лід ${index + 1 || 1} з ${prospects.length}` : "Лідів не завантажено");
   setText("selectedLeadAvatar", prospect ? initials(prospect.name) : "OS");
-  setText("leadWorkspaceCompany", prospect ? prospect.company || "Unknown account" : "Open a lead to start");
-  setText("leadWorkspacePosition", prospect ? [prospect.title, prospect.location, prospect.website].filter(Boolean).join(" · ") || "No profile details yet" : "Add a LinkedIn URL, upload leads, or pull from CRM. The system prepares intelligence, contacts, messages, CRM logs, and next actions without auto-sending.");
-  setText("leadWorkspaceFit", prospect ? `${titleCase(analysis.productFit || "unknown")} fit` : "No fit score yet");
+  setText("leadWorkspaceCompany", prospect ? prospect.company || "Акаунт невідомий" : "Відкрий ліда, щоб почати");
+  setText("leadWorkspacePosition", prospect ? [prospect.title, prospect.location, prospect.website].filter(Boolean).join(" · ") || "Деталей профілю ще немає" : "Додай посилання на LinkedIn, завантаж лідів або витягни їх із CRM. Система підготує бриф, контакти, повідомлення, записи в CRM і наступні дії — нічого не надсилаючи самостійно.");
+  setText("leadWorkspaceFit", prospect ? `Відповідність: ${titleCase(analysis.productFit || "невідомо")}` : "Оцінки відповідності ще немає");
   setText("leadWorkspaceUpdated", latest);
-  setText("leadWorkspaceConfidence", prospect ? `${confidence}% best contact confidence` : "Awaiting evidence");
-  setText("committeeCount", prospect ? `${committeeForProspect(prospect).length} contact${committeeForProspect(prospect).length === 1 ? "" : "s"}` : "0 contacts");
+  setText("leadWorkspaceConfidence", prospect ? `${confidence}% впевненості в найкращому контакті` : "Чекаємо на підтвердження");
+  setText("committeeCount", prospect ? `${committeeForProspect(prospect).length} ${uaPlural(committeeForProspect(prospect).length, "контакт", "контакти", "контактів")}` : "0 контактів");
 
   setHtml("companyBriefContent", companyBriefRows(prospect));
   setText("companyConfidencePill", companyConfidenceLabel(prospect));
-  setText("companyBriefMeta", prospect?.company ? `${prospect.company} account context for ${state.selectedProduct?.name || "selected product"}` : "What this company does, who they sell to, and why this lead may matter");
+  setText("companyBriefMeta", prospect?.company ? `Контекст акаунта ${prospect.company} для продукту ${state.selectedProduct?.name || "вибраного"}` : "Чим займається компанія, кому вона продає і чому цей лід може бути вартим уваги");
   setHtml("buyingCommitteeList", buyingCommitteeRows(prospect));
   setHtml("scoreBreakdown", scoreBreakdownRows(prospect));
   setHtml("nextActionSummary", nextActionRows(prospect));
@@ -817,14 +830,14 @@ function renderLeadsPage() {
   const active = prospects.filter((prospect) => ["contacted", "engaged", "follow_up_due", "meeting_booked"].includes(prospect.status)).length;
   const due = state.followUpTasks?.filter((task) => task.status !== "done").length || 0;
   setHtml("leadStatsStrip", `
-    <div><span>Total leads</span><strong>${prospects.length}</strong></div>
-    <div><span>Ready to contact</span><strong>${ready}</strong></div>
-    <div><span>Active conversations</span><strong>${active}</strong></div>
-    <div><span>Follow-ups</span><strong>${due}</strong></div>
+    <div><span>Усього лідів</span><strong>${prospects.length}</strong></div>
+    <div><span>Готові до контакту</span><strong>${ready}</strong></div>
+    <div><span>Активні розмови</span><strong>${active}</strong></div>
+    <div><span>Фолоу-апи</span><strong>${due}</strong></div>
   `);
   setHtml("leadTableBody", prospects.length
     ? prospects.map(leadTableRow).join("")
-    : `<tr><td colspan="6"><div class="empty-state">No leads yet. Pull from CRM or add a LinkedIn target from Dashboard.</div></td></tr>`);
+    : `<tr><td colspan="6"><div class="empty-state">Лідів ще немає. Витягни їх із CRM або додай ціль з LinkedIn на Панелі.</div></td></tr>`);
 }
 
 function leadTableRow(prospect) {
@@ -835,11 +848,11 @@ function leadTableRow(prospect) {
       <td><span class="pill">${escapeHtml(titleCase(prospect.status || "new"))}</span></td>
       <td><strong>${prospect.score || 0}</strong></td>
       <td><strong>${analysis.reachProbability || 0}%</strong></td>
-      <td><span>${escapeHtml(analysis.recommendedAction || "Run research")}</span></td>
+      <td><span>${escapeHtml(analysis.recommendedAction || "Запусти дослідження")}</span></td>
       <td>
         <div class="table-action-row">
-          <button type="button" data-open-prospect-id="${escapeAttr(prospect.id)}"><i data-lucide="arrow-up-right"></i><span>Open</span></button>
-          <button class="icon-button danger-button" type="button" data-remove-prospect-id="${escapeAttr(prospect.id)}" title="Remove lead" aria-label="Remove lead"><i data-lucide="trash-2"></i></button>
+          <button type="button" data-open-prospect-id="${escapeAttr(prospect.id)}"><i data-lucide="arrow-up-right"></i><span>Відкрити</span></button>
+          <button class="icon-button danger-button" type="button" data-remove-prospect-id="${escapeAttr(prospect.id)}" title="Видалити ліда" aria-label="Видалити ліда"><i data-lucide="trash-2"></i></button>
         </div>
       </td>
     </tr>
@@ -847,32 +860,32 @@ function leadTableRow(prospect) {
 }
 
 function companyConfidenceLabel(prospect) {
-  if (!prospect) return "no research";
+  if (!prospect) return "без дослідження";
   const profile = prospect.companyProfile || prospect.leadIntelligence?.company_context;
-  if (!profile) return "needs research";
+  if (!profile) return "потрібне дослідження";
   const confidence = Number(profile.confidence || 0);
-  if (confidence >= 75) return `${confidence}% confidence`;
-  if (confidence >= 45) return `${confidence}% needs review`;
-  return "low company data";
+  if (confidence >= 75) return `${confidence}% впевненості`;
+  if (confidence >= 45) return `${confidence}% — треба перевірити`;
+  return "мало даних про компанію";
 }
 
 function companyBriefRows(prospect) {
-  if (!prospect) return `<div class="empty-state">Open a lead and run research to build company context.</div>`;
+  if (!prospect) return `<div class="empty-state">Відкрий ліда і запусти дослідження, щоб зібрати контекст компанії.</div>`;
   const profile = prospect.companyProfile || prospect.leadIntelligence?.company_context || {};
   const confidence = Number(profile.confidence || 0);
-  const description = profile.description || `${prospect.company || "This account"} needs company research before high-confidence outreach.`;
+  const description = profile.description || `${prospect.company || "Цей акаунт"} потребує дослідження компанії, перш ніж аутріч можна вважати впевненим.`;
   const cards = [
-    ["What they do", description],
-    ["Company size", profile.size_estimate || "Unknown"],
-    ["Audience", profile.audience || "Unknown"],
-    ["Business model", profile.business_model || "Unknown"],
-    ["Category", profile.category || "Needs research"],
-    ["Why relevant", profile.why_relevant || prospect.analysis?.reasoning?.[0] || "Run research to build the angle."]
+    ["Чим займаються", description],
+    ["Розмір компанії", profile.size_estimate || "Невідомо"],
+    ["Аудиторія", profile.audience || "Невідомо"],
+    ["Бізнес-модель", profile.business_model || "Невідомо"],
+    ["Категорія", profile.category || "Потрібне дослідження"],
+    ["Чому релевантно", profile.why_relevant || prospect.analysis?.reasoning?.[0] || "Запусти дослідження, щоб знайти кут заходу."]
   ];
-  const priorities = detailChipList(profile.likely_priorities, "No priorities inferred yet");
-  const growth = detailChipList(profile.growth_signals, "No growth signals yet");
-  const stack = detailChipList(profile.tech_stack, "No tech stack found yet");
-  const unknowns = detailChipList(profile.unknowns, "No open company gaps");
+  const priorities = detailChipList(profile.likely_priorities, "Пріоритетів поки не видно");
+  const growth = detailChipList(profile.growth_signals, "Сигналів росту поки немає");
+  const stack = detailChipList(profile.tech_stack, "Технологічний стек поки не знайдено");
+  const unknowns = detailChipList(profile.unknowns, "Відкритих прогалин по компанії немає");
   const links = (profile.research_links || []).slice(0, 4).map((item) => {
     const url = typeof item === "string" ? item : item.url;
     const label = typeof item === "string" ? shortUrl(item) : item.label || item.title || shortUrl(item.url || "");
@@ -883,10 +896,10 @@ function companyBriefRows(prospect) {
   const appRows = apps.length ? apps.map((app) => `
     <article class="app-title-row">
       <div><strong>${escapeHtml(app.title)}</strong><span>${escapeHtml([app.os, app.category, app.publisher].filter(Boolean).join(" · "))}</span></div>
-      <div class="app-facts"><span>${escapeHtml(app.geo || "GEO not verified")}</span><span>${escapeHtml(app.monetization || "Monetization not verified")}</span><span>${escapeHtml(app.recentRelease ? new Date(app.recentRelease).toLocaleDateString() : "Release date unknown")}</span></div>
+      <div class="app-facts"><span>${escapeHtml(app.geo || "GEO не підтверджено")}</span><span>${escapeHtml(app.monetization || "Монетизацію не підтверджено")}</span><span>${escapeHtml(app.recentRelease ? new Date(app.recentRelease).toLocaleDateString() : "Дата релізу невідома")}</span></div>
       ${evidenceLinks(appEvidence.filter((source) => (app.evidenceSourceIds || []).includes(source.source_id)))}
     </article>
-  `).join("") : `<div class="empty-state">No confidently matched store title yet. The research job records this as a gap instead of inventing one.</div>`;
+  `).join("") : `<div class="empty-state">Жодного застосунку в сторі не зіставлено впевнено. Дослідження записує це як прогалину, а не вигадує назву.</div>`;
 
   return `
     <div class="company-summary">
@@ -900,35 +913,35 @@ function companyBriefRows(prospect) {
     </div>
     <div class="company-detail-grid">
       <section>
-        <strong>Likely Priorities</strong>
+        <strong>Ймовірні пріоритети</strong>
         <div class="cap-list">${priorities}</div>
       </section>
       <section>
-        <strong>Growth Signals</strong>
+        <strong>Сигнали росту</strong>
         <div class="cap-list">${growth}</div>
       </section>
       <section>
-        <strong>Tech and Tools</strong>
+        <strong>Технології та інструменти</strong>
         <div class="cap-list">${stack}</div>
       </section>
       <section>
-        <strong>Unknowns to Verify</strong>
+        <strong>Що треба перевірити</strong>
         <div class="cap-list">${unknowns}</div>
       </section>
     </div>
     <section class="app-portfolio-section">
-      <div class="subpanel-heading"><h3>Apps and Recent Releases</h3><span>title · OS · GEO · monetization · evidence</span></div>
+      <div class="subpanel-heading"><h3>Застосунки та останні релізи</h3><span>назва · OS · GEO · монетизація · докази</span></div>
       <div class="app-title-list">${appRows}</div>
     </section>
     <div class="company-research-footer">
-      <span>Company context confidence: ${confidence}%</span>
-      <div>${links || `<span>No research links yet</span>`}</div>
+      <span>Впевненість у контексті компанії: ${confidence}%</span>
+      <div>${links || `<span>Посилань на джерела ще немає</span>`}</div>
     </div>
   `;
 }
 
 function companyClaimEvidence(profile, label, prospect) {
-  const mapping = { "What they do": "Company description", "Company size": "Company size", "Audience": "Audience and business model", "Business model": "Audience and business model", "Category": "Company category", "Why relevant": "Product relevance" };
+  const mapping = { "Чим займаються": "Company description", "Розмір компанії": "Company size", "Аудиторія": "Audience and business model", "Бізнес-модель": "Audience and business model", "Категорія": "Company category", "Чому релевантно": "Product relevance" };
   const claim = (profile.claim_evidence || []).find((item) => item.claim === mapping[label]);
   if (!claim) return "";
   const sources = [...(prospect.leadIntelligence?.sources || []), ...(prospect.appPortfolio?.evidence || [])]
@@ -939,9 +952,9 @@ function companyClaimEvidence(profile, label, prospect) {
 function evidenceLinks(sources = [], compact = false) {
   const links = sources.slice(0, compact ? 2 : 5).map((source) => source.url
     ? `<a href="${escapeAttr(source.url)}" target="_blank" rel="noreferrer" title="${escapeAttr(source.excerpt || source.evidence_excerpt || "")}">${escapeHtml(source.title || shortUrl(source.url))}</a>`
-    : `<span title="${escapeAttr(source.excerpt || source.evidence_excerpt || "")}">${escapeHtml(source.title || source.source_id || "Internal source")}</span>`
+    : `<span title="${escapeAttr(source.excerpt || source.evidence_excerpt || "")}">${escapeHtml(source.title || source.source_id || "Внутрішнє джерело")}</span>`
   ).join("");
-  return links ? `<div class="evidence-links">${links}</div>` : `<span class="evidence-missing">Evidence pending</span>`;
+  return links ? `<div class="evidence-links">${links}</div>` : `<span class="evidence-missing">Докази ще не зібрані</span>`;
 }
 
 function detailChipList(items, emptyText) {
@@ -952,13 +965,13 @@ function detailChipList(items, emptyText) {
 }
 
 function accountSignalRows(prospect) {
-  if (!prospect) return `<div class="empty-state">Run research to see account signals</div>`;
+  if (!prospect) return `<div class="empty-state">Запусти дослідження, щоб побачити сигнали по акаунту</div>`;
   const analysis = prospect.analysis || {};
   const publicNote = publicLeadNote(prospect.notes);
   const signals = [
-    publicNote ? { label: "Lead context", value: publicNote, confidence: 78 } : null,
-    prospect.contactDiscovery?.scraperNote ? { label: "Contact discovery", value: prospect.contactDiscovery.scraperNote, confidence: 70 } : null,
-    ...(analysis.reasoning || []).map((value) => ({ label: "AI reasoning", value, confidence: 74 }))
+    publicNote ? { label: "Контекст ліда", value: publicNote, confidence: 78 } : null,
+    prospect.contactDiscovery?.scraperNote ? { label: "Пошук контактів", value: prospect.contactDiscovery.scraperNote, confidence: 70 } : null,
+    ...(analysis.reasoning || []).map((value) => ({ label: "Міркування AI", value, confidence: 74 }))
   ].filter(Boolean);
   return signals.length
     ? signals.map((signal) => `
@@ -971,11 +984,11 @@ function accountSignalRows(prospect) {
         <b>${signal.confidence}%</b>
       </article>
     `).join("")
-    : `<div class="empty-state">No account signals yet</div>`;
+    : `<div class="empty-state">Сигналів по акаунту ще немає</div>`;
 }
 
 function buyingCommitteeRows(prospect) {
-  if (!prospect) return `<div class="empty-state">Open a lead to map the buying committee</div>`;
+  if (!prospect) return `<div class="empty-state">Відкрий ліда, щоб зібрати комітет із закупівлі</div>`;
   const committee = committeeForProspect(prospect);
   return `${companyPeopleDirectoryCard(prospect)}${committee.map((member) => `
     <article class="committee-card">
@@ -994,15 +1007,15 @@ function companyPeopleDirectoryCard(prospect) {
   if (!url) return "";
   const storedSource = prospect.publicCompanyResearch?.linkedinCompanySource || "";
   const source = storedSource === "inferred_company_slug" || (!prospect.publicCompanyResearch?.linkedinPeopleUrl && !prospect.companyLinkedin)
-    ? "inferred from company name"
-    : "company LinkedIn";
+    ? "виведено з назви компанії"
+    : "LinkedIn компанії";
   return `
     <article class="committee-directory-card">
       <div>
-        <strong>LinkedIn company people</strong>
-        <span>${escapeHtml(source)} · open to review employees and choose 1-2 relevant targets</span>
+        <strong>Люди компанії в LinkedIn</strong>
+        <span>${escapeHtml(source)} · відкрий, переглянь співробітників і вибери 1-2 релевантні цілі</span>
       </div>
-      <a class="mini-button" href="${escapeAttr(url)}" target="_blank" rel="noreferrer"><i data-lucide="external-link"></i><span>Open People</span></a>
+      <a class="mini-button" href="${escapeAttr(url)}" target="_blank" rel="noreferrer"><i data-lucide="external-link"></i><span>Відкрити людей</span></a>
     </article>
   `;
 }
@@ -1013,26 +1026,26 @@ function committeeForProspect(prospect) {
   const known = sameCompany.filter((item) => isNamedPersonLead(item));
   const rows = known.map((item) => ({
     name: item.name,
-    title: item.title || "Unknown title",
+    title: item.title || "Посада невідома",
     role: committeeRole(item.title),
-    context: item.id === prospect.id ? "current lead" : "known in queue",
+    context: item.id === prospect.id ? "поточний лід" : "вже є в черзі",
     linkedin: item.linkedin || "",
     confidence: item.id === prospect.id ? 88 : 78
   }));
   rows.push(...(prospect.companyPeople || []).map((person) => ({
     name: person.name,
-    title: person.title || "Unknown title",
+    title: person.title || "Посада невідома",
     role: person.role || committeeRole(person.title),
-    context: person.context || "found by company scrape",
+    context: person.context || "знайдено під час скрейпу компанії",
     linkedin: person.linkedin || "",
     confidence: person.confidence || 64
   })));
   const suggestedBuyer = /adaction/i.test(state.selectedProduct?.name || "")
-    ? "UA, Growth, Monetization or Product owner"
+    ? "Хтось із UA, Growth, Monetization або Product"
     : /black affiliate/i.test(state.selectedProduct?.name || "")
-      ? "Affiliates, Partnerships or Acquisition owner"
-      : "Product-relevant buyer";
-  rows.push({ name: suggestedBuyer, title: "Suggested next person to research", role: "suggested", context: "not found yet", confidence: 45 });
+      ? "Хтось із Affiliates, Partnerships або Acquisition"
+      : "Покупець, релевантний продукту";
+  rows.push({ name: suggestedBuyer, title: "Кого варто дослідити наступним", role: "suggested", context: "ще не знайдено", confidence: 45 });
   return mergeCommitteeRows(rows).slice(0, 8);
 }
 
@@ -1057,19 +1070,19 @@ function committeeRole(title) {
 }
 
 function scoreBreakdownRows(prospect) {
-  if (!prospect) return `<div class="empty-state">Scoring appears after a lead is selected</div>`;
+  if (!prospect) return `<div class="empty-state">Скоринг з'явиться після вибору ліда</div>`;
   const analysis = prospect.analysis || {};
   const inputs = analysis.scoreInputs || {};
   const rows = [
-    ["Lead score", prospect.score || 0, "final"],
-    ["Readiness", inputs.readiness || 0, "driver"],
-    ["Reach chance", analysis.reachProbability || 0, "probability"],
-    ["Close chance", analysis.closeProbability || 0, "probability"],
-    ["Company context", inputs.companyContext || 0, "driver"],
-    ["Contact evidence", inputs.contactEvidence || bestContactConfidence(prospect), "driver"],
-    ["Timing trigger", inputs.trigger || 0, "driver"],
-    ["Product fit", inputs.fit || 0, "driver"],
-    ["Penalty", inputs.penalty || 0, "penalty"]
+    ["Бал ліда", prospect.score || 0, "final"],
+    ["Готовність", inputs.readiness || 0, "driver"],
+    ["Досяжність", analysis.reachProbability || 0, "probability"],
+    ["Шанс закрити", analysis.closeProbability || 0, "probability"],
+    ["Контекст компанії", inputs.companyContext || 0, "driver"],
+    ["Підтвердження контакту", inputs.contactEvidence || bestContactConfidence(prospect), "driver"],
+    ["Тригер за часом", inputs.trigger || 0, "driver"],
+    ["Відповідність продукту", inputs.fit || 0, "driver"],
+    ["Штраф", inputs.penalty || 0, "penalty"]
   ];
   const scoreRows = rows.map(([label, value, type]) => `
     <div>
@@ -1081,14 +1094,14 @@ function scoreBreakdownRows(prospect) {
   const model = state.scoringModel || {};
   return `${scoreRows}
     <article class="scoring-learning-card">
-      <div><span>CRM outcome learning</span><strong>${escapeHtml(titleCase(model.status || "insufficient_data"))}</strong></div>
-      <p>${Number(model.sampleSize || 0)} of ${Number(model.minimumSamples || 20)} resolved leads · ${Number(model.positiveOutcomes || 0)} positive · ${Number(model.negativeOutcomes || 0)} negative</p>
-      <button type="button" id="retrainScoringBtn"><i data-lucide="refresh-cw"></i><span>Recalculate Weights</span></button>
+      <div><span>Навчання на результатах CRM</span><strong>${escapeHtml(titleCase(model.status || "insufficient_data"))}</strong></div>
+      <p>${Number(model.sampleSize || 0)} з ${Number(model.minimumSamples || 20)} закритих лідів · ${Number(model.positiveOutcomes || 0)} позитивних · ${Number(model.negativeOutcomes || 0)} негативних</p>
+      <button type="button" id="retrainScoringBtn"><i data-lucide="refresh-cw"></i><span>Перерахувати ваги</span></button>
     </article>`;
 }
 
 function nextActionRows(prospect) {
-  if (!prospect) return `<div class="empty-state">Select a lead to see the next action</div>`;
+  if (!prospect) return `<div class="empty-state">Вибери ліда, щоб побачити наступну дію</div>`;
   const analysis = prospect.analysis || {};
   const plan = prospect.nextActionPlan;
   const channel = prospect.outreach?.recommendedChannel || preferredChannel(prospect);
@@ -1099,13 +1112,13 @@ function nextActionRows(prospect) {
       <article class="next-action-card">
         <i data-lucide="sparkles"></i>
         <div>
-          <strong>${escapeHtml(plan.primaryAction || analysis.recommendedAction || "Run research and prepare outreach")}</strong>
-          <span>Best channel: ${escapeHtml(plan.bestChannel || channel)} · Reach ${plan.score?.reachProbability || analysis.reachProbability || 0}% · Close ${plan.score?.closeProbability || analysis.closeProbability || 0}%</span>
+          <strong>${escapeHtml(plan.primaryAction || analysis.recommendedAction || "Запусти дослідження і підготуй аутріч")}</strong>
+          <span>Найкращий канал: ${escapeHtml(plan.bestChannel || channel)} · Досяжність ${plan.score?.reachProbability || analysis.reachProbability || 0}% · Закрити ${plan.score?.closeProbability || analysis.closeProbability || 0}%</span>
           <p>${escapeHtml(plan.reason || (analysis.reasoning || []).join(" "))}</p>
           ${preTouch ? `<div class="next-action-caps">${preTouch}</div>` : ""}
           <div class="next-action-follow">
-            <strong>${escapeHtml(plan.followUp?.label || "Follow up")}</strong>
-            <span>${escapeHtml(plan.followUp?.trigger || "2-3 days after invite")} · ${plan.followUp?.due ? escapeHtml(new Date(plan.followUp.due).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })) : "scheduled"}</span>
+            <strong>${escapeHtml(plan.followUp?.label || "Фолоу-ап")}</strong>
+            <span>${escapeHtml(plan.followUp?.trigger || "через 2-3 дні після запиту")} · ${plan.followUp?.due ? escapeHtml(new Date(plan.followUp.due).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })) : "заплановано"}</span>
           </div>
           ${channelOrder ? `<div class="channel-order">${channelOrder}</div>` : ""}
         </div>
@@ -1116,8 +1129,8 @@ function nextActionRows(prospect) {
     <article class="next-action-card">
       <i data-lucide="sparkles"></i>
       <div>
-        <strong>${escapeHtml(analysis.recommendedAction || "Run research and prepare outreach")}</strong>
-        <span>Best channel: ${escapeHtml(channel)} · Reach ${analysis.reachProbability || 0}% · Close ${analysis.closeProbability || 0}%</span>
+        <strong>${escapeHtml(analysis.recommendedAction || "Запусти дослідження і підготуй аутріч")}</strong>
+        <span>Найкращий канал: ${escapeHtml(channel)} · Досяжність ${analysis.reachProbability || 0}% · Закрити ${analysis.closeProbability || 0}%</span>
         <p>${escapeHtml((analysis.reasoning || []).join(" "))}</p>
       </div>
     </article>
@@ -1125,16 +1138,16 @@ function nextActionRows(prospect) {
 }
 
 function salesCycleRows(prospect) {
-  if (!prospect) return `<div class="empty-state">No lead selected</div>`;
+  if (!prospect) return `<div class="empty-state">Ліда не вибрано</div>`;
   const baseItems = [
-    { label: "Added to queue", value: relativeTime(prospect.createdAt), state: "done" },
-    { label: "Research", value: prospect.contactDiscovery ? "completed" : "not run", state: prospect.contactDiscovery ? "done" : "pending" },
-    { label: "Outreach prepared", value: prospect.outreach ? relativeTime(prospect.outreach.preparedAt || prospect.updatedAt) : "pending", state: prospect.outreach ? "done" : "pending", type: "outreach_prepared" },
-    { label: "Latest CRM action", value: (prospect.interactions || [])[0]?.type ? titleCase(prospect.interactions[0].type) : "none logged", state: (prospect.interactions || []).length ? "done" : "pending" }
+    { label: "Додано в чергу", value: relativeTime(prospect.createdAt), state: "done" },
+    { label: "Дослідження", value: prospect.contactDiscovery ? "виконано" : "не запускалося", state: prospect.contactDiscovery ? "done" : "pending" },
+    { label: "Аутріч підготовлено", value: prospect.outreach ? relativeTime(prospect.outreach.preparedAt || prospect.updatedAt) : "очікує", state: prospect.outreach ? "done" : "pending", type: "outreach_prepared" },
+    { label: "Остання дія в CRM", value: (prospect.interactions || [])[0]?.type ? titleCase(prospect.interactions[0].type) : "нічого не зафіксовано", state: (prospect.interactions || []).length ? "done" : "pending" }
   ];
   const cadenceItems = (prospect.salesCadence?.steps || []).slice(0, 5).map((step) => ({
     label: step.label,
-    value: [step.day, step.channel, step.messageChannel ? `copy ${titleCase(step.messageChannel)}` : ""].filter(Boolean).join(" · "),
+    value: [step.day, step.channel, step.messageChannel ? `копія ${titleCase(step.messageChannel)}` : ""].filter(Boolean).join(" · "),
     state: (prospect.interactions || []).some((interaction) => interaction.type === step.type) ? "done" : "pending",
     type: step.type
   }));
@@ -1146,51 +1159,51 @@ function salesCycleRows(prospect) {
         <strong>${escapeHtml(item.label)}</strong>
         <small>${escapeHtml(item.value)}</small>
       </div>
-      ${item.type && item.state !== "done" ? `<button type="button" data-interaction-type="${escapeAttr(item.type)}"><i data-lucide="check"></i><span>Done</span></button>` : ""}
+      ${item.type && item.state !== "done" ? `<button type="button" data-interaction-type="${escapeAttr(item.type)}"><i data-lucide="check"></i><span>Готово</span></button>` : ""}
     </article>
   `).join("");
 }
 
 function sourceAuditRows(prospect) {
-  if (!prospect) return `<div class="empty-state">Sources appear after profile import and research</div>`;
+  if (!prospect) return `<div class="empty-state">Джерела з'являться після імпорту профілю і дослідження</div>`;
   const productSources = state.selectedProduct?.mcpContext?.sources || [];
   const contactSources = prospect.contactDiscovery?.candidates || [];
   const intelSources = prospect.leadIntelligence?.sources || [];
   const researchRows = (prospect.researchHistory || []).slice(0, 5).map((record) => ({
-    source: `Research memory · ${titleCase(record.stage || "research")}`,
-    claim: `${record.summary || "Lead research stored."} ${record.contactSnapshot ? `Contacts: ${record.contactSnapshot.candidates || 0}, best confidence: ${record.contactSnapshot.bestConfidence || 0}%` : ""}`.trim(),
+    source: `Пам'ять досліджень · ${titleCase(record.stage || "дослідження")}`,
+    claim: `${record.summary || "Дослідження ліда збережено."} ${record.contactSnapshot ? `Контактів: ${record.contactSnapshot.candidates || 0}, найкраща впевненість: ${record.contactSnapshot.bestConfidence || 0}%` : ""}`.trim(),
     confidence: record.analysis?.reachProbability || record.score || 0,
-    status: record.at ? `stored ${relativeTime(record.at)}` : "stored"
+    status: record.at ? `збережено ${relativeTime(record.at)}` : "збережено"
   }));
   const rows = [
-    { source: "Uploaded or CRM profile", claim: [prospect.name, prospect.company, prospect.title].filter(Boolean).join(" · "), confidence: 82, status: "workspace data" },
+    { source: "Завантажений профіль або CRM", claim: [prospect.name, prospect.company, prospect.title].filter(Boolean).join(" · "), confidence: 82, status: "дані робочого простору" },
     ...researchRows,
-    ...productSources.map((source) => ({ source: source.name, claim: source.type, confidence: source.confidence, status: "product context" })),
-    ...intelSources.slice(0, 8).map((source) => ({ source: source.title || source.source_id, claim: source.evidence_excerpt || source.source_type, confidence: source.quality === "high" ? 90 : source.quality === "medium" ? 70 : 45, status: `${source.source_type || "source"} · ${source.claim_type || "claim"}` })),
+    ...productSources.map((source) => ({ source: source.name, claim: source.type, confidence: source.confidence, status: "контекст продукту" })),
+    ...intelSources.slice(0, 8).map((source) => ({ source: source.title || source.source_id, claim: source.evidence_excerpt || source.source_type, confidence: source.quality === "high" ? 90 : source.quality === "medium" ? 70 : 45, status: `${source.source_type || "джерело"} · ${source.claim_type || "твердження"}` })),
     ...contactSources.map((candidate) => ({ source: candidate.source, claim: `${candidate.type}: ${candidate.value}`, confidence: candidate.confidence, status: candidate.status })),
-    ...(prospect.contactDiscovery?.warnings || []).map((warning) => ({ source: "Enrichment warning", claim: warning, confidence: 0, status: "review required" }))
+    ...(prospect.contactDiscovery?.warnings || []).map((warning) => ({ source: "Попередження збагачення", claim: warning, confidence: 0, status: "потрібна перевірка" }))
   ];
   return rows.map((row) => `
     <article class="source-row">
       <div>
-        <strong>${escapeHtml(row.source || "Unknown source")}</strong>
-        <span>${escapeHtml(row.claim || "No claim")}</span>
+        <strong>${escapeHtml(row.source || "Джерело невідоме")}</strong>
+        <span>${escapeHtml(row.claim || "Без твердження")}</span>
       </div>
-      <small>${escapeHtml(row.status || "review")} · ${row.confidence || 0}%</small>
+      <small>${escapeHtml(row.status || "перевірка")} · ${row.confidence || 0}%</small>
     </article>
   `).join("");
 }
 
 function intelligenceStatusLabel(prospect) {
   const intel = prospect?.leadIntelligence;
-  if (!prospect) return "no lead";
-  if (!intel) return "not analyzed";
-  return `${titleCase(intel.status || "ready")} · ${intel.priority_wave || "no wave"}`;
+  if (!prospect) return "ліда немає";
+  if (!intel) return "не проаналізовано";
+  return `${titleCase(intel.status || "готово")} · ${intel.priority_wave || "без хвилі"}`;
 }
 
 function intelligenceRows(prospect) {
   if (!prospect) {
-    return `<div class="empty-state">Select a lead to analyze account fit, sources, gaps, messages, and next action.</div>`;
+    return `<div class="empty-state">Вибери ліда, щоб проаналізувати відповідність акаунта, джерела, прогалини, повідомлення й наступну дію.</div>`;
   }
   const intel = prospect.leadIntelligence;
   if (!intel) {
@@ -1198,22 +1211,22 @@ function intelligenceRows(prospect) {
       <div class="intelligence-empty">
         <i data-lucide="brain-circuit"></i>
         <div>
-          <strong>No intelligence brief yet</strong>
-          <span>Analyze once, then the account research is stored and reused when you return to this lead or another contact from the same account.</span>
+          <strong>Брифу по акаунту ще немає</strong>
+          <span>Проаналізуй один раз — дослідження акаунта збережеться і підтягнеться, коли повернешся до цього ліда або до іншого контакту з тієї ж компанії.</span>
         </div>
-        <button class="primary-button" type="button" data-intel-analyze="fresh"><i data-lucide="sparkles"></i><span>Analyze Brief</span></button>
+        <button class="primary-button" type="button" data-intel-analyze="fresh"><i data-lucide="sparkles"></i><span>Зібрати бриф</span></button>
       </div>
     `;
   }
 
   const warnings = (intel.warnings || []).map((warning) => `<span class="warning-chip">${escapeHtml(warning)}</span>`).join("");
   const profile = [intel.analysis_profile_name, intel.schema_version, intel.prompt_version].filter(Boolean).join(" · ");
-  const refreshed = intel.last_refreshed_at ? `Updated ${relativeTime(intel.last_refreshed_at)}` : "Stored";
+  const refreshed = intel.last_refreshed_at ? `Оновлено ${relativeTime(intel.last_refreshed_at)}` : "Збережено";
   const scores = [
-    ["Fit", intel.fit_score || 0],
-    ["Priority", intel.priority_score || 0],
-    ["Confidence", intel.overall_confidence || 0],
-    ["Call ease", 100 - ((Number(intel.call_difficulty || 3) - 1) * 20)]
+    ["Відповідність", intel.fit_score || 0],
+    ["Пріоритет", intel.priority_score || 0],
+    ["Впевненість", intel.overall_confidence || 0],
+    ["Легкість дзвінка", 100 - ((Number(intel.call_difficulty || 3) - 1) * 20)]
   ];
   const scoreCards = scores.map(([label, value]) => `
     <div>
@@ -1241,7 +1254,7 @@ function intelligenceRows(prospect) {
         <strong>${escapeHtml(step.action)}</strong>
         <span>${escapeHtml([step.priority, step.owner, step.rationale].filter(Boolean).join(" · "))}</span>
       </div>
-      <button type="button" data-intel-task-index="${index}"><i data-lucide="bell-plus"></i><span>Task</span></button>
+      <button type="button" data-intel-task-index="${index}"><i data-lucide="bell-plus"></i><span>Завдання</span></button>
     </article>
   `).join("");
   const gaps = (intel.research_gaps || []).slice(0, 5).map((gap) => `
@@ -1251,15 +1264,15 @@ function intelligenceRows(prospect) {
         <span>${escapeHtml(gap.why_it_matters)}</span>
         <small>${escapeHtml(gap.recommended_resolution || "")}</small>
       </div>
-      <button type="button" data-intel-review-action="mark_gap_resolved" data-intel-target-id="${escapeAttr(gap.id)}"><i data-lucide="check-circle-2"></i><span>Resolve</span></button>
+      <button type="button" data-intel-review-action="mark_gap_resolved" data-intel-target-id="${escapeAttr(gap.id)}"><i data-lucide="check-circle-2"></i><span>Закрити</span></button>
     </article>
   `).join("");
   const messages = (intel.contact_personalization?.messages || intel.messages || []).slice(0, 5).map((message) => `
     <article class="message-card intel-message">
       <div class="message-heading">
-        <span class="pill">${escapeHtml(titleCase(message.channel || "draft"))}</span>
+        <span class="pill">${escapeHtml(titleCase(message.channel || "чернетка"))}</span>
         ${message.subject ? `<strong>${escapeHtml(message.subject)}</strong>` : ""}
-        <button data-copy-text="${escapeAttr(message.body || "")}" data-copy-channel="${escapeAttr(message.channel || "draft")}" data-copy-label="Intelligence message" title="Copy" aria-label="Copy"><i data-lucide="copy"></i></button>
+        <button data-copy-text="${escapeAttr(message.body || "")}" data-copy-channel="${escapeAttr(message.channel || "draft")}" data-copy-label="Повідомлення з брифу" title="Копіювати" aria-label="Копіювати"><i data-lucide="copy"></i></button>
       </div>
       <pre>${escapeHtml(message.body || "")}</pre>
       <small>${escapeHtml((message.personalization_basis || []).slice(0, 3).join(" · "))}</small>
@@ -1267,7 +1280,7 @@ function intelligenceRows(prospect) {
   `).join("");
   const contacts = (intel.recommended_contacts || []).slice(0, 4).map((contact) => `
     <article class="intel-contact">
-      <strong>${escapeHtml(contact.full_name || contact.target_role || "Target role")}</strong>
+      <strong>${escapeHtml(contact.full_name || contact.target_role || "Цільова роль")}</strong>
       <span>${escapeHtml([contact.role, contact.persona, contact.verification_status].filter(Boolean).join(" · "))}</span>
       <small>${escapeHtml(contact.why_target || "")}</small>
     </article>
@@ -1282,99 +1295,99 @@ function intelligenceRows(prospect) {
   return `
     <div class="intelligence-hero">
       <div>
-        <span class="pill">${escapeHtml(intel.priority_wave || "Wave")}</span>
-        <h3>${escapeHtml(intel.executive_summary || "Intelligence brief ready")}</h3>
-        <p>${escapeHtml(profile)} · ${escapeHtml(refreshed)}${intel.reusedFromAccount ? " · reused from account" : ""}</p>
+        <span class="pill">${escapeHtml(intel.priority_wave || "Хвиля")}</span>
+        <h3>${escapeHtml(intel.executive_summary || "Бриф готовий")}</h3>
+        <p>${escapeHtml(profile)} · ${escapeHtml(refreshed)}${intel.reusedFromAccount ? " · перевикористано з акаунта" : ""}</p>
       </div>
       <div class="intelligence-score-grid">${scoreCards}</div>
     </div>
     ${warnings ? `<div class="warning-row">${warnings}</div>` : ""}
     <div class="intelligence-grid">
       <section class="intel-card span-wide">
-        <div class="intel-card-heading"><strong>Score Drivers</strong><span>Evidence-weighted, product-specific</span></div>
-        <div class="intel-input-list">${scoringInputs || `<div class="empty-state">No scoring inputs</div>`}</div>
+        <div class="intel-card-heading"><strong>Що формує бал</strong><span>Зважено за доказами, під конкретний продукт</span></div>
+        <div class="intel-input-list">${scoringInputs || `<div class="empty-state">Вхідних даних для скорингу немає</div>`}</div>
       </section>
       <section class="intel-card">
-        <div class="intel-card-heading"><strong>Next Steps</strong><span>Seller actions only</span></div>
-        <div class="intel-list">${nextSteps || `<div class="empty-state">No next steps</div>`}</div>
+        <div class="intel-card-heading"><strong>Наступні кроки</strong><span>Тільки дії продавця</span></div>
+        <div class="intel-list">${nextSteps || `<div class="empty-state">Наступних кроків немає</div>`}</div>
       </section>
       <section class="intel-card">
-        <div class="intel-card-heading"><strong>Research Gaps</strong><span>Fix before high-confidence outreach</span></div>
-        <div class="intel-list">${gaps || `<div class="empty-state">No open gaps</div>`}</div>
+        <div class="intel-card-heading"><strong>Прогалини в дослідженні</strong><span>Закрий їх, перш ніж писати впевнено</span></div>
+        <div class="intel-list">${gaps || `<div class="empty-state">Відкритих прогалин немає</div>`}</div>
       </section>
       <section class="intel-card span-wide">
-        <div class="intel-card-heading"><strong>Draft Messages</strong><span>Human review required before sending</span></div>
-        <div class="message-list">${messages || `<div class="empty-state">No messages drafted</div>`}</div>
+        <div class="intel-card-heading"><strong>Чернетки повідомлень</strong><span>Перед відправкою мусить перечитати людина</span></div>
+        <div class="message-list">${messages || `<div class="empty-state">Чернеток немає</div>`}</div>
       </section>
       <section class="intel-card">
-        <div class="intel-card-heading"><strong>Buying Path</strong><span>Who to reach next</span></div>
-        <div class="intel-list">${contacts || `<div class="empty-state">No recommended contacts</div>`}</div>
+        <div class="intel-card-heading"><strong>Шлях до рішення</strong><span>До кого йти далі</span></div>
+        <div class="intel-list">${contacts || `<div class="empty-state">Рекомендованих контактів немає</div>`}</div>
       </section>
       <section class="intel-card">
-        <div class="intel-card-heading"><strong>Objections</strong><span>Likely blockers</span></div>
-        <div class="intel-list">${objections || `<div class="empty-state">No objections mapped</div>`}</div>
+        <div class="intel-card-heading"><strong>Заперечення</strong><span>Ймовірні блокери</span></div>
+        <div class="intel-list">${objections || `<div class="empty-state">Заперечень не зібрано</div>`}</div>
       </section>
     </div>
   `;
 }
 
 function prospectingStrategyRows(prospect) {
-  if (!prospect) return `<div class="empty-state">Open a lead and run research to build the account strategy.</div>`;
+  if (!prospect) return `<div class="empty-state">Відкрий ліда і запусти дослідження, щоб зібрати стратегію по акаунту.</div>`;
   const strategy = prospect.leadIntelligence?.prospecting_strategy;
-  if (!strategy) return `<div class="intelligence-empty"><i data-lucide="route"></i><div><strong>No account strategy yet</strong><span>Run research to create the A-M account brief, stakeholder routes, message, and conversation plan.</span></div><button class="primary-button" type="button" data-intel-analyze="fresh"><i data-lucide="sparkles"></i><span>Analyze</span></button></div>`;
+  if (!strategy) return `<div class="intelligence-empty"><i data-lucide="route"></i><div><strong>Стратегії по акаунту ще немає</strong><span>Запусти дослідження, щоб зібрати бриф A-M, маршрути до стейкхолдерів, повідомлення й план розмови.</span></div><button class="primary-button" type="button" data-intel-analyze="fresh"><i data-lucide="sparkles"></i><span>Проаналізувати</span></button></div>`;
 
   const decision = strategy.decision_summary || {};
   const assessment = strategy.executive_assessment || {};
   const gate = strategy.internal_readiness_gate || {};
   const channelStrategy = strategy.channel_strategy || {};
   const decisionRows = [
-    ["Primary", decision.primary_contact],
-    ["Second route", decision.secondary_contact],
-    ["Conversation hook", decision.best_conversation_hook || decision.best_title],
-    ["Pilot choice", decision.best_pilot_candidate || decision.best_title],
-    ["Best question", decision.best_question]
-  ].map(([label, value]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value || "Needs research")}</strong></div>`).join("");
-  const gateChecks = (gate.checks || []).map((item) => `<div><span>${escapeHtml(item.check)}</span><strong>${escapeHtml(titleCase(item.status || "verify"))}</strong></div>`).join("");
-  const gateActions = gate.policy_sensitive || gate.regulated_category ? `<div class="strategy-gate-actions"><button type="button" data-policy-decision="approved_conditions"><i data-lucide="shield-check"></i><span>Approve Conditions</span></button><button class="danger-button" type="button" data-policy-decision="parked"><i data-lucide="pause-circle"></i><span>Park Account</span></button></div>` : "";
-  const knownFacts = (assessment.known_facts || []).map((item) => `<article class="strategy-row"><div><span class="claim-label fact">Known fact</span><strong>${escapeHtml(item.statement)}</strong>${strategyEvidence(prospect, item.source_ids)}</div></article>`).join("");
-  const signals = (strategy.recent_signals || []).map((item) => `<article class="strategy-row"><div><span class="claim-label ${item.claim_type === "known_fact" ? "fact" : "hypothesis"}">${escapeHtml(titleCase(item.claim_type || "hypothesis"))}</span><strong>${escapeHtml(item.signal)}</strong><p>${escapeHtml(item.commercial_meaning || "")}</p>${strategyEvidence(prospect, item.source_ids)}</div><small>${escapeHtml(item.date_window || "Date unknown")} · ${Number(item.confidence || 0)}%</small></article>`).join("");
-  const titles = (strategy.title_analysis || []).map((item) => `<article class="strategy-title-row"><div><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml([item.os, item.geo, item.monetization].filter(Boolean).join(" · "))}</span></div><dl><div><dt>Objective</dt><dd>${escapeHtml(item.likely_objective || "Unknown")}</dd></div><div><dt>KPI</dt><dd>${escapeHtml(item.likely_kpi || "Unknown")}</dd></div><div><dt>Risk</dt><dd>${escapeHtml(item.main_risk || "Unknown")}</dd></div><div><dt>Ask</dt><dd>${escapeHtml(item.discovery_question || "")}</dd></div></dl>${strategyEvidence(prospect, item.source_ids)}</article>`).join("");
-  const hypotheses = (strategy.growth_hypotheses || []).map((item, index) => `<article class="strategy-hypothesis"><header><span>Hypothesis ${index + 1}</span><b>${Number(item.confidence || 0)}%</b></header><strong>${escapeHtml(item.hypothesis)}</strong><p><b>Evidence:</b> ${escapeHtml(item.evidence || "Not yet verified")}</p><p><b>Why it matters:</b> ${escapeHtml(item.why_it_matters || "")}</p><p><b>Ask:</b> ${escapeHtml(item.validation_question || "")}</p><p><b>AdAction angle:</b> ${escapeHtml(item.adaction_angle || "")}</p>${strategyEvidence(prospect, item.source_ids)}</article>`).join("");
-  const stakeholders = (strategy.stakeholder_map || []).map((item, index) => `<article class="strategy-stakeholder"><header><span>${index + 1}</span><div><strong>${escapeHtml(item.full_name || item.target_role || "Unresolved stakeholder")}</strong><small>${escapeHtml([item.role, titleCase(item.deal_role || "")].filter(Boolean).join(" · "))}</small></div></header><dl><div><dt>Purpose</dt><dd>${escapeHtml(item.learn || item.why_contact || "")}</dd></div><div><dt>Personal hook</dt><dd>${escapeHtml(item.personal_hook || "Needs research")}</dd></div><div><dt>Business hook</dt><dd>${escapeHtml(item.business_hook || "")}</dd></div><div><dt>CTA</dt><dd>${escapeHtml(item.cta || "")}</dd></div><div><dt>Do not pitch yet</dt><dd>${escapeHtml(item.do_not_pitch_yet || "")}</dd></div></dl>${strategyEvidence(prospect, item.source_ids)}</article>`).join("");
+    ["Основний", decision.primary_contact],
+    ["Запасний шлях", decision.secondary_contact],
+    ["Гачок для розмови", decision.best_conversation_hook || decision.best_title],
+    ["Кандидат на пілот", decision.best_pilot_candidate || decision.best_title],
+    ["Найкраще питання", decision.best_question]
+  ].map(([label, value]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value || "Потрібне дослідження")}</strong></div>`).join("");
+  const gateChecks = (gate.checks || []).map((item) => `<div><span>${escapeHtml(item.check)}</span><strong>${escapeHtml(titleCase(item.status || "перевірити"))}</strong></div>`).join("");
+  const gateActions = gate.policy_sensitive || gate.regulated_category ? `<div class="strategy-gate-actions"><button type="button" data-policy-decision="approved_conditions"><i data-lucide="shield-check"></i><span>Затвердити умови</span></button><button class="danger-button" type="button" data-policy-decision="parked"><i data-lucide="pause-circle"></i><span>Відкласти акаунт</span></button></div>` : "";
+  const knownFacts = (assessment.known_facts || []).map((item) => `<article class="strategy-row"><div><span class="claim-label fact">Відомий факт</span><strong>${escapeHtml(item.statement)}</strong>${strategyEvidence(prospect, item.source_ids)}</div></article>`).join("");
+  const signals = (strategy.recent_signals || []).map((item) => `<article class="strategy-row"><div><span class="claim-label ${item.claim_type === "known_fact" ? "fact" : "hypothesis"}">${escapeHtml(titleCase(item.claim_type || "гіпотеза"))}</span><strong>${escapeHtml(item.signal)}</strong><p>${escapeHtml(item.commercial_meaning || "")}</p>${strategyEvidence(prospect, item.source_ids)}</div><small>${escapeHtml(item.date_window || "Дата невідома")} · ${Number(item.confidence || 0)}%</small></article>`).join("");
+  const titles = (strategy.title_analysis || []).map((item) => `<article class="strategy-title-row"><div><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml([item.os, item.geo, item.monetization].filter(Boolean).join(" · "))}</span></div><dl><div><dt>Мета</dt><dd>${escapeHtml(item.likely_objective || "Невідомо")}</dd></div><div><dt>KPI</dt><dd>${escapeHtml(item.likely_kpi || "Невідомо")}</dd></div><div><dt>Ризик</dt><dd>${escapeHtml(item.main_risk || "Невідомо")}</dd></div><div><dt>Питання</dt><dd>${escapeHtml(item.discovery_question || "")}</dd></div></dl>${strategyEvidence(prospect, item.source_ids)}</article>`).join("");
+  const hypotheses = (strategy.growth_hypotheses || []).map((item, index) => `<article class="strategy-hypothesis"><header><span>Гіпотеза ${index + 1}</span><b>${Number(item.confidence || 0)}%</b></header><strong>${escapeHtml(item.hypothesis)}</strong><p><b>Докази:</b> ${escapeHtml(item.evidence || "Ще не підтверджено")}</p><p><b>Чому це важливо:</b> ${escapeHtml(item.why_it_matters || "")}</p><p><b>Питання:</b> ${escapeHtml(item.validation_question || "")}</p><p><b>Кут AdAction:</b> ${escapeHtml(item.adaction_angle || "")}</p>${strategyEvidence(prospect, item.source_ids)}</article>`).join("");
+  const stakeholders = (strategy.stakeholder_map || []).map((item, index) => `<article class="strategy-stakeholder"><header><span>${index + 1}</span><div><strong>${escapeHtml(item.full_name || item.target_role || "Стейкхолдера не визначено")}</strong><small>${escapeHtml([item.role, titleCase(item.deal_role || "")].filter(Boolean).join(" · "))}</small></div></header><dl><div><dt>Навіщо</dt><dd>${escapeHtml(item.learn || item.why_contact || "")}</dd></div><div><dt>Особистий гачок</dt><dd>${escapeHtml(item.personal_hook || "Потрібне дослідження")}</dd></div><div><dt>Бізнес-гачок</dt><dd>${escapeHtml(item.business_hook || "")}</dd></div><div><dt>CTA</dt><dd>${escapeHtml(item.cta || "")}</dd></div><div><dt>Поки не пітчити</dt><dd>${escapeHtml(item.do_not_pitch_yet || "")}</dd></div></dl>${strategyEvidence(prospect, item.source_ids)}</article>`).join("");
   const firstTouch = strategy.recommended_first_touch || {};
   const messages = [firstTouch.linkedin ? ["LinkedIn", firstTouch.linkedin] : null, firstTouch.email ? ["Email", firstTouch.email] : null].filter(Boolean).map(([label, item]) => {
     const copyButton = gate.outreach_allowed
-      ? `<button data-copy-text="${escapeAttr([item.subject, item.body].filter(Boolean).join("\n\n"))}" data-copy-channel="${label.toLowerCase()}" data-copy-label="Strategy ${label}" title="Copy" aria-label="Copy"><i data-lucide="copy"></i></button>`
-      : `<button type="button" disabled aria-disabled="true" title="Resolve the readiness gate before copying"><i data-lucide="lock-keyhole"></i></button>`;
-    return `<article class="strategy-message ${gate.outreach_allowed ? "" : "blocked"}"><header><span class="pill">${label}</span><strong>${escapeHtml(item.subject || item.angle || "First touch")}</strong>${copyButton}</header><pre>${escapeHtml(item.body || "")}</pre>${(item.evidence || []).map((entry) => `<div class="message-evidence"><span class="claim-label ${entry.claim_type === "hypothesis" ? "hypothesis" : "fact"}">${escapeHtml(titleCase(entry.claim_type || "context"))}</span><p>${escapeHtml(entry.line)}</p>${strategyEvidence(prospect, entry.source_ids)}</div>`).join("") || strategyEvidence(prospect, item.source_ids)}</article>`;
+      ? `<button data-copy-text="${escapeAttr([item.subject, item.body].filter(Boolean).join("\n\n"))}" data-copy-channel="${label.toLowerCase()}" data-copy-label="Стратегія · ${label}" title="Копіювати" aria-label="Копіювати"><i data-lucide="copy"></i></button>`
+      : `<button type="button" disabled aria-disabled="true" title="Спочатку закрий гейт готовності, потім копіюй"><i data-lucide="lock-keyhole"></i></button>`;
+    return `<article class="strategy-message ${gate.outreach_allowed ? "" : "blocked"}"><header><span class="pill">${label}</span><strong>${escapeHtml(item.subject || item.angle || "Перший дотик")}</strong>${copyButton}</header><pre>${escapeHtml(item.body || "")}</pre>${(item.evidence || []).map((entry) => `<div class="message-evidence"><span class="claim-label ${entry.claim_type === "hypothesis" ? "hypothesis" : "fact"}">${escapeHtml(titleCase(entry.claim_type || "контекст"))}</span><p>${escapeHtml(entry.line)}</p>${strategyEvidence(prospect, entry.source_ids)}</div>`).join("") || strategyEvidence(prospect, item.source_ids)}</article>`;
   }).join("");
-  const conversation = (strategy.conversation_tree || []).map((item) => `<article class="strategy-branch"><strong>If: ${escapeHtml(item.if_they_say)}</strong><p>${escapeHtml(item.respond_with)}</p><span>Next question: ${escapeHtml(item.next_question)}</span></article>`).join("");
+  const conversation = (strategy.conversation_tree || []).map((item) => `<article class="strategy-branch"><strong>Якщо: ${escapeHtml(item.if_they_say)}</strong><p>${escapeHtml(item.respond_with)}</p><span>Наступне питання: ${escapeHtml(item.next_question)}</span></article>`).join("");
   const transition = strategy.adaction_transition || {};
   const cta = strategy.consultation_cta || {};
-  const sequence = (strategy.multi_thread_sequence || []).map((item) => `<article class="strategy-sequence-row"><b>${escapeHtml(item.day || "Next")}</b><div><strong>${escapeHtml(item.full_name || item.target_role || "Next stakeholder")}</strong><span>${escapeHtml(item.purpose || "")}</span><small>${escapeHtml([item.channel, item.thesis].filter(Boolean).join(" · "))}</small></div></article>`).join("");
+  const sequence = (strategy.multi_thread_sequence || []).map((item) => `<article class="strategy-sequence-row"><b>${escapeHtml(item.day || "Далі")}</b><div><strong>${escapeHtml(item.full_name || item.target_role || "Наступний стейкхолдер")}</strong><span>${escapeHtml(item.purpose || "")}</span><small>${escapeHtml([item.channel, item.thesis].filter(Boolean).join(" · "))}</small></div></article>`).join("");
   const risks = (strategy.risks || []).map((item) => `<article class="strategy-row"><div><strong>${escapeHtml(item.risk)}</strong><p>${escapeHtml(item.why_it_matters || "")}</p><span>${escapeHtml(item.handling || "")}</span>${strategyEvidence(prospect, item.source_ids)}</div></article>`).join("");
   const scores = Object.entries(strategy.account_scores || {}).map(([key, item]) => `<article class="strategy-score"><div><span>${escapeHtml(titleCase(key))}</span><strong>${Number(item.score || 0)}/10</strong></div><p>${escapeHtml(item.rationale || "")}</p></article>`).join("");
 
   return `<div class="strategy-decision-grid">${decisionRows}</div>
-    <article class="strategy-gate ${gate.outreach_allowed ? "approved" : "blocked"}"><header><div><span>Internal Readiness Gate</span><strong>${escapeHtml(titleCase(gate.status || "standard verification"))}</strong></div><b>${gate.outreach_allowed ? "Outreach eligible" : "Hold outreach"}</b></header><p>${escapeHtml(gate.reason || "")}</p><div class="strategy-gate-checks">${gateChecks}</div>${strategyEvidence(prospect, gate.source_ids)}${gateActions}</article>
-    <details class="strategy-section" open><summary><span>A</span><strong>Executive Account Assessment</strong></summary><div class="strategy-section-body"><h3>${escapeHtml(assessment.summary || "Assessment pending")}</h3><p>${escapeHtml(assessment.why_now || "")}</p>${knownFacts || `<div class="empty-state">No source-backed account fact yet.</div>`}<article class="strategy-channel"><span>Channel strategy</span><strong>${escapeHtml(channelStrategy.primary_route || "Choose after contact review")}</strong><p>${escapeHtml(channelStrategy.reason || "")}</p><small>${escapeHtml(channelStrategy.stop_rule || "")}</small></article></div></details>
-    <details class="strategy-section"><summary><span>B</span><strong>Recent 30-90 Day Signals</strong></summary><div class="strategy-section-body strategy-list">${signals || `<div class="empty-state">No dated signals verified.</div>`}</div></details>
-    <details class="strategy-section"><summary><span>C</span><strong>App and Title Analysis</strong></summary><div class="strategy-section-body strategy-list">${titles || `<div class="empty-state">No titles verified.</div>`}</div></details>
-    <details class="strategy-section"><summary><span>D</span><strong>Growth Hypotheses</strong></summary><div class="strategy-section-body strategy-hypothesis-grid">${hypotheses || `<div class="empty-state">No hypotheses prepared.</div>`}</div></details>
-    <details class="strategy-section"><summary><span>E-F</span><strong>Stakeholders and Person-First Angles</strong></summary><div class="strategy-section-body strategy-stakeholder-grid">${stakeholders || `<div class="empty-state">No named stakeholders found.</div>`}</div></details>
-    <details class="strategy-section"><summary><span>G</span><strong>Recommended First Touch</strong></summary><div class="strategy-section-body strategy-message-grid">${messages}</div></details>
-    <details class="strategy-section"><summary><span>H</span><strong>Follow-Up Conversation Tree</strong></summary><div class="strategy-section-body strategy-branch-grid">${conversation}</div></details>
-    <details class="strategy-section"><summary><span>I-J</span><strong>AdAction Transition and Consultation CTA</strong></summary><div class="strategy-section-body strategy-transition-grid"><article><span>When to transition</span><p>${escapeHtml(transition.when_to_use || "")}</p><strong>${escapeHtml(transition.language || "")}</strong><small>${escapeHtml(transition.commercial_framework || "")}</small>${strategyEvidence(prospect, transition.source_ids)}</article><article><span>${escapeHtml(cta.positioning || "Consultation")}</span><strong>${escapeHtml(cta.ask || "")}</strong><p>${escapeHtml(cta.agenda || "")}</p></article></div></details>
-    <details class="strategy-section"><summary><span>K</span><strong>Multi-Thread Sequence</strong></summary><div class="strategy-section-body strategy-list">${sequence}</div></details>
-    <details class="strategy-section"><summary><span>L</span><strong>Risks and Objections</strong></summary><div class="strategy-section-body strategy-list">${risks}</div></details>
-    <details class="strategy-section"><summary><span>M</span><strong>Overall Account Score</strong></summary><div class="strategy-section-body strategy-score-grid">${scores}</div></details>`;
+    <article class="strategy-gate ${gate.outreach_allowed ? "approved" : "blocked"}"><header><div><span>Внутрішній гейт готовності</span><strong>${escapeHtml(titleCase(gate.status || "стандартна перевірка"))}</strong></div><b>${gate.outreach_allowed ? "Аутріч дозволено" : "Аутріч на паузі"}</b></header><p>${escapeHtml(gate.reason || "")}</p><div class="strategy-gate-checks">${gateChecks}</div>${strategyEvidence(prospect, gate.source_ids)}${gateActions}</article>
+    <details class="strategy-section" open><summary><span>A</span><strong>Управлінська оцінка акаунта</strong></summary><div class="strategy-section-body"><h3>${escapeHtml(assessment.summary || "Оцінка ще не готова")}</h3><p>${escapeHtml(assessment.why_now || "")}</p>${knownFacts || `<div class="empty-state">Жодного факту про акаунт із підтвердженим джерелом.</div>`}<article class="strategy-channel"><span>Стратегія каналів</span><strong>${escapeHtml(channelStrategy.primary_route || "Обери після перегляду контактів")}</strong><p>${escapeHtml(channelStrategy.reason || "")}</p><small>${escapeHtml(channelStrategy.stop_rule || "")}</small></article></div></details>
+    <details class="strategy-section"><summary><span>B</span><strong>Сигнали за останні 30-90 днів</strong></summary><div class="strategy-section-body strategy-list">${signals || `<div class="empty-state">Жодного датованого сигналу не підтверджено.</div>`}</div></details>
+    <details class="strategy-section"><summary><span>C</span><strong>Аналіз застосунків і назв</strong></summary><div class="strategy-section-body strategy-list">${titles || `<div class="empty-state">Жодної назви не підтверджено.</div>`}</div></details>
+    <details class="strategy-section"><summary><span>D</span><strong>Гіпотези росту</strong></summary><div class="strategy-section-body strategy-hypothesis-grid">${hypotheses || `<div class="empty-state">Гіпотез не підготовлено.</div>`}</div></details>
+    <details class="strategy-section"><summary><span>E-F</span><strong>Стейкхолдери й кути під конкретну людину</strong></summary><div class="strategy-section-body strategy-stakeholder-grid">${stakeholders || `<div class="empty-state">Іменованих стейкхолдерів не знайдено.</div>`}</div></details>
+    <details class="strategy-section"><summary><span>G</span><strong>Рекомендований перший дотик</strong></summary><div class="strategy-section-body strategy-message-grid">${messages}</div></details>
+    <details class="strategy-section"><summary><span>H</span><strong>Дерево подальшої розмови</strong></summary><div class="strategy-section-body strategy-branch-grid">${conversation}</div></details>
+    <details class="strategy-section"><summary><span>I-J</span><strong>Перехід до AdAction і CTA на консультацію</strong></summary><div class="strategy-section-body strategy-transition-grid"><article><span>Коли переходити</span><p>${escapeHtml(transition.when_to_use || "")}</p><strong>${escapeHtml(transition.language || "")}</strong><small>${escapeHtml(transition.commercial_framework || "")}</small>${strategyEvidence(prospect, transition.source_ids)}</article><article><span>${escapeHtml(cta.positioning || "Консультація")}</span><strong>${escapeHtml(cta.ask || "")}</strong><p>${escapeHtml(cta.agenda || "")}</p></article></div></details>
+    <details class="strategy-section"><summary><span>K</span><strong>Послідовність у кількох тредах</strong></summary><div class="strategy-section-body strategy-list">${sequence}</div></details>
+    <details class="strategy-section"><summary><span>L</span><strong>Ризики й заперечення</strong></summary><div class="strategy-section-body strategy-list">${risks}</div></details>
+    <details class="strategy-section"><summary><span>M</span><strong>Загальний бал акаунта</strong></summary><div class="strategy-section-body strategy-score-grid">${scores}</div></details>`;
 }
 
 function strategyEvidence(prospect, sourceIds = []) {
   const ids = new Set(sourceIds || []);
   const sources = [...(prospect?.leadIntelligence?.sources || []), ...(prospect?.appPortfolio?.evidence || [])]
     .filter((source) => ids.has(source.source_id));
-  return sources.length ? evidenceLinks(sources, true) : `<span class="evidence-missing">Hypothesis or evidence pending</span>`;
+  return sources.length ? evidenceLinks(sources, true) : `<span class="evidence-missing">Гіпотеза або докази ще не зібрані</span>`;
 }
 
 function bestContactConfidence(prospect) {
@@ -1403,11 +1416,11 @@ function preferredChannel(prospect) {
 function updateQuickCopies(prospect) {
   const messages = prospect?.outreach?.messages || [];
   const variations = prospect?.outreach?.linkedinVariations || [];
-  setCopyText("copyLinkedinQuick", messages.find((message) => /linkedin_invite/i.test(message.channel))?.body || variations[0]?.body || messages.find((message) => /linkedin/i.test(message.channel))?.body || "", "linkedin", "LinkedIn quick copy");
-  setCopyText("copyEmailQuick", approvedChannel(prospect || {}, "email") ? messages.find((message) => /email/i.test(message.channel))?.body || "" : "", "email", "Email quick copy");
-  setCopyText("copySmsQuick", approvedChannel(prospect || {}, "sms") ? messages.find((message) => /^sms$/i.test(message.channel))?.body || "" : "", "sms", "SMS quick copy");
-  setCopyText("copyWhatsappQuick", approvedChannel(prospect || {}, "whatsapp") ? messages.find((message) => /whatsapp/i.test(message.channel))?.body || "" : "", "whatsapp", "WhatsApp quick copy");
-  setCopyText("copyTelegramQuick", approvedChannel(prospect || {}, "telegram") ? messages.find((message) => /telegram/i.test(message.channel))?.body || "" : "", "telegram", "Telegram quick copy");
+  setCopyText("copyLinkedinQuick", messages.find((message) => /linkedin_invite/i.test(message.channel))?.body || variations[0]?.body || messages.find((message) => /linkedin/i.test(message.channel))?.body || "", "linkedin", "Швидка копія LinkedIn");
+  setCopyText("copyEmailQuick", approvedChannel(prospect || {}, "email") ? messages.find((message) => /email/i.test(message.channel))?.body || "" : "", "email", "Швидка копія email");
+  setCopyText("copySmsQuick", approvedChannel(prospect || {}, "sms") ? messages.find((message) => /^sms$/i.test(message.channel))?.body || "" : "", "sms", "Швидка копія SMS");
+  setCopyText("copyWhatsappQuick", approvedChannel(prospect || {}, "whatsapp") ? messages.find((message) => /whatsapp/i.test(message.channel))?.body || "" : "", "whatsapp", "Швидка копія WhatsApp");
+  setCopyText("copyTelegramQuick", approvedChannel(prospect || {}, "telegram") ? messages.find((message) => /telegram/i.test(message.channel))?.body || "" : "", "telegram", "Швидка копія Telegram");
 }
 
 function analyticsRows(prospect) {
@@ -1415,18 +1428,18 @@ function analyticsRows(prospect) {
   return `
     <article class="analysis-card">
       <div>
-        <span>Reach chance</span>
+        <span>Досяжність</span>
         <strong>${analysis.reachProbability}%</strong>
         <div class="meter compact"><span style="width:${analysis.reachProbability}%"></span></div>
       </div>
       <div>
-        <span>Close chance</span>
+        <span>Шанс закрити</span>
         <strong>${analysis.closeProbability}%</strong>
         <div class="meter compact accent"><span style="width:${analysis.closeProbability}%"></span></div>
       </div>
       <div class="analysis-reason">
-        <span>AI next move</span>
-        <strong>${escapeHtml(analysis.recommendedAction || "Prepare outreach")}</strong>
+        <span>Наступний хід за AI</span>
+        <strong>${escapeHtml(analysis.recommendedAction || "Підготувати аутріч")}</strong>
         <small>${(analysis.reasoning || []).map(escapeHtml).join(" ")}</small>
       </div>
     </article>
@@ -1436,14 +1449,14 @@ function analyticsRows(prospect) {
 function profileFieldRows(prospect) {
   const publicNote = publicLeadNote(prospect.notes);
   const rows = [
-    ["Title", prospect.title],
-    ["Company", prospect.company],
-    ["Location", prospect.location],
-    ["Website", prospect.website],
+    ["Посада", prospect.title],
+    ["Компанія", prospect.company],
+    ["Локація", prospect.location],
+    ["Сайт", prospect.website],
     ["LinkedIn", prospect.linkedin],
     ["Email", prospect.email],
-    ["Phone", prospect.phone],
-    ["Notes", publicNote]
+    ["Телефон", prospect.phone],
+    ["Нотатки", publicNote]
   ].filter(([, value]) => value);
   return rows
     .map(
@@ -1458,7 +1471,7 @@ function profileFieldRows(prospect) {
 function contactRows(prospect) {
   const discovery = prospect.contactDiscovery;
   if (!discovery?.candidates?.length) {
-    return `<div class="empty-state">Contact discovery has not run</div>`;
+    return `<div class="empty-state">Пошук контактів ще не запускався</div>`;
   }
 
   const candidates = discovery.candidates
@@ -1474,13 +1487,13 @@ function contactRows(prospect) {
             <span class="contact-type">${escapeHtml(candidate.type)}</span>
             <strong>${linkIfUrl(candidate.value)}</strong>
             <small>${escapeHtml(candidate.source)} · ${escapeHtml(candidate.status)}</small>
-            ${approvalRequired ? `<span class="approval-state ${escapeAttr(candidate.approvalStatus || "verification_required")}">${escapeHtml(approved ? "Approved for outreach" : rejected ? "Rejected" : canApprove ? "Seller approval required" : "Verification required")}</span>` : ""}
+            ${approvalRequired ? `<span class="approval-state ${escapeAttr(candidate.approvalStatus || "verification_required")}">${escapeHtml(approved ? "Схвалено для аутрічу" : rejected ? "Відхилено" : canApprove ? "Потрібне схвалення продавця" : "Потрібна перевірка")}</span>` : ""}
             ${candidate.evidence?.length ? `<div class="evidence-row">${candidate.evidence.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>` : ""}
           </div>
           <div class="confidence">
             <span>${candidate.confidence}%</span>
-            ${approvalRequired && !approved ? `<div class="approval-actions">${canApprove ? `<button type="button" data-contact-decision="approved" data-contact-type="${escapeAttr(candidate.type)}" data-contact-value="${escapeAttr(candidate.value)}"><i data-lucide="check"></i><span>Approve</span></button>` : ""}<button class="icon-button danger-button" type="button" data-contact-decision="rejected" data-contact-type="${escapeAttr(candidate.type)}" data-contact-value="${escapeAttr(candidate.value)}" title="Reject"><i data-lucide="x"></i></button></div>` : ""}
-            <button data-copy-text="${approved || !approvalRequired ? escapeAttr(candidate.value) : ""}" data-copy-channel="${escapeAttr(candidate.type || "contact")}" data-copy-label="Contact data" title="${approved || !approvalRequired ? "Copy" : "Approve before use"}" aria-label="Copy" ${approved || !approvalRequired ? "" : "disabled"}><i data-lucide="copy"></i></button>
+            ${approvalRequired && !approved ? `<div class="approval-actions">${canApprove ? `<button type="button" data-contact-decision="approved" data-contact-type="${escapeAttr(candidate.type)}" data-contact-value="${escapeAttr(candidate.value)}"><i data-lucide="check"></i><span>Схвалити</span></button>` : ""}<button class="icon-button danger-button" type="button" data-contact-decision="rejected" data-contact-type="${escapeAttr(candidate.type)}" data-contact-value="${escapeAttr(candidate.value)}" title="Відхилити"><i data-lucide="x"></i></button></div>` : ""}
+            <button data-copy-text="${approved || !approvalRequired ? escapeAttr(candidate.value) : ""}" data-copy-channel="${escapeAttr(candidate.type || "contact")}" data-copy-label="Контактні дані" title="${approved || !approvalRequired ? "Копіювати" : "Спочатку схвали"}" aria-label="Копіювати" ${approved || !approvalRequired ? "" : "disabled"}><i data-lucide="copy"></i></button>
           </div>
         </article>
       `;
@@ -1511,7 +1524,7 @@ function approvedChannel(prospect, channel) {
 function outreachRows(prospect) {
   const outreach = prospect.outreach;
   if (!outreach) {
-    return `<div class="empty-state">Prepare outreach to generate messages and actions</div>`;
+    return `<div class="empty-state">Підготуй аутріч, щоб з'явилися повідомлення й дії</div>`;
   }
 
   const messages = (outreach.messages || [])
@@ -1524,7 +1537,7 @@ function outreachRows(prospect) {
           <div class="message-heading">
             <span class="pill">${escapeHtml(message.channel)}</span>
             ${message.subject ? `<strong>${escapeHtml(message.subject)}</strong>` : ""}
-            <button data-copy-text="${canUse ? escapeAttr(message.body) : ""}" data-copy-channel="${escapeAttr(message.channel || "draft")}" data-copy-label="Outreach message" title="${canUse ? "Copy" : "Approve contact first"}" aria-label="Copy" ${canUse ? "" : "disabled"}><i data-lucide="${canUse ? "copy" : "lock-keyhole"}"></i></button>
+            <button data-copy-text="${canUse ? escapeAttr(message.body) : ""}" data-copy-channel="${escapeAttr(message.channel || "draft")}" data-copy-label="Повідомлення аутрічу" title="${canUse ? "Копіювати" : "Спочатку схвали контакт"}" aria-label="Копіювати" ${canUse ? "" : "disabled"}><i data-lucide="${canUse ? "copy" : "lock-keyhole"}"></i></button>
           </div>
           <pre>${escapeHtml(message.body)}</pre>
           ${basis ? `<small class="message-basis">${escapeHtml(basis)}</small>` : ""}
@@ -1541,8 +1554,8 @@ function outreachRows(prospect) {
         <article class="message-card linkedin-variation">
           <div class="message-heading">
             <span class="pill">${escapeHtml(variation.label)}</span>
-            <strong>LinkedIn variation</strong>
-            <button data-copy-text="${escapeAttr(variation.body)}" data-copy-channel="linkedin" data-copy-label="LinkedIn variation" title="Copy" aria-label="Copy"><i data-lucide="copy"></i></button>
+            <strong>Варіант для LinkedIn</strong>
+            <button data-copy-text="${escapeAttr(variation.body)}" data-copy-channel="linkedin" data-copy-label="Варіант для LinkedIn" title="Копіювати" aria-label="Копіювати"><i data-lucide="copy"></i></button>
           </div>
           <pre>${escapeHtml(variation.body)}</pre>
         </article>
@@ -1551,10 +1564,10 @@ function outreachRows(prospect) {
     .join("");
   const angles = (outreach.messageAngles || []).map((angle, index) => `
     <article class="message-angle-card ${index === 0 ? "recommended" : ""}">
-      <div class="message-angle-heading"><div><span class="pill">${index === 0 ? "Recommended" : escapeHtml(angle.label)}</span><strong>${escapeHtml(angle.label)}</strong></div><span class="angle-score">${Number(angle.score || 0)}/100</span></div>
+      <div class="message-angle-heading"><div><span class="pill">${index === 0 ? "Рекомендовано" : escapeHtml(angle.label)}</span><strong>${escapeHtml(angle.label)}</strong></div><span class="angle-score">${Number(angle.score || 0)}/100</span></div>
       <p>${escapeHtml(angle.strategy || "")}</p>
       <pre>${escapeHtml(angle.body || "")}</pre>
-      <div class="angle-footer"><span>${escapeHtml(angle.scoreReason || "")}</span><button data-copy-text="${escapeAttr(angle.body || "")}" data-copy-channel="linkedin" data-copy-label="${escapeAttr(angle.label || "Message angle")}"><i data-lucide="copy"></i><span>Copy</span></button></div>
+      <div class="angle-footer"><span>${escapeHtml(angle.scoreReason || "")}</span><button data-copy-text="${escapeAttr(angle.body || "")}" data-copy-channel="linkedin" data-copy-label="${escapeAttr(angle.label || "Кут повідомлення")}"><i data-lucide="copy"></i><span>Копіювати</span></button></div>
       ${evidenceLinks(angle.evidence || [])}
     </article>
   `).join("");
@@ -1584,7 +1597,7 @@ function outreachRows(prospect) {
     )
     .join("");
   const fallbackWarning = outreach.fallbackReason
-    ? `<div class="outreach-warning"><i data-lucide="triangle-alert"></i><span>Live AI fallback used. ${escapeHtml(outreach.fallbackReason)}</span></div>`
+    ? `<div class="outreach-warning"><i data-lucide="triangle-alert"></i><span>Спрацював фолбек живого AI. ${escapeHtml(outreach.fallbackReason)}</span></div>`
     : "";
   const qualityWarnings = (outreach.qualityWarnings || [])
     .map((warning) => `<span>${escapeHtml(warning)}</span>`)
@@ -1595,9 +1608,9 @@ function outreachRows(prospect) {
 
   return `
     <div class="qualification-strip">
-      <div><span>Product</span><strong>${escapeHtml(outreach.productName || state.selectedProduct?.name || "")}</strong></div>
-      <div><span>Fit</span><strong>${escapeHtml(outreach.qualification?.fit || prospect.analysis?.productFit || "")}</strong></div>
-      <div><span>Channel</span><strong>${escapeHtml(outreach.recommendedChannel)}</strong></div>
+      <div><span>Продукт</span><strong>${escapeHtml(outreach.productName || state.selectedProduct?.name || "")}</strong></div>
+      <div><span>Відповідність</span><strong>${escapeHtml(outreach.qualification?.fit || prospect.analysis?.productFit || "")}</strong></div>
+      <div><span>Канал</span><strong>${escapeHtml(outreach.recommendedChannel)}</strong></div>
     </div>
     ${fallbackWarning}
     ${qualityWarningBlock}
@@ -1624,17 +1637,17 @@ function exampleRow(example) {
     <article class="example-card">
       <div>
         <span class="pill">${escapeHtml(example.channel)}</span>
-        <strong>${escapeHtml(example.label || example.persona || "Example")}</strong>
+        <strong>${escapeHtml(example.label || example.persona || "Приклад")}</strong>
         <p>${escapeHtml(example.message)}</p>
       </div>
-      <small>${escapeHtml(example.outcome || "training context")}</small>
+      <small>${escapeHtml(example.outcome || "навчальний контекст")}</small>
     </article>
   `;
 }
 
 function productKnowledgeRow(item) {
   const image = item.screenshot?.dataUrl
-    ? `<img src="${escapeAttr(item.screenshot.dataUrl)}" alt="${escapeAttr(item.screenshot.name || "Product screenshot")}" />`
+    ? `<img src="${escapeAttr(item.screenshot.dataUrl)}" alt="${escapeAttr(item.screenshot.name || "Скріншот продукту")}" />`
     : `<div class="knowledge-thumb-placeholder"><i data-lucide="${knowledgeIcon(item.type)}"></i></div>`;
   const tags = (item.tags || []).slice(0, 6).map((tag) => `<span class="cap">${escapeHtml(tag)}</span>`).join("");
   const body = item.text || item.url || item.screenshot?.name || "";
@@ -1643,9 +1656,9 @@ function productKnowledgeRow(item) {
       <div class="knowledge-thumb">${image}</div>
       <div>
         <div class="knowledge-card-heading">
-          <span class="pill">${escapeHtml(titleCase(item.type || "lesson"))}</span>
-          <strong>${escapeHtml(item.title || "Product knowledge")}</strong>
-          <small>${Number(item.priority || 0)} priority</small>
+          <span class="pill">${escapeHtml(titleCase(item.type || "урок"))}</span>
+          <strong>${escapeHtml(item.title || "Знання про продукт")}</strong>
+          <small>пріоритет ${Number(item.priority || 0)}</small>
         </div>
         <p>${linkIfUrl(body)}</p>
         ${item.url && item.text ? `<a href="${escapeAttr(item.url)}" target="_blank" rel="noreferrer">${escapeHtml(shortUrl(item.url))}</a>` : ""}
@@ -1689,7 +1702,7 @@ function emptyProductDraft() {
 function interactionRows(prospect) {
   const interactions = prospect.interactions || [];
   if (!interactions.length) {
-    return `<div class="empty-state">No interactions logged</div>`;
+    return `<div class="empty-state">Взаємодій не зафіксовано</div>`;
   }
 
   return interactions
@@ -1714,7 +1727,7 @@ function interactionRows(prospect) {
 function callAnalysisRows(prospect) {
   const analysis = prospect.callAnalysis;
   if (!analysis) {
-    return `<div class="empty-state">Paste a call transcript to get coaching, next templates, and a follow-up task</div>`;
+    return `<div class="empty-state">Встав транскрипт дзвінка — отримаєш розбір, шаблони наступних кроків і фолоу-ап</div>`;
   }
 
   const tips = (analysis.improvementTips || []).map((tip) => `<li>${escapeHtml(tip)}</li>`).join("");
@@ -1725,7 +1738,7 @@ function callAnalysisRows(prospect) {
           <div class="message-heading">
             <span class="pill">${escapeHtml(template.channel)}</span>
             <strong>${escapeHtml(template.label)}</strong>
-            <button data-copy-text="${escapeAttr(template.body)}" data-copy-channel="${escapeAttr(template.channel || "follow_up")}" data-copy-label="${escapeAttr(template.label || "Follow-up template")}" title="Copy" aria-label="Copy"><i data-lucide="copy"></i></button>
+            <button data-copy-text="${escapeAttr(template.body)}" data-copy-channel="${escapeAttr(template.channel || "follow_up")}" data-copy-label="${escapeAttr(template.label || "Шаблон фолоу-апу")}" title="Копіювати" aria-label="Копіювати"><i data-lucide="copy"></i></button>
           </div>
           <pre>${escapeHtml(template.body)}</pre>
         </article>
@@ -1735,9 +1748,9 @@ function callAnalysisRows(prospect) {
 
   return `
     <div class="call-score-row">
-      <div><span>Call quality</span><strong>${analysis.qualityScore}%</strong></div>
-      <div><span>Sentiment</span><strong>${escapeHtml(analysis.sentiment)}</strong></div>
-      <div><span>Product</span><strong>${escapeHtml(analysis.productName)}</strong></div>
+      <div><span>Якість дзвінка</span><strong>${analysis.qualityScore}%</strong></div>
+      <div><span>Настрій</span><strong>${escapeHtml(analysis.sentiment)}</strong></div>
+      <div><span>Продукт</span><strong>${escapeHtml(analysis.productName)}</strong></div>
     </div>
     <p class="call-summary">${escapeHtml(analysis.summary)}</p>
     <ul class="tip-list">${tips}</ul>
@@ -1748,7 +1761,7 @@ function callAnalysisRows(prospect) {
 function taskNotificationRows(prospect) {
   const tasks = (state.followUpTasks || []).filter((task) => task.prospectId === prospect?.id);
   if (!tasks.length) {
-    return `<div class="empty-state">No agreed follow-up detected yet</div>`;
+    return `<div class="empty-state">Домовленого фолоу-апу поки не видно</div>`;
   }
 
   return tasks
@@ -1760,7 +1773,7 @@ function taskNotificationRows(prospect) {
             <strong>${escapeHtml(task.label)}</strong>
             <span>${new Date(task.due).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })} · ${escapeHtml(task.status)}</span>
           </div>
-          ${task.status === "done" ? "" : `<button type="button" data-task-complete-id="${escapeAttr(task.id)}"><i data-lucide="check"></i><span>Done</span></button>`}
+          ${task.status === "done" ? "" : `<button type="button" data-task-complete-id="${escapeAttr(task.id)}"><i data-lucide="check"></i><span>Готово</span></button>`}
         </article>
       `
     )
@@ -1770,18 +1783,18 @@ function taskNotificationRows(prospect) {
 function capabilities(model) {
   return [
     model.structuredOutput ? "JSON" : "",
-    model.toolCalling ? "Tools" : "",
-    model.streaming ? "Stream" : "",
-    model.promptCaching ? "Cache" : "",
-    model.zeroRetention ? "ZDR" : model.noTraining ? "No training" : ""
+    model.toolCalling ? "Інструменти" : "",
+    model.streaming ? "Стрім" : "",
+    model.promptCaching ? "Кеш" : "",
+    model.zeroRetention ? "ZDR" : model.noTraining ? "Без навчання" : ""
   ].filter(Boolean);
 }
 
 function comparisonCopy(index) {
   return [
-    "Concise, low-cost variant with dependable structure for routine outreach.",
-    "Balanced draft with stronger personalization and conservative claims.",
-    "More strategic framing for complex accounts and executive audiences."
+    "Стислий дешевий варіант із передбачуваною структурою для рутинного аутрічу.",
+    "Збалансована чернетка: більше персоналізації, обережніші твердження.",
+    "Стратегічніша подача для складних акаунтів і керівної аудиторії."
   ][index % 3];
 }
 
@@ -1815,17 +1828,17 @@ function setCopyText(id, value, channel = "", label = "") {
 
 function renderBusyState() {
   const anyBusy = Boolean(busyAction);
-  setBusyButton("quickPrepareBtn", "research", "Running...");
-  setBusyButton("runResearchTopBtn", "research", "Running...");
-  setBusyButton("prepareOutreachBtn", "research", "Running...");
-  setBusyButton("analyzeIntelligenceBtn", "intelligence", "Analyzing...");
-  setBusyButton("refreshIntelligenceBtn", "intelligence", "Refreshing...");
-  setBusyButton("analyzeIntelligenceQuick", "intelligence", "Analyzing...");
-  setBusyButton("enrichProspectBtn", "enrich", "Refreshing...");
-  setBusyButton("removeLeadQuick", "remove", "Removing...");
-  setBusyButton("addLinkedinTargetBtn", "linkedin-import", "Adding...");
-  setBusyButton("crmImportBtn", "crm-import", "Pulling...");
-  setBusyButton("productTeachBtn", "product", "Studying...");
+  setBusyButton("quickPrepareBtn", "research", "Виконується...");
+  setBusyButton("runResearchTopBtn", "research", "Виконується...");
+  setBusyButton("prepareOutreachBtn", "research", "Виконується...");
+  setBusyButton("analyzeIntelligenceBtn", "intelligence", "Аналізуємо...");
+  setBusyButton("refreshIntelligenceBtn", "intelligence", "Оновлюємо...");
+  setBusyButton("analyzeIntelligenceQuick", "intelligence", "Аналізуємо...");
+  setBusyButton("enrichProspectBtn", "enrich", "Оновлюємо...");
+  setBusyButton("removeLeadQuick", "remove", "Видаляємо...");
+  setBusyButton("addLinkedinTargetBtn", "linkedin-import", "Додаємо...");
+  setBusyButton("crmImportBtn", "crm-import", "Тягнемо...");
+  setBusyButton("productTeachBtn", "product", "Вивчаємо...");
   document.querySelectorAll("[data-interaction-type], [data-task-complete-id], [data-remove-prospect-id]").forEach((button) => {
     button.disabled = anyBusy;
   });
@@ -1846,12 +1859,12 @@ function renderResearchProgress() {
   const stages = (savedJob.stages || []).map((stage) => `
     <div class="research-stage ${escapeAttr(stage.status || "pending")}">
       <i data-lucide="${stage.status === "complete" ? "check" : stage.status === "running" ? "loader-circle" : stage.status === "failed" ? "triangle-alert" : "circle"}"></i>
-      <div><strong>${escapeHtml(stage.label)}</strong><span>${escapeHtml(stage.detail || titleCase(stage.status || "pending"))}</span></div>
+      <div><strong>${escapeHtml(stage.label)}</strong><span>${escapeHtml(stage.detail || titleCase(stage.status || "очікує"))}</span></div>
     </div>
   `).join("");
   panel.innerHTML = `
     <div class="research-progress-heading">
-      <div><span class="eyebrow">Background research</span><strong>${escapeHtml(savedJob.productName || "Selected product")} · ${escapeHtml(savedJob.prospectName || "Lead")}</strong></div>
+      <div><span class="eyebrow">Фонове дослідження</span><strong>${escapeHtml(savedJob.productName || "Вибраний продукт")} · ${escapeHtml(savedJob.prospectName || "Лід")}</strong></div>
       <span class="pill">${Number(savedJob.progress || 0)}%</span>
     </div>
     <div class="meter"><span style="width:${Number(savedJob.progress || 0)}%"></span></div>
@@ -1885,15 +1898,15 @@ async function runUiAction(actionName, message, work) {
   try {
     await work();
     uiNotice = {
-      research: "Research refreshed. Outreach, score, company context, and next actions are updated.",
-      enrich: "Contact data refreshed. Review confidence before using any phone or social profile.",
-      "linkedin-import": "Lead added to the queue. Run Research when you are ready to enrich and prepare outreach.",
-      "crm-import": "CRM leads pulled into the queue.",
-      product: "Product memory saved. The system will use the updated context for scoring and outreach.",
-      remove: "Lead removed from the queue."
-    }[actionName] || "Action completed.";
+      research: "Дослідження оновлено. Аутріч, бал, контекст компанії й наступні дії перераховано.",
+      enrich: "Контактні дані оновлено. Перевір впевненість, перш ніж брати телефон чи соцмережу в роботу.",
+      "linkedin-import": "Ліда додано в чергу. Запусти Дослідження, коли будеш готовий збагатити його й підготувати аутріч.",
+      "crm-import": "Лідів із CRM підтягнуто в чергу.",
+      product: "Пам'ять продукту збережено. Система використає оновлений контекст для скорингу й аутрічу.",
+      remove: "Ліда прибрано з черги."
+    }[actionName] || "Готово.";
   } catch (error) {
-    uiNotice = error?.message || "Action failed. Please try again.";
+    uiNotice = error?.message || "Не вдалося. Спробуй ще раз.";
   } finally {
     busyAction = "";
     busyMessage = "";
@@ -1928,20 +1941,20 @@ function setView(viewName) {
   navItems.forEach((item) => item.classList.toggle("active", item.dataset.view === viewName));
   document.getElementById("pageTitle").textContent =
     {
-      prospects: "Dashboard",
-      leads: "Leads",
-      warmup: "LinkedIn Warm-up",
-      ai: "AI Operator",
-      database: "Knowledge Base",
-      products: "Products",
-      account: "Account",
-      integrations: "Settings",
-      overview: "AI Orchestration Control",
-      models: "Model Registry",
-      routing: "Task Routing",
-      budgets: "Budget Controls",
-      privacy: "Privacy Policy",
-      evaluation: "Model Evaluation"
+      prospects: "Панель",
+      leads: "Ліди",
+      warmup: "Прогрів LinkedIn",
+      ai: "AI-оператор",
+      database: "База знань",
+      products: "Продукти",
+      account: "Профіль",
+      integrations: "Налаштування",
+      overview: "Керування AI-оркестрацією",
+      models: "Реєстр моделей",
+      routing: "Маршрутизація задач",
+      budgets: "Контроль бюджету",
+      privacy: "Політика приватності",
+      evaluation: "Оцінка моделей"
     }[viewName] || "Outbound Sales OS";
   rememberView(viewName);
 
@@ -2045,7 +2058,7 @@ function fileToDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(reader.error || new Error("Could not read file."));
+    reader.onerror = () => reject(reader.error || new Error("Не вдалося прочитати файл."));
     reader.readAsDataURL(file);
   });
 }
@@ -2056,7 +2069,7 @@ function renderProductKnowledgeScreenshotPreview() {
   if (!preview || !name) return;
   if (!pendingProductKnowledgeScreenshot) {
     preview.innerHTML = "";
-    name.textContent = "PNG or JPG from product, demo, CRM, docs";
+    name.textContent = "PNG або JPG з продукту, демо, CRM, доків";
     return;
   }
   name.textContent = `${pendingProductKnowledgeScreenshot.name} · ${Math.round(pendingProductKnowledgeScreenshot.size / 1024)} KB`;
@@ -2086,7 +2099,7 @@ function renderKnowledgeInboxScreenshotPreview() {
   if (!preview || !name) return;
   if (!pendingKnowledgeInboxScreenshot) {
     preview.innerHTML = "";
-    name.textContent = "Optional PNG/JPG from platform, SMS, LinkedIn, CRM, or product docs";
+    name.textContent = "За бажанням: PNG/JPG з платформи, SMS, LinkedIn, CRM або доків продукту";
     return;
   }
   name.textContent = `${pendingKnowledgeInboxScreenshot.name} · ${Math.round(pendingKnowledgeInboxScreenshot.size / 1024)} KB`;
@@ -2107,14 +2120,14 @@ function initials(name) {
 
 function relativeTime(value) {
   const timestamp = new Date(value).getTime();
-  if (!Number.isFinite(timestamp)) return "unknown";
+  if (!Number.isFinite(timestamp)) return "невідомо";
   const diffMs = Date.now() - timestamp;
   const minutes = Math.max(0, Math.round(diffMs / 60000));
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes < 1) return "щойно";
+  if (minutes < 60) return `${minutes} хв тому`;
   const hours = Math.round(minutes / 60);
-  if (hours < 48) return `${hours}h ago`;
-  return `${Math.round(hours / 24)}d ago`;
+  if (hours < 48) return `${hours} год тому`;
+  return `${Math.round(hours / 24)} дн тому`;
 }
 
 function parseProfiles(text, fileName = "") {
@@ -2206,10 +2219,10 @@ document.getElementById("authForm").addEventListener("submit", async (event) => 
   const password = document.getElementById("authPasswordInput").value;
   const confirmation = document.getElementById("authConfirmInput").value;
   try {
-    if ((authMode === "bootstrap" || authMode === "reset") && password !== confirmation) throw new Error("Passwords do not match.");
+    if ((authMode === "bootstrap" || authMode === "reset") && password !== confirmation) throw new Error("Паролі не збігаються.");
     if (authMode === "recover") {
       const result = await api("/api/auth/recover", { method: "POST", body: JSON.stringify({ email }) });
-      setText("authMessage", result.message || "Reset link requested.");
+      setText("authMessage", result.message || "Посилання для скидання запитано.");
       return;
     }
     if (authMode === "reset") {
@@ -2217,7 +2230,7 @@ document.getElementById("authForm").addEventListener("submit", async (event) => 
       window.sessionStorage.removeItem("outboundRecoveryToken");
       window.history.replaceState({}, "", window.location.pathname);
       authMode = "login";
-      setText("authMessage", "Password changed. Sign in with the new password.");
+      setText("authMessage", "Пароль змінено. Увійди з новим паролем.");
       renderAuthForm();
       return;
     }
@@ -2229,7 +2242,7 @@ document.getElementById("authForm").addEventListener("submit", async (event) => 
     authState = result.auth;
     await enterWorkspace();
   } catch (error) {
-    setText("authMessage", error.message || "Could not sign in.");
+    setText("authMessage", error.message || "Не вдалося увійти.");
   }
 });
 
@@ -2244,13 +2257,13 @@ document.getElementById("accountPasswordForm").addEventListener("submit", async 
   event.preventDefault();
   const password = document.getElementById("accountPasswordInput").value;
   if (password !== document.getElementById("accountPasswordConfirmInput").value) {
-    uiNotice = "Passwords do not match.";
+    uiNotice = "Паролі не збігаються.";
     renderTopbar();
     return;
   }
   await api("/api/account/password", { method: "POST", body: JSON.stringify({ password }) });
   event.currentTarget.reset();
-  uiNotice = "Password changed.";
+  uiNotice = "Пароль змінено.";
   renderTopbar();
 });
 
@@ -2260,8 +2273,8 @@ document.getElementById("teamUserForm").addEventListener("submit", async (event)
   event.currentTarget.reset();
   authState = await api("/api/auth/status");
   uiNotice = result.existingAccount
-    ? "Existing company account added. The seller should use their current password or recover it."
-    : "Seller account created.";
+    ? "Наявний робочий акаунт додано. Продавець заходить своїм поточним паролем або відновлює його."
+    : "Акаунт продавця створено.";
   render();
 });
 
@@ -2275,7 +2288,7 @@ document.getElementById("logoutBtn").addEventListener("click", async () => {
 document.addEventListener("click", async (event) => {
   const contactDecision = event.target.closest("[data-contact-decision]");
   if (contactDecision && selectedProspectId) {
-    await runUiAction("contact-approval", "Reviewing contact evidence and channel access...", async () => {
+    await runUiAction("contact-approval", "Перевіряємо докази контакту й доступ до каналу...", async () => {
       state = await api("/api/prospects/contacts/approval", { method: "POST", body: JSON.stringify({ prospectId: selectedProspectId, type: contactDecision.dataset.contactType, value: contactDecision.dataset.contactValue, decision: contactDecision.dataset.contactDecision }) });
     });
     return;
@@ -2293,7 +2306,7 @@ document.getElementById("prospectSearch").addEventListener("input", renderProspe
 document.getElementById("prospectStatusFilter").addEventListener("change", renderProspects);
 document.getElementById("productSelect").addEventListener("change", async (event) => {
   creatingNewProduct = false;
-  await runUiAction("product", "Switching product context...", async () => {
+  await runUiAction("product", "Перемикаємо контекст продукту...", async () => {
     state = await api("/api/products/select", {
       method: "POST",
       body: JSON.stringify({ productId: event.target.value })
@@ -2303,7 +2316,7 @@ document.getElementById("productSelect").addEventListener("change", async (event
 
 document.getElementById("productStudioProductSelect")?.addEventListener("change", async (event) => {
   creatingNewProduct = false;
-  await runUiAction("product", "Switching product context...", async () => {
+  await runUiAction("product", "Перемикаємо контекст продукту...", async () => {
     state = await api("/api/products/select", {
       method: "POST",
       body: JSON.stringify({ productId: event.target.value })
@@ -2320,23 +2333,23 @@ document.getElementById("syncMcpBtn").addEventListener("click", async () => {
 });
 
 document.getElementById("quickPrepareBtn").addEventListener("click", async () => {
-  await runUiAction("research", "Running lead research, enrichment, scoring, and outreach...", researchAndPrepareSelected);
+  await runUiAction("research", "Досліджуємо ліда, збагачуємо, рахуємо бал і готуємо аутріч...", researchAndPrepareSelected);
 });
 
 document.getElementById("runResearchTopBtn").addEventListener("click", async () => {
-  await runUiAction("research", "Running lead research, enrichment, scoring, and outreach...", researchAndPrepareSelected);
+  await runUiAction("research", "Досліджуємо ліда, збагачуємо, рахуємо бал і готуємо аутріч...", researchAndPrepareSelected);
 });
 
 document.getElementById("analyzeIntelligenceBtn").addEventListener("click", async () => {
-  await runUiAction("intelligence", "Building the account intelligence brief...", () => analyzeLeadIntelligence(false));
+  await runUiAction("intelligence", "Збираємо бриф по акаунту...", () => analyzeLeadIntelligence(false));
 });
 
 document.getElementById("refreshIntelligenceBtn").addEventListener("click", async () => {
-  await runUiAction("intelligence", "Refreshing the account intelligence brief...", () => analyzeLeadIntelligence(true));
+  await runUiAction("intelligence", "Оновлюємо бриф по акаунту...", () => analyzeLeadIntelligence(true));
 });
 
 document.getElementById("analyzeIntelligenceQuick").addEventListener("click", async () => {
-  await runUiAction("intelligence", "Building the account intelligence brief...", () => analyzeLeadIntelligence(false));
+  await runUiAction("intelligence", "Збираємо бриф по акаунту...", () => analyzeLeadIntelligence(false));
 });
 
 document.getElementById("prevLeadBtn").addEventListener("click", () => {
@@ -2387,13 +2400,13 @@ document.addEventListener("click", async (event) => {
 
   const inlineAnalyze = event.target.closest("[data-intel-analyze]");
   if (inlineAnalyze) {
-    await runUiAction("intelligence", "Building the account intelligence brief...", () => analyzeLeadIntelligence(inlineAnalyze.dataset.intelAnalyze === "refresh"));
+    await runUiAction("intelligence", "Збираємо бриф по акаунту...", () => analyzeLeadIntelligence(inlineAnalyze.dataset.intelAnalyze === "refresh"));
     return;
   }
 
   const intelligenceTask = event.target.closest("[data-intel-task-index]");
   if (intelligenceTask && selectedProspectId) {
-    await runUiAction("task", "Creating follow-up task...", async () => {
+    await runUiAction("task", "Створюємо фолоу-ап...", async () => {
       state = await api("/api/prospects/intelligence/create-task", {
         method: "POST",
         body: JSON.stringify({ prospectId: selectedProspectId, stepIndex: Number(intelligenceTask.dataset.intelTaskIndex || 0) })
@@ -2404,7 +2417,7 @@ document.addEventListener("click", async (event) => {
 
   const intelligenceReview = event.target.closest("[data-intel-review-action]");
   if (intelligenceReview && selectedProspectId) {
-    await runUiAction("task", "Saving review update...", async () => {
+    await runUiAction("task", "Зберігаємо оновлення перевірки...", async () => {
       state = await api("/api/prospects/intelligence/review", {
         method: "POST",
         body: JSON.stringify({
@@ -2420,7 +2433,7 @@ document.addEventListener("click", async (event) => {
   const policyDecision = event.target.closest("[data-policy-decision]");
   if (policyDecision && selectedProspectId) {
     const status = policyDecision.dataset.policyDecision;
-    const label = status === "parked" ? "Parking account..." : "Saving approved conditions...";
+    const label = status === "parked" ? "Відкладаємо акаунт..." : "Зберігаємо затверджені умови...";
     await runUiAction("policy-decision", label, async () => {
       state = await api("/api/prospects/policy-decision", {
         method: "POST",
@@ -2428,8 +2441,8 @@ document.addEventListener("click", async (event) => {
       });
     });
     uiNotice = status === "parked"
-      ? "Account parked. Research and outreach remain on hold."
-      : "Conditions approved. Run research again to rebuild the strategy under those conditions.";
+      ? "Акаунт відкладено. Дослідження й аутріч лишаються на паузі."
+      : "Умови затверджено. Запусти дослідження ще раз, щоб перебудувати стратегію під ці умови.";
     renderTopbar();
     return;
   }
@@ -2456,7 +2469,7 @@ document.addEventListener("click", async (event) => {
     await navigator.clipboard.writeText(copiedText);
     const originalHtml = copyButton.dataset.copyDefaultHtml || copyButton.innerHTML;
     copyButton.dataset.copyDefaultHtml = originalHtml;
-    copyButton.innerHTML = `<i data-lucide="check"></i><span>Copied</span>`;
+    copyButton.innerHTML = `<i data-lucide="check"></i><span>Скопійовано</span>`;
     refreshIcons();
     void logCopiedActivity(copyButton, copiedText);
     window.setTimeout(() => {
@@ -2474,7 +2487,7 @@ document.addEventListener("click", async (event) => {
 
   const completeTask = event.target.closest("[data-task-complete-id]");
   if (completeTask) {
-    await runUiAction("task", "Marking follow-up complete...", async () => {
+    await runUiAction("task", "Закриваємо фолоу-ап...", async () => {
       state = await api("/api/follow-up-tasks/complete", {
         method: "POST",
         body: JSON.stringify({ taskId: completeTask.dataset.taskCompleteId })
@@ -2529,7 +2542,7 @@ document.getElementById("sampleProspectsBtn").addEventListener("click", async ()
 
 document.getElementById("linkedinTargetForm").addEventListener("submit", async (event) => {
   event.preventDefault();
-  await runUiAction("linkedin-import", "Adding LinkedIn target to the queue...", async () => {
+  await runUiAction("linkedin-import", "Додаємо ціль з LinkedIn у чергу...", async () => {
     state = await api("/api/prospects/linkedin-target", {
       method: "POST",
       body: JSON.stringify({
@@ -2565,7 +2578,7 @@ document.getElementById("crmLeadPullForm").addEventListener("submit", async (eve
     limit: Number(document.getElementById("crmPullLimitInput").value),
     linkedinField: document.getElementById("crmPullLinkedInFieldInput").value
   };
-  await runUiAction("crm-import", "Pulling leads from CRM...", async () => {
+  await runUiAction("crm-import", "Тягнемо лідів із CRM...", async () => {
     state = await api("/api/crm/import-leads", {
       method: "POST",
       body: JSON.stringify(payload)
@@ -2612,8 +2625,8 @@ document.getElementById("newProductBtn")?.addEventListener("click", () => {
 document.getElementById("deleteProductBtn")?.addEventListener("click", async () => {
   const product = state.selectedProduct;
   if (!product) return;
-  if (!window.confirm(`Delete ${product.name}? This removes its product memory, knowledge, and examples from Outbound OS.`)) return;
-  await runUiAction("product", "Deleting product memory...", async () => {
+  if (!window.confirm(`Видалити ${product.name}? Це прибере з Outbound OS його пам'ять, знання та приклади.`)) return;
+  await runUiAction("product", "Видаляємо пам'ять продукту...", async () => {
     state = await api("/api/products/delete", {
       method: "POST",
       body: JSON.stringify({ productId: product.id })
@@ -2626,7 +2639,7 @@ document.getElementById("deleteProductBtn")?.addEventListener("click", async () 
 document.getElementById("productForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const structuredText = productTrainingText();
-  await runUiAction("product", "Analyzing product text and updating system memory...", async () => {
+  await runUiAction("product", "Аналізуємо текст продукту й оновлюємо системну пам'ять...", async () => {
     state = await api("/api/products/teach", {
       method: "POST",
       body: JSON.stringify({
@@ -2672,7 +2685,7 @@ function setFormValue(id, value) {
 document.getElementById("exampleForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   if (creatingNewProduct) {
-    document.getElementById("exampleList").innerHTML = `<div class="empty-state">Save the new product first, then add examples</div>`;
+    document.getElementById("exampleList").innerHTML = `<div class="empty-state">Спочатку збережи новий продукт, потім додавай приклади</div>`;
     return;
   }
   state = await api("/api/products/examples", {
@@ -2810,12 +2823,12 @@ document.getElementById("knowledgeInboxScreenshotInput").addEventListener("chang
     return;
   }
   if (!file.type.startsWith("image/")) {
-    window.alert("Upload a PNG or JPG screenshot.");
+    window.alert("Завантаж скріншот у PNG або JPG.");
     event.target.value = "";
     return;
   }
   if (file.size > 2_000_000) {
-    window.alert("Keep screenshots under 2 MB for this local prototype.");
+    window.alert("Тримай скріншоти до 2 МБ — це локальний прототип.");
     event.target.value = "";
     return;
   }
@@ -2832,10 +2845,10 @@ document.getElementById("knowledgeInboxForm").addEventListener("submit", async (
   event.preventDefault();
   const text = document.getElementById("knowledgeInboxTextInput").value;
   if (!text.trim() && !pendingKnowledgeInboxScreenshot) {
-    setHtml("knowledgeInboxResult", `<div class="empty-state">Paste text, a URL, a lesson, or upload a screenshot first.</div>`);
+    setHtml("knowledgeInboxResult", `<div class="empty-state">Спочатку встав текст, посилання чи урок або завантаж скріншот.</div>`);
     return;
   }
-  await runUiAction("knowledge", "Analyzing knowledge and updating the AI playbook...", async () => {
+  await runUiAction("knowledge", "Аналізуємо знання й оновлюємо AI-плейбук...", async () => {
     state = await api("/api/knowledge/feed", {
       method: "POST",
       body: JSON.stringify({
@@ -2864,12 +2877,12 @@ document.getElementById("learningScreenshotInput").addEventListener("change", as
     return;
   }
   if (!file.type.startsWith("image/")) {
-    window.alert("Upload a PNG or JPG screenshot.");
+    window.alert("Завантаж скріншот у PNG або JPG.");
     event.target.value = "";
     return;
   }
   if (file.size > 2_000_000) {
-    window.alert("Keep screenshots under 2 MB for this local prototype.");
+    window.alert("Тримай скріншоти до 2 МБ — це локальний прототип.");
     event.target.value = "";
     return;
   }
@@ -2906,7 +2919,7 @@ document.getElementById("learningExampleForm").addEventListener("submit", async 
   document.getElementById("learningTagsInput").value = "";
   document.getElementById("learningProfileUrlInput").value = "";
   document.getElementById("learningOutcomeInput").value = "";
-  document.getElementById("learningScreenshotName").textContent = "PNG or JPG from SMS, LinkedIn, WhatsApp, email, CRM";
+  document.getElementById("learningScreenshotName").textContent = "PNG або JPG з SMS, LinkedIn, WhatsApp, пошти, CRM";
   renderLearningScreenshotPreview();
   render();
 });
@@ -2941,7 +2954,7 @@ document.getElementById("icpGenerateJsonBtn").addEventListener("click", async ()
 });
 
 document.getElementById("icpRunApifyBtn").addEventListener("click", async () => {
-  if (!window.confirm("Run the configured Apify actor with the current ICP filters? This may use paid Apify credits.")) return;
+  if (!window.confirm("Запустити налаштований актор Apify з поточними ICP-фільтрами? Це може витратити платні кредити Apify.")) return;
   state = await api("/api/icp/lookalike-search", {
     method: "POST",
     body: JSON.stringify({
@@ -2982,7 +2995,7 @@ document.getElementById("pasteProfilesForm").addEventListener("submit", async (e
 
 document.getElementById("enrichProspectBtn").addEventListener("click", async () => {
   if (!selectedProspectId) return;
-  await runUiAction("enrich", "Refreshing contact and messenger data...", async () => {
+  await runUiAction("enrich", "Оновлюємо контакти й месенджери...", async () => {
     state = await api("/api/prospects/enrich", {
       method: "POST",
       body: JSON.stringify({ prospectId: selectedProspectId, force: true })
@@ -2991,7 +3004,7 @@ document.getElementById("enrichProspectBtn").addEventListener("click", async () 
 });
 
 document.getElementById("prepareOutreachBtn").addEventListener("click", async () => {
-  await runUiAction("research", "Running lead research, enrichment, scoring, and outreach...", researchAndPrepareSelected);
+  await runUiAction("research", "Досліджуємо ліда, збагачуємо, рахуємо бал і готуємо аутріч...", researchAndPrepareSelected);
 });
 
 async function analyzeLeadIntelligence(force = false) {
@@ -3025,13 +3038,13 @@ async function researchAndPrepareSelected() {
     const update = await api(`/api/research/jobs/${encodeURIComponent(activeResearchJob.id)}`);
     activeResearchJob = update.job;
     const runningStage = activeResearchJob.stages?.find((stage) => stage.status === "running");
-    busyMessage = runningStage ? `${runningStage.label} · ${activeResearchJob.progress}%` : `Research · ${activeResearchJob.progress}%`;
+    busyMessage = runningStage ? `${runningStage.label} · ${activeResearchJob.progress}%` : `Дослідження · ${activeResearchJob.progress}%`;
     renderTopbar();
     renderResearchProgress();
     refreshIcons();
   }
   if (activeResearchJob.status !== "complete") {
-    throw new Error(activeResearchJob.error || "Research did not finish within five minutes.");
+    throw new Error(activeResearchJob.error || "Дослідження не завершилося за п'ять хвилин.");
   }
   await refresh();
   activeLeadSectionId = "dashboard-account";
@@ -3040,7 +3053,7 @@ async function researchAndPrepareSelected() {
 
 async function runAssistantTask(payload) {
   if (!payload.instruction?.trim()) {
-    document.getElementById("assistantActionList").innerHTML = `<div class="empty-state">Type a task for the AI Operator</div>`;
+    document.getElementById("assistantActionList").innerHTML = `<div class="empty-state">Напиши задачу для AI-оператора</div>`;
     return;
   }
   state = await api("/api/assistant/task", {
@@ -3053,7 +3066,7 @@ async function runAssistantTask(payload) {
 
 async function logInteraction(type) {
   if (!selectedProspectId || !type) return;
-  await runUiAction("task", "Logging the action on this lead...", async () => {
+  await runUiAction("task", "Фіксуємо дію по цьому ліду...", async () => {
     state = await api("/api/prospects/interaction", {
       method: "POST",
       body: JSON.stringify({ prospectId: selectedProspectId, type })
@@ -3065,7 +3078,7 @@ async function logCopiedActivity(button, copiedText) {
   if (!selectedProspectId || !String(copiedText || "").trim()) return;
   const channel = normalizeCopyChannel(button.dataset.copyChannel || inferCopyChannel(copiedText));
   const type = copiedInteractionType(channel);
-  const label = button.dataset.copyLabel || "Copied outreach";
+  const label = copyLabelText(button.dataset.copyLabel);
   const preview = cleanCopyPreview(copiedText);
   try {
     state = await api("/api/prospects/interaction", {
@@ -3075,7 +3088,7 @@ async function logCopiedActivity(button, copiedText) {
         type,
         channel,
         outcome: "copied",
-        note: `${label}: ${titleCase(channel)} copied in Outbound OS.`,
+        note: `${label}: ${titleCase(channel)} скопійовано в Outbound OS.`,
         source: "copy-button",
         metadata: {
           uiLabel: label,
@@ -3088,6 +3101,23 @@ async function logCopiedActivity(button, copiedText) {
   } catch (error) {
     console.warn("Copy activity was not logged", error);
   }
+}
+
+/**
+ * `data-copy-label` у розмітці — ключ, а не текст: атрибути `data-*` розмітка не
+ * перекладає. Тост, який його показує, будується тут, тому переклад теж тут.
+ */
+const COPY_LABEL_UA = {
+  "LinkedIn quick copy": "Швидка копія LinkedIn",
+  "Email quick copy": "Швидка копія email",
+  "SMS quick copy": "Швидка копія SMS",
+  "WhatsApp quick copy": "Швидка копія WhatsApp",
+  "Telegram quick copy": "Швидка копія Telegram"
+};
+
+function copyLabelText(value) {
+  const text = String(value || "").trim();
+  return COPY_LABEL_UA[text] || text || "Скопійований аутріч";
 }
 
 function normalizeCopyChannel(value) {
@@ -3128,7 +3158,7 @@ function cleanCopyPreview(value) {
 
 async function removeProspectById(prospectId = selectedProspectId) {
   if (!prospectId) return;
-  await runUiAction("remove", "Removing lead from the queue...", async () => {
+  await runUiAction("remove", "Прибираємо ліда з черги...", async () => {
     state = await api("/api/prospects/remove", {
       method: "POST",
       body: JSON.stringify({ prospectId })
@@ -3254,7 +3284,7 @@ document.getElementById("runForm").addEventListener("submit", async (event) => {
   });
   state = payload;
   document.getElementById("runOutput").textContent = payload.run.ok
-    ? `Used ${payload.run.modelUsed} through ${payload.run.provider}. Cost ${formatUsd(payload.run.usage.costUsd)}.`
+    ? `Використано ${payload.run.modelUsed} через ${payload.run.provider}. Вартість ${formatUsd(payload.run.usage.costUsd)}.`
     : payload.run.message;
   render();
 });
@@ -3350,13 +3380,13 @@ const WARMUP_STATUS_TONE = {
 };
 
 const WARMUP_STATUS_LABEL = {
-  warming: "Warming",
-  paused: "Paused",
-  blocked: "Blocked",
-  needs_attention: "Needs attention",
-  finished: "Finished",
-  excluded: "Excluded",
-  off: "Off"
+  warming: "Прогрівається",
+  paused: "На паузі",
+  blocked: "Заблоковано",
+  needs_attention: "Потребує уваги",
+  finished: "Завершено",
+  excluded: "Виключено",
+  off: "Вимкнено"
 };
 
 function warmupRelativeTime(iso) {
@@ -3365,25 +3395,25 @@ function warmupRelativeTime(iso) {
   if (!Number.isFinite(minutes)) return "—";
   const time = new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   if (minutes <= 0) return time;
-  if (minutes < 60) return `${time} · in ${minutes} min`;
-  return `${time} · in ${Math.round(minutes / 60)} h`;
+  if (minutes < 60) return `${time} · через ${minutes} хв`;
+  return `${time} · через ${Math.round(minutes / 60)} год`;
 }
 
 /** What the "next session" cell says, which follows the quota and not the clock. */
 function warmupNextSessionCell(profile) {
   const next = profile.nextSession;
-  if (profile.isRunningNow) return '<span class="warmup-due">open now</span>';
+  if (profile.isRunningNow) return '<span class="warmup-due">відкрита зараз</span>';
   if (!next) return "—";
-  if (next.overdue) return '<span class="warmup-due">due now</span>';
+  if (next.overdue) return '<span class="warmup-due">час настав</span>';
   if (next.today) return warmupRelativeTime(next.at);
-  return `tomorrow ${new Date(next.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+  return `завтра ${new Date(next.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
 }
 
 function warmupConnectionsCell(profile) {
   const { today = 0, total = 0, quota = 0, startsDay = null } = profile.connections || {};
-  if (quota > 0) return `${today}/${quota} <span class="warmup-subtle">· ${total} all time</span>`;
-  if (startsDay) return `<span class="warmup-subtle">from day ${startsDay}</span>`;
-  return `<span class="warmup-subtle">${total} all time</span>`;
+  if (quota > 0) return `${today}/${quota} <span class="warmup-subtle">· ${total} за весь час</span>`;
+  if (startsDay) return `<span class="warmup-subtle">з ${startsDay}-го дня</span>`;
+  return `<span class="warmup-subtle">${total} за весь час</span>`;
 }
 
 function renderWarmupConfigNote() {
@@ -3394,16 +3424,16 @@ function renderWarmupConfigNote() {
 
   if (warmupState.error) problems.push(escapeHtml(warmupState.error));
   if (config && !config.configured) {
-    problems.push(`The Anty database is not configured — set ${escapeHtml(config.missing.join(", "))} on the server.`);
+    problems.push(`База Anty не налаштована — задай на сервері ${escapeHtml(config.missing.join(", "))}.`);
   }
   if (config?.configured && !config.teamConfigured) {
-    problems.push("ANTY_TEAM_ID is not set, so every team's profiles are listed.");
+    problems.push("ANTY_TEAM_ID не заданий, тому в списку профілі всіх команд.");
   }
   if (config?.configured && !config.crmConfigured) {
-    problems.push(`The lead queue is off — set ${escapeHtml(config.crmMissing.join(", "))} to send connection requests to named people.`);
+    problems.push(`Черга лідів вимкнена — задай ${escapeHtml(config.crmMissing.join(", "))}, щоб надсилати запити на контакт конкретним людям.`);
   }
   if (config?.configured && !config.secretsConfigured) {
-    problems.push("LINKEDIN_SECRET_KEY is not set, so account passwords cannot be stored.");
+    problems.push("LINKEDIN_SECRET_KEY не заданий, тому паролі акаунтів нікуди зберігати.");
   }
 
   note.hidden = problems.length === 0;
@@ -3422,12 +3452,12 @@ function renderWarmupStats() {
   const { totals, todayProgress } = dashboard;
   const window = warmupState.config?.window;
   const cards = [
-    { label: "Warming", value: totals.warming },
-    { label: "Paused", value: totals.paused },
-    { label: "Finished", value: totals.completed },
-    { label: "Not started", value: totals.idle },
-    { label: "Today", value: `${todayProgress.done}/${todayProgress.planned}` },
-    { label: "Session window", value: window ? `${window.label}${window.open ? "" : " · closed"}` : "—" }
+    { label: "Прогріваються", value: totals.warming },
+    { label: "На паузі", value: totals.paused },
+    { label: "Завершені", value: totals.completed },
+    { label: "Не почали", value: totals.idle },
+    { label: "Сьогодні", value: `${todayProgress.done}/${todayProgress.planned}` },
+    { label: "Вікно сесій", value: window ? `${window.label}${window.open ? "" : " · зачинене"}` : "—" }
   ];
 
   strip.innerHTML = cards
@@ -3460,10 +3490,18 @@ const WARMUP_CAMPAIGN_TONE = {
 
 /** What a campaign in this state is doing, said once rather than implied. */
 const WARMUP_CAMPAIGN_STATE_NOTE = {
-  draft: "A draft claims nobody. Start it and its accounts begin taking people from this folder.",
-  running: "Running: whatever today's quota leaves over is offered to this campaign in the order below.",
-  paused: "Paused. Its accounts spend their quota on the campaigns below it instead; nothing already claimed is lost.",
-  done: "Marked done. Nothing more is claimed from it, and what was already sent stays as history."
+  draft: "Чернетка не закріплює нікого. Запусти її — і її акаунти почнуть брати людей із цієї папки.",
+  running: "Працює: усе, що лишається від сьогоднішньої квоти, пропонується цій кампанії в порядку нижче.",
+  paused: "На паузі. Її акаунти витрачають квоту на кампанії, що нижче; уже закріплене нікуди не дівається.",
+  done: "Позначена завершеною. З неї більше нічого не закріплюється, а надіслане лишається історією."
+};
+
+/** Стан кампанії — це дані; те, що видно в пігулці, — це текст. */
+const WARMUP_CAMPAIGN_STATE_LABEL = {
+  draft: "чернетка",
+  running: "працює",
+  paused: "на паузі",
+  done: "завершена"
 };
 
 function warmupFilterInputs() {
@@ -3538,9 +3576,9 @@ function warmupCount(value) {
 function warmupDuration(days) {
   const number = Number(days);
   if (!Number.isFinite(number) || number <= 0) return null;
-  if (number < 45) return `${Math.round(number)} days`;
-  if (number < 365) return `${Math.round(number / 30)} months`;
-  return `${(number / 365).toFixed(1)} years`;
+  if (number < 45) return `${Math.round(number)} ${uaPlural(Math.round(number), "день", "дні", "днів")}`;
+  if (number < 365) return `${Math.round(number / 30)} ${uaPlural(Math.round(number / 30), "місяць", "місяці", "місяців")}`;
+  return `${(number / 365).toFixed(1)} року`;
 }
 
 function warmupFolderName(folderId) {
@@ -3565,26 +3603,26 @@ function renderWarmupFolderOptions(selectedId) {
   select.dataset.signature = signature;
 
   if (!warmupState.foldersReady) {
-    select.innerHTML = `<option value="">${escapeHtml(warmupState.campaignsError ? "Folders unavailable" : "Loading folders...")}</option>`;
+    select.innerHTML = `<option value="">${escapeHtml(warmupState.campaignsError ? "Папки недоступні" : "Завантажуємо папки...")}</option>`;
     select.disabled = true;
     return;
   }
 
   select.disabled = false;
-  const options = [`<option value="">Pick a folder</option>`];
+  const options = [`<option value="">Обери папку</option>`];
   const known = new Set();
   for (const folder of warmupState.folders) {
     known.add(folder.id);
     const count = warmupCount(folder.contactCount);
-    const archived = folder.isArchived ? " · archived" : "";
-    options.push(`<option value="${escapeAttr(folder.id)}" ${folder.id === selectedId ? "selected" : ""}>${escapeHtml(folder.name)} · ${escapeHtml(count)} contacts${archived}</option>`);
+    const archived = folder.isArchived ? " · в архіві" : "";
+    options.push(`<option value="${escapeAttr(folder.id)}" ${folder.id === selectedId ? "selected" : ""}>${escapeHtml(folder.name)} · ${escapeHtml(count)} контактів${archived}</option>`);
   }
   // A folder the list no longer carries (archived, or renamed away) is still
   // the folder this campaign is pointed at, so it stays selectable rather than
   // silently becoming "none".
   if (selectedId && !known.has(selectedId)) {
     const name = warmupEditingCampaign()?.folderName || warmupFolderName(selectedId) || selectedId;
-    options.splice(1, 0, `<option value="${escapeAttr(selectedId)}" selected>${escapeHtml(name)} · not in the folder list</option>`);
+    options.splice(1, 0, `<option value="${escapeAttr(selectedId)}" selected>${escapeHtml(name)} · немає в списку папок</option>`);
   }
   select.innerHTML = options.join("");
 }
@@ -3598,14 +3636,14 @@ function renderWarmupProductOptions(selectedId) {
   if (select.dataset.signature === signature) return;
   select.dataset.signature = signature;
 
-  const options = [`<option value="" ${selectedId ? "" : "selected"}>No product</option>`];
+  const options = [`<option value="" ${selectedId ? "" : "selected"}>Без продукту</option>`];
   const known = new Set();
   for (const product of products) {
     known.add(product.id);
     options.push(`<option value="${escapeAttr(product.id)}" ${product.id === selectedId ? "selected" : ""}>${escapeHtml(product.name)}</option>`);
   }
   if (selectedId && !known.has(selectedId)) {
-    options.push(`<option value="${escapeAttr(selectedId)}" selected>${escapeHtml(selectedId)} · not in this workspace</option>`);
+    options.push(`<option value="${escapeAttr(selectedId)}" selected>${escapeHtml(selectedId)} · немає в цьому робочому просторі</option>`);
   }
   select.innerHTML = options.join("");
 }
@@ -3621,13 +3659,13 @@ function warmupForecastHtml(campaign, { stale = "" } = {}) {
 
   if (!forecast) {
     const reason = campaign?.forecastError
-      || (campaign?.folderId ? "No forecast came back for this folder." : "This campaign has no folder yet.");
+      || (campaign?.folderId ? "Для цієї папки прогноз не повернувся." : "У цієї кампанії ще немає папки.");
     return {
       tone: "is-muted",
       html: `<p class="warmup-forecast-line">${escapeHtml(reason)}</p>
         <p class="warmup-forecast-hint">${campaign?.folderId
-          ? "Nothing says how long this folder would take until the server can count it, so treat this campaign as unchecked."
-          : "Edit it and pick a folder — until then it has nothing to draw from."}</p>${stale}`
+          ? "Поки сервер не порахує, ніщо не скаже, скільки ця папка займе, — тож вважай цю кампанію неперевіреною."
+          : "Відредагуй її й обери папку — доти їй нізвідки брати людей."}</p>${stale}`
     };
   }
 
@@ -3641,15 +3679,15 @@ function warmupForecastHtml(campaign, { stale = "" } = {}) {
   const fullPass = warmupDuration(forecast.daysToFinish);
 
   const parts = [
-    `<span>${warmupCount(matching)} in the folder</span>`,
-    `<span>${warmupCount(approached)} already approached</span>`,
-    `<strong>${warmupCount(peak)} a day</strong>`,
-    `<span>~${warmupCount(perMonth)} in a month</span>`,
+    `<span>${warmupCount(matching)} у папці</span>`,
+    `<span>до ${warmupCount(approached)} уже зверталися</span>`,
+    `<strong>${warmupCount(peak)} на день</strong>`,
+    `<span>~${warmupCount(perMonth)} за місяць</span>`,
     remaining === 0
-      ? `<span>nothing left to work through</span>`
+      ? `<span>опрацьовувати більше нікого</span>`
       : fullPass
-        ? `<span>a full pass ~${escapeHtml(fullPass)}</span>`
-        : `<span>a full pass never finishes</span>`
+        ? `<span>повний прохід ~${escapeHtml(fullPass)}</span>`
+        : `<span>повний прохід не завершиться ніколи</span>`
   ];
 
   let tone = "is-ok";
@@ -3659,31 +3697,31 @@ function warmupForecastHtml(campaign, { stale = "" } = {}) {
   // left", and they need opposite things done about them.
   if (matching === 0) {
     tone = "is-bad";
-    hint = "Nothing in this folder passes these filters, so this campaign has nobody to work at all. Widen them, or point it at another folder.";
+    hint = "Під ці фільтри в папці не підпадає ніхто, тож цій кампанії немає з ким працювати взагалі. Розшир фільтри або спрямуй її на іншу папку.";
   } else if (chosen === 0) {
     tone = "is-bad";
-    hint = `Nobody is working this campaign, so none of the ${warmupCount(remaining)} left get reached. Tick the accounts that should send from it in Profiles below.`;
+    hint = `Цю кампанію ніхто не веде, тож із ${warmupCount(remaining)}, що лишились, не дійде черга ні до кого. Познач унизу, у Профілях, акаунти, які мають з неї надсилати.`;
   } else if (peak === 0) {
     tone = "is-bad";
-    hint = `The ${chosen === 1 ? "ticked account has" : `${chosen} ticked accounts have`} no connection quota even at peak, so this campaign would never move. Tick an account that is actually warming.`;
+    hint = `${chosen === 1 ? "Позначений акаунт не має" : `${chosen} позначених акаунтів не мають`} квоти на запити навіть на піку, тож ця кампанія ніколи не зрушить. Познач акаунт, який справді прогрівається.`;
   } else if (remaining === 0) {
     tone = "is-muted";
-    hint = "Everyone this campaign matches has already been approached. Widen the filters or point it at another folder.";
+    hint = "До всіх, кого ця кампанія знаходить, уже зверталися. Розшир фільтри або спрямуй її на іншу папку.";
   } else if (remaining > perMonth * 3) {
     tone = "is-bad";
-    hint = `At that rate this folder is ${escapeHtml(fullPass || "more work than these accounts will ever get through")} of work — ${warmupCount(perMonth)} of the ${warmupCount(remaining)} left get reached in the first month and the rest simply sit there. Edit the campaign and narrow it by country, position or lead status until what is left is a list these accounts can finish.`;
+    hint = `Такими темпами ця папка — це ${escapeHtml(fullPass || "більше роботи, ніж ці акаунти колись подужають")} роботи: за перший місяць черга дійде до ${warmupCount(perMonth)} із ${warmupCount(remaining)}, що лишились, а решта просто лежатиме. Відредагуй кампанію і звузь її за країною, посадою чи статусом ліда, поки не лишиться список, який ці акаунти справді закінчать.`;
   } else if (remaining > perMonth) {
     tone = "is-warn";
-    hint = `${warmupCount(remaining)} left is more than one month of sending. It finishes in about ${escapeHtml(fullPass || "an unknown time")} — narrow the filters if that is longer than the campaign.`;
+    hint = `${warmupCount(remaining)}, що лишились, — це більше ніж місяць надсилань. Закінчиться приблизно за ${escapeHtml(fullPass || "невідомо скільки")} — звузь фільтри, якщо це довше за саму кампанію.`;
   }
 
   // Today and at peak are different promises, and the panel should not let the
   // better one stand for both.
   let today = "";
   if (peak && now === 0) {
-    today = `<p class="warmup-forecast-today"><strong>Nothing goes out today.</strong> None of the ticked accounts may send a connection request yet — the strategy holds them back over the first days — so <strong>${warmupCount(peak)} a day</strong> is what they reach once every one of them is warm, not what happens now.</p>`;
+    today = `<p class="warmup-forecast-today"><strong>Сьогодні не піде нічого.</strong> Жодному з позначених акаунтів ще не можна надсилати запит на контакт — стратегія притримує їх перші дні, — тож <strong>${warmupCount(peak)} на день</strong> це те, до чого вони дійдуть, коли прогріється кожен, а не те, що буде сьогодні.</p>`;
   } else if (peak && now !== peak) {
-    today = `<p class="warmup-forecast-today">Today it is <strong>${warmupCount(now)} a day</strong>, not ${warmupCount(peak)}: the rest of the ticked accounts are still climbing, paused or not warming yet.</p>`;
+    today = `<p class="warmup-forecast-today">Сьогодні це <strong>${warmupCount(now)} на день</strong>, а не ${warmupCount(peak)}: решта позначених акаунтів ще набирають обертів, стоять на паузі або взагалі не прогріваються.</p>`;
   }
 
   return {
@@ -3698,16 +3736,16 @@ function warmupForecastHtml(campaign, { stale = "" } = {}) {
 
 function warmupTickedAccountsLine(campaign) {
   const ids = warmupCampaignAccountIds(campaign);
-  if (!ids.size) return "No account is ticked, so this campaign sends nothing.";
+  if (!ids.size) return "Не позначено жодного акаунта, тож ця кампанія нічого не надсилає.";
   const names = [];
   for (const profile of warmupState.profiles) {
     if (profile.account && ids.has(profile.account.id)) names.push(profile.name);
   }
   const hidden = ids.size - names.length;
-  if (!names.length) return `Worked by ${ids.size} account${ids.size === 1 ? "" : "s"} that this list does not show.`;
+  if (!names.length) return `Її ведуть ${ids.size} ${uaPlural(ids.size, "акаунт", "акаунти", "акаунтів")}, яких цей список не показує.`;
   const listed = escapeHtml(names.slice(0, 4).join(", "));
-  const more = names.length > 4 ? ` +${names.length - 4} more` : "";
-  return `Worked by ${listed}${more}${hidden > 0 ? ` · ${hidden} not in the list below` : ""}`;
+  const more = names.length > 4 ? ` +${names.length - 4} ще` : "";
+  return `Ведуть: ${listed}${more}${hidden > 0 ? ` · ще ${hidden} немає у списку нижче` : ""}`;
 }
 
 /**
@@ -3723,13 +3761,13 @@ function warmupCampaignRowHtml(campaign, rank) {
   const queued = Number(progress.queued) || 0;
   const remaining = campaign.forecast ? Number(campaign.forecast.remaining) || 0 : null;
   const accounts = (campaign.accountIds || []).length;
-  const folder = campaign.folderName || warmupFolderName(campaign.folderId) || (campaign.folderId ? "a folder the CRM does not list" : "no folder");
+  const folder = campaign.folderName || warmupFolderName(campaign.folderId) || (campaign.folderId ? "папка, якої CRM не показує" : "без папки");
   const product = warmupProductName(campaign.productId);
 
   const meta = [
     escapeHtml(folder),
-    `${accounts} account${accounts === 1 ? "" : "s"}`,
-    product ? escapeHtml(product) : "no product"
+    `${accounts} ${uaPlural(accounts, "акаунт", "акаунти", "акаунтів")}`,
+    product ? escapeHtml(product) : "без продукту"
   ];
 
   const controls = [];
@@ -3739,44 +3777,44 @@ function warmupCampaignRowHtml(campaign, rank) {
   // the two arrows that set it.
   const index = warmupState.campaigns.indexOf(campaign);
   const rankLabel = rank
-    ? `<strong title="Its accounts' quota is offered to running campaigns in this order, and the first with work takes it.">#${rank} in line</strong>`
-    : `<em title="Where it sits in the order. It joins the line when it runs.">not in line</em>`;
+    ? `<strong title="Квота її акаунтів пропонується активним кампаніям у цьому порядку, і бере її перша, у якої є робота.">#${rank} у черзі</strong>`
+    : `<em title="Її місце в порядку. У чергу вона стає, коли запрацює.">поза чергою</em>`;
   controls.push(`<span class="warmup-campaign-move">
-    <button class="text-button" type="button" data-warmup-campaign-move="up" ${index <= 0 ? "disabled" : ""} title="Offer this campaign its accounts' quota earlier" aria-label="Move ${escapeAttr(campaign.name || "this campaign")} earlier in the order"><i data-lucide="chevron-up"></i></button>
+    <button class="text-button" type="button" data-warmup-campaign-move="up" ${index <= 0 ? "disabled" : ""} title="Пропонувати цій кампанії квоту її акаунтів раніше" aria-label="Підняти ${escapeAttr(campaign.name || "цю кампанію")} вище в порядку"><i data-lucide="chevron-up"></i></button>
     ${rankLabel}
-    <button class="text-button" type="button" data-warmup-campaign-move="down" ${index < 0 || index >= warmupState.campaigns.length - 1 ? "disabled" : ""} title="Offer this campaign its accounts' quota later" aria-label="Move ${escapeAttr(campaign.name || "this campaign")} later in the order"><i data-lucide="chevron-down"></i></button>
+    <button class="text-button" type="button" data-warmup-campaign-move="down" ${index < 0 || index >= warmupState.campaigns.length - 1 ? "disabled" : ""} title="Пропонувати цій кампанії квоту її акаунтів пізніше" aria-label="Опустити ${escapeAttr(campaign.name || "цю кампанію")} нижче в порядку"><i data-lucide="chevron-down"></i></button>
   </span>`);
   if (campaign.state === "running") {
-    controls.push(`<button class="text-button" type="button" data-warmup-campaign-state="paused" title="Stop claiming from this campaign"><i data-lucide="pause"></i><span>Pause</span></button>`);
+    controls.push(`<button class="text-button" type="button" data-warmup-campaign-state="paused" title="Припинити закріплення з цієї кампанії"><i data-lucide="pause"></i><span>Пауза</span></button>`);
   } else if (campaign.state !== "done") {
-    controls.push(`<button class="text-button" type="button" data-warmup-campaign-state="running" title="Let its accounts claim from this campaign"><i data-lucide="play"></i><span>Start</span></button>`);
+    controls.push(`<button class="text-button" type="button" data-warmup-campaign-state="running" title="Дозволити її акаунтам закріплювати людей із цієї кампанії"><i data-lucide="play"></i><span>Старт</span></button>`);
   }
   if (campaign.state !== "done") {
-    controls.push(`<button class="text-button" type="button" data-warmup-campaign-state="done" title="Nothing more is claimed from it"><i data-lucide="check"></i><span>Done</span></button>`);
+    controls.push(`<button class="text-button" type="button" data-warmup-campaign-state="done" title="З неї більше нічого не закріплюється"><i data-lucide="check"></i><span>Завершити</span></button>`);
   } else {
-    controls.push(`<button class="text-button" type="button" data-warmup-campaign-state="running" title="Let its accounts claim from it again"><i data-lucide="rotate-ccw"></i><span>Reopen</span></button>`);
+    controls.push(`<button class="text-button" type="button" data-warmup-campaign-state="running" title="Знову дозволити її акаунтам закріплювати з неї"><i data-lucide="rotate-ccw"></i><span>Відкрити знову</span></button>`);
   }
-  controls.push(`<button class="text-button" type="button" data-warmup-campaign-edit><i data-lucide="pencil"></i><span>Edit</span></button>`);
-  controls.push(`<button class="text-button warmup-campaign-delete" type="button" data-warmup-campaign-delete><i data-lucide="trash-2"></i><span>Delete</span></button>`);
+  controls.push(`<button class="text-button" type="button" data-warmup-campaign-edit><i data-lucide="pencil"></i><span>Редагувати</span></button>`);
+  controls.push(`<button class="text-button warmup-campaign-delete" type="button" data-warmup-campaign-delete><i data-lucide="trash-2"></i><span>Видалити</span></button>`);
 
   const count = remaining === null
-    ? `<span class="warmup-campaign-count-unknown">${warmupCount(sent)} sent · what is left could not be counted</span>`
-    : `<strong>${warmupCount(sent)}</strong><span>sent of ${warmupCount(remaining)} left</span>`;
+    ? `<span class="warmup-campaign-count-unknown">${warmupCount(sent)} надіслано · скільки лишилось, порахувати не вдалося</span>`
+    : `<strong>${warmupCount(sent)}</strong><span>надіслано з ${warmupCount(remaining)}, що лишились</span>`;
 
   return `
     <article class="warmup-campaign-row ${tone} ${selected ? "is-selected" : ""}" data-warmup-campaign="${escapeAttr(campaign.id)}">
       <div class="warmup-campaign-who">
         <div class="warmup-campaign-name">
-          <button class="warmup-campaign-select" type="button" data-warmup-campaign-select aria-pressed="${selected}">${escapeHtml(campaign.name || "Unnamed campaign")}</button>
-          <span class="pill ${WARMUP_CAMPAIGN_TONE[campaign.state] || "tone-muted"}">${escapeHtml(campaign.state || "draft")}</span>
+          <button class="warmup-campaign-select" type="button" data-warmup-campaign-select aria-pressed="${selected}">${escapeHtml(campaign.name || "Кампанія без назви")}</button>
+          <span class="pill ${WARMUP_CAMPAIGN_TONE[campaign.state] || "tone-muted"}">${escapeHtml(WARMUP_CAMPAIGN_STATE_LABEL[campaign.state] || campaign.state || "чернетка")}</span>
         </div>
         <div class="warmup-campaign-meta">${meta.join('<span class="warmup-forecast-dot" aria-hidden="true">·</span>')}</div>
       </div>
       <div class="warmup-campaign-count">
         ${count}
-        ${queued ? `<span class="warmup-campaign-claimed">${warmupCount(queued)} claimed and not sent</span>` : ""}
+        ${queued ? `<span class="warmup-campaign-claimed">${warmupCount(queued)} закріплено й не надіслано</span>` : ""}
         ${campaign.progressApproximate
-          ? '<span class="warmup-campaign-approx" title="Another campaign shares an account and this folder, so its rows are counted here too. Telling them apart needs a column wl_outreach does not have.">counted across a shared account</span>'
+          ? '<span class="warmup-campaign-approx" title="Інша кампанія ділить із цією акаунт і цю папку, тож її рядки рахуються тут теж. Щоб їх розрізнити, потрібна колонка, якої в wl_outreach немає.">рахується разом зі спільним акаунтом</span>'
           : ""}
       </div>
       <div class="warmup-campaign-actions">${controls.join("")}</div>
@@ -3789,19 +3827,19 @@ function renderWarmupCampaignList() {
 
   if (warmupState.campaignsError) {
     host.innerHTML = `<div class="warmup-leads-prompt is-bad"><strong>${escapeHtml(warmupState.campaignsError)}</strong>
-      <span>Nothing on this panel is saved while the server cannot answer, so the accounts keep claiming from whatever they were pointed at.</span></div>`;
+      <span>Поки сервер не відповідає, ніщо на цій панелі не зберігається, і акаунти далі закріплюють людей звідти, куди їх спрямували раніше.</span></div>`;
     refreshIcons();
     return;
   }
 
   if (!warmupState.campaignsReady) {
-    host.innerHTML = '<div class="empty-state">Loading campaigns...</div>';
+    host.innerHTML = '<div class="empty-state">Завантажуємо кампанії...</div>';
     return;
   }
 
   if (!warmupState.campaigns.length) {
-    host.innerHTML = `<div class="warmup-leads-prompt"><strong>No campaign yet.</strong>
-      <span>A campaign is one folder, the accounts that work it and a product. Make one and this panel will say what it actually amounts to before anything is sent.</span></div>`;
+    host.innerHTML = `<div class="warmup-leads-prompt"><strong>Кампаній поки немає.</strong>
+      <span>Кампанія — це одна папка, акаунти, які її ведуть, і продукт. Створи одну, і ця панель скаже, у що вона насправді виллється, ще до першого надсилання.</span></div>`;
     refreshIcons();
     return;
   }
@@ -3824,7 +3862,7 @@ function renderWarmupCampaignDetail() {
   const campaign = warmupSelectedCampaign();
   if (!campaign) {
     host.innerHTML = warmupState.campaignsReady && warmupState.campaigns.length
-      ? '<div class="empty-state">Pick a campaign to see what it amounts to.</div>'
+      ? '<div class="empty-state">Обери кампанію, щоб побачити, у що вона виллється.</div>'
       : "";
     return;
   }
@@ -3832,7 +3870,7 @@ function renderWarmupCampaignDetail() {
   // The form is allowed to disagree with the campaign it is editing; the
   // forecast belongs to what is saved, and says so rather than looking current.
   const stale = warmupState.formOpen && warmupState.formCampaignId === campaign.id && warmupFormDirty()
-    ? '<p class="warmup-forecast-stale">These numbers are for the saved campaign. Save to count what is on screen.</p>'
+    ? '<p class="warmup-forecast-stale">Ці числа — для збереженої кампанії. Збережи, щоб порахувати те, що на екрані.</p>'
     : "";
 
   const { tone, html } = warmupForecastHtml(campaign, { stale });
@@ -3880,15 +3918,15 @@ function renderWarmupCampaignForm({ resetForm = false } = {}) {
 
   saveButton.disabled = !warmupState.campaignsReady || warmupState.savingCampaign;
   saveButton.querySelector("span").textContent = warmupState.savingCampaign
-    ? "Saving..."
-    : (editing ? "Save changes" : "Create campaign");
+    ? "Зберігаємо..."
+    : (editing ? "Зберегти зміни" : "Створити кампанію");
 
   if (note) {
     note.innerHTML = warmupState.campaignNotice
       ? `<em class="warmup-campaign-problem">${escapeHtml(warmupState.campaignNotice)}</em>`
       : (editing
-        ? escapeHtml(`Editing ${editing.name || "this campaign"}. Which accounts work it is ticked in Profiles below, not here.`)
-        : "A new campaign starts as a draft, last in line. Tick the accounts that work it in Profiles below, then start it.");
+        ? escapeHtml(`Редагуємо: ${editing.name || "ця кампанія"}. Які акаунти її ведуть — позначається нижче, у Профілях, а не тут.`)
+        : "Нова кампанія починається як чернетка, останньою в черзі. Познач унизу, у Профілях, акаунти, які її ведуть, і запусти її.");
   }
 }
 
@@ -3899,13 +3937,13 @@ function renderWarmupCampaigns({ resetForm = false } = {}) {
   if (pill) {
     if (!warmupState.campaignsReady) {
       pill.className = "pill tone-muted";
-      pill.textContent = warmupState.campaignsError ? "unavailable" : "loading";
+      pill.textContent = warmupState.campaignsError ? "недоступно" : "завантаження";
     } else {
       const running = warmupState.campaigns.filter((campaign) => campaign.state === "running").length;
       pill.className = running ? "pill tone-live" : "pill tone-muted";
       pill.textContent = warmupState.campaigns.length
-        ? `${warmupState.campaigns.length} campaign${warmupState.campaigns.length === 1 ? "" : "s"} · ${running} running`
-        : "none yet";
+        ? `${warmupState.campaigns.length} ${uaPlural(warmupState.campaigns.length, "кампанія", "кампанії", "кампаній")} · ${running} ${uaPlural(running, "працює", "працюють", "працюють")}`
+        : "поки жодної";
     }
   }
   if (newButton) newButton.disabled = !warmupState.campaignsReady || !warmupState.foldersReady;
@@ -3932,13 +3970,13 @@ function warmupQueueState(accountId) {
 function warmupQueueRowHtml(row, accountId, campaignId) {
   const link = warmupLeadLink(row.linkedin);
   const where = [row.position, row.company].filter(Boolean).join(" · ");
-  const name = row.name || "Unnamed contact";
+  const name = row.name || "Контакт без імені";
   // A queue belongs to an account, not to a campaign: an account that works two
   // campaigns holds both their claims in one list. Saying which campaign a
   // person came from is the difference between a list and a claim about where
   // these people are from.
   const elsewhere = row.campaignId && campaignId && row.campaignId !== campaignId
-    ? `<span class="warmup-queue-elsewhere" title="Claimed by another campaign this account also works">${escapeHtml(row.campaignName || "another campaign")}</span>`
+    ? `<span class="warmup-queue-elsewhere" title="Закріплено іншою кампанією, яку цей акаунт теж веде">${escapeHtml(row.campaignName || "інша кампанія")}</span>`
     : "";
   return `<li>
     <div class="warmup-lead-who">
@@ -3946,13 +3984,13 @@ function warmupQueueRowHtml(row, accountId, campaignId) {
       ${where ? `<span class="warmup-subtle">${escapeHtml(where)}</span>` : ""}
       ${elsewhere}
     </div>
-    ${link ? `<a href="${escapeAttr(link)}" target="_blank" rel="noreferrer">profile</a>` : '<span class="warmup-subtle">no profile link</span>'}
+    ${link ? `<a href="${escapeAttr(link)}" target="_blank" rel="noreferrer">профіль</a>` : '<span class="warmup-subtle">без посилання на профіль</span>'}
     <button class="text-button warmup-queue-send" type="button"
       data-warmup-take="${escapeAttr(row.crmContactId || "")}"
       data-warmup-take-account="${escapeAttr(accountId)}"
       data-warmup-take-name="${escapeAttr(name)}"
       ${row.crmContactId ? "" : "disabled"}
-      title="Records the request against this person. One person, one approach, for good.">Sent a request</button>
+      title="Фіксує запит до цієї людини. Одна людина — один захід, назавжди.">Надіслав запит</button>
   </li>`;
 }
 
@@ -3962,16 +4000,16 @@ function warmupQueueAccountHtml(accountId, campaignId) {
   const queue = warmupQueueState(accountId);
   const busy = Boolean(warmupState.queueBusy[accountId]);
 
-  const day = profile?.day ? `day ${profile.day}` : null;
+  const day = profile?.day ? `день ${profile.day}` : null;
   const connections = profile?.connections || {};
   const quotaLine = connections.quota > 0
-    ? `${connections.today || 0}/${connections.quota} today`
-    : (connections.startsDay ? `requests from day ${connections.startsDay}` : "no connection quota today");
+    ? `${connections.today || 0}/${connections.quota} сьогодні`
+    : (connections.startsDay ? `запити з ${connections.startsDay}-го дня` : "сьогодні квоти на запити немає");
   const meta = [day, quotaLine].filter(Boolean).join(" · ");
 
   let body;
   if (!queue) {
-    body = '<div class="empty-state">Loading...</div>';
+    body = '<div class="empty-state">Завантажуємо...</div>';
   } else if (queue.unavailable) {
     body = `<p class="warmup-queue-reason is-muted">${escapeHtml(queue.unavailable)}</p>`;
   } else if (queue.error) {
@@ -3983,23 +4021,23 @@ function warmupQueueAccountHtml(accountId, campaignId) {
     // on day 4" is the answer; an empty box is not.
     body = `<p class="warmup-queue-reason">${escapeHtml(queue.reason)}</p>`;
   } else {
-    body = '<p class="warmup-queue-reason is-muted">Nothing is claimed to this account, and the server gave no reason for it.</p>';
+    body = '<p class="warmup-queue-reason is-muted">За цим акаунтом нічого не закріплено, і сервер не сказав чому.</p>';
   }
 
   const released = Number(queue?.released) || 0;
   const releasedNote = released
-    ? `<p class="warmup-queue-released">${warmupCount(released)} claim${released === 1 ? "" : "s"} had gone stale and ${released === 1 ? "was" : "were"} let go — those people are back in the pool.</p>`
+    ? `<p class="warmup-queue-released">${warmupCount(released)} ${uaPlural(released, "закріплення протухло, і його відпущено", "закріплення протухли, і їх відпущено", "закріплень протухло, і їх відпущено")} — ці люди знову в пулі.</p>`
     : "";
 
   return `<article class="warmup-queue-account" data-warmup-queue-account="${escapeAttr(accountId)}">
     <header>
       <div class="warmup-queue-who">
-        <strong>${escapeHtml(profile?.name || "An account this list does not show")}</strong>
+        <strong>${escapeHtml(profile?.name || "Акаунт, якого цей список не показує")}</strong>
         ${identity?.name ? `<span class="warmup-identity"><i data-lucide="badge-check"></i><span>${escapeHtml(identity.name)}</span></span>` : ""}
         ${meta ? `<span class="warmup-subtle">${escapeHtml(meta)}</span>` : ""}
       </div>
       <button class="text-button" type="button" data-warmup-claim="${escapeAttr(accountId)}" ${busy ? "disabled" : ""}>
-        <i data-lucide="hand"></i><span>${busy ? "Claiming..." : "Claim now"}</span>
+        <i data-lucide="hand"></i><span>${busy ? "Закріплюємо..." : "Закріпити зараз"}</span>
       </button>
     </header>
     ${releasedNote}
@@ -4014,19 +4052,19 @@ function renderWarmupQueue() {
   if (!title || !subtitle || !body) return;
 
   const campaign = warmupSelectedCampaign();
-  title.textContent = campaign ? `Queue · ${campaign.name || "Unnamed campaign"}` : "Queue";
+  title.textContent = campaign ? `Черга · ${campaign.name || "Кампанія без назви"}` : "Черга";
 
   if (!campaign) {
-    subtitle.textContent = "No campaign selected";
-    body.innerHTML = '<div class="empty-state">Pick a campaign above to see what its accounts are holding.</div>';
+    subtitle.textContent = "Кампанію не вибрано";
+    body.innerHTML = '<div class="empty-state">Обери кампанію вгорі, щоб побачити, що тримають її акаунти.</div>';
     return;
   }
 
   const accountIds = campaign.accountIds || [];
   if (!accountIds.length) {
-    subtitle.textContent = "Nobody works this campaign yet";
-    body.innerHTML = `<div class="warmup-leads-prompt"><strong>No account is ticked against this campaign.</strong>
-      <span>Tick one in Profiles below — an account can only claim from a campaign it works.</span></div>`;
+    subtitle.textContent = "Цю кампанію поки ніхто не веде";
+    body.innerHTML = `<div class="warmup-leads-prompt"><strong>До цієї кампанії не позначено жодного акаунта.</strong>
+      <span>Познач акаунт нижче, у Профілях, — акаунт може закріплювати людей лише з тієї кампанії, яку веде.</span></div>`;
     refreshIcons();
     return;
   }
@@ -4034,10 +4072,10 @@ function renderWarmupQueue() {
   // A queue is an account's, so what is counted here is everything these
   // accounts hold — this campaign's claims and any other campaign's.
   const claimed = accountIds.reduce((total, id) => total + (warmupQueueState(id)?.rows?.length || 0), 0);
-  const held = `${warmupCount(claimed)} held by ${accountIds.length} account${accountIds.length === 1 ? "" : "s"}`;
+  const held = `${warmupCount(claimed)} на руках у ${accountIds.length} ${uaPlural(accountIds.length, "акаунта", "акаунтів", "акаунтів")}`;
   subtitle.textContent = campaign.state === "running"
-    ? `${held} · a claim holds a person, it does not send anything`
-    : `This campaign is ${campaign.state}, so nothing new is claimed from it. ${held}.`;
+    ? `${held} · закріплення тримає людину, воно нічого не надсилає`
+    : `Ця кампанія — ${WARMUP_CAMPAIGN_STATE_LABEL[campaign.state] || campaign.state}, тож нічого нового з неї не закріплюється. ${held}.`;
 
   body.innerHTML = `<div class="warmup-queue-accounts">${accountIds.map((id) => warmupQueueAccountHtml(id, campaign.id)).join("")}</div>`;
   refreshIcons();
@@ -4060,38 +4098,38 @@ function renderWarmupLeads() {
   const folderName = targeting?.folderName || warmupFolderName(targeting?.folderId);
   // A queue answering "nothing is targeted" must not carry a folder name in
   // its header — that would be two answers to the same question.
-  title.textContent = folderName && !warmupState.leadsPrompt ? `Lead queue · ${folderName}` : "Lead queue";
+  title.textContent = folderName && !warmupState.leadsPrompt ? `Черга лідів · ${folderName}` : "Черга лідів";
 
   if (warmupState.leadsPrompt) {
-    subtitle.textContent = "Nothing is targeted yet";
+    subtitle.textContent = "Ціль ще не задана";
     body.innerHTML = `<div class="warmup-leads-prompt">
       <strong>${escapeHtml(warmupState.leadsPrompt)}</strong>
-      <span>Make a campaign above and start it — this list is whatever its folder and filters match, before anything is claimed to an account.</span>
+      <span>Створи кампанію вгорі й запусти її — цей список і є те, що підпадає під її папку й фільтри, ще до закріплення за акаунтом.</span>
     </div>`;
     refreshIcons();
     return;
   }
 
   if (warmupState.leadsError) {
-    subtitle.textContent = "The queue could not be read";
+    subtitle.textContent = "Чергу не вдалося прочитати";
     body.innerHTML = `<div class="warmup-leads-prompt is-bad"><strong>${escapeHtml(warmupState.leadsError)}</strong>
-      <span>The CRM not answering and nobody being left are different answers; this is the first one.</span></div>`;
+      <span>«CRM не відповідає» і «більше нікого немає» — це різні відповіді; тут перша.</span></div>`;
     refreshIcons();
     return;
   }
 
   if (!warmupState.leadsReady) {
-    subtitle.textContent = "The lead queue is not available on this server yet";
-    body.innerHTML = '<div class="empty-state">Nothing to show until the queue endpoint answers.</div>';
+    subtitle.textContent = "Черги лідів на цьому сервері ще немає";
+    body.innerHTML = '<div class="empty-state">Показувати нічого, поки ендпоїнт черги не відповість.</div>';
     return;
   }
 
   subtitle.textContent = Number.isFinite(warmupState.leadsTotal)
-    ? `${warmupCount(warmupState.leadsTotal)} match this folder and its filters · the next ${warmupState.leads.length} are listed, anyone already approached from any account left out`
-    : "The next people this folder reaches, with anyone already approached from any account left out";
+    ? `${warmupCount(warmupState.leadsTotal)} ${uaPlural(warmupState.leadsTotal, "підпадає", "підпадають", "підпадають")} під цю папку й фільтри · показані наступні ${warmupState.leads.length}, без тих, до кого вже зверталися з будь-якого акаунта`
+    : "Наступні люди з цієї папки, без тих, до кого вже зверталися з будь-якого акаунта";
 
   if (!warmupState.leads.length) {
-    body.innerHTML = '<div class="empty-state">Nobody is left in this folder under these filters.</div>';
+    body.innerHTML = '<div class="empty-state">Під цими фільтрами в цій папці більше нікого немає.</div>';
     return;
   }
 
@@ -4101,11 +4139,11 @@ function renderWarmupLeads() {
       const where = [lead.position, lead.company].filter(Boolean).join(" · ");
       return `<li>
         <div class="warmup-lead-who">
-          <strong>${escapeHtml(lead.name || "Unnamed contact")}</strong>
+          <strong>${escapeHtml(lead.name || "Контакт без імені")}</strong>
           ${where ? `<span class="warmup-subtle">${escapeHtml(where)}</span>` : ""}
         </div>
         <span class="warmup-subtle">${escapeHtml(lead.country || "—")}</span>
-        ${link ? `<a href="${escapeAttr(link)}" target="_blank" rel="noreferrer">profile</a>` : '<span class="warmup-subtle">no profile link</span>'}
+        ${link ? `<a href="${escapeAttr(link)}" target="_blank" rel="noreferrer">профіль</a>` : '<span class="warmup-subtle">без посилання на профіль</span>'}
       </li>`;
     })
     .join("")}</ul>`;
@@ -4117,7 +4155,7 @@ function renderWarmupProfiles() {
   if (!body) return;
 
   if (!warmupState.profiles.length) {
-    body.innerHTML = '<tr><td colspan="7"><div class="empty-state">No profiles match.</div></td></tr>';
+    body.innerHTML = '<tr><td colspan="7"><div class="empty-state">Профілів за цим запитом немає.</div></td></tr>';
     renderWarmupCampaignDetail();
     return;
   }
@@ -4129,8 +4167,8 @@ function renderWarmupProfiles() {
   const ticked = warmupCampaignAccountIds(campaign);
   const tickable = Boolean(campaign) && warmupState.campaignsReady;
   const tickTitle = campaign
-    ? `Work ${campaign.name || "this campaign"} from this account`
-    : "Select a campaign above before choosing which accounts work it";
+    ? `Вести «${campaign.name || "цю кампанію"}» з цього акаунта`
+    : "Спочатку обери кампанію вгорі, потім познач акаунти, які її ведуть";
 
   body.innerHTML = warmupState.profiles
     .map((profile) => {
@@ -4143,15 +4181,15 @@ function renderWarmupProfiles() {
         <tr data-warmup-profile="${escapeHtml(profile.id)}" class="${profile.id === warmupState.selectedProfileId ? "is-selected" : ""}">
           <td class="warmup-tick">
             ${account
-              ? `<input type="checkbox" data-warmup-account-tick="${escapeAttr(account.id)}" ${ticked.has(account.id) ? "checked" : ""} ${tickable ? "" : "disabled"} aria-label="Work the selected campaign from ${escapeAttr(profile.name)}" title="${escapeAttr(tickTitle)}" />`
-              : '<span class="warmup-subtle" title="Not on warm-up yet, so it cannot be sent from">—</span>'}
+              ? `<input type="checkbox" data-warmup-account-tick="${escapeAttr(account.id)}" ${ticked.has(account.id) ? "checked" : ""} ${tickable ? "" : "disabled"} aria-label="Вести вибрану кампанію з акаунта ${escapeAttr(profile.name)}" title="${escapeAttr(tickTitle)}" />`
+              : '<span class="warmup-subtle" title="Ще не на прогріві, тож із нього не можна надсилати">—</span>'}
           </td>
           <td>
             <strong>${escapeHtml(profile.name)}</strong>
             ${identity?.name
-              ? `<div class="warmup-identity" title="Signed in as this person on the last agent login"><i data-lucide="badge-check"></i><span>${escapeHtml(identity.name)}${identity.slug ? ` · ${escapeHtml(identity.slug)}` : ""}</span></div>`
+              ? `<div class="warmup-identity" title="На останньому вході агента залогінений як ця особа"><i data-lucide="badge-check"></i><span>${escapeHtml(identity.name)}${identity.slug ? ` · ${escapeHtml(identity.slug)}` : ""}</span></div>`
               : ""}
-            <div class="warmup-subtle">${escapeHtml(profile.owner || "—")}${profile.proxy ? " · proxied" : " · no proxy"}</div>
+            <div class="warmup-subtle">${escapeHtml(profile.owner || "—")}${profile.proxy ? " · через проксі" : " · без проксі"}</div>
           </td>
           <td><span class="pill ${WARMUP_STATUS_TONE[status] || "tone-muted"}">${escapeHtml(WARMUP_STATUS_LABEL[status] || status)}</span></td>
           <td>${escapeHtml(profile.day || "—")}</td>
@@ -4159,8 +4197,8 @@ function renderWarmupProfiles() {
           <td>${warmupNextSessionCell(profile)}</td>
           <td class="warmup-row-actions">
             ${account
-              ? '<button class="text-button" type="button" data-warmup-open>Open</button>'
-              : '<button class="primary-button" type="button" data-warmup-adopt>Warm up</button>'}
+              ? '<button class="text-button" type="button" data-warmup-open>Відкрити</button>'
+              : '<button class="primary-button" type="button" data-warmup-adopt>Прогріти</button>'}
           </td>
         </tr>`;
     })
@@ -4178,9 +4216,9 @@ function renderWarmupDetail() {
 
   const detail = warmupState.detail;
   if (!detail) {
-    title.textContent = "No profile selected";
-    subtitle.textContent = "Pick a profile to see its day, today's quota and its own log";
-    body.innerHTML = '<div class="empty-state">Select a profile from the list.</div>';
+    title.textContent = "Профіль не вибрано";
+    subtitle.textContent = "Обери профіль, щоб побачити його день, сьогоднішню квоту і його власний лог";
+    body.innerHTML = '<div class="empty-state">Вибери профіль зі списку.</div>';
     refreshIcons();
     return;
   }
@@ -4189,8 +4227,8 @@ function renderWarmupDetail() {
   const warmup = account.warmup;
   title.textContent = account.label;
   subtitle.textContent = warmup
-    ? `${warmup.strategyName} · day ${warmup.day} of ${warmup.totalDays}${warmup.phase ? ` · ${warmup.phase}` : ""}`
-    : "Not warming yet";
+    ? `${warmup.strategyName} · день ${warmup.day} з ${warmup.totalDays}${warmup.phase ? ` · ${warmup.phase}` : ""}`
+    : "Ще не прогрівається";
 
   const actionRows = warmup && !warmup.finished
     ? (warmupState.config?.actionKinds || [])
@@ -4200,13 +4238,13 @@ function renderWarmupDetail() {
           // A kind with no quota today is forbidden, not merely finished, so it
           // gets no button rather than a disabled-looking one.
           if (quota === 0) {
-            return `<div class="warmup-action is-off"><span>${escapeHtml(label)}</span><em>not allowed today</em></div>`;
+            return `<div class="warmup-action is-off"><span>${escapeHtml(label)}</span><em>сьогодні не можна</em></div>`;
           }
           return `
             <div class="warmup-action">
               <span>${escapeHtml(label)}</span>
               <strong>${done}/${quota}</strong>
-              <button class="text-button" type="button" data-warmup-record="${escapeHtml(kind)}" ${done >= quota ? "disabled" : ""}>Record one</button>
+              <button class="text-button" type="button" data-warmup-record="${escapeHtml(kind)}" ${done >= quota ? "disabled" : ""}>Записати одну</button>
             </div>`;
         })
         .join("")
@@ -4214,16 +4252,16 @@ function renderWarmupDetail() {
 
   const controls = [];
   if (account.status === "excluded") {
-    controls.push('<button class="text-button" type="button" data-warmup-control="include">Put back in the list</button>');
+    controls.push('<button class="text-button" type="button" data-warmup-control="include">Повернути в список</button>');
   } else if (!warmup || warmup.state === "completed" || !warmup.runId) {
-    controls.push('<button class="primary-button" type="button" data-warmup-control="start">Start warm-up</button>');
-    controls.push('<button class="text-button" type="button" data-warmup-control="exclude">Exclude</button>');
+    controls.push('<button class="primary-button" type="button" data-warmup-control="start">Почати прогрів</button>');
+    controls.push('<button class="text-button" type="button" data-warmup-control="exclude">Виключити</button>');
   } else if (warmup.state === "paused") {
-    controls.push('<button class="primary-button" type="button" data-warmup-control="resume">Resume</button>');
-    controls.push('<button class="danger-button" type="button" data-warmup-control="stop">Stop</button>');
+    controls.push('<button class="primary-button" type="button" data-warmup-control="resume">Продовжити</button>');
+    controls.push('<button class="danger-button" type="button" data-warmup-control="stop">Зупинити</button>');
   } else {
-    controls.push('<button class="text-button" type="button" data-warmup-control="warning">Got a warning</button>');
-    controls.push('<button class="danger-button" type="button" data-warmup-control="stop">Stop</button>');
+    controls.push('<button class="text-button" type="button" data-warmup-control="warning">Прилетіло попередження</button>');
+    controls.push('<button class="danger-button" type="button" data-warmup-control="stop">Зупинити</button>');
   }
 
   const healthOptions = (warmupState.config?.healthValues || [])
@@ -4240,33 +4278,33 @@ function renderWarmupDetail() {
         .map((session) => {
           const did = Object.entries(session.actions || {}).map(([kind, count]) => `${kind}: ${count}`).join(", ");
           return `<li><strong>${new Date(session.startedAt).toLocaleString()}</strong> · ${
-            session.endedAt ? `${session.durationMin} min` : "open"
+            session.endedAt ? `${session.durationMin} хв` : "відкрита"
           } · ${escapeHtml(session.source)}${did ? ` · ${escapeHtml(did)}` : ""}</li>`;
         })
         .join("")
-    : "<li>No sessions recorded yet.</li>";
+    : "<li>Сесій ще не записано.</li>";
 
   const events = detail.events.length
     ? detail.events
         .slice(0, 12)
         .map((event) => `<li class="level-${escapeHtml(event.level)}"><span>${new Date(event.created_at).toLocaleString()}</span> ${escapeHtml(event.message)}</li>`)
         .join("")
-    : "<li>Nothing logged yet.</li>";
+    : "<li>У лозі ще порожньо.</li>";
 
   body.innerHTML = `
     <div class="warmup-detail-controls">${controls.join("")}</div>
-    ${warmup?.pausedUntil ? `<p class="warmup-paused">Paused after a warning until ${escapeHtml(warmup.pausedUntil)}.</p>` : ""}
+    ${warmup?.pausedUntil ? `<p class="warmup-paused">На паузі після попередження до ${escapeHtml(warmup.pausedUntil)}.</p>` : ""}
     ${actionRows ? `<div class="warmup-actions">${actionRows}</div>` : ""}
     ${rules}
     <div class="warmup-health">
-      <label for="warmupHealthSelect">Health</label>
+      <label for="warmupHealthSelect">Стан</label>
       <select id="warmupHealthSelect">${healthOptions}</select>
-      <input id="warmupHealthNote" type="text" placeholder="What did you see?" value="${escapeHtml(account.healthNote || "")}" />
-      <button class="text-button" type="button" data-warmup-health>Save</button>
+      <input id="warmupHealthNote" type="text" placeholder="Що ти побачив?" value="${escapeHtml(account.healthNote || "")}" />
+      <button class="text-button" type="button" data-warmup-health>Зберегти</button>
     </div>
-    <h3>Sessions</h3>
+    <h3>Сесії</h3>
     <ul class="warmup-sessions">${sessions}</ul>
-    <h3>Log</h3>
+    <h3>Лог</h3>
     <ul class="warmup-events">${events}</ul>
   `;
   refreshIcons();
@@ -4290,8 +4328,8 @@ async function loadWarmupCampaigns({ resetForm = true } = {}) {
   } else {
     warmupState.foldersReady = false;
     problems.push(folders.reason?.status === 404
-      ? "This server does not carry the folder list yet, so a folder cannot be picked here."
-      : `The folder list could not be read: ${folders.reason?.message}`);
+      ? "Цей сервер ще не віддає список папок, тож тут не вибрати папку."
+      : `Список папок не вдалося прочитати: ${folders.reason?.message}`);
   }
 
   if (campaigns.status === "fulfilled") {
@@ -4301,8 +4339,8 @@ async function loadWarmupCampaigns({ resetForm = true } = {}) {
     warmupState.campaignsReady = false;
     warmupState.campaigns = [];
     problems.push(campaigns.reason?.status === 404
-      ? "This server does not carry campaigns yet, so nothing made here would be kept."
-      : `The campaigns could not be read: ${campaigns.reason?.message}`);
+      ? "Цей сервер ще не тримає кампаній, тож створене тут не збережеться."
+      : `Кампанії не вдалося прочитати: ${campaigns.reason?.message}`);
   }
   warmupState.campaignsError = problems.join(" ");
 
@@ -4357,12 +4395,12 @@ async function saveWarmupCampaignForm() {
   const editing = warmupEditingCampaign();
 
   if (!form.folderId) {
-    warmupState.campaignNotice = "Pick a folder first — a campaign has to draw from something.";
+    warmupState.campaignNotice = "Спочатку обери папку — кампанії треба звідкись брати людей.";
     renderWarmupCampaigns();
     return;
   }
   if (!form.name) {
-    warmupState.campaignNotice = "Give it a name — a list of campaigns called nothing is a list nobody can read.";
+    warmupState.campaignNotice = "Дай їй назву — список кампаній без назв ніхто не прочитає.";
     renderWarmupCampaigns();
     return;
   }
@@ -4476,17 +4514,17 @@ async function deleteWarmupCampaign(campaignId) {
   const queued = Number(campaign.progress?.queued) || 0;
   const sent = Number(campaign.progress?.sent) || 0;
   const consequence = [
-    queued ? `${warmupCount(queued)} claimed but unsent ${queued === 1 ? "person goes" : "people go"} back in the pool` : "",
-    sent ? `${warmupCount(sent)} already sent ${sent === 1 ? "stays" : "stay"} on record` : ""
+    queued ? `${warmupCount(queued)} закріплених, але не надісланих, ${uaPlural(queued, "людина повертається", "людини повертаються", "людей повертаються")} в пул` : "",
+    sent ? `${warmupCount(sent)} уже надісланих ${uaPlural(sent, "лишається", "лишаються", "лишаються")} в історії` : ""
   ].filter(Boolean).join(", ");
-  if (!window.confirm(`Delete "${campaign.name || "this campaign"}"?${consequence ? `\n\n${consequence}.` : ""}`)) return;
+  if (!window.confirm(`Видалити «${campaign.name || "цю кампанію"}»?${consequence ? `\n\n${consequence}.` : ""}`)) return;
 
   try {
     const payload = await warmupApi(`/campaigns?id=${encodeURIComponent(campaignId)}`, { method: "DELETE" });
     warmupState.campaigns = warmupState.campaigns.filter((item) => item.id !== campaignId);
     const released = Number(payload?.released) || 0;
     warmupState.campaignNotice = released
-      ? `${warmupCount(released)} claimed ${released === 1 ? "person is" : "people are"} back in the pool.`
+      ? `${warmupCount(released)} закріплених ${uaPlural(released, "людина знову в пулі", "людини знову в пулі", "людей знову в пулі")}.`
       : "";
     if (warmupState.selectedCampaignId === campaignId) {
       warmupState.selectedCampaignId = warmupState.campaigns[0]?.id || null;
@@ -4525,7 +4563,7 @@ function selectWarmupCampaign(campaignId) {
 function toggleWarmupAccount(accountId, on) {
   const campaign = warmupSelectedCampaign();
   if (!campaign) {
-    warmupState.campaignNotice = "Select a campaign above first — an account works a campaign, not a folder on its own.";
+    warmupState.campaignNotice = "Спочатку обери кампанію вгорі — акаунт веде кампанію, а не окрему папку.";
     renderWarmupCampaigns();
     renderWarmupProfiles();
     return;
@@ -4611,7 +4649,7 @@ async function loadWarmupQueue(accountId) {
       // warming, paused. That is an answer too, and it carries only `error`.
       error: error.status === 404 ? "" : error.message,
       unavailable: error.status === 404
-        ? "This server does not carry the claim queue yet, so nothing can be claimed from here."
+        ? "Цей сервер ще не тримає черги закріплень, тож звідси нічого не закріпити."
         : ""
     };
   }
@@ -4655,7 +4693,7 @@ async function claimWarmupQueue(accountId) {
       rows: warmupState.queues[accountId]?.rows || [],
       reason: "",
       error: error.status === 404
-        ? "This server does not carry claiming yet."
+        ? "Цей сервер ще не вміє закріплювати."
         : error.message,
       unavailable: ""
     };
@@ -4676,7 +4714,7 @@ async function claimWarmupQueue(accountId) {
  */
 async function takeWarmupQueueLead(accountId, crmContactId, name) {
   if (!accountId || !crmContactId) return;
-  if (!window.confirm(`Record a connection request to ${name || "this contact"}?\n\nThis marks them approached for every account and every campaign, permanently.`)) return;
+  if (!window.confirm(`Записати запит на контакт до ${name || "цього контакту"}?\n\nЦе назавжди позначає, що до цієї людини вже зверталися — для кожного акаунта й кожної кампанії.`)) return;
 
   try {
     await warmupApi("/leads/take", {
@@ -4720,7 +4758,7 @@ async function loadWarmupLeads() {
     // drawing it in red would be calling the user's unfinished setup a fault.
     if (error.payload?.needsCampaign || error.payload?.needsTargeting || error.status === 409) {
       warmupState.leadsReady = true;
-      warmupState.leadsPrompt = error.message || "Create a campaign before pulling leads";
+      warmupState.leadsPrompt = error.message || "Створи кампанію, перш ніж тягнути лідів";
     } else if (error.status === 404) {
       warmupState.leadsReady = false;
     } else {
@@ -4775,7 +4813,7 @@ async function loadWarmup({ full = true } = {}) {
       warmupState.profiles = [];
       warmupState.foldersReady = false;
       warmupState.campaignsReady = false;
-      warmupState.campaignsError = "The warm-up is not configured on this server, so there are no folders to build a campaign on.";
+      warmupState.campaignsError = "Прогрів на цьому сервері не налаштований, тож немає папок, на яких будувати кампанію.";
       // Nothing can have arrived on accounts this server cannot even reach, and
       // the config note above already says why. An inbox promising otherwise
       // would be a second, softer answer to the same question.
@@ -5007,6 +5045,16 @@ const WARMUP_SYNC_STALE_HOURS = 36;
  */
 const WARMUP_INBOX_PREVIEW = 8;
 
+/** Статус — це дані; пігулка на екрані — це текст. */
+const WARMUP_OUTREACH_LABEL = {
+  pending: "очікує",
+  connected: "у контактах",
+  replied: "відповів",
+  accepted: "прийнято",
+  skipped: "пропущено",
+  failed: "не вдалося"
+};
+
 const WARMUP_OUTREACH_TONE = {
   pending: "tone-muted",
   connected: "tone-live",
@@ -5023,13 +5071,13 @@ function warmupAgo(iso) {
   if (!Number.isFinite(then)) return "";
   const minutes = Math.round((Date.now() - then) / 60000);
   if (minutes < 0) return new Date(then).toLocaleString();
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes} min ago`;
+  if (minutes < 1) return "щойно";
+  if (minutes < 60) return `${minutes} хв тому`;
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} h ago`;
+  if (hours < 24) return `${hours} год тому`;
   const days = Math.round(hours / 24);
-  if (days === 1) return "yesterday";
-  if (days < 30) return `${days} days ago`;
+  if (days === 1) return "вчора";
+  if (days < 30) return `${days} дн тому`;
   return new Date(then).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" });
 }
 
@@ -5059,7 +5107,7 @@ function warmupBodyHtml(body) {
 /** The first line of a message, for a list row that has one line to spend. */
 function warmupPreviewHtml(body, limit = 150) {
   const text = String(body ?? "").replace(/\s+/g, " ").trim();
-  if (!text) return '<em class="warmup-subtle">no text in this message</em>';
+  if (!text) return '<em class="warmup-subtle">у цьому повідомленні немає тексту</em>';
   const chars = Array.from(text);
   const clipped = chars.length > limit ? `${chars.slice(0, limit - 1).join("")}…` : text;
   return escapeHtml(clipped);
@@ -5108,7 +5156,7 @@ function warmupParticipantUnnamed(participant) {
 
 /** Who wrote, or an honest admission that nobody here knows. */
 function warmupParticipantName(participant) {
-  if (warmupParticipantUnnamed(participant)) return "Somebody this thread does not name";
+  if (warmupParticipantUnnamed(participant)) return "Хтось, кого цей тред не називає";
   return String(participant.name).trim();
 }
 
@@ -5120,7 +5168,7 @@ function warmupParticipantName(participant) {
  */
 function warmupParticipantNameAttr(participant) {
   return warmupParticipantUnnamed(participant)
-    ? ' title="LinkedIn showed no name for this person — usually a restricted or out-of-network profile, sometimes a failed read. This thread is deliberately matched to nobody in the CRM."'
+    ? ' title="LinkedIn не показав імені цієї людини — зазвичай це закритий профіль або профіль поза мережею, іноді невдале зчитування. Цей тред навмисно не зіставлено ні з ким у CRM."'
     : "";
 }
 
@@ -5136,7 +5184,7 @@ function warmupThreadAccount(thread) {
   if (name) return { name, exact: true };
   const label = String(thread?.accountLabel || "").trim();
   if (label) return { name: label, exact: false };
-  return { name: "an account this portal cannot name", exact: false };
+  return { name: "акаунт, який цей портал не може назвати", exact: false };
 }
 
 /**
@@ -5184,8 +5232,8 @@ function warmupSyncGapHtml(sync) {
   if (sync.accountsSynced >= sync.accountsTotal) return "";
   const missing = sync.accountsTotal - sync.accountsSynced;
   return `<div class="warmup-inbox-note is-warn">
-    <strong>${warmupCount(missing)} of ${warmupCount(sync.accountsTotal)} account${sync.accountsTotal === 1 ? "" : "s"} ${missing === 1 ? "has" : "have"} never been read.</strong>
-    <span>Whatever arrived on ${missing === 1 ? "it" : "them"} is not below and is not counted — this list is only as complete as the accounts the agent has actually opened.</span>
+    <strong>${warmupCount(missing)} ${uaPlural(missing, "акаунт із", "акаунти із", "акаунтів із")} ${warmupCount(sync.accountsTotal)} не читали жодного разу.</strong>
+    <span>Те, що надійшло ${missing === 1 ? "на нього" : "на них"}, не показане нижче і не враховане — цей список повний рівно настільки, наскільки агент справді відкривав акаунти.</span>
   </div>`;
 }
 
@@ -5199,8 +5247,8 @@ function warmupInboxEmptyHtml() {
 
   if (inbox.unreadOnly) {
     return `<div class="warmup-inbox-note is-calm">
-      <strong>Nothing unread.</strong>
-      <span>Everything that arrived has been opened. <button class="warmup-inbox-link" type="button" data-warmup-inbox-showall>Show every thread</button> to read them again.</span>
+      <strong>Непрочитаного немає.</strong>
+      <span>Усе, що надійшло, уже відкривали. <button class="warmup-inbox-link" type="button" data-warmup-inbox-showall>Показати всі треди</button>, щоб перечитати.</span>
     </div>`;
   }
 
@@ -5208,32 +5256,32 @@ function warmupInboxEmptyHtml() {
 
   if (!sync.known) {
     return `<div class="warmup-inbox-note is-warn">
-      <strong>No replies — and this server does not say when the accounts were last read.</strong>
-      <span>So this cannot tell an empty inbox from an agent that has never looked, and those are not the same thing: one is a quiet week, the other is every reply on every account going unseen. The sync time is what separates them.</span>
+      <strong>Відповідей немає — і цей сервер не каже, коли акаунти читали востаннє.</strong>
+      <span>Тому тут не відрізнити порожні вхідні від агента, який жодного разу не заглядав, а це не те саме: у першому випадку просто тихий тиждень, у другому — кожна відповідь на кожному акаунті лишається непоміченою. Розрізняє їх саме час останнього читання.</span>
     </div>`;
   }
 
   if (!sync.lastSyncedAt) {
     return `<div class="warmup-inbox-note is-bad">
-      <strong>No account has ever been read. This is not an empty inbox — it is an agent that has never looked.</strong>
-      <span>The warm-up agent opens LinkedIn messaging at the end of each run and posts what it finds here. Nothing has ever posted, so a reply on any of these accounts is invisible to everybody except whoever opens that account by hand. Check that the agent is running and pointed at this portal, and that its token is set on both sides.</span>
+      <strong>Жодного акаунта ще не читали. Це не порожні вхідні — це агент, який жодного разу не заглядав.</strong>
+      <span>Наприкінці кожного прогону агент прогріву відкриває повідомлення LinkedIn і складає знайдене сюди. Сюди не склали ще нічого, тож відповідь на будь-якому з цих акаунтів не бачить ніхто, крім того, хто відкриє акаунт руками. Перевір, що агент працює, дивиться саме на цей портал і що його токен заданий з обох боків.</span>
     </div>`;
   }
 
   if (sync.stale) {
     return `<div class="warmup-inbox-note is-warn">
-      <strong>Nothing has come in, and the last time anything looked was ${escapeHtml(warmupAgo(sync.lastSyncedAt))}.</strong>
-      <span>The last read was ${escapeHtml(warmupStamp(sync.lastSyncedAt))}. The agent reads the accounts at the end of every run, so a gap this long is more likely a stopped agent than a quiet week — an inbox nobody is reading looks exactly like an inbox nobody has written to.</span>
+      <strong>Нічого не надходило, а востаннє сюди заглядали ${escapeHtml(warmupAgo(sync.lastSyncedAt))}.</strong>
+      <span>Останнє читання — ${escapeHtml(warmupStamp(sync.lastSyncedAt))}. Агент читає акаунти наприкінці кожного прогону, тож така пауза — це радше зупинений агент, ніж тихий тиждень: вхідні, яких ніхто не читає, виглядають точно так само, як вхідні, куди ніхто не написав.</span>
     </div>`;
   }
 
   const coverage = sync.accountsTotal !== null && sync.accountsSynced !== null
-    ? ` All ${warmupCount(sync.accountsSynced)} of ${warmupCount(sync.accountsTotal)} account${sync.accountsTotal === 1 ? "" : "s"} were read.`
+    ? ` Прочитано всі ${warmupCount(sync.accountsSynced)} із ${warmupCount(sync.accountsTotal)} ${uaPlural(sync.accountsTotal, "акаунта", "акаунтів", "акаунтів")}.`
     : "";
 
   return `<div class="warmup-inbox-note is-calm">
-    <strong>Nothing has come in.</strong>
-    <span>The accounts were last read ${escapeHtml(warmupAgo(sync.lastSyncedAt))}, and nobody has written back since.${escapeHtml(coverage)} This is an empty inbox rather than an unread one.</span>
+    <strong>Нічого не надходило.</strong>
+    <span>Акаунти востаннє читали ${escapeHtml(warmupAgo(sync.lastSyncedAt))}, і відтоді ніхто не написав у відповідь.${escapeHtml(coverage)} Це порожні вхідні, а не непрочитані.</span>
   </div>`;
 }
 
@@ -5246,8 +5294,8 @@ function warmupThreadRowHtml(thread) {
   const count = Number(thread.messageCount) || 0;
   const status = String(thread.outreachStatus || "").trim();
   const accountTitle = account.exact
-    ? "The person this account is signed in as"
-    : "Anty's profile label — this portal does not know who this account is signed in as";
+    ? "Особа, під якою залогінений цей акаунт"
+    : "Назва профілю в Anty — цей портал не знає, під ким залогінений цей акаунт";
 
   return `
     <button class="warmup-thread ${thread.unread ? "is-unread" : ""}" type="button"
@@ -5259,25 +5307,25 @@ function warmupThreadRowHtml(thread) {
         ${participant.headline ? `<span class="warmup-subtle">${escapeHtml(participant.headline)}</span>` : ""}
         <span class="warmup-identity" title="${escapeAttr(accountTitle)}">
           <i data-lucide="${account.exact ? "badge-check" : "circle-help"}"></i>
-          <span>on ${escapeHtml(account.name)}</span>
+          <span>на ${escapeHtml(account.name)}</span>
         </span>
       </span>
       <span class="warmup-thread-preview">
-        <span class="warmup-thread-from">${inbound ? "They" : "You"}:</span>
+        <span class="warmup-thread-from">${inbound ? "Вони" : "Ти"}:</span>
         ${warmupPreviewHtml(last.body)}
       </span>
       <span class="warmup-thread-meta">
         <time datetime="${escapeAttr(last.sentAt || "")}" title="${escapeAttr(warmupStamp(last.sentAt))}">${escapeHtml(warmupAgo(last.sentAt) || "—")}</time>
-        <span class="warmup-subtle">${warmupCount(count)} message${count === 1 ? "" : "s"}</span>
-        ${status ? `<span class="pill ${WARMUP_OUTREACH_TONE[status] || "tone-muted"}">${escapeHtml(status)}</span>` : ""}
-        ${thread.unread ? '<span class="warmup-thread-unread">unread</span>' : ""}
+        <span class="warmup-subtle">${warmupCount(count)} ${uaPlural(count, "повідомлення", "повідомлення", "повідомлень")}</span>
+        ${status ? `<span class="pill ${WARMUP_OUTREACH_TONE[status] || "tone-muted"}">${escapeHtml(WARMUP_OUTREACH_LABEL[status] || status)}</span>` : ""}
+        ${thread.unread ? '<span class="warmup-thread-unread">непрочитане</span>' : ""}
       </span>
     </button>`;
 }
 
 function warmupMessageHtml(message, participantName, accountName) {
   const inbound = message.direction !== "out";
-  const who = inbound ? (participantName || "They") : accountName;
+  const who = inbound ? (participantName || "Вони") : accountName;
   return `<li class="warmup-message ${inbound ? "is-in" : "is-out"}">
     <div class="warmup-message-head">
       <strong>${escapeHtml(who)}</strong>
@@ -5294,16 +5342,16 @@ function warmupMessageHtml(message, participantName, accountName) {
  */
 function warmupThreadViewHtml() {
   const inbox = warmupState.inbox;
-  const back = '<button class="text-button warmup-thread-back" type="button" data-warmup-inbox-back><i data-lucide="arrow-left"></i><span>All replies</span></button>';
+  const back = '<button class="text-button warmup-thread-back" type="button" data-warmup-inbox-back><i data-lucide="arrow-left"></i><span>Усі відповіді</span></button>';
 
   if (inbox.openError) {
     return `${back}<div class="warmup-inbox-note is-bad">
       <strong>${escapeHtml(inbox.openError)}</strong>
-      <span>The conversation could not be read. What is in the list is the last thing this portal was told about it.</span>
+      <span>Розмову не вдалося прочитати. У списку — останнє, що цьому порталу про неї сказали.</span>
     </div>`;
   }
   if (!inbox.open) {
-    return `${back}<div class="empty-state">Opening the conversation...</div>`;
+    return `${back}<div class="empty-state">Відкриваємо розмову...</div>`;
   }
 
   const thread = inbox.open.thread || {};
@@ -5314,8 +5362,8 @@ function warmupThreadViewHtml() {
   const status = String(thread.outreachStatus || "").trim();
   const messages = Array.isArray(inbox.open.messages) ? inbox.open.messages : [];
   const accountTitle = account.exact
-    ? "The person this account is signed in as"
-    : "Anty's profile label — this portal does not know who this account is signed in as";
+    ? "Особа, під якою залогінений цей акаунт"
+    : "Назва профілю в Anty — цей портал не знає, під ким залогінений цей акаунт";
 
   const head = `
     <div class="warmup-thread-head">
@@ -5324,30 +5372,30 @@ function warmupThreadViewHtml() {
         <strong${warmupParticipantNameAttr(participant)}>${escapeHtml(name)}</strong>
         ${participant.headline ? `<span class="warmup-subtle">${escapeHtml(participant.headline)}</span>` : ""}
         ${link
-          ? `<a href="${escapeAttr(link)}" target="_blank" rel="noreferrer noopener"><i data-lucide="external-link"></i><span>their LinkedIn</span></a>`
-          : '<span class="warmup-subtle">no profile link came with this thread</span>'}
+          ? `<a href="${escapeAttr(link)}" target="_blank" rel="noreferrer noopener"><i data-lucide="external-link"></i><span>їхній LinkedIn</span></a>`
+          : '<span class="warmup-subtle">з цим тредом не прийшло посилання на профіль</span>'}
       </div>
       <div class="warmup-thread-head-meta">
         <span class="warmup-identity" title="${escapeAttr(accountTitle)}">
           <i data-lucide="${account.exact ? "badge-check" : "circle-help"}"></i>
-          <span>arrived on ${escapeHtml(account.name)}</span>
+          <span>надійшло на ${escapeHtml(account.name)}</span>
         </span>
         ${status
-          ? `<span class="pill ${WARMUP_OUTREACH_TONE[status] || "tone-muted"}">${escapeHtml(status)}</span>`
-          : '<span class="warmup-subtle">not matched to anyone this account approached</span>'}
+          ? `<span class="pill ${WARMUP_OUTREACH_TONE[status] || "tone-muted"}">${escapeHtml(WARMUP_OUTREACH_LABEL[status] || status)}</span>`
+          : '<span class="warmup-subtle">не зіставлено ні з ким, до кого цей акаунт звертався</span>'}
       </div>
     </div>`;
 
   if (!messages.length) {
     return `${head}<div class="warmup-inbox-note is-warn">
-      <strong>This thread has no messages stored.</strong>
-      <span>The conversation was seen but nothing in it was read — on the agent's side that is what a rotted selector looks like.</span>
+      <strong>У цьому треді не збережено жодного повідомлення.</strong>
+      <span>Розмову побачили, але нічого в ній не прочитали — на боці агента так виглядає протухлий селектор.</span>
     </div>`;
   }
 
   return `${head}
     <ol class="warmup-messages">${messages.map((message) => warmupMessageHtml(message, name, account.name)).join("")}</ol>
-    <p class="warmup-thread-foot">Reading is all this does. Replying goes out from a real account against a real person, so it needs its own quota treatment and is not in this phase — answer from the account itself.</p>`;
+    <p class="warmup-thread-foot">Тут можна тільки читати. Відповідь іде з живого акаунта живій людині, тож потребує власного поводження з квотою — у цій фазі її немає, відповідай із самого акаунта.</p>`;
 }
 
 function renderWarmupInbox() {
@@ -5367,8 +5415,8 @@ function renderWarmupInbox() {
   // that belong to the list step out of the way rather than filter nothing.
   if (inbox.openThreadKey !== null) {
     const open = inbox.open?.thread?.participant;
-    title.textContent = open ? `Inbox · ${warmupParticipantName(open)}` : "Inbox · one conversation";
-    subtitle.textContent = "The conversation as the agent read it, oldest first";
+    title.textContent = open ? `Вхідні · ${warmupParticipantName(open)}` : "Вхідні · одна розмова";
+    subtitle.textContent = "Розмова такою, як її прочитав агент, від найстарішого";
     if (toggleLabel) toggleLabel.hidden = true;
     if (pill) pill.hidden = true;
     body.innerHTML = warmupThreadViewHtml();
@@ -5376,23 +5424,23 @@ function renderWarmupInbox() {
     return;
   }
 
-  title.textContent = "Inbox";
+  title.textContent = "Вхідні";
   if (toggleLabel) toggleLabel.hidden = false;
   if (pill) pill.hidden = false;
 
   if (pill) {
     if (!inbox.available) {
       pill.className = "pill tone-muted";
-      pill.textContent = "not on this server";
+      pill.textContent = "немає на цьому сервері";
     } else if (inbox.error) {
       pill.className = "pill tone-bad";
-      pill.textContent = "unavailable";
+      pill.textContent = "недоступно";
     } else if (!inbox.ready) {
       pill.className = "pill tone-muted";
-      pill.textContent = "loading";
+      pill.textContent = "завантаження";
     } else if (inbox.unread > 0) {
       pill.className = "pill tone-live";
-      pill.textContent = `${warmupCount(inbox.unread)} unread`;
+      pill.textContent = `${warmupCount(inbox.unread)} ${uaPlural(inbox.unread, "непрочитана", "непрочитані", "непрочитаних")}`;
     } else {
       // With nothing unread the pill stops counting and starts reporting on the
       // reading, because "nothing yet" beside a panel saying nothing has ever
@@ -5400,43 +5448,43 @@ function renderWarmupInbox() {
       const state = warmupInboxSync();
       if (state.known && !state.lastSyncedAt) {
         pill.className = "pill tone-bad";
-        pill.textContent = "never read";
+        pill.textContent = "жодного разу не читали";
       } else if (state.stale) {
         pill.className = "pill tone-warn";
-        pill.textContent = "not read lately";
+        pill.textContent = "давно не читали";
       } else if (!state.known && !inbox.threads.length) {
         pill.className = "pill tone-warn";
-        pill.textContent = "reading unknown";
+        pill.textContent = "невідомо, чи читали";
       } else {
         pill.className = "pill tone-muted";
-        pill.textContent = inbox.threads.length ? "all read" : "nothing yet";
+        pill.textContent = inbox.threads.length ? "усе прочитано" : "поки нічого";
       }
     }
   }
 
   if (!inbox.available) {
-    subtitle.textContent = "The inbox is not on this server yet";
+    subtitle.textContent = "Вхідних на цьому сервері ще немає";
     body.innerHTML = `<div class="warmup-inbox-note is-warn">
-      <strong>This server has no inbox endpoint.</strong>
-      <span>Nothing is wrong with the accounts — this portal is simply older than the inbox. Nobody's reply is being lost, but nothing is reading for them either.</span>
+      <strong>На цьому сервері немає ендпоїнта вхідних.</strong>
+      <span>З акаунтами все гаразд — просто цей портал старший за вхідні. Нічия відповідь не губиться, але й ніхто її не читає.</span>
     </div>`;
     refreshIcons();
     return;
   }
 
   if (inbox.error) {
-    subtitle.textContent = "The inbox could not be read";
+    subtitle.textContent = "Вхідні не вдалося прочитати";
     body.innerHTML = `<div class="warmup-inbox-note is-bad">
       <strong>${escapeHtml(inbox.error)}</strong>
-      <span>The inbox not answering and nobody having written are different answers; this is the first one.</span>
+      <span>«Вхідні не відповідають» і «ніхто не написав» — це різні відповіді; тут перша.</span>
     </div>`;
     refreshIcons();
     return;
   }
 
   if (!inbox.ready) {
-    subtitle.textContent = "Reading what came back";
-    body.innerHTML = '<div class="empty-state">Loading the inbox...</div>';
+    subtitle.textContent = "Читаємо, що прийшло";
+    body.innerHTML = '<div class="empty-state">Завантажуємо вхідні...</div>';
     return;
   }
 
@@ -5444,17 +5492,17 @@ function renderWarmupInbox() {
   // Three answers, not two: read at a time, never read, and not reported. The
   // subtitle must not turn the third into the second.
   const read = sync.lastSyncedAt
-    ? `accounts last read ${warmupAgo(sync.lastSyncedAt)}`
-    : (sync.known ? "no account read yet" : "this server does not report when the accounts were read");
+    ? `акаунти востаннє читали ${warmupAgo(sync.lastSyncedAt)}`
+    : (sync.known ? "жодного акаунта ще не читали" : "цей сервер не каже, коли акаунти читали востаннє");
 
   if (!inbox.threads.length) {
-    subtitle.textContent = inbox.unreadOnly ? "Unread only" : read;
+    subtitle.textContent = inbox.unreadOnly ? "Тільки непрочитані" : read;
     body.innerHTML = warmupInboxEmptyHtml();
     refreshIcons();
     return;
   }
 
-  subtitle.textContent = `${warmupCount(inbox.threads.length)} conversation${inbox.threads.length === 1 ? "" : "s"}${inbox.unreadOnly ? " unread" : ""} · ${read}`;
+  subtitle.textContent = `${warmupCount(inbox.threads.length)} ${uaPlural(inbox.threads.length, "розмова", "розмови", "розмов")}${inbox.unreadOnly ? " непрочитаних" : ""} · ${read}`;
 
   const shown = inbox.showAll ? inbox.threads : inbox.threads.slice(0, WARMUP_INBOX_PREVIEW);
   const hidden = inbox.threads.length - shown.length;
@@ -5464,9 +5512,9 @@ function renderWarmupInbox() {
     ? inbox.threads.slice(shown.length).filter((thread) => thread.unread).length
     : 0;
   const more = hidden > 0
-    ? `<button class="warmup-inbox-more" type="button" data-warmup-inbox-expand>Show ${warmupCount(hidden)} more conversation${hidden === 1 ? "" : "s"}${hiddenUnread ? ` · ${warmupCount(hiddenUnread)} still unread` : ""}</button>`
+    ? `<button class="warmup-inbox-more" type="button" data-warmup-inbox-expand>Показати ще ${warmupCount(hidden)} ${uaPlural(hidden, "розмову", "розмови", "розмов")}${hiddenUnread ? ` · ${warmupCount(hiddenUnread)} досі непрочитаних` : ""}</button>`
     : (inbox.showAll && inbox.threads.length > WARMUP_INBOX_PREVIEW
-      ? '<button class="warmup-inbox-more" type="button" data-warmup-inbox-collapse>Show fewer</button>'
+      ? '<button class="warmup-inbox-more" type="button" data-warmup-inbox-collapse>Показати менше</button>'
       : "");
 
   body.innerHTML = `${warmupSyncGapHtml(sync)}
@@ -5502,7 +5550,7 @@ function renderWarmupNavBadge() {
   }
   badge.hidden = false;
   badge.textContent = count > 99 ? "99+" : String(count);
-  badge.title = `${count} unread ${count === 1 ? "reply" : "replies"}`;
+  badge.title = `${count} ${uaPlural(count, "непрочитана відповідь", "непрочитані відповіді", "непрочитаних відповідей")}`;
   badge.setAttribute("aria-label", badge.title);
 }
 
@@ -5571,7 +5619,7 @@ async function loadWarmupInbox() {
     } else {
       inbox.available = true;
       inbox.ready = true;
-      inbox.error = error.message || "The inbox could not be read.";
+      inbox.error = error.message || "Вхідні не вдалося прочитати.";
     }
   }
   renderWarmupInbox();
@@ -5637,9 +5685,9 @@ async function openWarmupThread(accountId, threadKey) {
     // either, in which case it is the route after all.
     inbox.openError = error?.status === 404
       ? (inbox.available
-        ? "This conversation is no longer stored on the server."
-        : "This server cannot open a single thread yet.")
-      : (error.message || "The conversation could not be read.");
+        ? "Цієї розмови вже немає на сервері."
+        : "Цей сервер ще не вміє відкривати окремий тред.")
+      : (error.message || "Розмову не вдалося прочитати.");
   } finally {
     if (warmupThreadIsOpen(accountId, threadKey)) {
       inbox.openBusy = false;
