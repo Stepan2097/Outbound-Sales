@@ -964,8 +964,8 @@
             <section class="panel product-teach-panel">
               <div class="panel-heading">
                 <div>
-                  <h2>Teach Product</h2>
-                  <p>Paste the product truth once, then keep adding updates over time</p>
+                  <h2>Product</h2>
+                  <p>Describe the product once. Everything else on this page is read from it.</p>
                 </div>
                 <div class="button-row">
                   <span class="pill" id="productStudioSelected">selected</span>
@@ -976,44 +976,14 @@
                   <span>Product</span>
                   <select id="productStudioProductSelect" aria-label="Product to edit"></select>
                 </label>
-                <button id="editProductBtn" type="button"><i data-lucide="file-pen-line"></i><span>Edit</span></button>
                 <button id="newProductBtn" type="button"><i data-lucide="plus"></i><span>New</span></button>
                 <button class="danger-button" id="deleteProductBtn" type="button"><i data-lucide="trash-2"></i><span>Delete</span></button>
               </div>
               <form class="product-form" id="productForm">
                 <label>
-                  <span>Plain text product training</span>
+                  <span>Everything about this product, in your own words</span>
                   <textarea id="productContextInput" class="product-context-textarea" rows="14" placeholder="Paste the full product context here. Include product name, what it does, ICP, who buys it, pain points, use cases, proof, pricing logic, objections, claims to avoid, how to sell it, message tone, competitors, and what makes a lead high or low fit. The system will analyze this text, create/update the product, segment the knowledge, and use it for outreach."></textarea>
                 </label>
-                <details class="structured-product-fields" open>
-                  <summary><span>Structured context</span><i data-lucide="chevron-down"></i></summary>
-                  <div class="structured-product-grid">
-                    <label>
-                      <span>Offer + deliverables</span>
-                      <textarea id="productOfferInput" rows="5" placeholder="What exactly do we sell, what is delivered, how onboarding works, what is included."></textarea>
-                    </label>
-                    <label>
-                      <span>ICP, buyers + GEOs</span>
-                      <textarea id="productIcpInput" rows="5" placeholder="Ideal companies, buyer personas, countries/GEOs, high-fit and low-fit signals."></textarea>
-                    </label>
-                    <label>
-                      <span>Pricing / commercial model</span>
-                      <textarea id="productPricingInput" rows="4" placeholder="Pricing, rev-share, CPA, retainers, test budgets, minimums, commercial rules."></textarea>
-                    </label>
-                    <label>
-                      <span>Proof, cases + approved claims</span>
-                      <textarea id="productProofInput" rows="4" placeholder="Case studies, proof points, exact claims we are allowed to make."></textarea>
-                    </label>
-                    <label>
-                      <span>Winning outreach examples</span>
-                      <textarea id="productWinningExamplesInput" rows="5" placeholder="Paste winning LinkedIn/SMS/email examples and notes on why they worked."></textarea>
-                    </label>
-                    <label>
-                      <span>Bad examples + claims to avoid</span>
-                      <textarea id="productBadExamplesInput" rows="5" placeholder="Paste bad messages, salesy phrases, false assumptions, disallowed claims, compliance limits."></textarea>
-                    </label>
-                  </div>
-                </details>
                 <button class="primary-button" id="productTeachBtn" type="submit"><i data-lucide="brain-circuit"></i><span>Analyze & Save Product</span></button>
               </form>
             </section>

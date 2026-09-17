@@ -167,8 +167,6 @@ function renderProductStudio() {
   document.getElementById("productStudioSelected").textContent = product.name || "selected product";
   const deleteButton = document.getElementById("deleteProductBtn");
   if (deleteButton) deleteButton.disabled = creatingNewProduct || (state.products || []).length <= 1;
-  const editButton = document.getElementById("editProductBtn");
-  if (editButton) editButton.disabled = creatingNewProduct || !state.selectedProduct;
   const teachButtonText = document.querySelector("#productTeachBtn span");
   if (teachButtonText) teachButtonText.textContent = creatingNewProduct ? "Analyze & Create Product" : "Analyze & Update Product";
   renderProductMemory(product);
@@ -1926,6 +1924,11 @@ function setView(viewName) {
   }
   // Loaded when the tab is opened rather than at boot: it talks to a different
   // database, and a workspace that never warms an account should not pay for it.
+  // Opening Products shows the selected product, but only into an empty box:
+  // coming back to the tab must not throw away something half-typed.
+  if (viewName === "products" && !document.getElementById("productContextInput")?.value) {
+    fillProductEditor(state.selectedProduct);
+  }
   if (viewName === "warmup") {
     loadWarmup();
   }
@@ -2280,6 +2283,9 @@ document.getElementById("productStudioProductSelect")?.addEventListener("change"
       body: JSON.stringify({ productId: event.target.value })
     });
   });
+  // Choosing a product shows it. This is what the Edit button used to be for,
+  // and a chooser that leaves the box empty is a chooser that chose nothing.
+  fillProductEditor(state.selectedProduct);
 });
 
 document.getElementById("syncMcpBtn").addEventListener("click", async () => {
@@ -2572,14 +2578,7 @@ document.getElementById("runPipelineBtn").addEventListener("click", async () => 
 
 document.getElementById("newProductBtn")?.addEventListener("click", () => {
   creatingNewProduct = true;
-  clearStructuredProductTrainingFields();
-  renderProductStudio();
-  refreshIcons();
-});
-
-document.getElementById("editProductBtn")?.addEventListener("click", () => {
-  creatingNewProduct = false;
-  fillProductEditor(state.selectedProduct);
+  clearProductTrainingField();
   renderProductStudio();
   refreshIcons();
 });
@@ -2594,13 +2593,13 @@ document.getElementById("deleteProductBtn")?.addEventListener("click", async () 
       body: JSON.stringify({ productId: product.id })
     });
     creatingNewProduct = false;
-    clearStructuredProductTrainingFields();
+    clearProductTrainingField();
   });
 });
 
 document.getElementById("productForm").addEventListener("submit", async (event) => {
   event.preventDefault();
-  const structuredText = structuredProductTrainingText();
+  const structuredText = productTrainingText();
   await runUiAction("product", "Analyzing product text and updating system memory...", async () => {
     state = await api("/api/products/teach", {
       method: "POST",
@@ -2611,62 +2610,32 @@ document.getElementById("productForm").addEventListener("submit", async (event) 
         createNewProduct: creatingNewProduct
       })
     });
-    clearStructuredProductTrainingFields();
+    // Show what was just saved rather than emptying the box. The box is the
+    // product now, so clearing it after a save reads as the product having
+    // gone — which was survivable when this was one field among seven.
+    fillProductEditor(state.selectedProduct);
   });
   creatingNewProduct = false;
 });
 
-function structuredProductTrainingText() {
-  const sections = [
-    ["General product context", document.getElementById("productContextInput").value],
-    ["Offer and deliverables", document.getElementById("productOfferInput")?.value],
-    ["ICP, buyers, and GEOs", document.getElementById("productIcpInput")?.value],
-    ["Pricing and commercial model", document.getElementById("productPricingInput")?.value],
-    ["Proof, cases, and approved claims", document.getElementById("productProofInput")?.value],
-    ["Winning outreach examples to imitate", document.getElementById("productWinningExamplesInput")?.value],
-    ["Bad outreach examples and claims to avoid", document.getElementById("productBadExamplesInput")?.value]
-  ];
-  return sections
-    .map(([label, value]) => [label, String(value || "").trim()])
-    .filter(([, value]) => value)
-    .map(([label, value]) => `${label}:\n${value}`)
-    .join("\n\n");
+/**
+ * What gets taught. One box, because the server only ever saw one string: the
+ * six structured fields were concatenated into this same text under headings,
+ * and on edit they were filled with the product own derived positioning,
+ * personas and proof — so saving fed the analysis its own output back as input.
+ */
+function productTrainingText() {
+  return String(document.getElementById("productContextInput").value || "").trim();
 }
 
-function clearStructuredProductTrainingFields() {
-  [
-    "productContextInput",
-    "productOfferInput",
-    "productIcpInput",
-    "productPricingInput",
-    "productProofInput",
-    "productWinningExamplesInput",
-    "productBadExamplesInput"
-  ].forEach((id) => {
-    const element = document.getElementById(id);
-    if (element) element.value = "";
-  });
+function clearProductTrainingField() {
+  const element = document.getElementById("productContextInput");
+  if (element) element.value = "";
 }
 
+/** The text this product was taught from, which is the only thing to edit. */
 function fillProductEditor(product) {
-  if (!product) return;
-  setFormValue("productContextInput", product.rawContext || product.positioning || "");
-  setFormValue("productOfferInput", [product.positioning, ...(product.useCases || [])].filter(Boolean).join("\n"));
-  setFormValue("productIcpInput", [
-    ...(product.targetPersonas || []).map((item) => `Persona: ${item}`),
-    ...((product.memory?.segments?.idealCustomers || []).map((item) => `Ideal customer: ${item}`))
-  ].join("\n"));
-  setFormValue("productPricingInput", product.memory?.segments?.pricing?.join("\n") || "");
-  setFormValue("productProofInput", (product.proofPoints || []).join("\n"));
-  setFormValue("productWinningExamplesInput", (product.examples || [])
-    .filter((example) => example.quality === "winning")
-    .slice(0, 6)
-    .map((example) => example.message)
-    .join("\n\n"));
-  setFormValue("productBadExamplesInput", [
-    ...(product.objections || []),
-    ...((product.examples || []).filter((example) => example.quality === "bad").slice(0, 6).map((example) => example.message))
-  ].filter(Boolean).join("\n\n"));
+  setFormValue("productContextInput", product?.rawContext || product?.positioning || "");
 }
 
 function setFormValue(id, value) {

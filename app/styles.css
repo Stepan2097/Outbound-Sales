@@ -2918,37 +2918,10 @@ dialog {
   margin-top: 14px;
 }
 
-.structured-product-fields {
-  border: 1px solid rgba(143, 177, 207, 0.18);
-  border-radius: 8px;
-  background: rgba(4, 16, 29, 0.34);
-  padding: 10px;
-}
 
-.structured-product-fields summary {
-  min-height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  cursor: pointer;
-  color: #dcecff;
-  font-weight: 800;
-}
 
-.structured-product-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 10px;
-}
 
-.structured-product-grid label {
-  min-width: 0;
-}
 
-.structured-product-grid textarea {
-  min-height: 112px;
-}
 
 .knowledge-inbox-card {
   display: grid;
@@ -4392,10 +4365,6 @@ dialog {
   }
 
   .product-management-row {
-    grid-template-columns: 1fr;
-  }
-
-  .structured-product-grid {
     grid-template-columns: 1fr;
   }
 
