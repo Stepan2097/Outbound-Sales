@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createReadStream, existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -25,6 +26,28 @@ const defaultSecondaryCompanyPeopleActorId = "scraper-engine/linkedin-company-em
 const defaultPersonEnrichmentActorId = "enrich-crm/enrich-crm-enrich-contact";
 const legacyPipelineLabsActorId = "kVYdvNOefemtiDXO5";
 const defaultFullEnrichBaseUrl = "https://app.fullenrich.com/api/v2";
+// Who is making the current API call. Attribution has to reach two places
+// deep inside the AI paths — the model a request picks and the usage row it
+// writes — and threading a profile through every caller in between would touch
+// every research, outreach and enrichment function on the way. The store is a
+// node builtin, so it costs no dependency, and a job running outside a request
+// (the warm-up scheduler, a webhook) simply finds nothing and stays
+// unattributed, which is what an unattributed row is supposed to mean.
+const actingUserStore = new AsyncLocalStorage();
+// A heartbeat is worth at most this much, however long the tab was silent.
+// It is the only thing standing between "left the tab open overnight" and a
+// sixteen-hour working day, so the ceiling is a little above the beat interval
+// the browser is told to use (60s) and nothing like a night.
+const heartbeatIntervalSeconds = 60;
+const heartbeatMaxCreditSeconds = clampNumber(process.env.ACTIVITY_MAX_CREDIT_SECONDS, 1, 3600, 90);
+// A backstop for the day as a whole. Nobody is in the app for sixteen hours;
+// a total that reaches this is a bug or a script, and it stops there.
+const activityDayCapSeconds = 16 * 60 * 60;
+// A tab that has not beaten for this long is treated as gone, for the open-tab
+// count the Profile screen shows. It changes no total.
+const activityTabIdleSeconds = 5 * 60;
+const activityRetentionDays = 400;
+const profileSpendWindowDays = 30;
 const authAccessCookie = "outbound_os_access";
 const authRefreshCookie = "outbound_os_refresh";
 const authSessionCache = new Map();
@@ -270,6 +293,8 @@ const state = {
   historicalOutcomes: seedHistoricalOutcomes(),
   scoringModel: seedScoringModel(),
   users: [],
+  // userId -> { days: { "YYYY-MM-DD": seconds }, lastCreditedAt, lastSeenAt, tabs }
+  userActivity: {},
   usage: seedUsage(),
   events: [
     {
@@ -307,7 +332,9 @@ const server = createServer(async (request, response) => {
     }
 
     if (url.pathname.startsWith("/api/")) {
-      await handleApi(request, response, url);
+      // The box is opened empty and filled the moment the session gate names a
+      // profile, so everything the request does afterwards knows who asked.
+      await actingUserStore.run({ profile: null }, () => handleApi(request, response, url));
       return;
     }
 
@@ -427,6 +454,7 @@ async function handleApi(request, response, url) {
     const auth = await authenticateApiRequest(request, response);
     if (!auth) return;
     request.auth = auth;
+    setActingUserProfile(auth.profile);
   }
 
   // LinkedIn warm-up. Its own modules, its own Anty database, mounted behind
@@ -469,6 +497,38 @@ async function handleApi(request, response, url) {
 
   if (request.method === "GET" && url.pathname === "/api/state") {
     sendJson(response, 200, publicState());
+    return;
+  }
+
+  // Everything the Profile screen shows, in one call: who you are, the model
+  // you picked, thirty days of your own spend, and your time in the app.
+  if (request.method === "GET" && url.pathname === "/api/account/profile") {
+    sendJson(response, 200, buildAccountProfileView(request.auth.profile));
+    return;
+  }
+
+  // The model is chosen per person now. An empty value hands the choice back
+  // to the workspace default rather than leaving the person without one.
+  if (request.method === "POST" && url.pathname === "/api/account/model") {
+    const body = await readJson(request);
+    const modelId = normalizeUserModelId(body.modelId ?? body.model ?? "");
+    if (modelId === null) {
+      sendJson(response, 400, { error: "Не впізнаю цю модель. Вибери одну зі списку або лиши поле порожнім, щоб узяти модель робочого простору." });
+      return;
+    }
+    request.auth.profile.modelId = modelId;
+    request.auth.profile.modelChosenAt = modelId ? new Date().toISOString() : null;
+    request.auth.profile.updatedAt = new Date().toISOString();
+    await writePersistentWorkspaceState();
+    sendJson(response, 200, { ok: true, model: accountModelView(request.auth.profile) });
+    return;
+  }
+
+  // The browser posts this while its tab is visible. What it is worth is
+  // decided here, not by the caller — see recordUserHeartbeat.
+  if (request.method === "POST" && url.pathname === "/api/account/heartbeat") {
+    const body = await readJson(request).catch(() => ({}));
+    sendJson(response, 200, recordUserHeartbeat(request.auth.profile, { tabId: body?.tabId }));
     return;
   }
 
@@ -1890,6 +1950,10 @@ function ensureWorkspaceUserProfile(user, defaults = {}) {
       title: cleanText(defaults.title || metadata.title || ""),
       role: defaults.role === "admin" || metadata.role === "admin" || !state.users.length ? "admin" : "seller",
       status: "active",
+      // Empty means "not chosen yet", which is a normal state and never an
+      // error: the workspace default answers for this person until they pick.
+      modelId: "",
+      modelChosenAt: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       lastLoginAt: null
@@ -1917,8 +1981,298 @@ function publicUserProfile(profile = {}) {
     title: profile.title || "",
     role: profile.role || "seller",
     status: profile.status || "active",
+    modelId: cleanText(profile.modelId || ""),
     createdAt: profile.createdAt,
     lastLoginAt: profile.lastLoginAt || null
+  };
+}
+
+// --- Per-user model choice -------------------------------------------------
+
+// Returns "" for "use the workspace default" and null for "this is not a model
+// id I will store", which the endpoint turns into a 400.
+function normalizeUserModelId(value) {
+  const modelId = cleanText(value || "").slice(0, 160);
+  if (!modelId) return "";
+  const known = state.models.find((model) => model.id === modelId);
+  if (known) return known.provider === "mock" ? null : modelId;
+  // The OpenRouter catalogue is synced on demand, so a valid id can be absent
+  // from state.models at the moment somebody picks it. Shape is the test.
+  return /^[\w.:-]+\/[\w.:-]+$/.test(modelId) ? modelId : null;
+}
+
+// The one rule the AI paths use. It never throws and never returns empty:
+// personal choice, then workspace default, then the id this build shipped with.
+function resolveModelForProfile(profile, kind = "analysis") {
+  const chosen = cleanText(profile?.modelId || "");
+  if (chosen) return chosen;
+  return kind === "writing"
+    ? cleanText(state.aiModelDefaults.writingModel || "") || openRouterDefaults.writingModel
+    : cleanText(state.aiModelDefaults.analysisModel || "") || openRouterDefaults.analysisModel;
+}
+
+function resolveModelForActingUser(kind = "analysis") {
+  return resolveModelForProfile(actingUserProfile(), kind);
+}
+
+function actingUserProfile() {
+  return actingUserStore.getStore()?.profile || null;
+}
+
+function setActingUserProfile(profile) {
+  const store = actingUserStore.getStore();
+  if (store) store.profile = profile || null;
+}
+
+function accountModelView(profile = {}) {
+  const chosen = cleanText(profile.modelId || "");
+  const catalogue = state.models
+    .filter((model) => model.provider !== "mock" && model.availability === "available")
+    .map((model) => ({
+      id: model.id,
+      displayName: model.displayName,
+      provider: model.provider,
+      tier: model.tier,
+      inputPrice: model.inputPrice,
+      outputPrice: model.outputPrice,
+      contextWindow: model.contextWindow,
+      enabled: Boolean(model.enabled)
+    }));
+  // Until OpenRouter is connected the catalogue is nothing but mock rows, and
+  // a Profile screen with an empty list would offer no choice at all. The two
+  // models the workspace actually calls are always offerable.
+  for (const id of [state.aiModelDefaults.analysisModel, state.aiModelDefaults.writingModel, chosen]) {
+    const modelId = cleanText(id || "");
+    if (!modelId || catalogue.some((model) => model.id === modelId)) continue;
+    catalogue.push({
+      id: modelId,
+      displayName: modelId,
+      provider: "openrouter",
+      tier: modelId === state.aiModelDefaults.writingModel ? "premium" : "economy",
+      inputPrice: 0,
+      outputPrice: 0,
+      contextWindow: 0,
+      enabled: true
+    });
+  }
+  return {
+    modelId: chosen,
+    source: chosen ? "user" : "workspace",
+    chosenAt: profile.modelChosenAt || null,
+    effective: {
+      analysisModel: resolveModelForProfile(profile, "analysis"),
+      writingModel: resolveModelForProfile(profile, "writing")
+    },
+    workspaceDefaults: { ...state.aiModelDefaults },
+    options: catalogue
+  };
+}
+
+// --- Usage attribution -----------------------------------------------------
+
+// Missing is unattributed, not "somebody". Rows written before this existed
+// stay readable everywhere the workspace reads them and belong to nobody.
+function usageRowUserId(row = {}) {
+  return cleanText(row?.userId || "") || null;
+}
+
+// The 18 rows seedUsage() makes are fabricated, and so is everything
+// simulateRun() writes: both carry provider "mock" and a mock/* model. One
+// rule covers both — a person's spend counts real provider calls only — and
+// nothing has to be deleted for it to hold.
+function isRealUsageRow(row = {}) {
+  if (!row) return false;
+  if (String(row.provider || "").toLowerCase() === "mock") return false;
+  if (String(row.modelId || "").startsWith("mock/")) return false;
+  return Number.isFinite(Number(row.costUsd));
+}
+
+// The id and nothing else. Who that id is stays in state.users, where the
+// roster is already admin-only — a row carrying an email would put every
+// colleague's address into the usage list any signed-in seller can read.
+function usageAttributionForActingUser() {
+  const profile = actingUserProfile();
+  return { userId: profile?.id || null };
+}
+
+// --- Days ------------------------------------------------------------------
+
+// UTC, for every bucket the app makes. One workspace, one day boundary: a
+// per-viewer boundary would make two people's charts disagree about the same
+// row. The payload says which zone it used so the screen can label it.
+function utcDayKey(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(date.getTime())) return "";
+  return date.toISOString().slice(0, 10);
+}
+
+function utcDayKeySeries(days = profileSpendWindowDays, endValue = new Date()) {
+  const end = endValue instanceof Date ? endValue : new Date(endValue);
+  const endMs = Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate());
+  const total = Math.max(1, Math.round(days));
+  return Array.from({ length: total }, (_, index) => {
+    const dayMs = endMs - (total - 1 - index) * 86400000;
+    return new Date(dayMs).toISOString().slice(0, 10);
+  });
+}
+
+// Every day in the window, including the ones with nothing in them — a chart
+// drawn from present days only lies about the shape of the month.
+function dailySpendBuckets(userId, { days = profileSpendWindowDays, endValue = new Date() } = {}) {
+  const buckets = new Map(utcDayKeySeries(days, endValue).map((date) => [date, { date, costUsd: 0, tokens: 0, requests: 0 }]));
+  for (const row of state.usage) {
+    if (!isRealUsageRow(row)) continue;
+    if (usageRowUserId(row) !== userId) continue;
+    const bucket = buckets.get(utcDayKey(row.at));
+    if (!bucket) continue;
+    bucket.costUsd += Number(row.costUsd) || 0;
+    bucket.tokens += (Number(row.inputTokens) || 0) + (Number(row.outputTokens) || 0);
+    bucket.requests += 1;
+  }
+  return [...buckets.values()].map((bucket) => ({ ...bucket, costUsd: Number(bucket.costUsd.toFixed(6)) }));
+}
+
+function userSpendSummary(userId, { days = profileSpendWindowDays, endValue = new Date() } = {}) {
+  const buckets = dailySpendBuckets(userId, { days, endValue });
+  const attributed = state.usage.filter((row) => isRealUsageRow(row) && usageRowUserId(row) === userId);
+  const windowCost = buckets.reduce((total, bucket) => total + bucket.costUsd, 0);
+  return {
+    currency: "USD",
+    days: buckets.length,
+    timeZone: "UTC",
+    from: buckets[0]?.date || "",
+    to: buckets[buckets.length - 1]?.date || "",
+    totalCostUsd: Number(windowCost.toFixed(6)),
+    totalTokens: buckets.reduce((total, bucket) => total + bucket.tokens, 0),
+    requests: buckets.reduce((total, bucket) => total + bucket.requests, 0),
+    allTimeCostUsd: Number(attributed.reduce((total, row) => total + (Number(row.costUsd) || 0), 0).toFixed(6)),
+    allTimeRequests: attributed.length,
+    buckets
+  };
+}
+
+// --- Time in the app -------------------------------------------------------
+
+function ensureUserActivity(profile = {}) {
+  const userId = cleanText(profile.id || "");
+  if (!userId) return null;
+  if (!state.userActivity || typeof state.userActivity !== "object") state.userActivity = {};
+  let record = state.userActivity[userId];
+  if (!record || typeof record !== "object") {
+    record = { userId, days: {}, tabs: {}, lastCreditedAt: null, lastSeenAt: null };
+    state.userActivity[userId] = record;
+  }
+  if (!record.days || typeof record.days !== "object") record.days = {};
+  if (!record.tabs || typeof record.tabs !== "object") record.tabs = {};
+  return record;
+}
+
+// Two judgement calls live here.
+//
+// 1. A tab left open overnight must not count as a working day. A beat is
+//    worth the time since the last credited beat, capped at
+//    heartbeatMaxCreditSeconds (90s by default, against a 60s beat). Eight
+//    silent hours therefore buy ninety seconds, not eight hours. Combined with
+//    the browser only beating while its tab is visible, sleeping through the
+//    night costs one beat's worth of time on the next morning's first beat.
+//
+// 2. Two open tabs must not count double. The clock is the person's, not the
+//    tab's: lastCreditedAt is kept per user, and each beat — from whichever
+//    tab — advances it. Two tabs beating every 60s credit 60s a minute
+//    between them, not 120s, because the second beat of the pair finds no
+//    elapsed time left to claim.
+function recordUserHeartbeat(profile, { tabId = "", now = Date.now() } = {}) {
+  const record = ensureUserActivity(profile);
+  const nowIso = new Date(now).toISOString();
+  const dayKey = utcDayKey(new Date(now));
+  if (!record) {
+    return { ok: false, date: dayKey, credited: 0, seconds: 0, openTabs: 0, intervalSeconds: heartbeatIntervalSeconds };
+  }
+
+  const previousMs = Date.parse(record.lastCreditedAt || "");
+  let credited = 0;
+  if (Number.isFinite(previousMs)) {
+    // Clamped at both ends: a clock that went backwards claims nothing, and a
+    // long silence claims one beat.
+    credited = Math.min(Math.max((now - previousMs) / 1000, 0), heartbeatMaxCreditSeconds);
+  }
+  const before = Number(record.days[dayKey]) || 0;
+  const after = Math.min(activityDayCapSeconds, before + credited);
+  record.days[dayKey] = Number(after.toFixed(3));
+  credited = Number((after - before).toFixed(3));
+  record.lastCreditedAt = nowIso;
+  record.lastSeenAt = nowIso;
+
+  const tab = cleanText(tabId).slice(0, 64) || "default";
+  record.tabs[tab] = nowIso;
+  pruneUserActivity(record, now);
+  // Beats arrive every minute from every open tab, and the workspace file is
+  // the whole workspace. Half a minute of seconds is the most a crash can
+  // cost, and the disk is left alone the rest of the time.
+  if (now - lastActivityPersistMs > 30_000) {
+    lastActivityPersistMs = now;
+    persistWorkspaceState();
+  }
+
+  return {
+    ok: true,
+    date: dayKey,
+    timeZone: "UTC",
+    credited,
+    seconds: Math.round(record.days[dayKey]),
+    openTabs: Object.keys(record.tabs).length,
+    intervalSeconds: heartbeatIntervalSeconds,
+    maxCreditSeconds: heartbeatMaxCreditSeconds
+  };
+}
+
+function pruneUserActivity(record, now = Date.now()) {
+  for (const [tab, seenAt] of Object.entries(record.tabs)) {
+    const seenMs = Date.parse(seenAt || "");
+    if (!Number.isFinite(seenMs) || now - seenMs > activityTabIdleSeconds * 1000) delete record.tabs[tab];
+  }
+  const keys = Object.keys(record.days).sort();
+  if (keys.length > activityRetentionDays) {
+    for (const key of keys.slice(0, keys.length - activityRetentionDays)) delete record.days[key];
+  }
+}
+
+function userTimeSummary(profile, { days = profileSpendWindowDays, endValue = new Date() } = {}) {
+  const record = state.userActivity?.[cleanText(profile?.id || "")] || null;
+  const daysMap = record?.days && typeof record.days === "object" ? record.days : {};
+  const buckets = utcDayKeySeries(days, endValue).map((date) => ({ date, seconds: Math.round(Number(daysMap[date]) || 0) }));
+  const windowSeconds = buckets.reduce((total, bucket) => total + bucket.seconds, 0);
+  const activeDays = buckets.filter((bucket) => bucket.seconds > 0).length;
+  const allTimeSeconds = Object.values(daysMap).reduce((total, value) => total + (Number(value) || 0), 0);
+  const today = utcDayKey(endValue);
+  const nowMs = (endValue instanceof Date ? endValue : new Date(endValue)).getTime();
+  const openTabs = Object.values(record?.tabs || {}).filter((seenAt) => {
+    const seenMs = Date.parse(seenAt || "");
+    return Number.isFinite(seenMs) && nowMs - seenMs <= activityTabIdleSeconds * 1000;
+  }).length;
+  return {
+    timeZone: "UTC",
+    days: buckets.length,
+    todaySeconds: Math.round(Number(daysMap[today]) || 0),
+    totalSeconds: windowSeconds,
+    allTimeSeconds: Math.round(allTimeSeconds),
+    activeDays,
+    averageSecondsPerActiveDay: activeDays ? Math.round(windowSeconds / activeDays) : 0,
+    lastSeenAt: record?.lastSeenAt || null,
+    openTabs,
+    intervalSeconds: heartbeatIntervalSeconds,
+    maxCreditSeconds: heartbeatMaxCreditSeconds,
+    buckets
+  };
+}
+
+function buildAccountProfileView(profile = {}, { endValue = new Date() } = {}) {
+  return {
+    user: publicUserProfile(profile),
+    model: accountModelView(profile),
+    spend: userSpendSummary(cleanText(profile.id || "") || null, { endValue }),
+    time: userTimeSummary(profile, { endValue }),
+    generatedAt: new Date().toISOString()
   };
 }
 
@@ -2005,6 +2359,8 @@ async function serveStatic(response, pathname) {
 }
 
 let persistTimer = null;
+// Throttles the workspace write a heartbeat asks for; see recordUserHeartbeat.
+let lastActivityPersistMs = 0;
 
 async function loadPersistentWorkspaceState() {
   if (!existsSync(stateFilePath)) return;
@@ -2051,8 +2407,24 @@ function applyPersistentWorkspaceState(saved = {}) {
   if (Array.isArray(saved.users)) {
     state.users = saved.users
       .filter((user) => user && user.id && user.email)
-      .map((user) => ({ ...user, email: cleanText(user.email).toLowerCase() }))
+      .map((user) => ({
+        ...user,
+        email: cleanText(user.email).toLowerCase(),
+        // A saved model that no longer parses is dropped rather than kept as a
+        // choice nobody can use: the workspace default answers again.
+        modelId: normalizeUserModelId(user.modelId) || "",
+        modelChosenAt: user.modelChosenAt || null
+      }))
       .slice(0, 200);
+  }
+  if (saved.userActivity && typeof saved.userActivity === "object" && !Array.isArray(saved.userActivity)) {
+    state.userActivity = restoreUserActivity(saved.userActivity);
+  }
+  if (Array.isArray(saved.usage)) {
+    // Real rows first, then the fabricated seeds this boot made, newest first.
+    state.usage = [...saved.usage.filter(isRealUsageRow), ...state.usage]
+      .sort((left, right) => String(right.at || "").localeCompare(String(left.at || "")))
+      .slice(0, 5000);
   }
   if (saved.historicalOutcomes && typeof saved.historicalOutcomes === "object") state.historicalOutcomes = saved.historicalOutcomes;
   if (saved.scoringModel && typeof saved.scoringModel === "object") {
@@ -2135,6 +2507,33 @@ function applyPersistentWorkspaceState(saved = {}) {
   }
 }
 
+// Seconds per user per day, taken back from the file with the same shape the
+// heartbeat writes: unknown keys dropped, numbers clamped, garbage ignored.
+function restoreUserActivity(saved = {}) {
+  const restored = {};
+  for (const [userId, record] of Object.entries(saved)) {
+    if (!userId || !record || typeof record !== "object") continue;
+    const days = {};
+    for (const [day, seconds] of Object.entries(record.days || {})) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) continue;
+      const value = Number(seconds);
+      if (!Number.isFinite(value) || value <= 0) continue;
+      days[day] = Math.min(activityDayCapSeconds, value);
+    }
+    restored[userId] = {
+      userId,
+      days,
+      // Tabs are a live signal, so a restart starts the count again. A
+      // restored lastCreditedAt is kept: the cap makes the first beat after a
+      // restart worth one beat, exactly like the first beat of a morning.
+      tabs: {},
+      lastCreditedAt: typeof record.lastCreditedAt === "string" ? record.lastCreditedAt : null,
+      lastSeenAt: typeof record.lastSeenAt === "string" ? record.lastSeenAt : null
+    };
+  }
+  return restored;
+}
+
 function mergeProductMemory(existing, product) {
   return {
     ...existing,
@@ -2184,6 +2583,11 @@ async function writePersistentWorkspaceState() {
       interactions: state.interactions.slice(0, 2000),
       followUpTasks: state.followUpTasks.slice(0, 1000),
       users: state.users.slice(0, 200),
+      userActivity: state.userActivity,
+      // Only rows from a real provider are kept. The fabricated ones — the 18
+      // seeds and anything simulateRun writes — are rebuilt on boot and would
+      // otherwise pile up in the file one restart at a time.
+      usage: state.usage.filter(isRealUsageRow).slice(0, 5000),
       historicalOutcomes: state.historicalOutcomes,
       scoringModel: state.scoringModel,
       researchJobs: state.researchJobs.slice(0, 100),
@@ -3423,7 +3827,7 @@ async function teachProductFromText(text, selectedProductId = "", options = {}) 
 
 async function analyzeProductContextWithAi(text, selectedProduct, localAnalysis) {
   const { data, run } = await callOpenRouterJson({
-    model: state.aiModelDefaults.analysisModel,
+    model: resolveModelForActingUser("analysis"),
     taskType: "MCP_CONTEXT_SYNTHESIS",
     profile: "economy",
     maxTokens: 1200,
@@ -6427,7 +6831,7 @@ async function analyzeLearningExample(example, product) {
     }
 
     const { data, run } = await callOpenRouterJson({
-      model: state.aiModelDefaults.analysisModel,
+      model: resolveModelForActingUser("analysis"),
       taskType: "MESSAGE_QUALITY_REVIEW",
       profile: "balanced",
       maxTokens: 1100,
@@ -6517,7 +6921,7 @@ async function rebuildLearningPlaybook({ forceAi = false } = {}) {
 
   try {
     const { data, run } = await callOpenRouterJson({
-      model: state.aiModelDefaults.analysisModel,
+      model: resolveModelForActingUser("analysis"),
       taskType: "CAMPAIGN_ANALYSIS",
       profile: "balanced",
       maxTokens: 1300,
@@ -6795,8 +7199,10 @@ async function prepareOutreachWithAi(prospect, profile, taskType = "SEQUENCE_GEN
 }
 
 function outreachModelForProfile(profile = "balanced") {
-  if (profile === "economy") return state.aiModelDefaults.analysisModel;
-  return state.aiModelDefaults.writingModel;
+  // "profile" here is the analysis profile (economy/balanced/premium), not a
+  // person. The person is whoever is making the request.
+  if (profile === "economy") return resolveModelForActingUser("analysis");
+  return resolveModelForActingUser("writing");
 }
 
 function outreachMaxTokensForProfile(profile = "balanced") {
@@ -8304,7 +8710,7 @@ async function synthesizeLeadIntelligenceWithAi(localSnapshot, prospect, product
   if (!state.vault || state.providerHealth.status !== "healthy") return localSnapshot;
   const started = performance.now();
   const { data, run } = await callOpenRouterJson({
-    model: state.aiModelDefaults.analysisModel,
+    model: resolveModelForActingUser("analysis"),
     taskType: "ACCOUNT_QUALIFICATION",
     profile: "balanced",
     maxTokens: 5200,
@@ -9607,7 +10013,7 @@ async function attachCallAnalysis(prospect, transcript, source = "manual_paste",
 
 async function analyzeCallTranscriptWithAi(prospect, transcript, product, fallback) {
   const { data, run } = await callOpenRouterJson({
-    model: state.aiModelDefaults.analysisModel,
+    model: resolveModelForActingUser("analysis"),
     taskType: "SALES_COACHING",
     profile: "economy",
     maxTokens: 1100,
@@ -9815,7 +10221,7 @@ async function interpretAssistantInstruction(instruction, defaults) {
   if (state.vault && state.providerHealth.status === "healthy") {
     try {
       const { data, run } = await callOpenRouterJson({
-        model: state.aiModelDefaults.analysisModel,
+        model: resolveModelForActingUser("analysis"),
         taskType: "NEXT_BEST_ACTION",
         profile: "economy",
         maxTokens: 900,
@@ -11835,6 +12241,9 @@ function recordOpenRouterUsage({ taskType, modelId, inputTokens, outputTokens, l
     taskType,
     modelId,
     provider: "openrouter",
+    // Who this cost belongs to. Null when the call came from a scheduler or a
+    // webhook rather than from a person's request.
+    ...usageAttributionForActingUser(),
     inputTokens,
     outputTokens,
     costUsd: Number((inputCost + outputCost).toFixed(6)),
@@ -11960,6 +12369,9 @@ function simulateRun(taskType, profile, preferredModel) {
     taskType: task.taskType,
     modelId: selected.model.id,
     provider: selected.model.provider,
+    // Attributed like any other row. It still stays out of the person's spend,
+    // because a simulated run is a mock provider and isRealUsageRow says no.
+    ...usageAttributionForActingUser(),
     inputTokens: profile === "premium" ? 2200 : profile === "economy" ? 580 : 1100,
     outputTokens: profile === "premium" ? 760 : profile === "economy" ? 170 : 380,
     costUsd: selected.estimatedCost,
