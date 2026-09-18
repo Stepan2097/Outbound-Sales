@@ -66,7 +66,7 @@
           <div class="topbar-actions">
             <select id="productSelect" aria-label="Продукт для аутрічу"></select>
             <button class="icon-button" id="accountMenuBtn" type="button" title="Користувачі" aria-label="Відкрити користувачів"><i data-lucide="users-round"></i></button>
-            <button class="primary-button" id="quickPrepareBtn"><i data-lucide="wand-sparkles"></i><span>Запустити дослідження</span></button>
+            <button class="primary-button" id="quickPrepareBtn"><i data-lucide="sparkles"></i><span>Збагатити</span></button>
             <button class="utility-hidden" id="syncMcpBtn"><i data-lucide="database-zap"></i><span>Синхронізувати MCP</span></button>
             <button class="icon-button utility-hidden" id="syncModelsBtn" title="Синхронізувати моделі" aria-label="Синхронізувати моделі">
               <i data-lucide="refresh-cw"></i>
@@ -77,6 +77,24 @@
 
         <section class="view active" id="view-prospects">
           <div class="lead-workspace">
+            <section class="panel lead-source-bar">
+              <label class="lead-source-field">
+                <span>Продукт</span>
+                <select id="panelProductSelect" aria-label="Продукт, під який готуємо захід"></select>
+              </label>
+              <label class="lead-source-field">
+                <span>Папка з контактами</span>
+                <select id="panelFolderSelect" aria-label="Папка з контактами">
+                  <option value="">Папку не вибрано</option>
+                </select>
+              </label>
+              <div class="lead-source-progress">
+                <span id="panelQueuePosition">Вибери папку — далі люди йдуть по черзі</span>
+                <div class="meter"><span id="panelQueueMeter" style="width:0%"></span></div>
+              </div>
+              <button class="icon-button lead-source-refresh" id="panelFoldersRefreshBtn" type="button" title="Перечитати папки CRM" aria-label="Перечитати папки CRM"><i data-lucide="refresh-cw"></i></button>
+            </section>
+
             <section class="panel lead-command-bar">
               <button id="prevLeadBtn" type="button"><i data-lucide="chevron-left"></i><span>Назад</span></button>
               <div class="lead-command-summary">
@@ -89,7 +107,7 @@
                 <option value="balanced" selected>Збалансовано</option>
                 <option value="premium">Стратегічно</option>
               </select>
-              <button class="primary-button" id="runResearchTopBtn" type="button"><i data-lucide="wand-sparkles"></i><span>Запустити дослідження</span></button>
+              <button class="primary-button" id="runResearchTopBtn" type="button"><i data-lucide="sparkles"></i><span>Збагатити</span></button>
               <button id="nextLeadBtn" type="button"><span>Далі</span><i data-lucide="chevron-right"></i></button>
             </section>
 
@@ -115,6 +133,7 @@
 
             <nav class="lead-section-nav" aria-label="Розділи робочої області ліда" role="tablist">
               <select id="mobileLeadSectionSelect" aria-label="Розділ робочої області ліда">
+                <option value="dashboard-client">Опис клієнта</option>
                 <option value="dashboard-account">Компанія</option>
                 <option value="dashboard-strategy">Стратегія</option>
                 <option value="dashboard-intelligence">Бриф</option>
@@ -126,6 +145,7 @@
                 <option value="dashboard-next">Наступна дія</option>
                 <option value="dashboard-cycle">Цикл продажу</option>
               </select>
+              <button type="button" role="tab" data-lead-tab="dashboard-client">Опис клієнта</button>
               <button type="button" role="tab" data-lead-tab="dashboard-account">Компанія</button>
               <button type="button" role="tab" data-lead-tab="dashboard-strategy">Стратегія</button>
               <button type="button" role="tab" data-lead-tab="dashboard-intelligence">Бриф</button>
@@ -140,6 +160,21 @@
 
             <div class="lead-workbench-grid">
               <main class="lead-main-stack">
+                <section class="panel lead-section client-profile-panel" id="dashboard-client">
+                  <div class="panel-heading">
+                    <div>
+                      <h2>Опис клієнта і підходи до розмови</h2>
+                      <p id="clientProfileMeta">Хто це, що для нього важливо і з чого почати розмову</p>
+                    </div>
+                    <div class="intelligence-actions">
+                      <span class="pill" id="clientProfilePill">ще не збагачено</span>
+                      <button class="primary-button" id="enrichLeadBtn" type="button"><i data-lucide="sparkles"></i><span>Збагатити</span></button>
+                      <button id="refreshCompanyBtn" type="button" title="Шукати компанію заново, не читаючи збережене"><i data-lucide="refresh-cw"></i><span>Перешукати компанію</span></button>
+                    </div>
+                  </div>
+                  <div class="client-profile-content" id="clientProfileContent"></div>
+                </section>
+
                 <section class="panel lead-section intelligence-panel" id="dashboard-intelligence">
                   <div class="panel-heading">
                     <div>
@@ -335,7 +370,7 @@
                       <p>Спочатку переглянь, потім копіюй або записуй</p>
                     </div>
                   </div>
-                  <button class="primary-button" id="prepareOutreachBtn" type="button"><i data-lucide="wand-sparkles"></i><span>Запустити дослідження</span></button>
+                  <button class="primary-button" id="prepareOutreachBtn" type="button"><i data-lucide="sparkles"></i><span>Збагатити</span></button>
                   <button id="analyzeIntelligenceQuick" type="button"><i data-lucide="brain-circuit"></i><span>Проаналізувати бриф</span></button>
                   <button id="copyLinkedinQuick" type="button" data-copy-text="" data-copy-channel="linkedin" data-copy-label="LinkedIn quick copy"><i data-lucide="send"></i><span>Копіювати LinkedIn</span></button>
                   <button id="copyEmailQuick" type="button" data-copy-text="" data-copy-channel="email" data-copy-label="Email quick copy"><i data-lucide="mail"></i><span>Копіювати email</span></button>

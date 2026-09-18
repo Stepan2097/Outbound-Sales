@@ -3129,6 +3129,160 @@ dialog {
   gap: 16px;
 }
 
+/* Звідки Панель бере людей: продукт, папка і місце в ній. */
+.lead-source-bar {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.9fr) minmax(220px, 1.2fr) minmax(200px, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+  padding: 12px;
+}
+
+.lead-source-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.lead-source-field span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.lead-source-field select {
+  width: 100%;
+}
+
+.lead-source-progress {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding-bottom: 10px;
+}
+
+.lead-source-progress span {
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Опис клієнта і підходи до розмови. */
+.client-profile-content {
+  display: grid;
+  gap: 16px;
+}
+
+.client-profile-description {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.client-profile-split {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.client-profile-split section {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-sunk);
+}
+
+.client-profile-split h3,
+.client-profile-list h3,
+.client-approach-list h3 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.client-profile-split p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.client-profile-list ul {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+}
+
+.client-approach-list {
+  display: grid;
+  gap: 10px;
+}
+
+.client-approach {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-sunk);
+}
+
+.client-approach header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.client-approach header > div {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.client-approach header strong {
+  font-size: 15px;
+}
+
+.client-approach header .pill {
+  justify-self: start;
+}
+
+.client-approach-opener {
+  margin: 0;
+  padding: 10px 12px;
+  border-left: 2px solid var(--teal);
+  border-radius: 0 10px 10px 0;
+  background: var(--surface-strong);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.client-approach-why,
+.client-approach-risk {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.client-profile-content .is-muted {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.client-profile-meta {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .lead-command-bar {
   position: sticky;
   top: 0;
@@ -4345,6 +4499,22 @@ dialog {
     grid-template-columns: auto minmax(0, 1fr) auto;
   }
 
+  .lead-source-bar {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  }
+
+  /* Кнопка лишається в першому рядку поруч із селектами: прогрес під ними
+     розтягнутий на всю ширину і інакше зіпхнув би її в окремий рядок. */
+  .lead-source-refresh {
+    grid-row: 1;
+    grid-column: 3;
+  }
+
+  .lead-source-progress {
+    grid-column: 1 / -1;
+    padding-bottom: 0;
+  }
+
   .lead-command-bar select {
     grid-column: 1 / -1;
   }
@@ -4369,6 +4539,7 @@ dialog {
 
   .product-memory-segments,
   .lead-command-bar,
+  .lead-source-bar,
   .lead-hero,
   .lead-stats-strip,
   .score-breakdown-grid,

@@ -4,7 +4,16 @@ let selectedProspectId = null;
 let busyAction = "";
 let busyMessage = "";
 let uiNotice = "";
-let activeLeadSectionId = "dashboard-account";
+let activeLeadSectionId = "dashboard-client";
+// Панель працює папку CRM по черзі: вибрана папка, місце в ній, скільки там
+// людей і що сервер сказав про це місце. Позиція — не фільтр і не пошук: це
+// рівно те, на кому продавець зупинився, тому вона переживає перезавантаження.
+let panelFolderId = window.localStorage.getItem("outbound.panel.folder") || "";
+let panelIndex = Number(window.localStorage.getItem("outbound.panel.index") || 0) || 0;
+let panelTotal = 0;
+let panelContact = null;
+let panelQueueNotice = "";
+let panelQueueBusy = false;
 let authState = null;
 let authMode = "login";
 let activeResearchJob = null;
@@ -100,6 +109,7 @@ function render() {
   renderAccount();
   renderSidebarUser();
   renderProductWorkspace();
+  renderPanelSource();
   renderProspects();
   renderLeadsPage();
   renderAssistant();
@@ -160,6 +170,7 @@ async function enterWorkspace() {
   startActivityHeartbeat();
   const saved = rememberedView();
   if (saved) setView(saved);
+  else setView("prospects");
 }
 
 function renderAuthForm() {
@@ -641,6 +652,153 @@ function renderEvaluation() {
     .join("");
 }
 
+/* ── Папка як черга ────────────────────────────────────────────────────────
+ *
+ * Панель не дає гортати папку — вона веде по ній. Продавець вибирає продукт і
+ * папку, а далі кожен наступний контакт відкривається на весь екран сам, по
+ * порядку, і єдина навігація — «Назад» і «Далі». Позиція живе в localStorage,
+ * бо це не стан робочого простору, а те, на кому зупинився конкретний продавець
+ * у конкретному браузері.
+ *
+ * Контакт при відкритті потрапляє в чергу лідів — інакше досліджувати, писати
+ * й фіксувати в CRM було б нічого.
+ */
+
+function renderPanelSource() {
+  const productSelect = document.getElementById("panelProductSelect");
+  if (productSelect) {
+    fillSelect(productSelect, state?.products || [], (product) => product.id, (product) => product.name, state?.selectedProductId);
+  }
+
+  const folderSelect = document.getElementById("panelFolderSelect");
+  if (folderSelect) {
+    const options = [`<option value="">${contactFoldersLoaded ? "Папку не вибрано" : "Читаємо папки CRM..."}</option>`];
+    for (const folder of contactFolders) {
+      const count = Number(folder.contactCount) || 0;
+      options.push(`<option value="${escapeAttr(folder.id)}" ${folder.id === panelFolderId ? "selected" : ""}>${escapeHtml(folder.name || "Без назви")} · ${count} ${uaPlural(count, "контакт", "контакти", "контактів")}</option>`);
+    }
+    // Папка, якої CRM більше не показує, все одно лишається тією, з якою людина
+    // працює: прибрати її зі списку — це мовчки перекинути чергу в іншу папку.
+    if (panelFolderId && !contactFolders.some((folder) => folder.id === panelFolderId)) {
+      options.push(`<option value="${escapeAttr(panelFolderId)}" selected>Папка, якої CRM не показує</option>`);
+    }
+    folderSelect.innerHTML = options.join("");
+    folderSelect.disabled = panelQueueBusy;
+  }
+
+  const position = panelFolderId && panelTotal
+    ? `Контакт ${Math.min(panelIndex + 1, panelTotal)} з ${panelTotal}`
+    : panelFolderId
+      ? (panelQueueBusy ? "Читаємо папку..." : "У цій папці немає контактів")
+      : "Вибери папку — далі люди йдуть по черзі";
+  setText("panelQueuePosition", panelQueueNotice ? `${position} · ${panelQueueNotice}` : position);
+
+  const meter = document.getElementById("panelQueueMeter");
+  if (meter) meter.style.width = `${panelTotal ? Math.round(((Math.min(panelIndex + 1, panelTotal)) / panelTotal) * 100) : 0}%`;
+
+  const refreshButton = document.getElementById("panelFoldersRefreshBtn");
+  if (refreshButton) refreshButton.disabled = panelQueueBusy;
+}
+
+function rememberPanelPosition() {
+  try {
+    window.localStorage.setItem("outbound.panel.folder", panelFolderId);
+    window.localStorage.setItem("outbound.panel.index", String(panelIndex));
+  } catch {
+    // Приватне вікно без localStorage — позиція просто не переживе перезавантаження.
+  }
+}
+
+async function loadPanelFolders({ force = false } = {}) {
+  panelQueueBusy = true;
+  renderPanelSource();
+  try {
+    await fetchContactFolders({ force });
+    if (panelFolderId && contactFolders.length && !contactFolders.some((folder) => folder.id === panelFolderId)) {
+      panelQueueNotice = "";
+    }
+  } catch (error) {
+    panelQueueNotice = error.message || "CRM не відповіла.";
+  } finally {
+    panelQueueBusy = false;
+    renderPanelSource();
+    refreshIcons();
+  }
+  if (panelFolderId && !panelTotal) await openPanelPosition(panelIndex);
+}
+
+/**
+ * Відкрити людину, яка стоїть у папці на цьому місці.
+ *
+ * Сервер за одним запитом і дістає контакт, і бере його в чергу лідів, і віддає
+ * весь стан робочого простору — щоб між «Далі» і карткою на екрані не було
+ * проміжного стану, в якому лід уже вибраний, а даних про нього ще немає.
+ */
+async function openPanelPosition(index) {
+  if (!panelFolderId || panelQueueBusy) return;
+  const wanted = Math.max(0, Math.trunc(index));
+  panelQueueBusy = true;
+  panelQueueNotice = "";
+  renderPanelSource();
+  try {
+    const payload = await api("/api/contacts/queue", {
+      method: "POST",
+      body: JSON.stringify({ folderId: panelFolderId, index: wanted })
+    });
+    const queue = payload.queue || {};
+    state = payload;
+    panelTotal = Number(queue.total) || 0;
+    panelContact = queue.contact || null;
+    if (!queue.contact) {
+      panelQueueNotice = queue.warning || "Далі в цій папці нікого немає.";
+      panelIndex = panelTotal ? Math.min(wanted, panelTotal - 1) : 0;
+    } else {
+      panelIndex = Number(queue.index) || 0;
+      // Контакт без компанії — не лід: досліджувати нема по чому. Черга на
+      // ньому не спиняється, але й мовчки його не пропускає.
+      panelQueueNotice = queue.warning ? `${queue.contact.name || "Цей контакт"}: ${queue.warning}` : "";
+      if (queue.prospectId) {
+        selectedProspectId = queue.prospectId;
+        if (activeResearchJob?.prospectId !== selectedProspectId) activeResearchJob = null;
+        activeLeadSectionId = "dashboard-client";
+      }
+    }
+    rememberPanelPosition();
+    render();
+    if (queue.contact) scrollLeadWorkspaceToTop();
+  } catch (error) {
+    panelQueueNotice = error.message || "CRM не відповіла.";
+  } finally {
+    panelQueueBusy = false;
+    renderPanelSource();
+    refreshIcons();
+  }
+}
+
+/** «Назад» і «Далі»: по папці, коли папка вибрана, інакше по локальній черзі. */
+function movePanel(direction) {
+  // Поки йде збагачення, наступний контакт не відкривається: дослідження
+  // дописує саме того ліда, який зараз на екрані, і підмінити його на півдорозі
+  // означало б показати результат не про ту людину.
+  if (busyAction) return;
+  if (!panelFolderId) {
+    moveSelectedProspect(direction);
+    return;
+  }
+  const next = panelIndex + direction;
+  if (next < 0) {
+    panelQueueNotice = "Це перший контакт у папці.";
+    renderPanelSource();
+    return;
+  }
+  if (panelTotal && next >= panelTotal) {
+    panelQueueNotice = "Папку пройдено до кінця.";
+    renderPanelSource();
+    return;
+  }
+  void openPanelPosition(next);
+}
+
 function renderProspects() {
   if (!state.prospects?.length) {
     selectedProspectId = null;
@@ -737,7 +895,13 @@ function renderLeadWorkspaceExtras(prospect) {
   const confidence = bestContactConfidence(prospect);
   const latest = prospect?.updatedAt ? `Оновлено ${relativeTime(prospect.updatedAt)}` : "Дослідження не запускалося";
 
-  setText("leadWorkspaceQueue", prospects.length ? `Лід ${index + 1 || 1} з ${prospects.length}` : "Лідів не завантажено");
+  // Коли Панель веде папку, рахунок іде по папці, а не по локальній черзі:
+  // «Лід 3 з 4» під час проходу дванадцяти тисяч контактів — це не той рахунок,
+  // який людині потрібен.
+  const folderName = contactFolders.find((folder) => folder.id === panelFolderId)?.name;
+  setText("leadWorkspaceQueue", panelFolderId && panelTotal
+    ? `${folderName || "Папка"} · ${Math.min(panelIndex + 1, panelTotal)} з ${panelTotal}`
+    : prospects.length ? `Лід ${index + 1 || 1} з ${prospects.length}` : "Лідів не завантажено");
   setText("selectedLeadAvatar", prospect ? initials(prospect.name) : "OS");
   setText("leadWorkspaceCompany", prospect ? prospect.company || "Акаунт невідомий" : "Відкрий ліда, щоб почати");
   setText("leadWorkspacePosition", prospect ? [prospect.title, prospect.location, prospect.website].filter(Boolean).join(" · ") || "Деталей профілю ще немає" : "Додай посилання на LinkedIn, завантаж лідів або витягни їх із CRM. Система підготує бриф, контакти, повідомлення, записи в CRM і наступні дії — нічого не надсилаючи самостійно.");
@@ -746,6 +910,11 @@ function renderLeadWorkspaceExtras(prospect) {
   setText("leadWorkspaceConfidence", prospect ? `${confidence}% впевненості в найкращому контакті` : "Чекаємо на підтвердження");
   setText("committeeCount", prospect ? `${committeeForProspect(prospect).length} ${uaPlural(committeeForProspect(prospect).length, "контакт", "контакти", "контактів")}` : "0 контактів");
 
+  setHtml("clientProfileContent", clientProfileRows(prospect));
+  setText("clientProfilePill", clientProfileStatusLabel(prospect));
+  setText("clientProfileMeta", prospect
+    ? `${prospect.name}${prospect.company ? ` · ${prospect.company}` : ""} — під продукт ${state.selectedProduct?.name || "вибраний"}`
+    : "Хто це, що для нього важливо і з чого почати розмову");
   setHtml("companyBriefContent", companyBriefRows(prospect));
   setText("companyConfidencePill", companyConfidenceLabel(prospect));
   setText("companyBriefMeta", prospect?.company ? `Контекст акаунта ${prospect.company} для продукту ${state.selectedProduct?.name || "вибраного"}` : "Чим займається компанія, кому вона продає і чому цей лід може бути вартим уваги");
@@ -810,6 +979,91 @@ function leadTableRow(prospect) {
       </td>
     </tr>
   `;
+}
+
+/* ── Опис клієнта і підходи ────────────────────────────────────────────────
+ *
+ * Те, заради чого натискають «Збагатити»: хто ця людина, що для неї зараз
+ * важливо і з чого почати розмову. Усе інше на цій сторінці — джерела під це.
+ */
+
+const clientChannelLabels = {
+  email: "Пошта",
+  linkedin: "LinkedIn",
+  telegram: "Telegram",
+  phone: "Телефон"
+};
+
+function clientProfileRows(prospect) {
+  if (!prospect) {
+    return `<div class="empty-state">Вибери папку з контактами — перша людина відкриється сама.</div>`;
+  }
+  const profile = prospect.clientProfile;
+  if (!profile) {
+    return `<div class="empty-state">Цю людину ще не збагачували. Тисни «Збагатити»: модель знайде все доступне про неї і про компанію, запише знайдене в базу — і на цьому місці з'явиться опис клієнта та підходи до розмови.</div>`;
+  }
+
+  const approaches = (profile.approaches || []).map((approach, index) => `
+    <article class="client-approach">
+      <header>
+        <div>
+          <span class="pill">${escapeHtml(clientChannelLabels[approach.channel] || approach.channel || "канал не вибрано")}</span>
+          <strong>${escapeHtml(approach.angle || `Підхід ${index + 1}`)}</strong>
+        </div>
+        <button data-copy-text="${escapeAttr(approach.opener || "")}" data-copy-channel="${escapeAttr(approach.channel || "")}" data-copy-label="Підхід: ${escapeAttr(approach.angle || "")}"><i data-lucide="copy"></i><span>Копіювати</span></button>
+      </header>
+      <p class="client-approach-opener">${escapeHtml(approach.opener || "")}</p>
+      ${approach.why ? `<p class="client-approach-why"><strong>Чому має спрацювати.</strong> ${escapeHtml(approach.why)}</p>` : ""}
+      ${approach.risk ? `<p class="client-approach-risk"><strong>Чим може не зайти.</strong> ${escapeHtml(approach.risk)}</p>` : ""}
+    </article>
+  `).join("");
+
+  const list = (title, items, empty) => {
+    const rows = (items || []).filter(Boolean);
+    if (!rows.length && !empty) return "";
+    return `<section class="client-profile-list">
+      <h3>${escapeHtml(title)}</h3>
+      ${rows.length ? `<ul>${rows.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : `<p class="is-muted">${escapeHtml(empty)}</p>`}
+    </section>`;
+  };
+
+  const research = profile.companyResearch;
+  const memoryNote = research
+    ? research.reused
+      ? `Компанію не шукали заново — узято з бази, дослідження від ${relativeTime(research.researchedAt)}.`
+      : `Компанію досліджено ${relativeTime(research.researchedAt)} і записано в базу — наступний контакт із неї піде без пошуку.`
+    : "";
+  const productNote = profile.productId && state?.selectedProductId && profile.productId !== state.selectedProductId
+    ? `<div class="outreach-warning"><i data-lucide="triangle-alert"></i><span>Цей опис написано під продукт «${escapeHtml(profile.productName || "інший")}». Щоб отримати його під вибраний зараз продукт, збагати ще раз.</span></div>`
+    : "";
+
+  return `
+    ${productNote}
+    <p class="client-profile-description">${escapeHtml(profile.description || "")}</p>
+    <div class="client-profile-split">
+      <section><h3>Людина</h3><p>${escapeHtml(profile.person || "—")}</p></section>
+      <section><h3>Компанія</h3><p>${escapeHtml(profile.company || "—")}</p></section>
+    </div>
+    ${list("Що для нього зараз важливо", profile.whatMatters)}
+    <section class="client-approach-list">
+      <h3>Підходи до розмови</h3>
+      ${approaches || `<p class="is-muted">Підходів не згенеровано.</p>`}
+    </section>
+    ${list("Про що спитати", profile.questions)}
+    ${list("Чого не робити", profile.avoid)}
+    ${list("Чого нам бракує", profile.unknowns)}
+    ${(profile.warnings || []).length ? `<div class="outreach-warning"><i data-lucide="triangle-alert"></i><span>${escapeHtml(profile.warnings.join(" "))}</span></div>` : ""}
+    <div class="client-profile-meta">
+      <span>${escapeHtml(profile.productName || "продукт")} · ${escapeHtml(profile.modelUsed || "локально")} · ${relativeTime(profile.generatedAt)}</span>
+      ${memoryNote ? `<span>${escapeHtml(memoryNote)}</span>` : ""}
+    </div>
+  `;
+}
+
+function clientProfileStatusLabel(prospect) {
+  if (!prospect) return "ліда не вибрано";
+  if (!prospect.clientProfile) return "ще не збагачено";
+  return prospect.clientProfile.companyResearch?.reused ? "збагачено · компанія з бази" : "збагачено";
 }
 
 function companyConfidenceLabel(prospect) {
@@ -1732,6 +1986,8 @@ function renderBusyState() {
   const anyBusy = Boolean(busyAction);
   setBusyButton("quickPrepareBtn", "research", "Виконується...");
   setBusyButton("runResearchTopBtn", "research", "Виконується...");
+  setBusyButton("enrichLeadBtn", "research", "Збагачуємо...");
+  setBusyButton("refreshCompanyBtn", "research", "Шукаємо...");
   setBusyButton("prepareOutreachBtn", "research", "Виконується...");
   setBusyButton("analyzeIntelligenceBtn", "intelligence", "Аналізуємо...");
   setBusyButton("refreshIntelligenceBtn", "intelligence", "Оновлюємо...");
@@ -1800,7 +2056,7 @@ async function runUiAction(actionName, message, work) {
   try {
     await work();
     uiNotice = {
-      research: "Дослідження оновлено. Аутріч, бал, контекст компанії й наступні дії перераховано.",
+      research: "Збагачено. Опис клієнта і підходи до розмови — у першому блоці; компанію записано в базу, вдруге її вже не шукатимемо.",
       enrich: "Контактні дані оновлено. Перевір впевненість, перш ніж брати телефон чи соцмережу в роботу.",
       "linkedin-import": "Ліда додано в чергу. Запусти Дослідження, коли будеш готовий збагатити його й підготувати аутріч.",
       "crm-import": "Лідів із CRM підтягнуто в чергу.",
@@ -1883,6 +2139,12 @@ function setView(viewName) {
   // Те саме для контактів: CRM опитується, коли на неї дивляться.
   if (viewName === "contacts") {
     void loadContactFolders().catch(() => {});
+  }
+
+  // Панель теж читає папки CRM — але тільки список, без сторінки контактів:
+  // людину з папки вона бере по одній, за позицією.
+  if (viewName === "prospects") {
+    void loadPanelFolders().catch(() => {});
   }
 }
 
@@ -2052,7 +2314,7 @@ function moveSelectedProspect(direction) {
   const nextIndex = (currentIndex + direction + prospects.length) % prospects.length;
   selectedProspectId = prospects[nextIndex].id;
   if (activeResearchJob?.prospectId !== selectedProspectId) activeResearchJob = null;
-  activeLeadSectionId = "dashboard-account";
+  activeLeadSectionId = "dashboard-client";
   render();
   scrollLeadWorkspaceToTop();
 }
@@ -2188,11 +2450,11 @@ document.getElementById("syncMcpBtn").addEventListener("click", async () => {
 });
 
 document.getElementById("quickPrepareBtn").addEventListener("click", async () => {
-  await runUiAction("research", "Досліджуємо ліда, збагачуємо, рахуємо бал і готуємо аутріч...", researchAndPrepareSelected);
+  await runUiAction("research", "Шукаємо все про людину і компанію, пишемо опис і підходи...", () => researchAndPrepareSelected());
 });
 
 document.getElementById("runResearchTopBtn").addEventListener("click", async () => {
-  await runUiAction("research", "Досліджуємо ліда, збагачуємо, рахуємо бал і готуємо аутріч...", researchAndPrepareSelected);
+  await runUiAction("research", "Шукаємо все про людину і компанію, пишемо опис і підходи...", () => researchAndPrepareSelected());
 });
 
 document.getElementById("analyzeIntelligenceBtn").addEventListener("click", async () => {
@@ -2208,15 +2470,50 @@ document.getElementById("analyzeIntelligenceQuick").addEventListener("click", as
 });
 
 document.getElementById("prevLeadBtn").addEventListener("click", () => {
-  moveSelectedProspect(-1);
+  movePanel(-1);
 });
 
 document.getElementById("nextLeadBtn").addEventListener("click", () => {
-  moveSelectedProspect(1);
+  movePanel(1);
 });
 
 document.getElementById("nextLeadRailBtn").addEventListener("click", () => {
-  moveSelectedProspect(1);
+  movePanel(1);
+});
+
+document.getElementById("panelFolderSelect").addEventListener("change", async (event) => {
+  panelFolderId = event.target.value;
+  panelIndex = 0;
+  panelTotal = 0;
+  panelContact = null;
+  panelQueueNotice = "";
+  rememberPanelPosition();
+  if (!panelFolderId) {
+    renderPanelSource();
+    return;
+  }
+  await openPanelPosition(0);
+});
+
+document.getElementById("panelProductSelect").addEventListener("change", async (event) => {
+  await runUiAction("product", "Перемикаємо контекст продукту...", async () => {
+    state = await api("/api/products/select", {
+      method: "POST",
+      body: JSON.stringify({ productId: event.target.value })
+    });
+  });
+});
+
+document.getElementById("panelFoldersRefreshBtn").addEventListener("click", async () => {
+  await loadPanelFolders({ force: true });
+});
+
+document.getElementById("enrichLeadBtn").addEventListener("click", async () => {
+  await runUiAction("research", "Шукаємо все про людину і компанію, пишемо опис і підходи...", () => researchAndPrepareSelected());
+});
+
+document.getElementById("refreshCompanyBtn").addEventListener("click", async () => {
+  await runUiAction("research", "Шукаємо компанію заново, не читаючи збережене...", () => researchAndPrepareSelected({ force: true }));
 });
 
 document.addEventListener("click", async (event) => {
@@ -2239,7 +2536,7 @@ document.addEventListener("click", async (event) => {
   if (openProspect) {
     selectedProspectId = openProspect.dataset.openProspectId;
     if (activeResearchJob?.prospectId !== selectedProspectId) activeResearchJob = null;
-    activeLeadSectionId = "dashboard-account";
+    activeLeadSectionId = "dashboard-client";
     setView("prospects");
     render();
     scrollLeadWorkspaceToTop();
@@ -2312,7 +2609,7 @@ document.addEventListener("click", async (event) => {
   if (prospectCardButton) {
     selectedProspectId = prospectCardButton.dataset.prospectId;
     if (activeResearchJob?.prospectId !== selectedProspectId) activeResearchJob = null;
-    activeLeadSectionId = "dashboard-account";
+    activeLeadSectionId = "dashboard-client";
     renderProspects();
     renderLeadWorkspaceExtras(state.prospects?.find((prospect) => prospect.id === selectedProspectId));
     refreshIcons();
@@ -2953,18 +3250,30 @@ function wordCountLabel(value) {
   return `${words} ${uaPlural(words, "слово", "слова", "слів")}`;
 }
 
+/**
+ * Папки CRM, прочитані один раз на дві сторінки.
+ *
+ * Їх питають і «Контакти», і «Панель», і це той самий список — тримати дві
+ * копії означало б показувати різні папки на сусідніх вкладках.
+ */
+async function fetchContactFolders({ force = false } = {}) {
+  if (contactFoldersLoaded && !force) return contactFolders;
+  const payload = await api("/api/contacts/folders");
+  contactFolders = payload.folders || [];
+  contactFoldersLoaded = true;
+  // Порожня CRM і CRM, прочитана не тим ключем, виглядають однаково — сервер
+  // розрізняє їх за нас, і сторінка повторює це словами.
+  contactsError = contactFolders.length ? "" : payload.warning || "";
+  return contactFolders;
+}
+
 async function loadContactFolders({ force = false } = {}) {
   if (contactFoldersLoaded && !force) return;
   contactsLoading = true;
   contactsError = "";
   renderContacts();
   try {
-    const payload = await api("/api/contacts/folders");
-    contactFolders = payload.folders || [];
-    contactFoldersLoaded = true;
-    // Порожня CRM і CRM, прочитана не тим ключем, виглядають однаково — сервер
-    // розрізняє їх за нас, і сторінка повторює це словами.
-    contactsError = contactFolders.length ? "" : payload.warning || "";
+    await fetchContactFolders({ force });
     if (!contactFolderId && contactFolders.length) {
       await selectContactFolder(contactFolders[0].id);
       return;
@@ -3138,7 +3447,7 @@ document.getElementById("enrichProspectBtn").addEventListener("click", async () 
 });
 
 document.getElementById("prepareOutreachBtn").addEventListener("click", async () => {
-  await runUiAction("research", "Досліджуємо ліда, збагачуємо, рахуємо бал і готуємо аутріч...", researchAndPrepareSelected);
+  await runUiAction("research", "Шукаємо все про людину і компанію, пишемо опис і підходи...", () => researchAndPrepareSelected());
 });
 
 async function analyzeLeadIntelligence(force = false) {
@@ -3156,12 +3465,18 @@ async function analyzeLeadIntelligence(force = false) {
   document.querySelector(".lead-section-nav")?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-async function researchAndPrepareSelected() {
+/**
+ * «Збагатити»: одна дія від «ось людина» до «ось з чого з нею почати».
+ *
+ * `force` — це «шукай компанію заново»: за замовчуванням дослідження читає вже
+ * збережений досьє компанії і не платить за ті самі відповіді вдруге.
+ */
+async function researchAndPrepareSelected({ force = false } = {}) {
   if (!selectedProspectId) return;
   const profile = document.getElementById("outreachProfileSelect").value;
   const payload = await api("/api/research/jobs", {
     method: "POST",
-    body: JSON.stringify({ prospectId: selectedProspectId, profile })
+    body: JSON.stringify({ prospectId: selectedProspectId, profile, force })
   });
   activeResearchJob = payload.job;
   renderResearchProgress();
@@ -3181,7 +3496,7 @@ async function researchAndPrepareSelected() {
     throw new Error(activeResearchJob.error || "Дослідження не завершилося за п'ять хвилин.");
   }
   await refresh();
-  activeLeadSectionId = "dashboard-account";
+  activeLeadSectionId = "dashboard-client";
   render();
 }
 

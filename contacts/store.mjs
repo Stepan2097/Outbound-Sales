@@ -132,3 +132,32 @@ export function contactAsProspect(contact = {}) {
     }
   };
 }
+
+/**
+ * The contact standing at one position in a folder, and how many there are.
+ *
+ * The Панель works a folder from the top down instead of letting somebody
+ * browse it, so what it asks for is not a page — it is "number thirty-seven"
+ * and "of how many". The order is the folder's own history, oldest first, with
+ * the id as a tie-break: without a second, stable key two contacts created in
+ * the same millisecond can swap places between two requests, and then the
+ * position a seller stopped at points at a different person tomorrow.
+ */
+export async function folderContactAt({ folderId = "", index = 0 } = {}) {
+  if (!folderId) {
+    const error = new Error("Спочатку обери папку — без неї запит іде по всій базі CRM.");
+    error.statusCode = 400;
+    throw error;
+  }
+  const position = Math.max(Math.trunc(Number(index) || 0), 0);
+  const [rows, total] = await Promise.all([
+    crm.from("contacts").select(CONTACT_COLUMNS).eq("folder_id", folderId)
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true })
+      .limit(1)
+      .offset(position)
+      .rows(),
+    crm.from("contacts").select("id").eq("folder_id", folderId).count()
+  ]);
+  return { contact: rows[0] || null, total, index: position };
+}

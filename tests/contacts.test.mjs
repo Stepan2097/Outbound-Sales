@@ -209,6 +209,95 @@ test("a CRM this workspace cannot reach is said to be the CRM, not a bug here", 
   }
 });
 
+/**
+ * The Панель does not browse a folder — it walks it.
+ *
+ * So what it asks the server for is a position, and what it must get back is
+ * the person standing there, taken into the lead queue, with the size of the
+ * folder beside them. The three things that decide whether the walk works are
+ * all here: the same position twice is the same lead and not a second one, a
+ * row the CRM cannot make a lead out of is named rather than silently skipped,
+ * and walking off the end says so instead of erroring.
+ */
+test("the panel walks a folder by position and takes each person into the queue", async () => {
+  const roster = [
+    people[0],
+    people[1],
+    { id: "contact-3", created_at: "2026-09-05T10:00:00Z", name: "Olena Bila", company: "", position: "", folder_id: "folder-1" }
+  ];
+  const { server: crm, url: crmUrl } = await startFakeCrm(roster);
+  const directory = await mkdtemp(join(tmpdir(), "outbound-panel-test-"));
+  const walkPort = port + 2;
+  const walkOrigin = `http://127.0.0.1:${walkPort}`;
+  const child = spawn(process.execPath, ["server.mjs"], {
+    cwd: new URL("..", import.meta.url),
+    env: {
+      ...process.env,
+      PORT: String(walkPort),
+      STATE_FILE_PATH: join(directory, "state.json"),
+      AUTH_DEV_BYPASS: "1",
+      WARMUP_CRM_SUPABASE_URL: crmUrl,
+      WARMUP_CRM_SERVICE_ROLE_KEY: "test-key"
+    },
+    stdio: "ignore"
+  });
+  const exitPromise = new Promise((resolve) => child.once("exit", resolve));
+  const open = async (index) => {
+    const response = await fetch(`${walkOrigin}/api/contacts/queue`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ folderId: "folder-1", index })
+    });
+    assert.ok(response.ok, `position ${index} answered ${response.status}`);
+    return response.json();
+  };
+
+  try {
+    await waitForHealth(walkOrigin);
+
+    const first = await open(0);
+    assert.equal(first.queue.total, 3, "the position is reported against the whole folder");
+    assert.equal(first.queue.contact.id, "contact-1");
+    assert.ok(first.queue.prospectId, "the person opened is a lead the rest of the page can work with");
+    assert.equal(first.prospects.find((item) => item.id === first.queue.prospectId).name, "Marta Kovalenko");
+
+    const fromFolder = (payload) => payload.prospects.filter((item) => item.crmSource?.folder_id === "folder-1");
+
+    const second = await open(1);
+    assert.equal(second.queue.contact.id, "contact-2");
+    assert.equal(fromFolder(second).length, 2);
+
+    // Coming back to somebody already walked past reopens the same lead rather
+    // than making a second one with its own research bill.
+    const back = await open(0);
+    assert.equal(back.queue.prospectId, first.queue.prospectId);
+    assert.equal(fromFolder(back).length, 2, "walking back does not grow the queue");
+
+    const unusable = await open(2);
+    assert.equal(unusable.queue.contact.id, "contact-3");
+    assert.equal(unusable.queue.prospectId, "", "a row with no company is not a lead");
+    assert.match(unusable.queue.warning, /компанії/, "and the panel is told why");
+
+    const past = await open(3);
+    assert.equal(past.queue.contact, null);
+    assert.equal(past.queue.total, 3);
+    assert.match(past.queue.warning, /кінець папки/);
+
+    // A folder is still required: a position in the whole CRM is not a queue.
+    const unscoped = await fetch(`${walkOrigin}/api/contacts/queue`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ index: 0 })
+    });
+    assert.equal(unscoped.status, 400);
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+    await Promise.race([exitPromise, new Promise((resolve) => setTimeout(resolve, 2000))]);
+    crm.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("the drafts written without a model still follow the channel's limits", () => {
   const contact = { name: "Marta Kovalenko", company: "Fleetify", position: "Head of UA" };
   const product = {

@@ -24,6 +24,36 @@ Local outbound workspace for researching prospects, generating product-specific 
 - Use a cost-capped Apify waterfall for company people, work-email, and phone enrichment. It stops when verified email and phone are found, limits actors per lead, and reuses recent verified results.
 - Keep email, phone, WhatsApp, Telegram, and SMS locked until the seller approves the matched contact and channel.
 
+## The Panel
+
+The Panel is the seller's working screen: pick a product and a CRM folder, and
+the folder is worked from the top down. There is no browsing it — the queue
+hands over one person at a time, oldest first, full screen, with everything the
+workspace knows about them, and the only navigation is **Назад** / **Далі**. The
+position is kept per browser, so somebody who stopped on contact 37 yesterday
+opens on contact 37 today. Each person walked past is taken into the lead queue
+carrying their CRM id, which is what the research, the drafts and the CRM
+activity hang off; the same person opened twice is still one lead.
+
+**Збагатити** runs the whole pipeline on the person in front of you: the
+company and its products, the people in it, verified contacts, the fit score,
+then a description of the client and ways to open the conversation, then the
+message angles and the CRM activity. Each stage says what it found while it
+runs.
+
+The company half is done once per company, not once per contact. What the web
+research found is written to `accountDossiers` in the workspace's saved state,
+keyed by CRM account id, domain, or company name — so the second person from a
+company already researched starts from that dossier instead of searching again,
+and the stage says so on screen. The dossier is good for thirty days; its news
+signals for seven, after which only that one search is repeated. **Перешукати
+компанію** ignores the dossier and searches from scratch.
+
+The description and the approaches are written by the model from the new
+findings plus whatever the workspace already had — and, with no OpenRouter key
+or a provider that is down, by the workspace itself from the same facts, marked
+as written without a model.
+
 ## Contacts
 
 The Contacts tab reads the CRM directly: its folders, one page of a folder at a
