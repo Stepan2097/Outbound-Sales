@@ -37,6 +37,32 @@ export async function listContactFolders() {
 }
 
 /**
+ * Which key this workspace is reading the CRM with.
+ *
+ * It matters because the wrong one fails silently: a publishable/anon key is
+ * accepted, answers 200, and returns nothing at all under row-level security —
+ * which on screen is indistinguishable from a CRM with no folders in it. The
+ * claim is read out of the JWT without verifying it; this is a hint for a
+ * sentence on a screen, not a security decision.
+ */
+export function crmKeyKind() {
+  let key = "";
+  try {
+    key = crm.config().key || "";
+  } catch {
+    return "missing";
+  }
+  if (key.startsWith("sb_secret_")) return "service_role";
+  if (key.startsWith("sb_publishable_")) return "anon";
+  try {
+    const claims = JSON.parse(Buffer.from(key.split(".")[1], "base64").toString("utf8"));
+    return claims.role === "service_role" ? "service_role" : claims.role === "anon" ? "anon" : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+/**
  * One page of a folder, newest first, with the total beside it.
  *
  * The search covers the four things somebody actually types — a name, a

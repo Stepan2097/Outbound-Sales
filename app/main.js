@@ -198,7 +198,6 @@ function renderAccount() {
  */
 function renderSidebarUser() {
   const user = authState?.user;
-  setText("sidebarUserBadge", user ? initials(user.name || user.email || "?") : "—");
   // Пошта, а не ім'я: під чиїм акаунтом ти сидиш — питання про адресу, і саме
   // її людина звіряє. Ім'я і роль стоять у title, бо місця тут на два рядки.
   setText("sidebarUserEmail", user?.email || user?.name || "Не увійдено");
@@ -2960,9 +2959,12 @@ async function loadContactFolders({ force = false } = {}) {
   contactsError = "";
   renderContacts();
   try {
-    const { folders } = await api("/api/contacts/folders");
-    contactFolders = folders || [];
+    const payload = await api("/api/contacts/folders");
+    contactFolders = payload.folders || [];
     contactFoldersLoaded = true;
+    // Порожня CRM і CRM, прочитана не тим ключем, виглядають однаково — сервер
+    // розрізняє їх за нас, і сторінка повторює це словами.
+    contactsError = contactFolders.length ? "" : payload.warning || "";
     if (!contactFolderId && contactFolders.length) {
       await selectContactFolder(contactFolders[0].id);
       return;

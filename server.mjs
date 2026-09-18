@@ -7,7 +7,7 @@ import { connect as connectTcp } from "node:net";
 import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildFallbackDrafts, draftsPromptPayload, normalizeDrafts, normalizeLanguage } from "./contacts/drafts.mjs";
-import { contactAsProspect, contactsConfigured, contactsMissingConfig, listContactFolders, listFolderContacts, readContact } from "./contacts/store.mjs";
+import { contactAsProspect, contactsConfigured, contactsMissingConfig, crmKeyKind, listContactFolders, listFolderContacts, readContact } from "./contacts/store.mjs";
 import { handleKnowledgeLibraryApi } from "./knowledge/api.mjs";
 import { knowledgeExcerptsForPrompt, knowledgeFilesForProduct, loadKnowledgeLibrary } from "./knowledge/library.mjs";
 import { handleWarmupApi } from "./warmup/api.mjs";
@@ -590,7 +590,14 @@ async function handleApi(request, response, url) {
     }
     try {
       if (request.method === "GET" && url.pathname === "/api/contacts/folders") {
-        sendJson(response, 200, { folders: await listContactFolders() });
+        const folders = await listContactFolders();
+        // An empty CRM and a CRM read with the wrong key look identical from
+        // here — both are 200 with no rows — so when the key is the anon one,
+        // say which of the two this is.
+        const warning = !folders.length && crmKeyKind() === "anon"
+          ? "CRM відповіла, але ключ у налаштуваннях — anon: під row-level security він не бачить жодного рядка. Потрібен service_role у WARMUP_CRM_SERVICE_ROLE_KEY."
+          : "";
+        sendJson(response, 200, { folders, ...(warning ? { warning } : {}) });
         return;
       }
 
