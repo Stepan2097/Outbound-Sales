@@ -45,13 +45,20 @@ export async function listContactFolders() {
  * behaves differently here than there is worse than a simpler one.
  */
 export async function listFolderContacts({ folderId = "", search = "", limit = 25, offset = 0 } = {}) {
+  // A folder is required, and not out of tidiness: without one this is a page
+  // of every contact in the CRM plus an exact count of the whole table, and on
+  // a real base that query comes back as a statement timeout.
+  if (!folderId) {
+    const error = new Error("Спочатку обери папку — без неї запит іде по всій базі CRM.");
+    error.statusCode = 400;
+    throw error;
+  }
   const size = Math.min(Math.max(Number(limit) || 25, 1), MAX_PAGE);
   const from = Math.max(Number(offset) || 0, 0);
   const term = String(search || "").trim().replace(/[(),*]/g, " ").trim();
 
   const build = (columns) => {
-    let query = crm.from("contacts").select(columns);
-    if (folderId) query = query.eq("folder_id", folderId);
+    let query = crm.from("contacts").select(columns).eq("folder_id", folderId);
     if (term) {
       query = query.or(`name.ilike.*${term}*,company.ilike.*${term}*,position.ilike.*${term}*,email.ilike.*${term}*`);
     }

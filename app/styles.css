@@ -109,6 +109,10 @@ svg {
   grid-template-columns: 260px minmax(0, 1fr);
 }
 
+/* Сайдбар тримається екрана, а не довжини сторінки. Інакше на довгих екранах
+   — «Користувачі», довгий лід — підпис із поштою і вихід опинялися внизу
+   документа, тобто за межами вікна: щоб вийти, треба було скролити сторінку до
+   кінця. Навігація всередині гортається сама, якщо пунктів колись стане більше. */
 .sidebar {
   background: #102225;
   color: #edf7f5;
@@ -116,6 +120,14 @@ svg {
   display: grid;
   grid-template-rows: auto 1fr auto;
   gap: 24px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  height: 100dvh;
+}
+
+.sidebar .nav-list {
+  overflow-y: auto;
 }
 
 .brand {
@@ -1700,6 +1712,7 @@ output {
     inset: auto 0 0 0;
     z-index: 60;
     display: block;
+    height: auto;
     padding: 7px 8px max(7px, env(safe-area-inset-bottom));
     border-right: 0;
     border-top: 1px solid rgba(143, 177, 207, 0.22);
@@ -4386,6 +4399,7 @@ dialog {
     inset: auto 0 0 0;
     z-index: 60;
     display: block;
+    height: auto;
     min-height: auto;
     padding: 7px 8px max(7px, env(safe-area-inset-bottom));
     border-right: 0;

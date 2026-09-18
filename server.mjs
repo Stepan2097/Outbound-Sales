@@ -667,7 +667,8 @@ async function handleApi(request, response, url) {
     } catch (error) {
       // A CRM that is unreachable, or answering with a complaint, is not this
       // app being broken — say which it is.
-      sendJson(response, Number(error?.status) === 503 ? 503 : 502, { error: crmErrorMessage(error) });
+      const status = Number(error?.statusCode) || (Number(error?.status) === 503 ? 503 : 502);
+      sendJson(response, status, { error: crmErrorMessage(error) });
       return;
     }
   }
@@ -12095,7 +12096,13 @@ function prospectForCrmContact(contactId) {
 
 function crmErrorMessage(error) {
   const message = error instanceof Error ? error.message : String(error || "");
-  return !message || message === "fetch failed" ? "CRM не відповіла." : message;
+  if (!message || message === "fetch failed") return "CRM не відповіла.";
+  // Postgres says this when a query runs past the statement timeout, and on a
+  // screen "canceling statement due to statement timeout" reads as a crash.
+  if (/statement timeout/i.test(message)) {
+    return "CRM не встигла відповісти на цей запит. Звузь папку або додай пошук.";
+  }
+  return message;
 }
 
 function briefForPrompt(product = {}) {

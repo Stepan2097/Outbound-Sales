@@ -160,6 +160,12 @@ test("contacts are read from the CRM, and three drafts are written for one of th
     const missing = await fetch(`${origin}/api/contacts/nope`);
     assert.equal(missing.status, 404);
 
+    // Without a folder this would be a page of the whole CRM plus an exact
+    // count of it, which on a real base comes back as a statement timeout.
+    const unscoped = await fetch(`${origin}/api/contacts?limit=3`);
+    assert.equal(unscoped.status, 400);
+    assert.match((await unscoped.json()).error, /обери папку/i);
+
     await waitForFile(statePath);
     const saved = JSON.parse(await readFile(statePath, "utf8"));
     assert.ok(saved.contactDrafts["contact-1"], "drafts outlive the process that wrote them");
