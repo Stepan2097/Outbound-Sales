@@ -98,6 +98,7 @@ function render() {
   renderTopbar();
   renderProductContext();
   renderAccount();
+  renderSidebarUser();
   renderProductWorkspace();
   renderProspects();
   renderLeadsPage();
@@ -122,8 +123,7 @@ function renderTopbar() {
   const line = busyMessage || uiNotice || "";
   meta.textContent = line;
   meta.hidden = !line;
-  document.getElementById("providerStatus").textContent = state.providerHealth.status;
-  document.getElementById("healthPill").textContent = state.providerHealth.status;
+  setText("healthPill", state.providerHealth.status);
   document.getElementById("keyState").textContent = state.hasOpenRouterKey
     ? `Версія ключа ${state.keyMetadata.keyVersion} · ${state.keyMetadata.environment}`
     : "Ключ не налаштовано";
@@ -189,6 +189,29 @@ function renderAccount() {
   const user = authState?.user;
   if (!user) return;
   document.getElementById("teamCreatePanel").hidden = user.role !== "admin";
+}
+
+/**
+ * Хто зараз у застосунку — внизу сайдбара, там, де раніше стояв технічний
+ * статус провайдера («mock_ready»). Продавцеві потрібні дві речі: пересвідчитись,
+ * що він під своїм акаунтом, і вийти; стан AI-провайдера має свій екран.
+ */
+function renderSidebarUser() {
+  const user = authState?.user;
+  setText("sidebarUserBadge", user ? initials(user.name || user.email || "?") : "—");
+  // Пошта, а не ім'я: під чиїм акаунтом ти сидиш — питання про адресу, і саме
+  // її людина звіряє. Ім'я і роль стоять у title, бо місця тут на два рядки.
+  setText("sidebarUserEmail", user?.email || user?.name || "Не увійдено");
+  const button = document.getElementById("sidebarUserBtn");
+  // Пошта в сайдбарі обрізається — місця там на сто тридцять пікселів, — тож
+  // ціла вона тут, під курсором, разом із роллю.
+  if (button) {
+    button.title = user
+      ? `${[user.name, user.email].filter(Boolean).join(" · ")}${user.role === "admin" ? " · адміністратор" : " · продавець"} — відкрити свою картку`
+      : "Відкрити свою картку";
+  }
+  const logout = document.getElementById("sidebarLogoutBtn");
+  if (logout) logout.hidden = !user;
 }
 
 /**
@@ -2116,11 +2139,19 @@ document.getElementById("teamUserForm").addEventListener("submit", async (event)
   render();
 });
 
-document.getElementById("logoutBtn").addEventListener("click", async () => {
+async function signOut() {
   await api("/api/auth/logout", { method: "POST", body: "{}" });
   authState = { authenticated: false, bootstrapRequired: false };
   authMode = "login";
   showAuthGate();
+}
+
+document.getElementById("logoutBtn").addEventListener("click", signOut);
+document.getElementById("sidebarLogoutBtn").addEventListener("click", signOut);
+
+document.getElementById("sidebarUserBtn").addEventListener("click", () => {
+  setView("account");
+  loadProfileScreen();
 });
 
 document.addEventListener("click", async (event) => {

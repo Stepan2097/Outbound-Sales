@@ -185,18 +185,56 @@ svg {
   min-height: 42px;
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 6px;
   color: #b8d4d0;
   font-size: 13px;
-  padding: 0 6px;
+  padding: 0 2px;
 }
 
-.status-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: #65d389;
-  box-shadow: 0 0 0 4px rgba(101, 211, 137, 0.12);
+/* Хто увійшов. Кнопка, бо веде на свою картку, але виглядає як підпис: у
+   сайдбарі й так сім кнопок, і восьма, схожа на них, читалась би як пункт меню. */
+.sidebar-user {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  background: none;
+  text-align: left;
+  min-height: 38px;
+}
+
+.sidebar-user:hover {
+  border-color: var(--line);
+  background: var(--surface-strong);
+}
+
+.sidebar-user-badge {
+  flex: 0 0 26px;
+  height: 26px;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  background: var(--teal-weak);
+  color: var(--teal);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* Два рядки і не більше: сайдбар вузький, а підпис, який росте від довжини
+   чужої пошти, штовхав би навігацію. Ім'я і роль живуть у title кнопки. */
+.sidebar-user-text {
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.3;
+  color: #d4e6e3;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .workspace {
@@ -1220,8 +1258,19 @@ output {
 
   .brand div:last-child,
   .nav-item span,
-  .sidebar-footer span:last-child {
+  .sidebar-user-text {
     display: none;
+  }
+
+  /* Вузький сайдбар: лишаються ініціали і вихід, і вони стоять поруч
+     посередині, а не по різних краях порожньої колонки. */
+  .sidebar-footer {
+    justify-content: center;
+    gap: 4px;
+  }
+
+  .sidebar-user {
+    flex: 0 0 auto;
   }
 
   .metric-grid {
