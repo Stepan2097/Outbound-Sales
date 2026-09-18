@@ -2266,17 +2266,19 @@ async function supabaseRestRows(table, columns) {
  * anybody has to fix: the role shown for them is the one they would be given
  * the moment they do.
  */
-async function workspaceDirectory() {
-  const authUsers = (await supabaseAuthRequest("admin/users?page=1&per_page=1000")).users || [];
+async function workspaceDirectory({ endValue = new Date() } = {}) {
   const crmByEmail = await crmProfilesByEmail({ maxAgeMs: 0 });
+  const { accounts, adminApi, adminApiError } = await directoryAccounts(crmByEmail);
 
-  const people = authUsers.map((user) => {
+  const people = accounts.map((user) => {
     const email = cleanText(user.email || "").toLowerCase();
     const metadata = user.user_metadata || {};
     const known = state.users.find((item) => item.id === user.id || item.email === email) || null;
     const crm = crmByEmail.get(email) || null;
     const approval = cleanText(crm?.approval_status || "");
     const blocked = known ? "" : !crm ? "немає в базі CRM" : approval && approval !== "approved" ? "не підтверджений у CRM" : "";
+    const spend = userSpendSummary(cleanText(user.id || "") || null, { endValue });
+    const time = userTimeSummary({ id: user.id }, { endValue });
     return {
       id: user.id,
       email,
@@ -2286,6 +2288,15 @@ async function workspaceDirectory() {
       // spread of choices is one glance rather than fourteen clicks.
       modelId: cleanText(known?.modelId || ""),
       modelLabel: modelChoiceLabel(known?.modelId),
+      // The same thirty days the card below draws, reduced to the two numbers
+      // worth reading across a team: what this person spent, and how long they
+      // were here. A list of people that says nothing about them is a list of
+      // addresses.
+      costUsd: spend.totalCostUsd,
+      requests: spend.requests,
+      allTimeCostUsd: spend.allTimeCostUsd,
+      seconds: time.totalSeconds,
+      activeDays: time.activeDays,
       signedInHere: Boolean(known),
       blocked,
       crmRole: cleanText(crm?.role || ""),
@@ -2303,7 +2314,56 @@ async function workspaceDirectory() {
     if (Boolean(left.blocked) !== Boolean(right.blocked)) return left.blocked ? 1 : -1;
     return String(right.lastSignInAt || right.createdAt || "").localeCompare(String(left.lastSignInAt || left.createdAt || ""));
   });
-  return { people: collapsed, canSignIn: collapsed.filter((person) => !person.blocked).length };
+  return {
+    people: collapsed,
+    canSignIn: collapsed.filter((person) => !person.blocked).length,
+    days: profileSpendWindowDays,
+    // Whether the list is everybody with a Supabase account or only everybody
+    // the CRM knows — the screen says which rather than quietly showing fewer.
+    adminApi,
+    adminApiError
+  };
+}
+
+/**
+ * Everybody the list should hold, from whichever source can answer.
+ *
+ * `auth/v1/admin/users` is the fuller answer: it holds accounts that never got
+ * a CRM profile at all. But it is a service-role endpoint, and a workspace
+ * configured with the project's publishable key gets 401 from it — which used
+ * to leave the tab with no list whatsoever.
+ *
+ * The CRM's own `profiles` table is readable with either key, and it is the
+ * user base this app defers to everywhere else. So it answers when the admin
+ * endpoint will not, and the screen says which of the two it got.
+ */
+async function directoryAccounts(crmByEmail) {
+  try {
+    const result = await supabaseAuthRequest("admin/users?page=1&per_page=1000");
+    return { accounts: result.users || [], adminApi: true, adminApiError: "" };
+  } catch (error) {
+    const accounts = [...crmByEmail.values()].map((row) => ({
+      id: cleanText(row.id || ""),
+      email: cleanText(row.email || "").toLowerCase(),
+      user_metadata: {},
+      last_sign_in_at: row.last_sign_in_at || null,
+      created_at: row.created_at || null
+    })).filter((row) => row.id && row.email);
+    // Somebody who worked here but has no CRM profile would otherwise vanish
+    // from a list that is meant to be everybody.
+    const seen = new Set(accounts.map((row) => row.id));
+    for (const profile of state.users) {
+      if (seen.has(profile.id)) continue;
+      accounts.push({
+        id: profile.id,
+        email: cleanText(profile.email || "").toLowerCase(),
+        user_metadata: { name: profile.name || "" },
+        last_sign_in_at: profile.lastLoginAt || null,
+        created_at: profile.createdAt || null
+      });
+    }
+    return { accounts, adminApi: false, adminApiError: error?.message || "" };
+  }
 }
 
 /**

@@ -335,3 +335,86 @@ test("a seller's card is their own, and asking for another's is refused rather t
   assert.equal(own.status, 200);
   assert.equal(own.body.model.modelId, "anthropic/claude-haiku-4.5#low");
 });
+
+/* ── Усі, і з цифрами ───────────────────────────────────────────────────────
+ *
+ * The Users tab is meant to be everybody, with what each person costs and how
+ * long they were here. Two things had to hold for that: the list must not need
+ * a service-role key to exist at all, and every row must carry its own numbers.
+ */
+
+test("every row carries the person's own spend and time", async (t) => {
+  const workspace = await withWorkspace(t, {
+    version: 1,
+    users: [
+      { id: "u-lilia", email: "ovchar.lilia17@gmail.com", name: "Лілія", role: "seller", status: "active", modelId: "", createdAt: new Date().toISOString() }
+    ],
+    usage: [
+      { id: "r1", at: new Date().toISOString(), taskType: "COLD_EMAIL", modelId: "anthropic/claude-haiku-4.5", provider: "openrouter", userId: "u-lilia", inputTokens: 1000, outputTokens: 200, costUsd: 0.75, latencyMs: 700 },
+      { id: "r2", at: new Date().toISOString(), taskType: "COLD_EMAIL", modelId: "anthropic/claude-haiku-4.5", provider: "openrouter", userId: "u-lilia", inputTokens: 1000, outputTokens: 200, costUsd: 0.25, latencyMs: 700 },
+      // Somebody else's, and a fabricated row: neither belongs to her.
+      { id: "r3", at: new Date().toISOString(), taskType: "COLD_EMAIL", modelId: "anthropic/claude-haiku-4.5", provider: "openrouter", userId: "u-mark", inputTokens: 10, outputTokens: 10, costUsd: 5, latencyMs: 10 },
+      { id: "r4", at: new Date().toISOString(), taskType: "COLD_EMAIL", modelId: "mock/economy", provider: "mock", userId: "u-lilia", inputTokens: 10, outputTokens: 10, costUsd: 99, latencyMs: 10 }
+    ],
+    userActivity: {
+      "u-lilia": { userId: "u-lilia", days: { [new Date().toISOString().slice(0, 10)]: 5400 }, tabs: {}, lastCreditedAt: null, lastSeenAt: null }
+    }
+  });
+
+  const { body } = await workspace.call("/api/account/directory");
+  assert.equal(body.days, 30, "the numbers are for a stated window");
+  const byEmail = new Map(body.people.map((person) => [person.email, person]));
+
+  const lilia = byEmail.get("ovchar.lilia17@gmail.com");
+  assert.equal(lilia.costUsd, 1, "her two real rows, and not the mock one");
+  assert.equal(lilia.requests, 2);
+  assert.equal(lilia.seconds, 5400);
+  assert.equal(lilia.activeDays, 1);
+
+  const mark = byEmail.get("yurkevych.mark@gmail.com");
+  assert.equal(mark.costUsd, 5, "and his are his");
+  assert.equal(mark.seconds, 0);
+
+  const untouched = byEmail.get("stranger@example.com");
+  assert.equal(untouched.costUsd, 0, "nobody's numbers leak onto somebody who never worked");
+  assert.equal(untouched.requests, 0);
+  assert.equal(untouched.seconds, 0);
+});
+
+test("the list still exists when the service-role endpoint refuses, and says where it came from", async (t) => {
+  // A workspace holding the project's publishable key gets 401 from
+  // auth/v1/admin/users. That used to leave the tab with no list at all; the
+  // CRM's own profiles table is readable either way and answers instead.
+  const supabase = await startFakeSupabase();
+  const noAdminApi = await new Promise((resolve) => {
+    const service = createServer((request, response) => {
+      response.setHeader("Content-Type", "application/json");
+      if (request.url.startsWith("/auth/v1/admin/users")) {
+        response.statusCode = 401;
+        response.end(JSON.stringify({ msg: "User not allowed" }));
+        return;
+      }
+      if (request.url.startsWith("/rest/v1/profiles")) {
+        response.end(JSON.stringify(crmProfiles));
+        return;
+      }
+      response.statusCode = 404;
+      response.end(JSON.stringify({ message: "no stub" }));
+    });
+    service.listen(0, "127.0.0.1", () => resolve({ service, port: service.address().port }));
+  });
+  supabase.service.close();
+  const workspace = await startWorkspace(noAdminApi.port);
+  t.after(async () => { await workspace.stop(); noAdminApi.service.close(); });
+
+  const { status, body } = await workspace.call("/api/account/directory");
+  assert.equal(status, 200, "a refused admin endpoint is not a broken screen");
+  assert.equal(body.adminApi, false, "and the screen is told which list it got");
+  assert.ok(body.people.length >= crmProfiles.length, "everybody the CRM knows is there");
+  const emails = body.people.map((person) => person.email);
+  assert.ok(emails.includes("ovchar.lilia17@gmail.com"));
+  assert.ok(emails.includes("yurkevych.mark@gmail.com"));
+  // The one account Supabase has and the CRM does not cannot be known this way,
+  // which is exactly what adminApi:false is there to say.
+  assert.ok(!emails.includes("stranger@example.com"));
+});

@@ -5961,19 +5961,34 @@ dialog {
   background: rgba(101, 240, 219, 0.08);
 }
 
-/* Згорнута група чужих акаунтів стоїть у тому ж списку, тож тримає той самий
-   відступ, що й рядки над нею. */
-.team-outside-group {
-  border: 1px solid rgba(143, 177, 207, 0.18);
-  border-radius: 8px;
-  background: rgba(4, 16, 29, 0.35);
-  padding: 12px;
+/* Дві цифри в рядку: витрачено і пробуто. Табличні цифри, щоб стовпчик читався
+   згори вниз, а не стрибав від рядка до рядка. */
+.team-stats {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 18px;
 }
 
-.team-outside-group .profile-details-body {
+.team-stat {
   display: grid;
-  gap: 12px;
-  margin-top: 12px;
+  gap: 2px;
+  min-width: 72px;
+  text-align: right;
+}
+
+.team-stat strong {
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.team-stat small {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* Нуль — це нуль, а не досягнення: підсвічується лише те, за чим щось стоїть. */
+.team-stat.has-value strong {
+  color: var(--teal);
 }
 
 .team-model {

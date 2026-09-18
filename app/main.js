@@ -232,12 +232,25 @@ function teamRowHtml(person, selfEmail, { canSetRole = false } = {}) {
     `<option value="${value}"${value === person.role ? " selected" : ""}>${ROLE_LABEL[value]}</option>`
   ).join("");
   const open = String(person.id || "") === String(profileUserId || "");
+  // Дві цифри, заради яких на цей список і дивляться: скільки людина витратила
+  // і скільки тут пробула. Обидві за ті самі 30 днів, що й графіки в картці.
+  const stats = `<div class="team-stats">
+      <span class="team-stat${person.costUsd > 0 ? " has-value" : ""}">
+        <strong>${escapeHtml(formatMoney(person.costUsd))}</strong>
+        <small>${person.requests ? `${person.requests} ${uaPlural(person.requests, "запит", "запити", "запитів")}` : "без запитів"}</small>
+      </span>
+      <span class="team-stat${person.seconds > 0 ? " has-value" : ""}">
+        <strong>${escapeHtml(formatSeconds(person.seconds))}</strong>
+        <small>${person.activeDays ? `${person.activeDays} ${uaPlural(person.activeDays, "день", "дні", "днів")}` : "не заходив"}</small>
+      </span>
+    </div>`;
   return `<article class="team-row${person.blocked ? " team-row-outside" : ""}${open ? " team-row-open" : ""}" data-team-user="${escapeAttr(person.id || "")}" tabindex="0" role="button" aria-pressed="${open ? "true" : "false"}">
     <div class="team-who">
       <strong>${escapeHtml(name || person.email)}${self ? " · це ти" : ""}</strong>
       ${name ? `<span>${escapeHtml(person.email)}</span>` : ""}
       ${facts ? `<span>${escapeHtml(facts)}</span>` : ""}
     </div>
+    ${stats}
     <span class="team-model">${person.modelLabel ? escapeHtml(person.modelLabel) : "модель робочого простору"}</span>
     ${canSetRole
       ? `<select class="team-access" data-email="${escapeAttr(person.email)}"${self ? " disabled title=\"Свою роль змінює інший адміністратор\"" : ""}>${options}</select>`
@@ -264,21 +277,20 @@ async function loadTeamDirectory() {
   }
   try {
     teamDirectory = await api("/api/account/directory");
-    // Команда — це ті, хто тут працює. Решта акаунтів Supabase — залишки
-    // тестів і випадкові реєстрації, яких CRM усе одно не пускає: вони не
-    // зникають, але й не стоять між живими людьми.
-    const working = teamDirectory.people.filter((person) => !person.blocked);
-    const outside = teamDirectory.people.filter((person) => person.blocked);
-    setHtml("teamUserList", [
-      working.map((person) => teamRowHtml(person, selfEmail, { canSetRole: true })).join(""),
-      outside.length
-        ? `<details class="profile-details team-outside-group">
-            <summary><span>Ще ${outside.length} ${uaPlural(outside.length, "акаунт", "акаунти", "акаунтів")} Supabase, ${uaPlural(outside.length, "якого", "яких", "яких")} CRM сюди не пускає</span><i data-lucide="chevron-down"></i></summary>
-            <div class="profile-details-body">${outside.map((person) => teamRowHtml(person, selfEmail, { canSetRole: true })).join("")}</div>
-          </details>`
-        : ""
-    ].join(""));
-    setText("teamUserNote", `${working.length} ${uaPlural(working.length, "людина працює", "людини працюють", "людей працюють")} у цьому робочому просторі. Вибери людину — нижче її модель, кредити і час.`);
+    // Усі, одним списком. Ті, кого CRM не пускає, стоять у кінці й підписані
+    // чому — але вони тут: список користувачів, який когось не показує, змушує
+    // шукати зниклих деінде.
+    setHtml("teamUserList", teamDirectory.people
+      .map((person) => teamRowHtml(person, selfEmail, { canSetRole: true }))
+      .join(""));
+    const total = teamDirectory.people.length;
+    const blocked = total - teamDirectory.canSignIn;
+    setText("teamUserNote", [
+      `${total} ${uaPlural(total, "користувач", "користувачі", "користувачів")}`,
+      blocked ? `${teamDirectory.canSignIn} ${uaPlural(teamDirectory.canSignIn, "може", "можуть", "можуть")} увійти, решту тримає CRM` : "усі можуть увійти",
+      `кредити і час — за ${teamDirectory.days || 30} днів`,
+      teamDirectory.adminApi ? "" : "список із бази CRM: акаунтів Supabase без профілю в CRM тут не видно (потрібен сервісний ключ)"
+    ].filter(Boolean).join(" · "));
   } catch (error) {
     // Список приходить із Supabase, і без нього тут була б порожня вкладка. Своя
     // картка є завжди — вона лежить у цьому ж застосунку.
