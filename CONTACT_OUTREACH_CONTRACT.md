@@ -509,22 +509,53 @@ does not, the fallback is to suppress at render time and carry two rows forever.
 Dockerfile runs no install. Mail goes over HTTP through `fetch`, the way
 OpenRouter, Apify and FullEnrich already do.
 
-Two candidates, and they differ in more than convenience:
+### The choice, with what each one actually costs
 
-- **Gmail API on the team's Google Workspace.** The letter leaves the seller's
-  real address at `@advantage-agency.co`, replies land in the mailbox they
-  already read, and the same API reads them back, so inbound is solved by the
-  same integration. Cost: OAuth with a refresh token per seller, and a domain
-  Google can suspend for the whole team at once.
-- **Resend or Postmark on a separate domain.** One API key, delivery webhooks,
-  an inbound webhook. Cost: a second sending identity to warm up, and replies
-  arrive at an address nobody reads by hand.
+|  | **Gmail API**, team's Workspace | **Postmark / Resend**, separate domain |
+|---|---|---|
+| Who the letter is from | the seller's real address, `@advantage-agency.co` | a new address on a new domain |
+| Setting it up | a Google Cloud project, a service account, and **one admin action**: paste the client id and the two scopes into the Workspace admin console. Then nothing per seller. | verify a domain (DKIM + SPF DNS records), take an API key. Then warm the new domain for weeks before volume. |
+| Replies | land in the seller's own mailbox, where they already read them, **and** the same API reads them back for the history | land at an address nobody opens by hand; the history is the only place they exist |
+| Inbound plumbing | poll `users.messages.list` with a query — one outbound `fetch` on the schedule we already run | a public webhook endpoint plus MX or an inbound address; the pattern exists (`/api/webhooks/fullenrich`) but it is another moving part |
+| Dependencies | none, but ~80 lines we own: build the RFC 2822 message and `Buffer.from(mime).toString("base64url")`, and sign the service-account JWT with `crypto.createSign("RSA-SHA256")` | none, and ~10 lines: a JSON body and a bearer token |
+| When a seller leaves | with domain-wide delegation there is no per-seller token to die; impersonating the closed account fails and nobody else is touched | nothing breaks — the identity is the domain, not the person |
+| When a seller changes their password | nothing, under domain-wide delegation. Under per-seller OAuth a refresh token can be invalidated and that seller has to consent again | nothing |
+| The risk that ends the project | one misconfigured delegation is permission to send as **anybody** in the domain, so the scope list has to stay `gmail.send` + `gmail.readonly` and nothing else | **cold outreach is what these providers suspend accounts for.** Their acceptable-use terms are written for mail the recipient asked for. Read the current terms before committing — a suspension takes the domain with it |
 
-Whichever is chosen: keys in the existing encrypted vault, one `email.out` event
-per letter with `{ crmContactId, from, to, subject, body, messageId, status,
-error }`, and **`email.in` from day one or the contract says plainly that email
-history is one-directional.** A history with only our own letters in it is the
-half that makes the other half misleading.
+**Two things decide it, and neither is convenience.**
+
+The first is what the letter is for. This is a cold first touch whose whole job
+is to be answerable by a human. A letter from a real person at a real company,
+landing in a mailbox that person reads, is a different object from a letter
+from `outreach@some-new-domain.com`. The second is that a transactional email
+provider is the wrong shop for this errand: their business is mail people
+signed up for, and cold outbound is the specific thing their terms exist to
+refuse. Building on one means building on an account that can be closed for
+doing what the product is for.
+
+**Recommendation: Gmail API with domain-wide delegation** — not per-seller
+OAuth. Delegation costs one admin action instead of a consent screen per
+person, has no refresh token to expire, and survives password changes. Inbound
+comes free from the same integration, which is the only way the "all
+correspondence in one history" half of the ask is honest rather than
+one-directional. The eighty lines of MIME and JWT are written once and never
+touched again; the domain reputation of a new sending domain is the thing that
+is never finished.
+
+**What to ask the user, in these words:** are you willing to have a Workspace
+admin add one client id with two scopes, so that letters go out from your own
+address and replies come back to your own inbox? If yes, Gmail. If that admin
+access is not available — it is somebody else's Google Workspace, or the answer
+is slow — Postmark is the fallback, and then the contract must say that email
+is a separate identity from the seller, with its own domain to warm.
+
+### Whichever is chosen
+
+Keys in the existing encrypted vault, one `email.out` event per letter with
+`{ crmContactId, from, to, subject, body, messageId, status, error }`, and
+**`email.in` from day one or this contract says plainly that email history is
+one-directional.** A history with only our own letters in it is the half that
+makes the other half misleading.
 
 One schema problem to solve before any of this: `wl_events.account_id` is a
 LinkedIn account, and an email has none. Either emails carry a null account and
@@ -538,7 +569,9 @@ in the Phase 4 contract, not in the code.
 - `markReplied` — matches `accepted` as well as `pending`.
 - `WARMUP_OUTREACH_LABEL` / `WARMUP_OUTREACH_TONE` — rewritten to the real six
   values.
-- `AGENT_KINDS` — gains `connect`.
+- `AGENT_KINDS` — **unchanged**, deliberately. Invitations became a reason to be
+  due through `invitesWaiting` in `dueFrom`, not through a quota kind; see the
+  correction under Phase 2.
 - `POST /leads/take` — its claim lookup is `.eq("crm_contact_id").eq("status",
   CLAIM_STATUS)` with **no account filter**, and the patch it applies sets
   `account_id`. Sending from account B silently re-points a claim account A
