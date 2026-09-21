@@ -23,7 +23,8 @@ import {
 } from "./targeting.mjs";
 import {
   AUDIT_HIDDEN_TYPES, MAX_THREADS_PER_RUN, lastSyncedAt, listThreads, markRead, markSynced, normalizeThreadInput,
-  outreachFor, readThread, storeThread, syncSummary, syncedTodayAccounts, threadKeyOf, unreadCount
+  messagesForContact, outreachFor, readThread, storeThread, syncSummary, syncedTodayAccounts,
+  threadKeyOf, unreadCount
 } from "./inbox.mjs";
 import { decideNext, finishRun, leaseAccount } from "./scheduler.mjs";
 import {
@@ -1665,6 +1666,73 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       }));
       accounts.sort((left, right) => Number(right.canSend) - Number(left.canSend) || right.connectsLeft - left.connectsLeft);
       sendJson(response, 200, { success: true, accounts });
+      return true;
+    }
+
+    /**
+     * Everything that ever passed between us and one person, in one list.
+     *
+     * Keyed by the CRM contact rather than by a thread: a thread is one
+     * conversation on one account, and the question a seller asks in front of
+     * a lead is "what has anybody here ever said to them". The invitation, the
+     * LinkedIn messages both ways, and — when Phase 4 lands — the emails.
+     *
+     * The invitation is dated by its `invite.sent` event rather than by the
+     * row's `created_at`, which is the moment the person was held: hours or a
+     * day earlier, and a timeline ordered by it puts the request before things
+     * that happened before it.
+     */
+    if (method === "GET" && path === "/history") {
+      const crmContactId = url.searchParams.get("crmContactId");
+      if (!crmContactId) return fail(response, sendJson, 400, "Який контакт?");
+
+      const outreach = await outreachForContact(crmContactId);
+      const events = await inviteEvents(crmContactId);
+      const messages = outreach
+        ? await messagesForContact({
+          accountId: outreach.account_id,
+          crmContactId,
+          personName: outreach.person_name,
+          personLinkedin: outreach.person_linkedin
+        })
+        : [];
+
+      const invite = describeInvite(outreach, events);
+      const entries = [
+        ...events
+          // `invite.checked` is written on every look, including the ones that
+          // saw nothing. It belongs in the account's log, not in a person's
+          // story, where a fortnight of "checked, no change" would bury the
+          // three lines that matter.
+          .filter((event) => event.type !== "invite.checked")
+          .map((event) => ({
+            id: event.id,
+            kind: "invite",
+            direction: "out",
+            // The event's own timestamp, which is the whole reason the
+            // invitation is read from events rather than from the row.
+            at: event.at,
+            event: event.type,
+            body: event.message,
+            meta: event.meta
+          })),
+        ...messages
+      ].sort((left, right) => String(right.at || "").localeCompare(String(left.at || "")));
+
+      sendJson(response, 200, {
+        success: true,
+        contact: {
+          crmContactId,
+          name: outreach?.person_name || "",
+          company: outreach?.person_company || ""
+        },
+        invite,
+        outreach: outreach ? describeOutreach(outreach) : null,
+        entries,
+        // Said plainly rather than left for somebody to work out from an empty
+        // list: nothing has been written to this person from this workspace.
+        empty: entries.length === 0
+      });
       return true;
     }
 

@@ -492,6 +492,56 @@ test("an account that finished warming is still told to come and check what it s
   assert.equal(third.payload.reason, "Warm-up is finished");
 });
 
+test("one person's history is the invitation and the messages, newest first", async () => {
+  await call({ method: "POST", path: "/api/warmup/invites", body: { accountId: "acc-1", crmContactId: "c-1", note: "коротке питання" } });
+  const outreachId = rows.wl_outreach[0].id;
+  await call({
+    method: "POST", path: "/api/warmup/agent",
+    body: { action: "invite.sent", accountId: "acc-1", outreachId, outcome: "sent" }
+  });
+
+  // Two messages: one carrying the person key written at store time, one from
+  // before this phase that has to be matched the old way, on the slug.
+  rows.wl_events.push({
+    id: "m-1", account_id: "acc-1", type: "message.out", created_at: "2026-09-22T09:00:00.000Z",
+    meta: { threadKey: "t-1", crmContactId: "c-1", direction: "out", body: "Дякую, що прийняли", sentAt: "2026-09-22T09:00:00.000Z" }
+  });
+  rows.wl_events.push({
+    id: "m-2", account_id: "acc-1", type: "message.in", created_at: "2026-09-23T10:00:00.000Z",
+    meta: { threadKey: "t-1", direction: "in", body: "Привіт, розкажіть більше", sentAt: "2026-09-23T10:00:00.000Z",
+      participant: { name: "Marta Kovalenko", slug: "marta" } }
+  });
+
+  const answer = await call({ method: "GET", path: "/api/warmup/history?crmContactId=c-1" });
+  assert.equal(answer.status, 200);
+  assert.equal(answer.payload.contact.name, "Marta Kovalenko");
+
+  const kinds = answer.payload.entries.map((entry) => `${entry.kind}:${entry.event || entry.direction}`);
+  // Newest first: the reply, our message, the send, the queueing.
+  assert.deepEqual(kinds, ["message:in", "message:out", "invite:invite.sent", "invite:invite.requested"]);
+
+  const older = answer.payload.entries.find((entry) => entry.direction === "in");
+  assert.equal(older.matchedBy, "name_or_slug", "and the screen can say this one was matched by name");
+  const ours = answer.payload.entries.find((entry) => entry.direction === "out" && entry.kind === "message");
+  assert.equal(ours.matchedBy, "contact_id");
+
+  // The daily check is an account's business, not a person's story.
+  await call({
+    method: "POST", path: "/api/warmup/agent",
+    body: { action: "invites.checked", accountId: "acc-1", results: [] }
+  });
+  const again = await call({ method: "GET", path: "/api/warmup/history?crmContactId=c-1" });
+  assert.equal(again.payload.entries.filter((entry) => entry.event === "invite.checked").length, 0);
+});
+
+test("a person nobody has written to says so rather than showing an empty list", async () => {
+  const answer = await call({ method: "GET", path: "/api/warmup/history?crmContactId=c-1" });
+  assert.equal(answer.status, 200);
+  assert.equal(answer.payload.empty, true);
+  assert.deepEqual(answer.payload.entries, []);
+  assert.equal(answer.payload.invite, null);
+});
+
 test("the write-access probe answers for each of the three writes, and cleans up", async () => {
   // Which way the history dedupe has to be built hangs on this answer, and it
   // can only be asked where the keys are — the deployed server.

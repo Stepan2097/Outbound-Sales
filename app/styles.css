@@ -3270,6 +3270,66 @@ dialog {
   line-height: 1.5;
 }
 
+/* Історія по людині. */
+.history-content {
+  display: grid;
+  gap: 12px;
+}
+
+.history-feed {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.history-entry {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-sunk);
+}
+
+.history-entry.is-in {
+  border-left: 2px solid var(--teal);
+}
+
+.history-entry.is-invite {
+  background: transparent;
+}
+
+.history-when {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.history-body {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.history-body strong {
+  font-size: 14px;
+}
+
+.history-body pre {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+@media (max-width: 720px) {
+  .history-entry {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* Перевірка прав на запис у базу прогріву. */
 .warmup-header-actions {
   display: flex;

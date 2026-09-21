@@ -135,6 +135,7 @@
               <select id="mobileLeadSectionSelect" aria-label="Розділ робочої області ліда">
                 <option value="dashboard-client">Опис клієнта</option>
                 <option value="dashboard-invite">Запрошення</option>
+                <option value="dashboard-history">Історія</option>
                 <option value="dashboard-account">Компанія</option>
                 <option value="dashboard-strategy">Стратегія</option>
                 <option value="dashboard-intelligence">Бриф</option>
@@ -148,6 +149,7 @@
               </select>
               <button type="button" role="tab" data-lead-tab="dashboard-client">Опис клієнта</button>
               <button type="button" role="tab" data-lead-tab="dashboard-invite">Запрошення</button>
+              <button type="button" role="tab" data-lead-tab="dashboard-history">Історія</button>
               <button type="button" role="tab" data-lead-tab="dashboard-account">Компанія</button>
               <button type="button" role="tab" data-lead-tab="dashboard-strategy">Стратегія</button>
               <button type="button" role="tab" data-lead-tab="dashboard-intelligence">Бриф</button>
@@ -186,6 +188,17 @@
                     <span class="pill" id="invitePill">—</span>
                   </div>
                   <div class="invite-content" id="inviteContent"></div>
+                </section>
+
+                <section class="panel lead-section history-panel" id="dashboard-history">
+                  <div class="panel-heading">
+                    <div>
+                      <h2>Історія</h2>
+                      <p id="historyMeta">Усе, що ми цій людині писали і що вона відповідала</p>
+                    </div>
+                    <button class="text-button" id="historyRefreshBtn" type="button"><i data-lucide="refresh-cw"></i><span>Оновити</span></button>
+                  </div>
+                  <div class="history-content" id="historyContent"></div>
                 </section>
 
                 <section class="panel lead-section intelligence-panel" id="dashboard-intelligence">

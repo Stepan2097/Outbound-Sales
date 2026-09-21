@@ -23,6 +23,11 @@ let inviteAccountsLoaded = false;
 let inviteState = null;
 let inviteLoadedFor = "";
 let inviteNotice = "";
+// Стрічка по людині: запрошення, повідомлення в обидва боки, далі листи. Живе
+// в базі прогріву, тож читається окремо і лише для відкритого ліда.
+let historyEntries = null;
+let historyLoadedFor = "";
+let historyNotice = "";
 let authState = null;
 let authMode = "login";
 let activeResearchJob = null;
@@ -921,9 +926,11 @@ function renderLeadWorkspaceExtras(prospect) {
 
   renderMessageControls(prospect);
   renderInvite(prospect);
-  // Стан запрошення живе в базі прогріву, тож його читають окремо — і лише
-  // коли відкрили іншу людину, а не на кожне перемальовування.
+  renderHistory(prospect);
+  // Стан запрошення й історія живуть у базі прогріву, тож їх читають окремо — і
+  // лише коли відкрили іншу людину, а не на кожне перемальовування.
   void loadInviteContext(prospect).catch(() => {});
+  void loadHistory(prospect).catch(() => {});
   setHtml("clientProfileContent", clientProfileRows(prospect));
   setText("clientProfilePill", clientProfileStatusLabel(prospect));
   setText("clientProfileMeta", prospect
@@ -1217,6 +1224,114 @@ function inviteFirstMessageHtml(prospect) {
       <pre>${escapeHtml(message.body)}</pre>
       <small class="message-basis">Надсилає людина зі свого акаунта — платформа цього не робить.</small>
     </article>
+  `;
+}
+
+/* ── Історія по людині ─────────────────────────────────────────────────────
+ *
+ * Питання, яке продавець ставить перед розмовою: що цій людині взагалі
+ * писали — з будь-якого акаунта, будь-яким каналом, і що вона відповіла.
+ * Тред — це одна розмова на одному акаунті; тут ключ інший, людина.
+ */
+
+const HISTORY_EVENT_LABEL = {
+  "invite.requested": "Запит поставлено в чергу",
+  "invite.sent": "Запит надіслано",
+  "invite.cancelled": "Запит скасовано",
+  "invite.reassigned": "Запит перекинуто на інший акаунт",
+  "invite.failed": "Запит не вдалося надіслати"
+};
+
+async function loadHistory(prospect, { force = false } = {}) {
+  const contactId = crmContactIdOf(prospect);
+  if (!contactId) {
+    historyEntries = null;
+    historyLoadedFor = "";
+    historyNotice = "";
+    renderHistory(prospect);
+    return;
+  }
+  if (historyLoadedFor === contactId && !force) return;
+  historyLoadedFor = contactId;
+  historyEntries = null;
+  historyNotice = "";
+  renderHistory(prospect);
+  try {
+    const payload = await warmupApi(`/history?crmContactId=${encodeURIComponent(contactId)}`);
+    // Ліда могли перемкнути, поки відповідь ішла.
+    if (historyLoadedFor !== contactId) return;
+    historyEntries = payload.entries || [];
+  } catch (error) {
+    historyNotice = error.message || "Прогрів не відповів.";
+  }
+  renderHistory(state.prospects?.find((item) => item.id === selectedProspectId));
+  refreshIcons();
+}
+
+function renderHistory(prospect) {
+  const content = document.getElementById("historyContent");
+  if (!content) return;
+  const contactId = crmContactIdOf(prospect);
+
+  // Рід за іменем не вгадується: половина цих людей — не з української
+  // іменної традиції, і помилка тут неприємна саме тому, що це реальна людина
+  // на екрані. Тому скрізь безособове.
+  setText("historyMeta", prospect?.name
+    ? `Усе, що писали цій людині (${prospect.name}), і що приходило у відповідь`
+    : "Усе, що писали цій людині, і що приходило у відповідь");
+
+  if (!prospect) {
+    content.innerHTML = `<div class="empty-state">Відкрий ліда.</div>`;
+    return;
+  }
+  if (!contactId) {
+    content.innerHTML = `<div class="empty-state">Цей лід не з CRM, а історія ведеться по контакту в CRM. Відкрий людину з папки на Панелі.</div>`;
+    return;
+  }
+  if (historyNotice) {
+    content.innerHTML = `<div class="outreach-warning"><i data-lucide="triangle-alert"></i><span>${escapeHtml(historyNotice)}</span></div>`;
+    return;
+  }
+  if (!historyEntries) {
+    content.innerHTML = `<div class="empty-state">Читаємо історію...</div>`;
+    return;
+  }
+  if (!historyEntries.length) {
+    content.innerHTML = `<div class="empty-state">Цій людині ще нічого не писали з жодного акаунта.</div>`;
+    return;
+  }
+
+  content.innerHTML = `<ol class="history-feed">${historyEntries.map(historyEntryHtml).join("")}</ol>`;
+}
+
+function historyEntryHtml(entry) {
+  const when = entry.at ? relativeTime(entry.at) : "";
+  const exact = entry.at ? new Date(entry.at).toLocaleString("uk-UA", { dateStyle: "short", timeStyle: "short" }) : "";
+
+  if (entry.kind === "invite") {
+    return `
+      <li class="history-entry is-invite">
+        <div class="history-when" title="${escapeAttr(exact)}">${escapeHtml(when)}</div>
+        <div class="history-body">
+          <strong>${escapeHtml(HISTORY_EVENT_LABEL[entry.event] || entry.event)}</strong>
+          ${entry.meta?.note ? `<pre>${escapeHtml(entry.meta.note)}</pre>` : ""}
+          ${entry.meta?.by ? `<small class="is-muted">${entry.meta.by === "agent" ? "надіслав агент" : "надіслано вручну"}${entry.meta.overQuota ? " · понад денну норму" : ""}</small>` : ""}
+          ${entry.meta?.outcome ? `<small class="is-muted">${escapeHtml(entry.meta.outcome)}</small>` : ""}
+        </div>
+      </li>
+    `;
+  }
+
+  const mine = entry.direction === "out";
+  return `
+    <li class="history-entry ${mine ? "is-out" : "is-in"}">
+      <div class="history-when" title="${escapeAttr(exact)}">${escapeHtml(when)}</div>
+      <div class="history-body">
+        <strong>${mine ? "Ми написали" : "Прийшло у відповідь"}</strong>
+        <pre>${escapeHtml(entry.body || "")}</pre>
+        <small class="is-muted">${escapeHtml(wordCountLabel(entry.body))}${entry.truncated ? " · текст обрізано при збереженні" : ""}${entry.matchedBy === "name_or_slug" ? " · звʼязано за імʼям, а не за контактом" : ""}</small>
+      </div>
+    </li>
   `;
 }
 
@@ -2881,6 +2996,11 @@ document.getElementById("enrichLeadBtn").addEventListener("click", async () => {
  * показі. Перевірити можна лише там, де є ключі — тобто на розгорнутому
  * сервері, — тож це кнопка в застосунку, а не скрипт, який нікому не запустити.
  */
+document.getElementById("historyRefreshBtn").addEventListener("click", async () => {
+  const prospect = state?.prospects?.find((item) => item.id === selectedProspectId);
+  await loadHistory(prospect, { force: true });
+});
+
 document.getElementById("warmupProbeBtn").addEventListener("click", async () => {
   const note = document.getElementById("warmupProbeNote");
   const button = document.getElementById("warmupProbeBtn");

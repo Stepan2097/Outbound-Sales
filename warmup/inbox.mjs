@@ -395,7 +395,7 @@ export function crmContent(accountName, body) {
 // -- writing ----------------------------------------------------------------
 
 /** The only place a message becomes a row. */
-async function insertMessages(accountId, threadKey, participant, messages) {
+async function insertMessages(accountId, threadKey, participant, messages, crmContactId = null) {
   if (!messages.length) return;
   await anty.from("wl_events").insert(messages.map((message) => ({
     account_id: accountId,
@@ -406,6 +406,11 @@ async function insertMessages(accountId, threadKey, participant, messages) {
     message: `${message.direction === "in" ? "Reply from" : "Sent to"} ${participant.name}`,
     meta: {
       threadKey,
+      // Who this is, written down rather than worked out again on every read.
+      // Without it a person's history is a name match repeated at read time,
+      // and somebody who renames their LinkedIn profile drops out of their own
+      // history. Null when the thread matched nobody we approached.
+      crmContactId,
       externalId: message.externalId,
       direction: message.direction,
       body: message.body,
@@ -481,34 +486,82 @@ export async function storeThread({ account, input }) {
   const seen = await storedExternalIds(account.id, messages.map((message) => message.externalId));
   const { fresh, skipped } = splitStored(messages, seen);
 
-  await insertMessages(account.id, threadKey, participant, fresh);
+  // Who this thread is, resolved before anything is written rather than after.
+  // It used to be worked out only when something inbound arrived, which meant
+  // a thread of our own messages was stored with nothing saying who they were
+  // to. Done for every thread that has anything new in it, so the person key
+  // goes onto outbound messages as well.
+  const rows = fresh.length
+    ? await anty.from("wl_outreach")
+      .select("id,account_id,crm_contact_id,person_name,person_linkedin,status,created_at")
+      .eq("account_id", account.id).rows()
+    : [];
+  const match = fresh.length ? matchOutreachRow(rows, participant) : null;
+
+  await insertMessages(account.id, threadKey, participant, fresh, match?.crm_contact_id ?? null);
 
   const inbound = fresh.filter((message) => message.direction === "in");
-  const outcome = { matchedOutreachId: null, statusMoved: false, crm: "skipped" };
+  const outcome = { matchedOutreachId: match?.id ?? null, statusMoved: false, crm: "skipped" };
 
-  if (inbound.length) {
-    const rows = await anty.from("wl_outreach")
-      .select("id,account_id,crm_contact_id,person_name,person_linkedin,status,created_at")
-      .eq("account_id", account.id).rows();
-    const match = matchOutreachRow(rows, participant);
-
-    if (match) {
-      outcome.matchedOutreachId = match.id;
-      // The newest inbound message is the one that proves they answered.
-      const newest = inbound.reduce((latest, message) => (message.sentAt > latest.sentAt ? message : latest));
-      outcome.statusMoved = await markReplied(match, newest.sentAt);
-      if (match.crm_contact_id) {
-        outcome.crm = await writeCrmActivity({
-          accountId: account.id,
-          contactId: match.crm_contact_id,
-          accountName: account.login?.trim() || account.label,
-          body: newest.body
-        });
-      }
+  if (inbound.length && match) {
+    // The newest inbound message is the one that proves they answered.
+    const newest = inbound.reduce((latest, message) => (message.sentAt > latest.sentAt ? message : latest));
+    outcome.statusMoved = await markReplied(match, newest.sentAt);
+    if (match.crm_contact_id) {
+      outcome.crm = await writeCrmActivity({
+        accountId: account.id,
+        contactId: match.crm_contact_id,
+        accountName: account.login?.trim() || account.label,
+        body: newest.body
+      });
     }
   }
 
   return { stored: fresh.length, skipped: skipped.length, invalid, undated, threadKey, ...outcome };
+}
+
+/**
+ * Every message stored for one person, newest first.
+ *
+ * Two ways of belonging, and both are needed for a while. Messages stored from
+ * this phase on carry `meta.crmContactId` and are simply filtered. Everything
+ * stored before it has no person key at all, so those are matched the old way —
+ * on the LinkedIn slug, then the name — which is the matching that breaks when
+ * somebody renames their profile. **Older messages are not backfilled**, so a
+ * person's history is exact from here on and best-effort behind.
+ */
+export async function messagesForContact({ accountId, crmContactId, personName, personLinkedin }, limit = 200) {
+  if (!accountId) return [];
+  const rows = await anty.from("wl_events").select("id,account_id,type,meta,created_at")
+    .eq("account_id", accountId).in("type", MESSAGE_TYPES)
+    .order("created_at", { ascending: false }).limit(LISTING_LIMIT).rows();
+
+  const wantedSlug = linkedinSlug(personLinkedin);
+  const wantedName = cleanName(personName).toLowerCase();
+
+  return rows
+    .filter((row) => {
+      const meta = row.meta || {};
+      if (meta.crmContactId) return String(meta.crmContactId) === String(crmContactId);
+      const participant = meta.participant || {};
+      if (wantedSlug && linkedinSlug(participant.slug) === wantedSlug) return true;
+      const name = cleanName(participant.name).toLowerCase();
+      return Boolean(wantedName) && !NON_NAMES.has(wantedName) && name === wantedName;
+    })
+    .slice(0, limit)
+    .map((row) => ({
+      id: row.id,
+      kind: "message",
+      direction: row.type === MESSAGE_IN ? "in" : "out",
+      at: row.meta?.sentAt || row.created_at,
+      storedAt: row.created_at,
+      body: row.meta?.body || "",
+      threadKey: row.meta?.threadKey || "",
+      truncated: Boolean(row.meta?.truncated),
+      // How this message was recognised as theirs — worth showing, because the
+      // second way is a guess that a rename can break.
+      matchedBy: row.meta?.crmContactId ? "contact_id" : "name_or_slug"
+    }));
 }
 
 /**
