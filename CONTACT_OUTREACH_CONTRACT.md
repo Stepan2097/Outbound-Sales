@@ -333,11 +333,14 @@ upkeep: { checks: 4, inbox: false, any: true }
 
 - **checks** — `pending` rows for this account, capped at `MAX_INVITE_CHECKS_PER_RUN`,
   and zero once an `invite.checked` row exists for today. Any day, in plan or out.
-- **inbox** — true only **past the last day of the plan**, when the inbox has not
-  been read today. Inside the plan tomorrow's quota opens the browser anyway and
-  the inbox is read while it is there; making "not read today" a reason of its
-  own would hand every account a session every morning whether or not it had
-  anything else to do.
+- **inbox** — true only **past the last day of the plan**, when the account has
+  at least one `wl_outreach` row in a status a reply could still come from
+  (`pending`, `accepted`, `connected`) and nobody has read it today. Inside the
+  plan tomorrow's quota opens the browser anyway and the inbox is read while it
+  is there. The open-conversation count is the evidence: "we have not read it
+  today" is a statement about us, and without it an account that finished
+  warming without ever approaching anybody opens a browser every morning,
+  forever, to find an empty inbox.
 
 `remaining` stays what it was — the day's quota, and the worker's pacing. An
 account can be handed over with `remaining: 0`, an empty `kinds`, and `upkeep`
@@ -354,10 +357,33 @@ a time inside a four-hour window, and upkeep keeps until tomorrow where a day of
 a plan does not.
 
 **What this costs.** The fleet's daily session count no longer shrinks as
-accounts finish their plans. Every account still in `warming` status gets at
-most one session a day for as long as it holds pending invitations or has an
-unread inbox — forever, for a finished account. The lever is the one that
-already exists: excluding an account takes it out of `candidates()` entirely.
+accounts finish their plans. An account still in `warming` status gets at most
+one session a day for as long as it has something outstanding — an unchecked
+invitation, or an open conversation whose inbox has not been read today. An
+account that finished with nothing outstanding sleeps. The lever, if one is
+needed, is the one that already exists: excluding an account takes it out of
+`candidates()` entirely.
+
+**The ceiling, named here so nobody has to find it twice.** One account runs at
+a time inside 09:00–13:00, paced 120–420 seconds apart — call it thirty to sixty
+sessions a day. Warming accounts sort ahead of upkeep-only ones, which is right,
+so when the number of accounts owing something passes what the window holds, it
+is upkeep that is dropped, and it is dropped **silently**: nothing errors, the
+oldest invitations simply go unchecked for a day, then two. The first signal is
+the age of `lastCheckedAt`, which is written on every check including the empty
+ones. A screen that shows the oldest `lastCheckedAt` across accounts would turn
+this from something discovered into something watched; it is not built, and it
+is the right thing to build first if the fleet grows.
+
+**One more thing this work turned up, worth knowing outside it.**
+`wl_accounts.status` and the status on screen are different things and can
+diverge without limit. `deriveStatus` computes `finished` for display, but
+nothing ever writes it back, `setAccountStatus` only ever writes `excluded`,
+`idle`, `warming` and `restricted`, and no code anywhere sets a run to
+`completed`. So an account that finished its plan a year ago is still stored as
+`warming` with a `running` run. Every query that filters on
+`wl_accounts.status` — `candidates()` among them — is reading "was this account
+ever switched off by a human", not "is this account still warming up".
 
 ### The second, cheaper road to the same answer
 

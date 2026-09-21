@@ -8,8 +8,8 @@ import { CLAIM_STATUS, OUTREACH_COLUMNS, OUTREACH_STATUSES, describeClaim, descr
 import {
   ACCEPTED_STATUS, MAX_INVITES_PER_RUN, MAX_INVITE_CHECKS_PER_RUN, WAITING_STATUS, cancelInvite,
   describeInvite, inviteEvents, invitesToCheck, invitesToSend, lastCheckedAt as invitesLastCheckedAt,
-  checkedTodayAccounts, moveStatus, outreachForContact, pendingCounts, reassignInvite,
-  recordCheck, recordFailed, recordSent, requestInvite
+  checkedTodayAccounts, moveStatus, openConversationCounts, outreachForContact, pendingCounts,
+  reassignInvite, recordCheck, recordFailed, recordSent, requestInvite
 } from "./invites.mjs";
 import { antyTimestampToIso, describeSession, durationMin } from "./sessions.mjs";
 import { encryptSecret, secretsConfigured } from "./secretbox.mjs";
@@ -184,15 +184,17 @@ async function connectAllowance(account) {
 async function upkeepWorkFor(account, run) {
   if (!run) return { checks: 0, inbox: false, any: false };
   const todayIso = today();
-  const [pending, checked, synced] = await Promise.all([
+  const [pending, conversations, checked, synced] = await Promise.all([
     pendingCounts([account.id]),
+    openConversationCounts([account.id]),
     checkedTodayAccounts([account.id], todayIso),
     syncedTodayAccounts([account.id], todayIso)
   ]);
   const day = currentDay(new Date(run.started_at), run.paused_days ?? 0);
   const inPlan = day <= totalDays(run.strategy_snapshot);
   const checks = checked.has(account.id) ? 0 : Math.min(pending.get(account.id) ?? 0, MAX_INVITE_CHECKS_PER_RUN);
-  const inbox = !inPlan && !synced.has(account.id);
+  // Somebody who could still write, and nobody has looked today.
+  const inbox = !inPlan && (conversations.get(account.id) ?? 0) > 0 && !synced.has(account.id);
   return { checks, inbox, any: checks > 0 || inbox };
 }
 

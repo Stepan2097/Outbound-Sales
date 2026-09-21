@@ -135,6 +135,29 @@ test("an account past the end of its plan is still opened for what it is holding
   assert.equal(again.length, 0);
 });
 
+test("an account that finished warming without approaching anybody is left alone", () => {
+  const now = new Date("2026-09-17T10:00:00.000Z");
+  const finished = {
+    accounts: [account("c")],
+    runs: [run("c", { startedAt: startedForDay(20, now) })],
+    dayActions: [],
+    todayIso: TODAY,
+    nowMs: now.getTime()
+  };
+
+  // Nothing sent, nothing waiting, nobody who could have written. "We have not
+  // read the inbox today" is a statement about us, not evidence that there is
+  // anything to read — and this account would otherwise open a browser every
+  // morning, forever, to find an empty one.
+  assert.equal(dueFrom(finished).ready.length, 0);
+
+  // One open conversation is the evidence, and then it is worth opening.
+  const { ready } = dueFrom({ ...finished, openConversations: new Map([["c", 1]]) });
+  assert.equal(ready.length, 1);
+  assert.equal(ready[0].upkeep.inbox, true);
+  assert.equal(ready[0].upkeep.checks, 0, "nothing is awaiting an answer — this is only about reading");
+});
+
 test("an account with a plan to follow goes before one that only needs looking after", () => {
   const now = new Date("2026-09-17T10:00:00.000Z");
   const { ready } = dueFrom({

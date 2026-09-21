@@ -4,7 +4,7 @@ import { anty, today } from "./db.mjs";
 import { SESSION_WINDOW, insideWindow, windowLabel } from "./schedule.mjs";
 import { currentDay, dailyQuota, totalDays } from "./strategy.mjs";
 import { logEvent } from "./store.mjs";
-import { MAX_INVITE_CHECKS_PER_RUN, checkedTodayAccounts, pendingCounts, waitingCounts } from "./invites.mjs";
+import { MAX_INVITE_CHECKS_PER_RUN, checkedTodayAccounts, openConversationCounts, pendingCounts, waitingCounts } from "./invites.mjs";
 import { syncedTodayAccounts } from "./inbox.mjs";
 
 /**
@@ -231,27 +231,34 @@ export function resetScheduler() {
  * rest of this function follows: evidence rather than allowance — there must be
  * something outstanding — and a bound, which here is once a day.
  */
-function upkeepFor({ accountId, inPlan, pendingInvites, checkedToday, inboxSyncedToday }) {
+function upkeepFor({ accountId, inPlan, pendingInvites, openConversations, checkedToday, inboxSyncedToday }) {
   // Invitations are checked on any day, in or out of plan: a sent request can
   // be accepted on a day this account happens to owe nothing else, and "every
   // day" was the ask.
   const checks = checkedToday?.has(accountId) ? 0 : Math.min(pendingInvites?.get(accountId) ?? 0, MAX_INVITE_CHECKS_PER_RUN);
 
-  // The inbox is different, and only out-of-plan accounts need it as a reason.
-  // An account inside its plan is woken by tomorrow's quota anyway and reads
-  // the inbox while it is there; making "not read today" a reason on its own
-  // would hand every account a session every morning whether or not it had
-  // anything else to do, which is a fleet-wide change in behaviour bought for
-  // nothing. Past the last day nothing else will ever wake it, and then it is
-  // the only reason left.
-  const inbox = !inPlan && !inboxSyncedToday?.has(accountId);
+  // The inbox is different in two ways, and both are restrictions.
+  //
+  // Only out-of-plan accounts need it as a reason at all: inside the plan
+  // tomorrow's quota opens the browser anyway and the inbox is read while it is
+  // there, so making "not read today" a reason of its own would hand every
+  // account a session every morning whether or not it had anything else to do.
+  //
+  // And it needs the same evidence the rest of this function demands. "We have
+  // not read it today" is a statement about us; an account that finished
+  // warming without ever approaching anybody has nobody who could have written,
+  // and opening a browser daily forever to find an empty inbox is exactly the
+  // allowance-instead-of-evidence mistake this whole rule exists to prevent.
+  const inbox = !inPlan
+    && (openConversations?.get(accountId) ?? 0) > 0
+    && !inboxSyncedToday?.has(accountId);
 
   return { checks, inbox, any: checks > 0 || inbox };
 }
 
 export function dueFrom({
   accounts, runs, dayActions, openProfiles, invitesWaiting,
-  pendingInvites, checkedToday, inboxSyncedToday,
+  pendingInvites, openConversations, checkedToday, inboxSyncedToday,
   todayIso, nowMs = Date.now()
 }) {
   const runByAccount = new Map((runs ?? []).map((row) => [row.account_id, row]));
@@ -306,7 +313,7 @@ export function dueFrom({
       remaining += invites;
     }
 
-    const upkeep = upkeepFor({ accountId: account.id, inPlan, pendingInvites, checkedToday, inboxSyncedToday });
+    const upkeep = upkeepFor({ accountId: account.id, inPlan, pendingInvites, openConversations, checkedToday, inboxSyncedToday });
     // Upkeep is counted apart from `remaining` on purpose: `remaining` is the
     // day's quota and paces the worker, and a check spends none of it. An
     // account can be due on upkeep alone, with `remaining: 0`.
@@ -368,15 +375,16 @@ async function candidates(todayIso, nowMs) {
   const invitesWaiting = await waitingCounts(ids);
   // The upkeep evidence: what is outstanding, and what has already been done
   // today. Three queries for every account rather than three per account.
-  const [pendingInvites, checkedToday, inboxSyncedToday] = await Promise.all([
+  const [pendingInvites, openConversations, checkedToday, inboxSyncedToday] = await Promise.all([
     pendingCounts(ids),
+    openConversationCounts(ids),
     checkedTodayAccounts(ids, todayIso),
     syncedTodayAccounts(ids, todayIso)
   ]);
 
   return dueFrom({
     accounts, runs, dayActions, openProfiles, invitesWaiting,
-    pendingInvites, checkedToday, inboxSyncedToday, todayIso, nowMs
+    pendingInvites, openConversations, checkedToday, inboxSyncedToday, todayIso, nowMs
   });
 }
 

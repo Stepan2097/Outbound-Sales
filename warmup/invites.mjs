@@ -298,6 +298,34 @@ export async function waitingCounts(accountIds = []) {
   return counts;
 }
 
+/**
+ * The statuses a reply could still arrive from.
+ *
+ * `connected` is here as well as the two unanswered ones: a conversation that
+ * is already going does not stop being worth reading. `declined` and
+ * `withdrawn` are not — nobody is going to write from those — and neither is
+ * `waiting`, where nothing has been sent yet.
+ */
+export const REPLIABLE_FROM = ["pending", ACCEPTED_STATUS, "connected"];
+
+/**
+ * How many people each account has an open conversation with.
+ *
+ * This is the evidence behind reading the inbox. "We have not read it today"
+ * is a statement about us, not about there being anything to read: an account
+ * that finished warming without ever approaching anybody has no threads and no
+ * invitations, and waking it every morning to open an empty inbox is the
+ * machine doing what a person never would.
+ */
+export async function openConversationCounts(accountIds = []) {
+  const counts = new Map();
+  if (!accountIds.length) return counts;
+  const rows = await anty.from("wl_outreach").select("account_id")
+    .in("account_id", accountIds).in("status", REPLIABLE_FROM).rows();
+  for (const row of rows) counts.set(row.account_id, (counts.get(row.account_id) || 0) + 1);
+  return counts;
+}
+
 /** How many sent invitations each of these accounts is still waiting on. */
 export async function pendingCounts(accountIds = []) {
   const counts = new Map();
