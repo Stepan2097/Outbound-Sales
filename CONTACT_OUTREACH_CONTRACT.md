@@ -226,56 +226,94 @@ not send it.
 
 ## Phase 2 — the agent sends, and checks every day
 
-### `GET /api/warmup/agent` — two additions
+### `GET /api/warmup/agent` — one addition
+
+**Built and answering.** Beside `queue`, `session`, `inbox` and `window`:
 
 ```
 invites: {
   toSend:  [ { outreachId, crmContactId, name, company, position, linkedin, note } ],
-  toCheck: [ { outreachId, linkedin, name, sentAt } ],
-  lastCheckedAt: "2026-09-21T09:12:04.318Z" | null
+  toCheck: [ { outreachId, crmContactId, name, linkedin, heldAt } ],
+  lastCheckedAt: "2026-09-21T09:12:04.318Z" | null,
+  connectsLeft: 3
 }
 ```
 
-`toSend` is capped by what the quota allows right now, so the agent is never
-handed work it would be refused for. `toCheck` is every `pending` row for this
-account, capped at 20 per run and oldest first.
+`toSend` is already cut to `min(connectsLeft, 10)`, oldest queued first, so the
+agent is not handed a request the server would refuse a moment later. `toCheck`
+is every `pending` row for this account, oldest first, capped at 20 — a check
+costs no allowance, and without the cap it grows into a crawl of everybody this
+account ever wrote to. `note` is the text the seller wrote; send it as the
+invitation note, do not compose one.
 
 ### `POST /api/warmup/agent` — `invite.sent`
+
+**Built and answering.**
 
 ```
 body { action: "invite.sent", accountId, outreachId,
        outcome: "sent" | "already_pending" | "already_connected"
               | "no_button" | "profile_gone" | "blocked" }
-200  { success: true, status, connectsLeft }
-409  { success: false, error: "Daily quota reached (5)", quota, done }
+
+200  { success: true, status: "pending", moved: true,  connectsLeft: 2 }
+200  { success: true, status: "waiting", moved: false, recorded: "no_button" }
+200  { success: true, status: "pending", moved: false, reason: "already" | "refused" | "raced" | "gone" }
+404  { success: false, error: "That invitation is gone" }
+409  { success: false, error: "That invitation belongs to another account" }
+409  { success: false, error: "No warm-up in progress" }
+409  { success: false, error: "Daily quota reached (5)", quota: 5, done: 5 }
 ```
 
-`sent` moves `waiting` → `pending`, calls `commitAction(account, run,
-"connect", allowance)` and writes `invite.sent`. `already_pending` moves the row
-to `pending` **without** spending quota — it is the reconciliation for a previous
-run that clicked and died before reporting. `already_connected` goes straight to
-`accepted`. `profile_gone` and `no_button` write `invite.failed` and leave the
-row `waiting` with the reason on it; `blocked` stops the send step for the run.
+| outcome | status becomes | allowance | what it means |
+|---|---|---|---|
+| `sent` | `pending` | **spent** | the card read Connect, we clicked, it now reads Pending |
+| `already_pending` | `pending` | not spent | it already read Pending before we clicked — last run's crash |
+| `already_connected` | `accepted` | not spent | they are already in the contacts |
+| `no_button` | unchanged (`waiting`) | not spent | no Connect control on the profile |
+| `profile_gone` | unchanged (`waiting`) | not spent | 404, redirect, or a members-only wall |
+| `blocked` | unchanged (`waiting`) | not spent | an interstitial or rate-limit page |
 
-A quota refusal is an ordinary answer, not a failure: the agent stops sending
-for the day and leaves the rest queued.
+A `409` on quota is an ordinary answer, not a failure: **stop the send step for
+the day** and leave the rest queued. A `moved: false` with a `reason` is also
+ordinary — somebody else moved the row — and is worth one log line, not a retry.
 
 ### `POST /api/warmup/agent` — `invites.checked`
+
+**Built and answering.**
 
 ```
 body { action: "invites.checked", accountId,
        results: [ { outreachId, state: "accepted" | "pending" | "gone" } ] }
-200  { success: true, accepted: 2, withdrawn: 0, checked: 14 }
+200  { success: true, checked: 14, accepted: 2, withdrawn: 0,
+       refused: [ { outreachId, from: "connected", to: "accepted" } ] }
 ```
 
-`accepted` → status `accepted`, `responded_at` left null (nobody has said
-anything yet). `gone` → `withdrawn`. `pending` changes nothing.
+`accepted` → status `accepted`, `responded_at` untouched (nobody has said
+anything yet). `gone` → `withdrawn`. `pending` changes nothing. At most 20
+results are read; the rest are ignored rather than rejected.
 
-**The check is written even when nothing changed.** `invite.checked` carries
-`{ checked, accepted, withdrawn }` every time, the way `inbox.synced` does, for
-the same reason: a run of zeros is how anybody finds out that the sent-invitations
-page changed its markup, and without it "nobody is accepting" and "the agent
-stopped looking" are the same screen.
+`refused` lists moves the transition table would not make — almost always
+because the inbox sync already recorded a real reply for that person inside the
+same run. That is correct and expected; it is reported so that a run of them
+can be noticed.
+
+**Send this call even when nothing changed** — `results: []` is a valid body and
+writes the `invite.checked` row. Without it, "nobody is accepting" and "the
+agent stopped looking" are the same empty screen.
+
+### What the portal does not check, and you must
+
+`outreachId` is trusted to be one this account holds — the route refuses one
+belonging to another account with a 409 — but nothing checks that the profile
+you clicked is the person in the row. **The link in `toSend[].linkedin` is the
+only authority on who to open.** A request sent to the wrong person cannot be
+undone: `wl_outreach_person_once` is unique on the contact, so the row now says
+this account approached somebody it did not.
+
+`toSend` can be empty while `connectsLeft` is positive, and that is not an
+error — it means nobody is queued. Do not fall back to inventing recipients;
+that is the rule `run-account.mjs` has followed from the beginning and it is
+why every request in this system is attached to a person and a status.
 
 ### The second, cheaper road to the same answer
 
@@ -302,8 +340,18 @@ seconds apart — the ordinary failure here is a dropped socket, not a dead
 process — and if it still will not go, **stop the send step for the whole run**
 rather than opening the next person.
 
-`connect` must join `AGENT_KINDS` in `scheduler.mjs` and the early-exit gate at
-`run-account.mjs:140-146` must count invite work, or none of this ever runs.
+**Correction to this contract, made while building it.** It said `connect` must
+join `AGENT_KINDS`. It must not. `dueFrom` computes `remaining` from quota
+alone, so adding the kind there makes every account due every morning for as
+long as it has allowance, and the browser opens to send nothing. What is now
+built instead: `dueFrom` takes an `invitesWaiting` count per account and adds
+`min(waiting, connectLeft)` to `remaining`, pushing `connect` into `kinds` only
+when somebody is actually queued. The evidence for waking an account is a
+person waiting, not an unspent allowance.
+
+The early-exit gate at `run-account.mjs:140-146` still has to count invite work,
+or an account whose views and likes are done exits before opening Chrome. That
+half is in the agent repository.
 
 ### What this costs, and it is a real cost
 
