@@ -3270,6 +3270,15 @@ dialog {
   line-height: 1.5;
 }
 
+.compliance-list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .client-profile-content .is-muted {
   margin: 0;
   color: var(--muted);

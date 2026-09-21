@@ -14,6 +14,8 @@ let panelTotal = 0;
 let panelContact = null;
 let panelQueueNotice = "";
 let panelQueueBusy = false;
+// Чий вибір зараз стоїть у селекторах повідомлень. Порожньо — ліда змінили.
+let messageControlsLeadId = "";
 let authState = null;
 let authMode = "login";
 let activeResearchJob = null;
@@ -910,6 +912,7 @@ function renderLeadWorkspaceExtras(prospect) {
   setText("leadWorkspaceConfidence", prospect ? `${confidence}% впевненості в найкращому контакті` : "Чекаємо на підтвердження");
   setText("committeeCount", prospect ? `${committeeForProspect(prospect).length} ${uaPlural(committeeForProspect(prospect).length, "контакт", "контакти", "контактів")}` : "0 контактів");
 
+  renderMessageControls(prospect);
   setHtml("clientProfileContent", clientProfileRows(prospect));
   setText("clientProfilePill", clientProfileStatusLabel(prospect));
   setText("clientProfileMeta", prospect
@@ -1003,20 +1006,26 @@ function clientProfileRows(prospect) {
     return `<div class="empty-state">Цю людину ще не збагачували. Тисни «Збагатити»: модель знайде все доступне про неї і про компанію, запише знайдене в базу — і на цьому місці з'явиться опис клієнта та підходи до розмови.</div>`;
   }
 
-  const approaches = (profile.approaches || []).map((approach, index) => `
+  const approaches = (profile.approaches || []).map((approach, index) => {
+    // Той самий замок, що й на картках каналів: скопійований рядок одразу
+    // лягає в історію як дотик цим каналом, тож копіювати пошту людини, чию
+    // пошту ще ніхто не схвалив, — це запис про дію, якої не можна робити.
+    const canUse = approvedChannel(prospect, approach.channel || "");
+    return `
     <article class="client-approach">
       <header>
         <div>
           <span class="pill">${escapeHtml(clientChannelLabels[approach.channel] || approach.channel || "канал не вибрано")}</span>
           <strong>${escapeHtml(approach.angle || `Підхід ${index + 1}`)}</strong>
         </div>
-        <button data-copy-text="${escapeAttr(approach.opener || "")}" data-copy-channel="${escapeAttr(approach.channel || "")}" data-copy-label="Підхід: ${escapeAttr(approach.angle || "")}"><i data-lucide="copy"></i><span>Копіювати</span></button>
+        <button data-copy-text="${canUse ? escapeAttr(approach.opener || "") : ""}" data-copy-channel="${escapeAttr(approach.channel || "")}" data-copy-label="Підхід: ${escapeAttr(approach.angle || "")}" title="${canUse ? "Копіювати" : "Спочатку схвали контакт у розділі «Контакти»"}" ${canUse ? "" : "disabled"}><i data-lucide="${canUse ? "copy" : "lock-keyhole"}"></i><span>Копіювати</span></button>
       </header>
       <p class="client-approach-opener">${escapeHtml(approach.opener || "")}</p>
       ${approach.why ? `<p class="client-approach-why"><strong>Чому має спрацювати.</strong> ${escapeHtml(approach.why)}</p>` : ""}
       ${approach.risk ? `<p class="client-approach-risk"><strong>Чим може не зайти.</strong> ${escapeHtml(approach.risk)}</p>` : ""}
     </article>
-  `).join("");
+  `;
+  }).join("");
 
   const list = (title, items, empty) => {
     const rows = (items || []).filter(Boolean);
@@ -1734,26 +1743,40 @@ function outreachRows(prospect) {
     return `<div class="empty-state">Підготуй аутріч, щоб з'явилися повідомлення й дії</div>`;
   }
 
-  const messages = (outreach.messages || [])
-    .map(
-      (message) => {
-        const basis = (message.personalization_basis || message.basis || []).slice(0, 4).join(" · ");
-        const canUse = approvedChannel(prospect, message.channel || "");
-        return `
-        <article class="message-card">
-          <div class="message-heading">
-            <span class="pill">${escapeHtml(message.channel)}</span>
-            ${message.subject ? `<strong>${escapeHtml(message.subject)}</strong>` : ""}
-            <button data-copy-text="${canUse ? escapeAttr(message.body) : ""}" data-copy-channel="${escapeAttr(message.channel || "draft")}" data-copy-label="Повідомлення аутрічу" title="${canUse ? "Копіювати" : "Спочатку схвали контакт"}" aria-label="Копіювати" ${canUse ? "" : "disabled"}><i data-lucide="${canUse ? "copy" : "lock-keyhole"}"></i></button>
-          </div>
-          <pre>${escapeHtml(message.body)}</pre>
-          ${basis ? `<small class="message-basis">${escapeHtml(basis)}</small>` : ""}
-          ${evidenceLinks(message.evidence || [])}
-        </article>
-      `;
-      }
-    )
-    .join("");
+  const messageCard = (message) => {
+    const channel = String(message.channel || "").toLowerCase();
+    const basis = (message.personalization_basis || message.basis || []).slice(0, 4).join(" · ");
+    const canUse = approvedChannel(prospect, channel);
+    // Пошта копіюється разом із темою — окремо скопійований лист без теми
+    // доводиться доскладати руками саме тоді, коли поспішаєш.
+    const copyText = channel === "email" && message.subject
+      ? `Тема: ${message.subject}\n\n${message.body || ""}`
+      : message.body || "";
+    return `
+      <article class="message-card">
+        <div class="message-heading">
+          <span class="pill">${escapeHtml(channelLabels[channel] || message.channel || "канал")}</span>
+          ${message.subject ? `<strong>${escapeHtml(message.subject)}</strong>` : ""}
+          <button data-copy-text="${canUse ? escapeAttr(copyText) : ""}" data-copy-channel="${escapeAttr(channel || "draft")}" data-copy-label="${escapeAttr(channelLabels[channel] || "Повідомлення")}" title="${canUse ? "Копіювати" : "Спочатку схвали контакт у розділі «Контакти»"}" aria-label="Копіювати" ${canUse ? "" : "disabled"}><i data-lucide="${canUse ? "copy" : "lock-keyhole"}"></i></button>
+        </div>
+        <pre>${escapeHtml(message.body || "")}</pre>
+        <small class="message-basis">${escapeHtml(wordCountLabel(message.body))}${canUse ? "" : " · канал заблоковано, поки контакт не схвалено"}${basis ? ` · ${escapeHtml(basis)}` : ""}</small>
+        ${evidenceLinks(message.evidence || [])}
+      </article>
+    `;
+  };
+
+  // Три канали, якими справді пишуть із цієї Панелі, — нагорі. Решта нікуди не
+  // зникає, але й не відсуває їх униз екрана.
+  const byChannel = (outreach.messages || []).filter(isSendableMessage);
+  const primary = PRIMARY_MESSAGE_CHANNELS
+    .map((channel) => byChannel.find((message) => String(message.channel || "").toLowerCase() === channel))
+    .filter(Boolean);
+  const secondary = byChannel.filter((message) => !PRIMARY_MESSAGE_CHANNELS.includes(String(message.channel || "").toLowerCase()));
+  const messages = primary.map(messageCard).join("");
+  const otherMessages = secondary.length
+    ? `<details class="optional-fields"><summary>Інші канали (${secondary.length})</summary><div class="message-list">${secondary.map(messageCard).join("")}</div></details>`
+    : "";
 
   const variations = (outreach.linkedinVariations || [])
     .map(
@@ -1813,20 +1836,119 @@ function outreachRows(prospect) {
     ? `<div class="outreach-warning"><i data-lucide="shield-alert"></i><div>${qualityWarnings}</div></div>`
     : "";
 
+  // Затримка по відповідності більше не означає «текстів немає»: тексти є, але
+  // вони ставлять питання замість пропозиції — і на екрані має бути видно, чому.
+  const holdBlock = outreach.fitHold
+    ? `<div class="outreach-warning"><i data-lucide="shield-alert"></i><div>
+        <span>Відповідність продукту не підтверджена, тому це перший дотик із питанням, а не пропозиція. ${escapeHtml(outreach.fitHold.reason || "")}</span>
+        ${(outreach.fitHold.unverified || []).map((item) => `<span>Не підтверджено: ${escapeHtml(item)}</span>`).join("")}
+      </div></div>`
+    : "";
+  const complianceBlock = (outreach.complianceChecks || []).length
+    ? `<details class="optional-fields"><summary>Перевір перед відправкою (${outreach.complianceChecks.length})</summary><ul class="compliance-list">${outreach.complianceChecks.map((item) => `<li>${escapeHtml(typeof item === "string" ? item : item.label || item.check || JSON.stringify(item))}</li>`).join("")}</ul></details>`
+    : "";
+
   return `
     <div class="qualification-strip">
       <div><span>Продукт</span><strong>${escapeHtml(outreach.productName || state.selectedProduct?.name || "")}</strong></div>
-      <div><span>Відповідність</span><strong>${escapeHtml(outreach.qualification?.fit || prospect.analysis?.productFit || "")}</strong></div>
+      <div><span>Мова</span><strong>${escapeHtml(languageLabels[outreach.language] || "не задано")}</strong></div>
+      <div><span>Підхід</span><strong>${escapeHtml(outreach.usedApproach || "без підходу")}</strong></div>
       <div><span>Канал</span><strong>${escapeHtml(outreach.recommendedChannel)}</strong></div>
     </div>
+    ${holdBlock}
     ${fallbackWarning}
     ${qualityWarningBlock}
-    ${angles ? `<div class="message-angle-grid">${angles}</div>` : ""}
-    <div class="message-list">${messages}</div>
-    <div class="message-list">${variations}</div>
+    <div class="message-list">${messages || `<div class="empty-state">${escapeHtml(noMessagesReason(outreach))}</div>`}</div>
+    ${otherMessages}
+    ${complianceBlock}
+    ${variations ? `<details class="optional-fields"><summary>Варіанти для LinkedIn</summary><div class="message-list">${variations}</div></details>` : ""}
+    ${angles ? `<details class="optional-fields"><summary>Інші кути заходу</summary><div class="message-angle-grid">${angles}</div></details>` : ""}
     ${warmupActions ? `<div class="warmup-list">${warmupActions}</div>` : ""}
     <div class="action-list">${actions}</div>
   `;
+}
+
+/**
+ * Вибір, з якого виростають тексти: підхід і мова.
+ *
+ * Обидва селекти показують те, чим писали минулого разу, а не свої
+ * замовчування — інакше кожне відкриття ліда пропонує переписати його наново
+ * чужими налаштуваннями.
+ */
+function renderMessageControls(prospect) {
+  const approachSelect = document.getElementById("messageApproachSelect");
+  const languageSelect = document.getElementById("messageLanguageSelect");
+  const writeButton = document.getElementById("writeMessagesBtn");
+  // Один вираз на обидві причини: кнопка мертва і без ліда, і поки щось іде.
+  // Рендер черги викликається і з місць, які не чіпають renderBusyState, тож
+  // інакше кнопка під час збагачення виглядала б активною і ковтала кліки.
+  if (writeButton) writeButton.disabled = !prospect || Boolean(busyAction);
+
+  // Перемальовування не повинно скасовувати вибір. Копіювання чи схвалення
+  // контакту перерендерює цю область — і мова, виставлена секунду тому, зникала
+  // б рівно перед тим, як її збираються застосувати.
+  const sameLead = messageControlsLeadId === (prospect?.id || "");
+  messageControlsLeadId = prospect?.id || "";
+
+  if (approachSelect) {
+    const approaches = prospect?.clientProfile?.approaches || [];
+    const used = approaches.findIndex((approach) => approach.angle === prospect?.outreach?.usedApproach);
+    const keep = sameLead ? approachSelect.value : "";
+    approachSelect.innerHTML = approaches.length
+      ? approaches.map((approach, index) => `<option value="${index}">${escapeHtml(approach.angle || `Підхід ${index + 1}`)}</option>`).join("")
+      : `<option value="">Спершу збагати ліда</option>`;
+    const wanted = keep !== "" && Number(keep) < approaches.length ? keep : String(Math.max(used, 0));
+    if (approaches.length) approachSelect.value = wanted;
+    approachSelect.disabled = !approaches.length;
+  }
+
+  if (languageSelect) {
+    const keep = sameLead ? languageSelect.value : "";
+    languageSelect.value = keep || prospect?.outreach?.language || prospect?.clientProfile?.openerLanguage || "uk";
+  }
+}
+
+// Канали, заради яких на цю вкладку заходять. Порядок — порядок на екрані.
+const PRIMARY_MESSAGE_CHANNELS = ["linkedin_invite", "linkedin_follow_up", "email", "telegram"];
+
+const channelLabels = {
+  linkedin_invite: "LinkedIn · запрошення",
+  linkedin_follow_up: "LinkedIn · перше повідомлення",
+  email: "Пошта",
+  telegram: "Telegram",
+  whatsapp: "WhatsApp",
+  sms: "SMS",
+  call: "Перша фраза для дзвінка"
+};
+
+const languageLabels = { uk: "Українською", en: "English", ru: "Русский" };
+
+/** Чому в списку порожньо — різні причини, і продавцю важлива саме його. */
+function noMessagesReason(outreach = {}) {
+  if (outreach.fitHold?.writing === false) {
+    return `${outreach.fitHold.reason || "По цьому акаунту вже ухвалено рішення."} Щоб тексти готувалися, зніми рішення в розділі «Стратегія».`;
+  }
+  if (outreach.modelUsed === "product-fit-guard") {
+    return "Тексти під затримкою пише модель, а вона зараз недоступна. Підключи OpenRouter у Налаштуваннях — або підтверди відповідність продукту, і тексти напишуться звичайним шляхом.";
+  }
+  if (outreach.provider === "fallback") {
+    return `Модель не відповіла (${outreach.fallbackReason || "причина невідома"}). Спробуй «Переписати тексти».`;
+  }
+  return "Жодного тексту не повернулося. Спробуй «Переписати тексти».";
+}
+
+/**
+ * Повідомлення, яке справді є повідомленням.
+ *
+ * Під затримкою шаблонні білдери кладуть у канал вказівку продавцю («Do not
+ * contact … yet»), а не чернетку. Сервер позначає такі рядки прапорцем `hold`:
+ * упізнавати їх за англійським формулюванням тут означало б пропустити кожен
+ * канал, сформульований інакше, і викинути справжній текст, що почався
+ * схожими словами.
+ */
+function isSendableMessage(message = {}) {
+  if (message.hold) return false;
+  return String(message.body || "").trim().length > 8;
 }
 
 function warmupIcon(channel) {
@@ -1987,6 +2109,7 @@ function renderBusyState() {
   setBusyButton("quickPrepareBtn", "research", "Виконується...");
   setBusyButton("runResearchTopBtn", "research", "Виконується...");
   setBusyButton("enrichLeadBtn", "research", "Збагачуємо...");
+  setBusyButton("writeMessagesBtn", "messages", "Пишемо...");
   setBusyButton("refreshCompanyBtn", "research", "Шукаємо...");
   setBusyButton("prepareOutreachBtn", "research", "Виконується...");
   setBusyButton("analyzeIntelligenceBtn", "intelligence", "Аналізуємо...");
@@ -2036,7 +2159,7 @@ function setBusyButton(id, actionName, activeText) {
   if (!button) return;
   if (!button.dataset.defaultHtml) button.dataset.defaultHtml = button.innerHTML;
   const active = busyAction === actionName;
-  button.disabled = active || (Boolean(busyAction) && ["research", "intelligence", "enrich", "remove", "linkedin-import", "crm-import", "product"].includes(actionName));
+  button.disabled = active || (Boolean(busyAction) && ["research", "intelligence", "enrich", "messages", "remove", "linkedin-import", "crm-import", "product"].includes(actionName));
   button.classList.toggle("is-loading", active);
   if (active) {
     const icon = actionName === "remove" ? "loader-circle" : "loader-circle";
@@ -2056,6 +2179,7 @@ async function runUiAction(actionName, message, work) {
   try {
     await work();
     uiNotice = {
+      messages: "Тексти переписано. Копіюй з картки каналу — копія одразу лягає в історію по ліду.",
       research: "Збагачено. Опис клієнта і підходи до розмови — у першому блоці; компанію записано в базу, вдруге її вже не шукатимемо.",
       enrich: "Контактні дані оновлено. Перевір впевненість, перш ніж брати телефон чи соцмережу в роботу.",
       "linkedin-import": "Ліда додано в чергу. Запусти Дослідження, коли будеш готовий збагатити його й підготувати аутріч.",
@@ -2510,6 +2634,28 @@ document.getElementById("panelFoldersRefreshBtn").addEventListener("click", asyn
 
 document.getElementById("enrichLeadBtn").addEventListener("click", async () => {
   await runUiAction("research", "Шукаємо все про людину і компанію, пишемо опис і підходи...", () => researchAndPrepareSelected());
+});
+
+document.getElementById("writeMessagesBtn").addEventListener("click", async () => {
+  if (!selectedProspectId) return;
+  const approachValue = document.getElementById("messageApproachSelect")?.value ?? "";
+  await runUiAction("messages", "Пишемо тексти під вибраний підхід...", async () => {
+    // Це один виклик моделі, а не сім стадій дослідження: компанію, людей і бал
+    // ми вже маємо, переписати треба лише самі тексти.
+    state = await api("/api/prospects/prepare", {
+      method: "POST",
+      body: JSON.stringify({
+        prospectId: selectedProspectId,
+        profile: document.getElementById("outreachProfileSelect").value,
+        language: document.getElementById("messageLanguageSelect")?.value || "uk",
+        approachIndex: approachValue === "" ? undefined : Number(approachValue),
+        useIntelligenceAi: false
+      })
+    });
+  });
+  activeLeadSectionId = "dashboard-outreach";
+  renderLeadSectionTabs();
+  refreshIcons();
 });
 
 document.getElementById("refreshCompanyBtn").addEventListener("click", async () => {
@@ -3476,7 +3622,12 @@ async function researchAndPrepareSelected({ force = false } = {}) {
   const profile = document.getElementById("outreachProfileSelect").value;
   const payload = await api("/api/research/jobs", {
     method: "POST",
-    body: JSON.stringify({ prospectId: selectedProspectId, profile, force })
+    body: JSON.stringify({
+      prospectId: selectedProspectId,
+      profile,
+      force,
+      language: document.getElementById("messageLanguageSelect")?.value || ""
+    })
   });
   activeResearchJob = payload.job;
   renderResearchProgress();

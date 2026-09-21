@@ -54,6 +54,34 @@ findings plus whatever the workspace already had — and, with no OpenRouter key
 or a provider that is down, by the workspace itself from the same facts, marked
 as written without a model.
 
+### The texts
+
+The **Повідомлення** tab holds the drafts themselves: the LinkedIn invitation
+and first message, the email with its subject, and Telegram, each with a copy
+button that logs the touch against the lead. They are written in the seller's
+language — Ukrainian unless the language select says otherwise — and they expand
+the approach chosen in the description rather than inventing a fresh reason to
+write, because the prompt now carries `clientProfile`, the person's open
+channels and the cached company facts. Channel rules (a 300-character
+invitation, an email under 90 words, a Telegram message under 60) come from
+`contacts/drafts.mjs`, the same file the Контакти tab writes by, so the two
+screens cannot drift apart. **Переписати тексти** re-runs only the writing —
+one model call, not the seven research stages.
+
+An unconfirmed product fit no longer means no text. It used to short-circuit
+before the model and leave an English "Do not send yet" template in every
+channel; now it is a constraint the model writes under — no pitch, no offer, no
+claimed outcome, one question that would tell the seller whether this is even
+the right kind of company — and the panel says on screen what is unverified.
+The lead still stays in `review`: writing a first touch and clearing it to be
+sent are different things, and this workspace never sends anything by itself.
+
+A Telegram username on a CRM card is now a contact candidate a seller can
+approve. It was not one before, so the channel could never be unlocked, which
+for a good part of this market is the only channel that answers. Approval is
+still a human decision; until it is given, the copy button is locked and says
+why.
+
 ## Contacts
 
 The Contacts tab reads the CRM directly: its folders, one page of a folder at a

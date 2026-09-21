@@ -22,7 +22,15 @@ export function normalizeLanguage(value) {
   return LANGUAGES[clean] ? clean : "en";
 }
 
-const CHANNEL_RULES = {
+/**
+ * What each channel allows, in one place.
+ *
+ * Exported because the Панель writes the same three channels through a
+ * different prompt: two writers with two private ideas of "how long is a
+ * LinkedIn invitation" is how the same workspace ends up sending a 400-character
+ * note from one screen and a 260-character one from the next.
+ */
+export const CHANNEL_RULES = {
   email: [
     "Subject: 2-5 specific words, lowercase, no punctuation tricks, something a colleague could have written.",
     "Body under 90 words, four sentences: the reason this person now, a hedged problem guess, one proof with a real number, one easy question.",
@@ -203,6 +211,13 @@ export function normalizeDrafts(data, fallback) {
       body: cleanDraftText(linkedin.body || linkedin.message) || fallback.linkedin.body
     },
     grounding: stringList(source.grounding).length ? stringList(source.grounding) : fallback.grounding,
-    verifyBeforeSending: stringList(source.verifyBeforeSending)
+    // Like grounding above: a model that answers without this list leaves a
+    // seller with an empty «перевір перед відправкою» block, which reads as
+    // "nothing to check" rather than "the model said nothing". The stand-in is
+    // its own sentence rather than the fallback's, because the fallback's line
+    // says the draft was written without a model — and this one was not.
+    verifyBeforeSending: stringList(source.verifyBeforeSending).length
+      ? stringList(source.verifyBeforeSending)
+      : ["Модель не назвала, що перевірити — перечитай сам перед відправкою."]
   };
 }

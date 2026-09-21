@@ -264,10 +264,19 @@
                 <section class="panel outreach-panel lead-section" id="dashboard-outreach">
                   <div class="panel-heading">
                     <div>
-                      <h2>Персоналізований аутріч</h2>
-                      <p>LinkedIn, email, WhatsApp, Telegram, перша фраза для дзвінка і фолоу-апи</p>
+                      <h2>Тексти повідомлень</h2>
+                      <p id="outreachMeta">LinkedIn, пошта і Telegram — під вибраний підхід і вибраною мовою</p>
                     </div>
-                    <span id="outreachModel" class="pill">не підготовлено</span>
+                    <div class="intelligence-actions">
+                      <span id="outreachModel" class="pill">не підготовлено</span>
+                      <select id="messageApproachSelect" aria-label="Підхід, з якого виростають тексти"></select>
+                      <select id="messageLanguageSelect" aria-label="Мова повідомлень">
+                        <option value="uk">Українською</option>
+                        <option value="en">English</option>
+                        <option value="ru">Русский</option>
+                      </select>
+                      <button class="primary-button" id="writeMessagesBtn" type="button"><i data-lucide="pen-line"></i><span>Переписати тексти</span></button>
+                    </div>
                   </div>
                   <div id="outreachContent" class="outreach-content"></div>
                 </section>

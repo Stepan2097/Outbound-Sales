@@ -6,7 +6,7 @@ import { createServer } from "node:http";
 import { connect as connectTcp } from "node:net";
 import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildFallbackDrafts, draftsPromptPayload, normalizeDrafts, normalizeLanguage } from "./contacts/drafts.mjs";
+import { CHANNEL_RULES, LANGUAGES, buildFallbackDrafts, draftsPromptPayload, normalizeDrafts, normalizeLanguage } from "./contacts/drafts.mjs";
 import { contactAsProspect, contactsConfigured, contactsMissingConfig, crmKeyKind, folderContactAt, listContactFolders, listFolderContacts, readContact } from "./contacts/store.mjs";
 import { handleKnowledgeLibraryApi } from "./knowledge/api.mjs";
 import { knowledgeExcerptsForPrompt, knowledgeFilesForProduct, loadKnowledgeLibrary } from "./knowledge/library.mjs";
@@ -1714,7 +1714,7 @@ async function handleApi(request, response, url) {
       sendJson(response, 202, { job: publicResearchJob(existing) });
       return;
     }
-    const job = createResearchJob(prospect, body.profile, actorContextForRequest(request), { force: Boolean(body.force) });
+    const job = createResearchJob(prospect, body.profile, actorContextForRequest(request), { force: Boolean(body.force), language: cleanText(body.language || "") });
     state.researchJobs.unshift(job);
     state.researchJobs = state.researchJobs.slice(0, 100);
     await writePersistentWorkspaceState();
@@ -1859,7 +1859,11 @@ async function handleApi(request, response, url) {
     const profile = body.profile === "premium" || body.profile === "economy" ? body.profile : "balanced";
     prospect.outreach = await prepareAndLogOutreach(prospect, profile, "SEQUENCE_GENERATION", {
       source: "manual-prepare",
-      actor: actorContextForRequest(request)
+      actor: actorContextForRequest(request),
+      // Переписати тексти іншою мовою або під інший підхід — це один виклик
+      // моделі, а не сім стадій дослідження заново.
+      language: cleanText(body.language || ""),
+      approachIndex: Number.isInteger(body.approachIndex) ? body.approachIndex : undefined
     });
     prospect.status = statusAfterOutreachPlan(prospect.outreach);
     prospect.updatedAt = new Date().toISOString();
@@ -5338,6 +5342,22 @@ function buildContactDiscovery(prospect) {
     });
   }
 
+  // Телеграм із картки CRM. Без цього кандидата канал неможливо розблокувати в
+  // принципі: єдиний інший telegram-кандидат виводиться з телефона зі статусом,
+  // якого не приймає contactCandidateCanBeApproved, тож `approved` для нього не
+  // настає ніколи — а для частини цього ринку це єдиний канал, що відповідає.
+  // Схвалення все одно за продавцем: стартовий статус тут «pending».
+  if (prospect.telegram) {
+    candidates.push({
+      type: "telegram",
+      value: prospect.telegram,
+      confidence: 90,
+      source: "uploaded profile",
+      status: "verified_by_import",
+      evidence: ["Юзернейм узято з картки контакту в CRM."]
+    });
+  }
+
   if (domain && first && last) {
     candidates.push(
       {
@@ -5589,7 +5609,7 @@ const researchStageDefinitions = [
   ["crm", "Запис у CRM"]
 ];
 
-function createResearchJob(prospect, profileValue, actor, { force = false } = {}) {
+function createResearchJob(prospect, profileValue, actor, { force = false, language = "" } = {}) {
   const now = new Date().toISOString();
   return {
     id: `research-${randomBytes(7).toString("hex")}`,
@@ -5602,6 +5622,7 @@ function createResearchJob(prospect, profileValue, actor, { force = false } = {}
     // A forced run searches the company again instead of reading the saved
     // dossier — the button for "these facts are stale", not the default one.
     force,
+    language,
     actor,
     status: "queued",
     progress: 0,
@@ -5621,6 +5642,7 @@ function publicResearchJob(job = {}) {
     productName: job.productName,
     profile: job.profile,
     force: Boolean(job.force),
+    language: job.language || "",
     status: job.status,
     progress: job.progress || 0,
     stages: job.stages || [],
@@ -5718,11 +5740,21 @@ async function buildClientProfile(prospect, product, profileValue = "balanced") 
 
 /** Only what the CRM and the research actually know about the person. */
 function clientProfilePersonFacts(prospect = {}) {
-  // Only the channels that are actually open. A list of every channel with
-  // `false` beside it reads, to a model, like a list of channels.
-  const reachableBy = Object.entries(contactAvailability(prospect))
-    .filter(([, open]) => open)
-    .map(([channel]) => channel);
+  // Two different questions, and conflating them cost the panel its email and
+  // Telegram drafts: `contactAvailability` answers "may a human press send
+  // yet", which is false for every freshly researched lead because approval is
+  // a manual step that happens afterwards. What a writer needs is the other
+  // question — which channels this person even has — so that is what travels,
+  // with the approval state beside it rather than instead of it.
+  const availability = contactAvailability(prospect);
+  const hasChannel = {
+    linkedin: Boolean(prospect.linkedin) || availability.linkedin,
+    email: Boolean(prospect.email) || (prospect.contactDiscovery?.candidates || []).some((candidate) => candidate.type === "email"),
+    telegram: Boolean(prospect.telegram) || (prospect.contactDiscovery?.candidates || []).some((candidate) => candidate.type === "telegram"),
+    phone: Boolean(prospect.phone) || (prospect.contactDiscovery?.candidates || []).some((candidate) => candidate.type === "phone")
+  };
+  const reachableBy = Object.entries(hasChannel).filter(([, present]) => present).map(([channel]) => channel);
+  const approvedChannels = Object.entries(availability).filter(([, open]) => open).map(([channel]) => channel);
   return Object.fromEntries(Object.entries({
     name: prospect.name,
     title: prospect.title,
@@ -5732,21 +5764,24 @@ function clientProfilePersonFacts(prospect = {}) {
     notes: publicPersonalizationSignal(prospect),
     crmStatus: prospect.crmSource?.lead_status || "",
     crmStage: prospect.crmSource?.lifecycle_stage || "",
-    reachableBy: reachableBy.length ? reachableBy : ""
+    reachableBy: reachableBy.length ? reachableBy : "",
+    approvedForSending: approvedChannels.length ? approvedChannels : ""
   }).filter(([, value]) => value !== null && value !== undefined && value !== ""));
 }
 
 /** Everything the company dossier holds, trimmed to what a prompt can carry. */
 function clientProfileCompanyFacts(prospect = {}) {
   const profile = prospect.companyProfile || prospect.leadIntelligence?.company_context || {};
+  // «unknown audience - research required» — чесний запис у досьє і абсурд у
+  // проміпті, який просять заземлити персоналізацію на цих фактах.
   return {
     name: prospect.company || "",
     website: prospect.website || prospect.publicCompanyResearch?.domain || "",
-    whatTheyDo: profile.description || prospect.publicCompanyResearch?.description || "",
-    category: profile.category || "",
-    audience: profile.audience || "",
-    businessModel: profile.business_model || "",
-    sizeEstimate: profile.size_estimate || prospect.companyEnrichment?.employeeEstimate || "",
+    whatTheyDo: knownPhrase(profile.description || prospect.publicCompanyResearch?.description || ""),
+    category: knownPhrase(profile.category || ""),
+    audience: knownPhrase(profile.audience || ""),
+    businessModel: knownPhrase(profile.business_model || ""),
+    sizeEstimate: knownPhrase(profile.size_estimate || "") || prospect.companyEnrichment?.employeeEstimate || "",
     priorities: (profile.likely_priorities || []).slice(0, 6),
     growthSignals: (profile.growth_signals || []).slice(0, 6),
     techStack: (profile.tech_stack || prospect.companyEnrichment?.technologies || []).slice(0, 10),
@@ -5951,11 +5986,15 @@ async function runResearchJob(job) {
       source: "background-research",
       actor: job.actor,
       researchJobId: job.id,
-      product
+      product,
+      // Тексти пишуться мовою, яку щойно визначив опис клієнта, і розгортають
+      // його перший підхід — інакше сусідні вкладки радять різне.
+      language: job.language || prospect.clientProfile?.openerLanguage,
+      approachIndex: 0
     });
     prospect.status = statusAfterOutreachPlan(prospect.outreach);
     await updateResearchJobStage(job, "writing", "complete", isNamedPersonProspect(prospect)
-      ? `${prospect.outreach.messageAngles?.length || 0} оцінених кутів заходу.`
+      ? outreachStageDetail(prospect.outreach)
       : "Повідомлення чекають, поки буде обрано конкретну людину.");
 
     await updateResearchJobStage(job, "crm", "running", "Фіксуємо дослідження і персоналізацію в CRM.");
@@ -8180,7 +8219,7 @@ function topEntries(counts, limit) {
     .map(([key]) => key);
 }
 
-async function prepareOutreachWithAi(prospect, profile, taskType = "SEQUENCE_GENERATION", productOverride = null) {
+async function prepareOutreachWithAi(prospect, profile, taskType = "SEQUENCE_GENERATION", productOverride = null, options = {}) {
   const product = productOverride || currentProduct();
   const canUseLiveAi = Boolean(state.vault && state.providerHealth.status === "healthy");
   const fallbackRoute = canUseLiveAi ? localFallbackRun(taskType, profile) : simulateRun(taskType, profile, "");
@@ -8192,25 +8231,72 @@ async function prepareOutreachWithAi(prospect, profile, taskType = "SEQUENCE_GEN
     run: fallbackRoute
   };
 
-  if (shouldHoldForProductFitReview(prospect, product, fallbackPlan.analysis)) {
+  // Мова, якою продавець писатиме цій людині. Вибір із Панелі має пріоритет над
+  // тим, що визначив опис клієнта; українська — типова, бо це внутрішній
+  // інструмент української команди, а не англомовний продукт.
+  const language = normalizeOutreachLanguage(options.language || prospect.clientProfile?.openerLanguage || inferredOutreachLanguage(prospect));
+  const approach = clientApproachAt(prospect, options.approachIndex);
+
+  /**
+   * Продукт не підтверджено як доречний для цього ліда.
+   *
+   * Раніше це означало «жодного тексту»: шлях обривався до моделі і продавець
+   * отримував англійський шаблон «Do not send yet». Правило лишається — нічого
+   * не пітчити, доки відповідність не підтверджена, — але воно тепер формулює
+   * завдання моделі, а не скасовує його: перший дотик, чия єдина мета —
+   * з'ясувати, чи взагалі є про що говорити.
+   */
+  const holdKind = productFitHoldKind(prospect, product, fallbackPlan.analysis);
+
+  // Дві різні затримки. «Даних про відповідність ще немає» — це дослідницька
+  // прогалина, і перший дотик із питанням її якраз і закриває. «Людина вирішила
+  // не чіпати цей акаунт» і «категорія не пройшла внутрішні умови» — це вже
+  // рішення, а не прогалина: тут не пишеться нічого, і модель не питають.
+  if (holdKind === "decided") {
     return {
       ...fallbackPlan,
+      language: "en",
+      fitHold: { reason: fitHoldDecisionReason(prospect, product), unverified: fitHoldUnknowns(prospect, product), writing: false },
       modelUsed: "product-fit-guard",
       provider: "local",
-      run: {
-        ...fallbackRoute,
-        ok: true,
-        provider: "local",
-        modelUsed: "product-fit-guard"
-      }
+      run: { ...fallbackRoute, ok: true, provider: "local", modelUsed: "product-fit-guard" }
     };
   }
 
+  const fitHold = holdKind === "unevidenced"
+    ? {
+      reason: `${product.name} ще не підтверджено як доречний для цього акаунта, тому текст може лише питати.`,
+      unverified: fitHoldUnknowns(prospect, product),
+      writing: true
+    }
+    : null;
+
   if (!canUseLiveAi) {
-    return fallbackPlan;
+    // Без моделі краще нічого не вигадувати: шаблон і є те, що ми вміємо
+    // написати самі, а причина затримки їде з ним, щоб її було видно на екрані.
+    // Мова плану без моделі — мова самих шаблонів, а вони англійські. Написати
+    // тут «Українською» означало б підписати англійський текст чужою мовою.
+    return fitHold
+      ? {
+        ...fallbackPlan,
+        fitHold,
+        language: "en",
+        modelUsed: "product-fit-guard",
+        provider: "local",
+        run: { ...fallbackRoute, ok: true, provider: "local", modelUsed: "product-fit-guard" }
+      }
+      : { ...fallbackPlan, language: "en" };
   }
 
   try {
+    // Правила каналів — спільні з чернетками у Контактах, щоб та сама
+    // майстерня не мала двох різних уявлень про довжину запрошення в LinkedIn.
+    const channelRules = [
+      "Baseline channel limits. Where a product rule below sets a stricter limit for the same channel, the product rule wins.",
+      `email — ${CHANNEL_RULES.email.join(" ")}`,
+      `telegram — ${CHANNEL_RULES.telegram.join(" ")}`,
+      `linkedin — ${CHANNEL_RULES.linkedin.join(" ")}`
+    ];
     const productCopyRules = isBlackAffiliateProduct(product)
       ? [
         "Write as Black Affiliate / iGaming affiliate acquisition context, not as RevOps, CRM, sales automation, or outbound research software.",
@@ -8230,20 +8316,26 @@ async function prepareOutreachWithAi(prospect, profile, taskType = "SEQUENCE_GEN
           "Primary flow is LinkedIn first: verify profile and company, engage with a relevant post only when natural, send an invitation, then check acceptance in 2-3 days."
         ]
       : [];
+    const copyRules = [...channelRules, ...productCopyRules, ...(fitHold ? fitHoldCopyRules(fitHold) : [])];
     const { data, run } = await callOpenRouterJson({
       model: outreachModelForProfile(profile),
       taskType,
       profile,
-      maxTokens: outreachMaxTokensForProfile(profile),
+      maxTokens: outreachMaxTokensForProfile(profile, language),
       messages: [
         {
           role: "system",
-          content: "You are an elite outbound strategist and plain-spoken sales writer. Return only strict JSON with escaped newlines inside string values. The copy must sound human, specific, calm, and low-pressure. Avoid salesy phrases like 'I help', 'we help', 'quick demo', 'revolutionize', 'streamline', 'unlock', 'synergy', 'touch base', 'just checking in', and generic ROI claims. Do not invent private contact data or company facts. Ground every personalization point in provided company context, lead context, product knowledge, or the workspace knowledge files, or mark it as something to verify. product.brief holds the team's own eight answers about the product, and product.knowledgeLibrary their written rules and facts: follow both over your own habits, and never claim what neither supports. First touch should usually be a LinkedIn profile review/warm-up and a short invitation, not a pitch."
+          content: `${LANGUAGES[language].instruction} Every message body, subject and variation is written in that language and nothing else; rationale fields may stay in English. ` + "You are an elite outbound strategist and plain-spoken sales writer. Return only strict JSON with escaped newlines inside string values. The copy must sound human, specific, calm, and low-pressure. Avoid salesy phrases like 'I help', 'we help', 'quick demo', 'revolutionize', 'streamline', 'unlock', 'synergy', 'touch base', 'just checking in', and generic ROI claims. Do not invent private contact data or company facts. Ground every personalization point in provided company context, lead context, product knowledge, or the workspace knowledge files, or mark it as something to verify. product.brief holds the team's own eight answers about the product, and product.knowledgeLibrary their written rules and facts: follow both over your own habits, and never claim what neither supports. First touch should usually be a LinkedIn profile review/warm-up and a short invitation, not a pitch."
         },
         {
           role: "user",
           content: JSON.stringify({
-            instruction: "Create a product-specific outbound strategy for this exact lead. Start from company context, likely priorities, unknowns, contact evidence, the product brief in product.brief, product knowledge, the workspace knowledge files in product.knowledgeLibrary, and learning memory. Treat outreach examples with quality='winning' as style guidance, and quality='bad' as patterns to avoid. Write messages that feel like a researched note from one professional to another. Do not use broad claims. If company data is weak, make the first touch a research-based question and add a research gap instead of pretending. Include concise LinkedIn invite, LinkedIn follow-up, email, SMS, WhatsApp, Telegram, call opener, four LinkedIn variations, and practical next actions. SMS and messenger drafts must be short and only used after contact/permission review.",
+            instruction: (fitHold
+              ? "Product fit for this lead is NOT confirmed. Do not pitch, do not name the offer, do not claim any benefit or result. Every message is a first touch whose only job is to find out whether there is anything to talk about: one specific question grounded in what is actually known about this person and this company, and nothing that assumes they need the product. Say plainly when something is a guess. "
+              : "")
+              + (approach ? `Expand this approach the research already chose instead of inventing a new reason to write — angle: ${approach.angle}; opener the seller liked: ${approach.opener}; why it should land: ${approach.why}. ` : "")
+              + "Write real copy for LinkedIn, email and Telegram regardless of person.approvedForSending — that list is a human send-gate in this workspace, not a reason to leave a draft unwritten. person.reachableBy says which channels this person actually has; for a channel they do not have, write the copy anyway but keep it short. Ground personalization in clientProfile and company below — they are the research this workspace already paid for. "
+              + "Create a product-specific outbound strategy for this exact lead. Start from company context, likely priorities, unknowns, contact evidence, the product brief in product.brief, product knowledge, the workspace knowledge files in product.knowledgeLibrary, and learning memory. Treat outreach examples with quality='winning' as style guidance, and quality='bad' as patterns to avoid. Write messages that feel like a researched note from one professional to another. Do not use broad claims. If company data is weak, make the first touch a research-based question and add a research gap instead of pretending. Include concise LinkedIn invite, LinkedIn follow-up, email, SMS, WhatsApp, Telegram, call opener, four LinkedIn variations, and practical next actions. SMS and messenger drafts must be short and only used after contact/permission review.",
             requiredJsonShape: {
               recommendedChannel: "linkedin | email | sms | whatsapp | telegram | manual_research",
               qualificationRationale: "short rationale",
@@ -8271,7 +8363,13 @@ async function prepareOutreachWithAi(prospect, profile, taskType = "SEQUENCE_GEN
               ]
             },
             product: productForPrompt(product, prospect),
-            productCopyRules,
+            productCopyRules: copyRules,
+            language,
+            fitHold,
+            clientProfile: prospect.clientProfile || null,
+            approach,
+            person: clientProfilePersonFacts(prospect),
+            company: clientProfileCompanyFacts(prospect),
             outreachExamples: (product.examples || []).slice(0, 5),
             learningMemory: learningContextForProduct(product.id),
             prospect: prospectForPrompt(prospect),
@@ -8289,16 +8387,129 @@ async function prepareOutreachWithAi(prospect, profile, taskType = "SEQUENCE_GEN
         }
       ]
     });
-    return normalizeAiOutreachPlan(fallbackPlan, data, run, product);
+    // Основа для злиття: коли діє затримка, шаблонні тексти — це вказівки
+    // продавцю, а не чернетки. Канал, який модель не написала, має лишитися
+    // порожнім, а не показати англійську вказівку як готовий текст.
+    // Мова ставиться вже тут, а не поверх результату: перевірка на чужий
+    // контекст усередині normalizeAiOutreachPlan читає plan.language, і якщо
+    // дописати мову після неї, попередження про неперевірений текст не
+    // з'явиться ніколи.
+    const mergeBase = { ...fallbackPlan, language, ...(fitHold ? { messages: [] } : {}) };
+    return {
+      ...normalizeAiOutreachPlan(mergeBase, data, run, product),
+      language,
+      fitHold,
+      usedApproach: approach?.angle || ""
+    };
   } catch (error) {
     const fallbackReason = error instanceof Error ? error.message : "generation failed";
     addEvent("provider", `OpenRouter outreach fallback: ${fallbackReason}`);
     return {
       ...fallbackPlan,
+      language: "en",
+      fitHold,
       provider: "fallback",
       fallbackReason
     };
   }
+}
+
+/** Що саме вийшло зі стадії письма — мовою екрана, а не лічильником кутів. */
+function outreachStageDetail(outreach = {}) {
+  const written = (outreach.messages || []).filter((message) => message.written).length;
+  if (!written) {
+    return outreach.fitHold?.writing === false
+      ? "Текстів не готували: рішення по цьому акаунту вже ухвалене."
+      : "Модель не повернула текстів — на екрані лишилися шаблони.";
+  }
+  const language = LANGUAGES[outreach.language] ? LANGUAGES[outreach.language].label.toLowerCase() : "мовою шаблонів";
+  const hold = outreach.fitHold ? " · відповідність не підтверджена, тому це питання, а не пропозиція" : "";
+  return `${written} ${uaPlural(written, "текст", "тексти", "текстів")} ${language}${hold}`;
+}
+
+/** Мова текстів: вибір продавця, інакше та, яку визначив опис клієнта. */
+function normalizeOutreachLanguage(value) {
+  const code = String(value || "").trim().toLowerCase();
+  return LANGUAGES[code] ? code : "en";
+}
+
+/**
+ * Мова для ліда, якого ніколи не проводили через опис клієнта.
+ *
+ * Панель завжди передає вибір явно; сюди потрапляють інші виклики — агенти,
+ * AI-оператор, старі ліди. Писати їм усім українською тільки тому, що
+ * інтерфейс український, означає слати українські листи в Тель-Авів.
+ */
+function inferredOutreachLanguage(prospect = {}) {
+  return /ukrain|україн/i.test(`${prospect.location || ""} ${prospect.company || ""}`) ? "uk" : "en";
+}
+
+/** Підхід із опису клієнта за номером, якщо він там є. */
+function clientApproachAt(prospect, index) {
+  const approaches = prospect.clientProfile?.approaches || [];
+  if (!approaches.length) return null;
+  const position = Number.isInteger(index) ? index : 0;
+  return approaches[position] || approaches[0] || null;
+}
+
+/**
+ * Яка саме це затримка.
+ *
+ * "decided" — хтось уже вирішив не чіпати цей акаунт або не пройшов внутрішні
+ * умови по категорії. "unevidenced" — ми просто ще не знаємо достатньо, і це
+ * якраз те, що перший дотик із питанням і з'ясовує. Розрізняти їх обов'язково:
+ * написати гарний перший рядок для відкладеного акаунта — це підготувати до
+ * відправки те, що відправляти заборонено.
+ */
+function productFitHoldKind(prospect, product, analysisOrFit = null) {
+  if (!shouldHoldForProductFitReview(prospect, product, analysisOrFit)) return "";
+  if (!isAdActionProduct(product)) return "unevidenced";
+  if ((prospect.policyDecision?.status || "") === "parked") return "decided";
+  if (isPolicySensitiveProspect(prospect) && (prospect.policyDecision?.status || "pending") !== "approved_conditions") return "decided";
+  return "unevidenced";
+}
+
+/** Чому нічого не пишемо, коли рішення вже ухвалене. */
+function fitHoldDecisionReason(prospect, product) {
+  if ((prospect.policyDecision?.status || "") === "parked") {
+    return `Акаунт відкладено рішенням по політиці — ${product.name} не готує для нього текстів.`;
+  }
+  return `Акаунт у чутливій категорії, і внутрішні умови для ${product.name} ще не затверджені — тексти не готуються.`;
+}
+
+/**
+ * Чого саме бракує, щоб знімати затримку.
+ *
+ * Перевірки по політиці має сенс називати лише там, де вони взагалі діють:
+ * `shouldHoldForProductFitReview` дивиться на policyDecision тільки для
+ * AdAction, і називати «умови не затверджені» причиною затримки для іншого
+ * продукту — це відправити продавця залагоджувати те, що нічого не тримає.
+ */
+function fitHoldUnknowns(prospect, product) {
+  const unknowns = [];
+  if (isAdActionProduct(product)) {
+    if (!prospect.appPortfolio?.apps?.some((app) => app.title && app.evidenceSourceIds?.length)) {
+      unknowns.push("жодного застосунку чи гри компанії не підтверджено джерелом");
+    }
+    if (isPolicySensitiveProspect(prospect) && (prospect.policyDecision?.status || "pending") !== "approved_conditions") {
+      unknowns.push("акаунт у чутливій категорії, умови не затверджені");
+    }
+    if ((prospect.policyDecision?.status || "") === "parked") unknowns.push("акаунт відкладено рішенням по політиці");
+  } else if (isBlackAffiliateProduct(product)) {
+    const evidence = blackAffiliateFitEvidence(prospect);
+    if (!evidence?.hasCompanyEvidence) unknowns.push("не підтверджено, що компанія працює з iGaming, афіліат-трафіком чи дистрибуцією застосунків");
+  }
+  if (!unknowns.length) unknowns.push("відповідність продукту ще не підтверджена даними про компанію");
+  return unknowns;
+}
+
+/** Що саме заборонено, поки відповідність не підтверджена. */
+function fitHoldCopyRules(fitHold) {
+  return [
+    "FIT IS NOT CONFIRMED. No pitch, no offer, no product name as a solution, no claimed outcome, no case study, no meeting or demo ask.",
+    "The only allowed ask is one question that would tell the seller whether this company is even the right kind of company.",
+    `Unverified right now: ${fitHold.unverified.join("; ")}. Never write around these as if they were known.`
+  ];
 }
 
 function outreachModelForProfile(profile = "balanced") {
@@ -8308,15 +8519,19 @@ function outreachModelForProfile(profile = "balanced") {
   return resolveModelForActingUser("writing");
 }
 
-function outreachMaxTokensForProfile(profile = "balanced") {
-  if (profile === "economy") return 650;
-  if (profile === "premium") return 1200;
-  return 900;
+function outreachMaxTokensForProfile(profile = "balanced", language = "en") {
+  const base = profile === "economy" ? 650 : profile === "premium" ? 1200 : 900;
+  // Кирилиця коштує приблизно вдвічі більше токенів за той самий текст, і
+  // бюджет, написаний під англійську, обрізає останні канали на півслові.
+  return ["uk", "ru"].includes(language) ? Math.round(base * 1.8) : base;
 }
 
 async function prepareAndLogOutreach(prospect, profile, taskType = "SEQUENCE_GENERATION", context = {}) {
   const product = context.product || currentProduct();
-  const outreach = await prepareOutreachWithAi(prospect, profile, taskType, product);
+  const outreach = await prepareOutreachWithAi(prospect, profile, taskType, product, {
+    language: context.language,
+    approachIndex: context.approachIndex
+  });
   const baseReviewRequired = statusAfterOutreachPlan(outreach) === "review";
   const messageAngles = baseReviewRequired ? [] : buildAndScoreMessageAngles(prospect, product, outreach);
   const evidenceMessages = (outreach.messages || []).map((message) => ({
@@ -8487,6 +8702,10 @@ function evidenceRecordsForIds(prospect, product, ids = []) {
 }
 
 function statusAfterOutreachPlan(outreach = {}) {
+  // Тексти під затримкою тепер пише модель, тож `modelUsed` більше не відрізняє
+  // затриманий план від звичайного — це робить прапорець. Статус лишається
+  // «на перевірку»: написати перший дотик і дозволити пітч — різні речі.
+  if (outreach.fitHold) return "review";
   if (outreach.recommendedChannel === "manual_research" || outreach.modelUsed === "product-fit-guard") return "review";
   if ((outreach.qualityWarnings || []).some((warning) => /company fit evidence is weak/i.test(warning))) return "review";
   return "outreach_ready";
@@ -8805,9 +9024,9 @@ function buildBlackAffiliateOutreachPlan(prospect, profile, route, product, anal
       }
     ],
     complianceChecks: [
-      "No guaranteed ROI, deposit, moderation, or conversion claims.",
-      "Direct phone, WhatsApp, and Telegram require source and permission review.",
-      "If company evidence is weak, use a fit-check question instead of a pitch."
+      "Жодних обіцянок ROI, депозитів, модерації чи конверсій.",
+      "Прямий телефон, WhatsApp і Telegram — лише після перевірки джерела й дозволу.",
+      "Якщо даних про компанію мало — питання про відповідність, а не пропозиція."
     ],
     warmupActions: buildWarmupActions(prospect),
     linkedinVariations: buildBlackAffiliateLinkedInOutreach(prospect, product, profile, analysis).variations,
@@ -8966,10 +9185,10 @@ function buildAdActionOutreachPlan(prospect, profile, route, product, analysis) 
       { type: "verify_test_inputs", label: "Before a commercial pitch, confirm title, OS, GEOs, MMP, payable event, and natural KPI", due: "before proposal", priority: "high" }
     ],
     complianceChecks: [
-      "Rewarded/value-exchange traffic is disclosed plainly.",
-      "No performance, scale, fraud, retention, or ROI claim is made without approved proof.",
-      "SMS and messenger channels require reviewed phone source, presence, identity, and permission.",
-      "The test keeps the payable event separate from the natural quality KPI."
+      "Про rewarded / value-exchange трафік сказано прямо.",
+      "Жодних заяв про результат, масштаб, фрод, утримання чи ROI без затверджених доказів.",
+      "SMS і месенджери — лише з перевіреним телефоном, присутністю, збігом особи й дозволом.",
+      "У тесті платна подія відокремлена від природного KPI якості."
     ],
     warmupActions: buildWarmupActions(prospect),
     linkedinVariations: [
@@ -9013,7 +9232,7 @@ function buildCompanyOnlyResearchPlan(prospect, profile, route, product, analysi
       { type: "research_gap_logged", label: "Keep the account research and app evidence stored for the selected buyer", due: "today", priority: "medium" }
     ],
     qualityWarnings: ["Outreach is blocked because this record does not identify a person."],
-    complianceChecks: ["Do not address a company name as a person.", "Do not prepare seller-ready copy until a named buyer and role are verified."]
+    complianceChecks: ["Не звертатися до назви компанії як до людини.", "Не готувати готові до відправки тексти, поки не підтверджено конкретну людину і її роль."]
   };
 }
 
@@ -9145,9 +9364,9 @@ function buildOutreachPlan(prospect, profile, route, product = currentProduct())
       }
     ],
     complianceChecks: [
-      "No unsupported claims added.",
-      "Personal data is marked for review before use.",
-      "Suppression and communication-permission checks required before send."
+      "Жодних тверджень без підтвердження.",
+      "Персональні дані позначено на перевірку перед використанням.",
+      "Перед відправкою — перевірка стоп-листів і дозволу на комунікацію."
     ],
     warmupActions: buildWarmupActions(prospect),
     linkedinVariations: buildLinkedInOutreach(prospect, product, profile).variations
@@ -9198,7 +9417,10 @@ function buildFitReviewOutreachPlan(prospect, profile, route, product, analysis)
       fit: analysis.productFit,
       rationale: `Hold outreach for ${company}. ${reason}`
     },
-    messages: holdMessages,
+    // These are instructions to a seller, not drafts to send. The flag says so
+    // once, here, instead of leaving the screen to recognise them by their
+    // English wording — which it cannot do for a channel worded differently.
+    messages: holdMessages.map((message) => ({ ...message, hold: true })),
     actions: [
       {
         type: "research_company_fit",
@@ -9220,9 +9442,9 @@ function buildFitReviewOutreachPlan(prospect, profile, route, product, analysis)
       }
     ],
     complianceChecks: [
-      "No outreach should be sent until ICP fit is verified.",
-      "No unsupported product or performance claims added.",
-      "Phone/messenger channels require source and permission review."
+      "Нічого не надсилаємо, поки відповідність ICP не підтверджена.",
+      "Жодних тверджень про продукт чи результат без підтвердження.",
+      "Телефон і месенджери — лише після перевірки джерела й дозволу."
     ],
     warmupActions: [
       {
@@ -10943,6 +11165,13 @@ function sanitizeOutreachPlanForProduct(plan, fallbackPlan, product = currentPro
   const isAdAction = isAdActionProduct(product);
   if (!isBlackAffiliate && !isAdAction) return plan;
   const warnings = [];
+  // Обидва фільтри дрейфу шукають англійські слова. На українському чи
+  // російському тексті вони не спрацьовують ніколи — і мовчазний пропуск
+  // виглядає так само, як пройдена перевірка. Хай не виглядає.
+  if (["uk", "ru"].includes(plan.language)) {
+    const written = plan.language === "uk" ? "українські" : "російські";
+    warnings.push(`Автоматична перевірка на чужий контекст працює лише з англійським текстом — ці ${written} чернетки вона не перевіряла.`);
+  }
   const fallbackMessages = new Map((fallbackPlan.messages || []).map((message) => [String(message.channel || "").toLowerCase(), message]));
   const sanitizedMessages = (plan.messages || []).map((message) => {
     const text = `${message.subject || ""} ${message.body || ""}`;
@@ -11000,7 +11229,10 @@ function normalizeAiMessages(messages, fallback) {
   const normalized = messages.slice(0, 8).map((message) => ({
     channel: cleanText(message.channel || "email").slice(0, 32),
     subject: message.subject ? cleanText(message.subject).slice(0, 140) : undefined,
-    body: cleanLongText(message.body || "")
+    body: cleanLongText(message.body || ""),
+    // Хто написав цей текст. Без цієї позначки шаблон і відповідь моделі
+    // нерозрізненні — і стадія рапортує «сім текстів», коли модель написала два.
+    written: true
   })).filter((message) => message.body.length > 8);
   if (!normalized.length) return fallback;
   const byChannel = new Map((fallback || []).map((message) => [String(message.channel || "").toLowerCase(), message]));
@@ -13184,7 +13416,7 @@ function updateOpenRouterDefaults(input = {}) {
 async function testOpenRouterConnection(apiKey) {
   const startedAt = performance.now();
   try {
-    const openRouterResponse = await fetch("https://openrouter.ai/api/v1/models", {
+    const openRouterResponse = await fetch(`${openRouterBaseUrl()}/models`, {
       headers: openRouterHeaders(apiKey)
     });
     state.providerHealth = {
@@ -13205,7 +13437,7 @@ async function testOpenRouterConnection(apiKey) {
 
 async function syncOpenRouterModels(apiKey) {
   try {
-    const openRouterResponse = await fetch("https://openrouter.ai/api/v1/models", {
+    const openRouterResponse = await fetch(`${openRouterBaseUrl()}/models`, {
       headers: openRouterHeaders(apiKey)
     });
     if (!openRouterResponse.ok) {
@@ -13425,11 +13657,22 @@ async function parseOrRepairOpenRouterJson(content, context) {
   }
 }
 
+/**
+ * Адреса OpenRouter, яку можна підмінити.
+ *
+ * За замовчуванням — справжня. Змінна оточення існує рівно для одного: щоб тест
+ * міг підставити свій сервер і перевірити, що саме ми надсилаємо моделі. Без
+ * неї найважливіший проміпт у застосунку не перевіряється нічим.
+ */
+function openRouterBaseUrl() {
+  return (process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1").replace(/\/+$/, "");
+}
+
 async function postOpenRouterChat(body, { timeoutMs = 12000 } = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    const response = await fetch(`${openRouterBaseUrl()}/chat/completions`, {
       method: "POST",
       headers: openRouterHeaders(),
       body: JSON.stringify(body),
