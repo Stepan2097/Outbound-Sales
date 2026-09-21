@@ -72,6 +72,42 @@ truncated to 200 characters and lands in `meta.detail`. There is no
 inbox's `participant`. Nothing the agent reports today could move a named
 person's row out of a queue.
 
+## Recording is not permission
+
+Three defects in this work were the same defect, found in three places by three
+different reviewers, and the rule that would have prevented all three is worth
+one paragraph of its own.
+
+- `invite.sent` past the day's allowance answered 409 and moved nothing. But
+  the agent reports only after LinkedIn's own card has changed to Pending, so
+  the invitation existed. The refusal did not un-send it; it threw away the
+  record of it.
+- `invites.checked` moved a row belonging to another account into `withdrawn`,
+  a status with no exit — deciding, on a stale report, that something had not
+  happened.
+- Cancelling an invitation while the agent was mid-send deleted the row, so a
+  request sitting on somebody's LinkedIn had nothing anywhere saying it was
+  ever made.
+
+**The quota decides what we cause. The record describes what happened. The
+first must never be allowed to erase the second.** Refusing to write down
+something that already exists in the world does not undo it — it makes our own
+record false, and here it does something worse: a person with no `wl_outreach`
+row is not held by anything, so the next campaign that asks takes them and
+approaches somebody who has already been approached.
+
+So the test for every new path that can fail: **if this refusal stands, is
+there something out in the world that already happened?** If yes, write it
+down, flag it — `overQuota`, `warn`, a `foreign` list, an `invite.failed` with
+a reason — and let the human who reads the flag decide. A refusal is only the
+right answer when nothing has happened yet.
+
+The inverse matters exactly as much and is easier to lose sight of: **this is
+not permission to send.** Recording is not sending. The quota still decides
+what leaves an account, `checkQuota` still refuses before anything is caused,
+and no path in this contract puts a message in front of a human being without a
+person pressing send.
+
 ## The storage decisions, and what they cost
 
 No migration can run against the Anty Supabase — no Postgres password, no
