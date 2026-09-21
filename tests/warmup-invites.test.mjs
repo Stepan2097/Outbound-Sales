@@ -492,6 +492,44 @@ test("an account that finished warming is still told to come and check what it s
   assert.equal(third.payload.reason, "Warm-up is finished");
 });
 
+test("the scheduler and the semaphore answer with one upkeep, not two", async () => {
+  // The scheduler decides who to wake; the semaphore tells the agent what to do
+  // when it gets there. Two copies of this arithmetic that drifted would wake
+  // an account by one rule and hand it an empty list by the other — a browser
+  // opened for nothing, which is the failure upkeep exists to prevent.
+  const { dueFrom, resetScheduler } = await import("../warmup/scheduler.mjs");
+  const { checkedTodayAccounts, openConversationCounts, pendingCounts } = await import("../warmup/invites.mjs");
+  const { syncedTodayAccounts } = await import("../warmup/inbox.mjs");
+  resetScheduler();
+
+  rows.wl_runs[0].started_at = startedForDay(30);
+  rows.wl_outreach = [{
+    id: "o-1", account_id: "acc-1", crm_contact_id: "c-1", person_name: "Marta Kovalenko",
+    person_linkedin: "https://linkedin.com/in/marta", sent_by: "chloe@example.com",
+    status: "pending", created_at: "2026-09-10T10:00:00.000Z", responded_at: null
+  }];
+
+  const fromSemaphore = (await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" })).payload.upkeep;
+
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const ids = ["acc-1"];
+  const { ready } = dueFrom({
+    accounts: rows.wl_accounts,
+    runs: rows.wl_runs,
+    dayActions: rows.wl_day_actions,
+    pendingInvites: await pendingCounts(ids),
+    openConversations: await openConversationCounts(ids),
+    checkedToday: await checkedTodayAccounts(ids, todayIso),
+    inboxSyncedToday: await syncedTodayAccounts(ids, todayIso),
+    todayIso,
+    nowMs: Date.now()
+  });
+
+  assert.equal(ready.length, 1, "the scheduler wakes it");
+  assert.deepEqual(ready[0].upkeep, fromSemaphore, "and hands over exactly what the semaphore will describe");
+  assert.equal(fromSemaphore.checks, 1);
+});
+
 test("one person's history is the invitation and the messages, newest first", async () => {
   await call({ method: "POST", path: "/api/warmup/invites", body: { accountId: "acc-1", crmContactId: "c-1", note: "коротке питання" } });
   const outreachId = rows.wl_outreach[0].id;

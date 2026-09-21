@@ -230,8 +230,14 @@ export function resetScheduler() {
  * So upkeep is its own reason to open a browser, with the same two rules the
  * rest of this function follows: evidence rather than allowance — there must be
  * something outstanding — and a bound, which here is once a day.
+ *
+ * **Exported because there are two callers and there must be one answer.** The
+ * scheduler decides who to wake; the semaphore tells the agent what to do when
+ * it arrives. A second copy of this arithmetic that drifted would wake an
+ * account by one rule and hand it an empty list by the other — a browser opened
+ * for nothing, which is the exact failure upkeep exists to prevent.
  */
-function upkeepFor({ accountId, inPlan, pendingInvites, openConversations, checkedToday, inboxSyncedToday }) {
+export function upkeepFor({ accountId, inPlan, pendingInvites, openConversations, checkedToday, inboxSyncedToday }) {
   // Invitations are checked on any day, in or out of plan: a sent request can
   // be accepted on a day this account happens to owe nothing else, and "every
   // day" was the ask.

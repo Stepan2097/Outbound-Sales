@@ -26,7 +26,7 @@ import {
   messagesForContact, outreachFor, readThread, storeThread, syncSummary, syncedTodayAccounts,
   threadKeyOf, unreadCount
 } from "./inbox.mjs";
-import { decideNext, finishRun, leaseAccount } from "./scheduler.mjs";
+import { decideNext, finishRun, leaseAccount, upkeepFor } from "./scheduler.mjs";
 import {
   allowanceReason, claimCapacity, claimCutoff, defaultFilters, describeCampaign, isCampaignState,
   migrateCampaigns, moveTo, nextOrder, normalizeCampaign, progressApproximate, progressFrom, renumber,
@@ -182,21 +182,28 @@ async function connectAllowance(account) {
  * past the last day of the plan — inside it, tomorrow's quota opens the browser
  * anyway and the inbox is read while it is there.
  */
-async function upkeepWorkFor(account, run) {
+async function upkeepWorkFor(account, run, { now = new Date() } = {}) {
   if (!run) return { checks: 0, inbox: false, any: false };
   const todayIso = today();
-  const [pending, conversations, checked, synced] = await Promise.all([
+  const [pendingInvites, openConversations, checkedToday, inboxSyncedToday] = await Promise.all([
     pendingCounts([account.id]),
     openConversationCounts([account.id]),
     checkedTodayAccounts([account.id], todayIso),
     syncedTodayAccounts([account.id], todayIso)
   ]);
-  const day = currentDay(new Date(run.started_at), run.paused_days ?? 0);
-  const inPlan = day <= totalDays(run.strategy_snapshot);
-  const checks = checked.has(account.id) ? 0 : Math.min(pending.get(account.id) ?? 0, MAX_INVITE_CHECKS_PER_RUN);
-  // Somebody who could still write, and nobody has looked today.
-  const inbox = !inPlan && (conversations.get(account.id) ?? 0) > 0 && !synced.has(account.id);
-  return { checks, inbox, any: checks > 0 || inbox };
+  // The clock is an argument here too. It does not matter for a request served
+  // now, but this is the shape that already rotted once in the scheduler, and
+  // a second copy of it living where nothing tests it against a pinned time is
+  // how it comes back.
+  const day = currentDay(new Date(run.started_at), run.paused_days ?? 0, now);
+  return upkeepFor({
+    accountId: account.id,
+    inPlan: day <= totalDays(run.strategy_snapshot),
+    pendingInvites,
+    openConversations,
+    checkedToday,
+    inboxSyncedToday
+  });
 }
 
 /**
