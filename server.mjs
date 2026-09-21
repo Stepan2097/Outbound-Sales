@@ -8969,6 +8969,7 @@ function buildBlackAffiliateOutreachPlan(prospect, profile, route, product, anal
         body: directPhoneOk
           ? trimWords(`Hi ${firstName}, quick fit check for ${company}: are app funnels relevant for affiliate or paid traffic, or not your area?`, 30)
           : "Do not use SMS until a verified phone, identity match, and permission review exist.",
+        hold: !directPhoneOk,
         personalization_basis: [directPhoneOk ? "verified phone candidate" : "phone not verified", company].filter(Boolean)
       },
       {
@@ -8976,6 +8977,7 @@ function buildBlackAffiliateOutreachPlan(prospect, profile, route, product, anal
         body: directPhoneOk
           ? trimWords(`Hi ${firstName}, is app-based affiliate acquisition something you touch at ${company}, or should I speak with whoever owns traffic/GEOs?`, 30)
           : messengerHold,
+        hold: !directPhoneOk,
         personalization_basis: [directPhoneOk ? "verified phone candidate" : "messenger hold", company].filter(Boolean)
       },
       {
@@ -8983,6 +8985,7 @@ function buildBlackAffiliateOutreachPlan(prospect, profile, route, product, anal
         body: directPhoneOk
           ? trimWords(`Hi ${firstName}, is affiliate/app traffic your area at ${company}, or should I park this?`, 22)
           : messengerHold,
+        hold: !directPhoneOk,
         personalization_basis: [directPhoneOk ? "verified phone candidate" : "messenger hold", company].filter(Boolean)
       },
       {
@@ -9154,6 +9157,7 @@ function buildAdActionOutreachPlan(prospect, profile, route, product, analysis) 
         body: directPhoneOk
           ? trimWords(`Hi ${firstName}, one question for ${company}: is a disclosed rewarded UA test relevant, or should I speak with the title's UA owner?`, 28)
           : "Do not use SMS until a reviewed phone, identity match, and permission check exist.",
+        hold: !directPhoneOk,
         personalization_basis: [directPhoneOk ? "reviewed phone" : "phone hold", company]
       },
       {
@@ -9161,6 +9165,7 @@ function buildAdActionOutreachPlan(prospect, profile, route, product, analysis) 
         body: directPhoneOk
           ? trimWords(`Hi ${firstName}, does your team test rewarded/value-exchange UA against a separate retention or payer KPI?`, 24)
           : messengerHold,
+        hold: !directPhoneOk,
         personalization_basis: [directPhoneOk ? "reviewed phone" : "messenger hold", buyerAngle.focus]
       },
       {
@@ -9168,6 +9173,7 @@ function buildAdActionOutreachPlan(prospect, profile, route, product, analysis) 
         body: directPhoneOk
           ? trimWords(`Hi ${firstName}, is rewarded UA testing in your scope at ${company}?`, 18)
           : messengerHold,
+        hold: !directPhoneOk,
         personalization_basis: [directPhoneOk ? "reviewed phone" : "messenger hold", company]
       },
       {
