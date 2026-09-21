@@ -930,7 +930,10 @@ function renderLeadWorkspaceExtras(prospect) {
   // Стан запрошення й історія живуть у базі прогріву, тож їх читають окремо — і
   // лише коли відкрили іншу людину, а не на кожне перемальовування.
   void loadInviteContext(prospect).catch(() => {});
-  void loadHistory(prospect).catch(() => {});
+  // Історія читає до чотирьох тисяч подій акаунта разом із тілами повідомлень.
+  // Робити це на кожне «Далі» в папці — платити повною ціною за вкладку, на яку
+  // здебільшого не дивляться. Читається, коли її відкривають.
+  if (activeLeadSectionId === "dashboard-history") void loadHistory(prospect).catch(() => {});
   setHtml("clientProfileContent", clientProfileRows(prospect));
   setText("clientProfilePill", clientProfileStatusLabel(prospect));
   setText("clientProfileMeta", prospect
@@ -1063,6 +1066,11 @@ async function loadInviteContext(prospect, { force = false } = {}) {
     if (inviteLoadedFor !== contactId) return;
     inviteState = invite.invite || null;
   } catch (error) {
+    // Only if this is still the lead that asked. Without the guard a failure
+    // for the previous person painted their error banner and a «невідомо» pill
+    // over somebody else's card, and it stayed until the lead was switched
+    // twice.
+    if (inviteLoadedFor !== contactId) return;
     inviteNotice = error.message || "Прогрів не відповів.";
   }
   renderInvite(state.prospects?.find((item) => item.id === selectedProspectId));
@@ -1136,12 +1144,14 @@ function inviteFormHtml(prospect) {
         <span>Записка до запиту · до 300 символів, без продажу</span>
         <textarea id="inviteNoteInput" rows="3" maxlength="300">${escapeHtml(note)}</textarea>
       </label>
-      ${usable.some((account) => account.connectsLeft > 0)
-        ? ""
-        : `<p class="is-muted">Сьогоднішню квоту вибрано на всіх акаунтах — запит стане в чергу і піде завтра.</p>`}
+      ${usable.length === 0
+        ? `<p class="is-muted">Жоден акаунт зараз не може нести запит — подивись причини в списку вище. Поставити в чергу нема на кого.</p>`
+        : usable.some((account) => account.connectsLeft > 0)
+          ? ""
+          : `<p class="is-muted">Сьогоднішню квоту вибрано на всіх акаунтах — запит стане в чергу і піде завтра.</p>`}
       <div class="invite-actions">
-        <button class="primary-button" id="inviteSendBtn" type="button"><i data-lucide="user-plus"></i><span>Додати в друзі</span></button>
-        <button id="inviteByHandBtn" type="button" title="Я вже натиснув Connect у своєму браузері"><i data-lucide="check"></i><span>Я надіслав сам</span></button>
+        <button class="primary-button" id="inviteSendBtn" type="button" ${usable.length ? "" : "disabled"}><i data-lucide="user-plus"></i><span>Додати в друзі</span></button>
+        <button id="inviteByHandBtn" type="button" title="Запит уже надіслано вручну зі свого браузера"><i data-lucide="check"></i><span>Я надіслав сам</span></button>
       </div>
     </div>
   `;
@@ -1262,6 +1272,7 @@ async function loadHistory(prospect, { force = false } = {}) {
     if (historyLoadedFor !== contactId) return;
     historyEntries = payload.entries || [];
   } catch (error) {
+    if (historyLoadedFor !== contactId) return;
     historyNotice = error.message || "Прогрів не відповів.";
   }
   renderHistory(state.prospects?.find((item) => item.id === selectedProspectId));
@@ -1297,7 +1308,10 @@ function renderHistory(prospect) {
     return;
   }
   if (!historyEntries.length) {
-    content.innerHTML = `<div class="empty-state">Цій людині ще нічого не писали з жодного акаунта.</div>`;
+    // Not "from any account": the read follows this person's one outreach row
+    // to one account, and a message that arrived on some other login would not
+    // be found. The claim the server can actually back is narrower.
+    content.innerHTML = `<div class="empty-state">За цією людиною тут ще нічого не записано.</div>`;
     return;
   }
 
@@ -2804,6 +2818,9 @@ navItems.forEach((item) => {
 });
 
 document.getElementById("mobileLeadSectionSelect").addEventListener("change", (event) => {
+  if (event.target.value === "dashboard-history") {
+    void loadHistory(state?.prospects?.find((item) => item.id === selectedProspectId)).catch(() => {});
+  }
   activeLeadSectionId = event.target.value || "dashboard-account";
   renderLeadSectionTabs();
   document.querySelector(".lead-section-nav")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -2988,19 +3005,19 @@ document.getElementById("enrichLeadBtn").addEventListener("click", async () => {
   await runUiAction("research", "Шукаємо все про людину і компанію, пишемо опис і підходи...", () => researchAndPrepareSelected());
 });
 
-/**
- * Чи може ключ цього середовища оновити рядок у wl_events.
- *
- * Від відповіді залежить, яким шляхом іти в дедуплікації історії: оновлювати
- * тимчасовий рядок на місці чи назавжди тримати два і ховати один при
- * показі. Перевірити можна лише там, де є ключі — тобто на розгорнутому
- * сервері, — тож це кнопка в застосунку, а не скрипт, який нікому не запустити.
- */
 document.getElementById("historyRefreshBtn").addEventListener("click", async () => {
   const prospect = state?.prospects?.find((item) => item.id === selectedProspectId);
   await loadHistory(prospect, { force: true });
 });
 
+/**
+ * Чи може ключ цього середовища оновити рядок у wl_events.
+ *
+ * Від відповіді залежить, яким шляхом іти в дедуплікації історії: оновлювати
+ * тимчасовий рядок на місці чи назавжди тримати два і ховати один при показі.
+ * Перевірити можна лише там, де є ключі — тобто на розгорнутому сервері, — тож
+ * це кнопка в застосунку, а не скрипт, який нікому не запустити.
+ */
 document.getElementById("warmupProbeBtn").addEventListener("click", async () => {
   const note = document.getElementById("warmupProbeNote");
   const button = document.getElementById("warmupProbeBtn");
@@ -3010,7 +3027,13 @@ document.getElementById("warmupProbeBtn").addEventListener("click", async () => 
   button.disabled = true;
   try {
     const { probe } = await warmupApi("/diagnostics/event-write", { method: "POST", body: "{}" });
-    const line = (label, step) => `<li class="${step?.ok ? "is-ok" : "is-bad"}">${escapeHtml(label)}: ${step?.ok ? "так" : `ні — ${escapeHtml(step?.error || "без пояснення")}`}</li>`;
+    // A step that was never attempted is not a refusal. Painting `null` red
+    // with "ні — без пояснення" destroyed the one distinction this probe was
+    // rebuilt to make: no keys here, versus the key is not allowed to.
+    const line = (label, step) => {
+      if (!step) return `<li class="is-skipped">${escapeHtml(label)}: не пробували</li>`;
+      return `<li class="${step.ok ? "is-ok" : "is-bad"}">${escapeHtml(label)}: ${step.ok ? "так" : `ні — ${escapeHtml(step.error || "без пояснення")}`}</li>`;
+    };
     const verdict = {
       full: "Ключ уміє все три дії. Дедуплікацію історії можна робити оновленням рядка на місці.",
       no_update: "Ключ пише, але не оновлює. Дедуплікацію доведеться робити придушенням під час показу — два рядки лишаться в базі назавжди.",
@@ -3036,6 +3059,15 @@ document.getElementById("warmupProbeBtn").addEventListener("click", async () => 
 document.getElementById("inviteContent").addEventListener("click", async (event) => {
   const button = event.target.closest("button");
   if (!button || button.disabled) return;
+  // `runUiAction` returns immediately when something else is running, and the
+  // section is re-rendered afterwards — so a click during a research run was
+  // swallowed **and** took the note the seller had typed with it. Say what
+  // happened instead.
+  if (busyAction) {
+    uiNotice = "Зачекай, поки завершиться поточна дія — і натисни ще раз.";
+    renderTopbar();
+    return;
+  }
   const prospect = state?.prospects?.find((item) => item.id === selectedProspectId);
   const crmContactId = crmContactIdOf(prospect);
   if (!crmContactId) return;
@@ -3043,6 +3075,10 @@ document.getElementById("inviteContent").addEventListener("click", async (event)
   const run = async (message, work) => {
     await runUiAction("invite", message, work);
     await loadInviteContext(prospect, { force: true });
+    // The history is the same events by another name. Without this it kept
+    // saying nothing had ever been written to this person, a second after
+    // somebody wrote something.
+    await loadHistory(prospect, { force: true });
   };
 
   if (button.id === "inviteSendBtn") {
@@ -3128,6 +3164,9 @@ document.addEventListener("click", async (event) => {
   const leadTab = event.target.closest("[data-lead-tab]");
   if (leadTab) {
     activeLeadSectionId = leadTab.dataset.leadTab || "dashboard-account";
+    if (activeLeadSectionId === "dashboard-history") {
+      void loadHistory(state?.prospects?.find((item) => item.id === selectedProspectId)).catch(() => {});
+    }
     renderLeadSectionTabs();
     document.querySelector(".lead-section-nav")?.scrollIntoView({ behavior: "smooth", block: "start" });
     refreshIcons();

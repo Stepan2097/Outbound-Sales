@@ -364,6 +364,14 @@ account that finished with nothing outstanding sleeps. The lever, if one is
 needed, is the one that already exists: excluding an account takes it out of
 `candidates()` entirely.
 
+**Starvation inside the ceiling.** `ready` is sorted warming-first and then by
+`run.started_at`, which never changes. So when upkeep demand passes what the
+window holds, it is not "the longest unchecked" that waits — it is always the
+same accounts, the ones whose runs started most recently, and they wait forever
+rather than in turn. Rotating on `lastCheckedAt` instead of `started_at` inside
+the upkeep-only group would fix it; it is not built, because the fleet has not
+reached the ceiling.
+
 **The ceiling, named here so nobody has to find it twice.** One account runs at
 a time inside 09:00–13:00, paced 120–420 seconds apart — call it thirty to sixty
 sessions a day. Warming accounts sort ahead of upkeep-only ones, which is right,
@@ -455,7 +463,19 @@ both ways, emails both ways once Phase 4 lands.
                at, accountLabel, body, meta } ] }
 ```
 
-Two problems this has to solve, and both are named rather than hidden:
+**What this read costs, and where it stops being true.** It reads the newest
+`LISTING_LIMIT` (4 000) message events for the account and then filters them to
+this person, so once an account passes four thousand messages the **beginning**
+of somebody's history quietly falls off the end — the screen shows what it
+found and cannot know what it missed. It also follows this person's single
+`wl_outreach` row to a single account, so a message that arrived on some other
+login is not in the answer; the empty state says "nothing is recorded here for
+this person" rather than "nobody ever wrote to them", because only the first is
+something the server can back. And a name match that was wrong once becomes
+permanent the moment it is stamped into `meta.crmContactId`: nothing re-checks
+it, and there is no screen to correct it from.
+
+Two more problems this has to solve, and both are named rather than hidden:
 
 **History is keyed by thread today, not by person.** Nothing writes
 `crm_contact_id` into a message event's meta; the person is recomputed on every

@@ -3364,6 +3364,7 @@ dialog {
   color: var(--muted);
 }
 
+.warmup-probe-note li.is-skipped { color: var(--muted); }
 .warmup-probe-note li.is-ok { color: var(--teal); }
 .warmup-probe-note li.is-bad { color: #f87171; }
 
