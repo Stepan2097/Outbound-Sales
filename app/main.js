@@ -13,6 +13,10 @@ let panelIndex = Number(window.localStorage.getItem("outbound.panel.index") || 0
 let panelTotal = 0;
 let panelContact = null;
 let panelQueueNotice = "";
+// Чи це повідомлення про збій, а не про стан папки. Без цього поділу невдалий
+// запит показувався як «У цій папці немає контактів» — твердження про дані
+// користувача, якого ми не перевіряли і яке неправдиве.
+let panelQueueFailed = false;
 let panelQueueBusy = false;
 // Чий вибір зараз стоїть у селекторах повідомлень. Порожньо — ліда змінили.
 let messageControlsLeadId = "";
@@ -703,7 +707,7 @@ function renderPanelSource() {
   const position = panelFolderId && panelTotal
     ? `Контакт ${Math.min(panelIndex + 1, panelTotal)} з ${panelTotal}`
     : panelFolderId
-      ? (panelQueueBusy ? "Читаємо папку..." : "У цій папці немає контактів")
+      ? (panelQueueBusy ? "Читаємо папку..." : panelQueueFailed ? "Папку не вдалося прочитати" : "У цій папці немає контактів")
       : "Вибери папку — далі люди йдуть по черзі";
   setText("panelQueuePosition", panelQueueNotice ? `${position} · ${panelQueueNotice}` : position);
 
@@ -728,11 +732,13 @@ async function loadPanelFolders({ force = false } = {}) {
   renderPanelSource();
   try {
     await fetchContactFolders({ force });
+    panelQueueFailed = false;
     if (panelFolderId && contactFolders.length && !contactFolders.some((folder) => folder.id === panelFolderId)) {
       panelQueueNotice = "";
     }
   } catch (error) {
     panelQueueNotice = error.message || "CRM не відповіла.";
+    panelQueueFailed = true;
   } finally {
     panelQueueBusy = false;
     renderPanelSource();
@@ -753,6 +759,7 @@ async function openPanelPosition(index) {
   const wanted = Math.max(0, Math.trunc(index));
   panelQueueBusy = true;
   panelQueueNotice = "";
+  panelQueueFailed = false;
   renderPanelSource();
   try {
     const payload = await api("/api/contacts/queue", {
@@ -782,6 +789,7 @@ async function openPanelPosition(index) {
     if (queue.contact) scrollLeadWorkspaceToTop();
   } catch (error) {
     panelQueueNotice = error.message || "CRM не відповіла.";
+    panelQueueFailed = true;
   } finally {
     panelQueueBusy = false;
     renderPanelSource();

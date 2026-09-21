@@ -283,6 +283,24 @@ test("the panel walks a folder by position and takes each person into the queue"
     assert.equal(past.queue.total, 3);
     assert.match(past.queue.warning, /кінець папки/);
 
+    // A name of ours is never a contact id. Any request to this block's own
+    // endpoints that does not match its method used to fall through to "fetch
+    // the person whose id is `queue`", and the seller saw a database error
+    // about a uuid for a route that exists.
+    const wrongMethod = await fetch(`${walkOrigin}/api/contacts/queue`);
+    assert.equal(wrongMethod.status, 405);
+    const refusal = await wrongMethod.json();
+    assert.equal(refusal.expected, "POST");
+    // The method is in the answer because a screenshot cannot show it, and it
+    // is the one fact that separates "the client sent the wrong thing" from
+    // "something between the client and here changed it".
+    assert.equal(refusal.received, "GET");
+    assert.doesNotMatch(refusal.error, /uuid/i);
+
+    const foldersWrongMethod = await fetch(`${walkOrigin}/api/contacts/folders`, { method: "POST" });
+    assert.equal(foldersWrongMethod.status, 405);
+    assert.equal((await foldersWrongMethod.json()).expected, "GET");
+
     // A folder is still required: a position in the whole CRM is not a queue.
     const unscoped = await fetch(`${walkOrigin}/api/contacts/queue`, {
       method: "POST",

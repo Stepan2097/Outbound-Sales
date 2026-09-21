@@ -657,6 +657,34 @@ async function handleApi(request, response, url) {
         return;
       }
 
+      /**
+       * A name of ours is never a contact id.
+       *
+       * The pattern below reads the last segment as a CRM contact id, so any
+       * request to one of this block's own endpoints that did not match its
+       * method above fell through to "fetch the person whose id is `queue`" —
+       * and the seller was shown `invalid input syntax for type uuid: "queue"`
+       * from a database they have never heard of, for a route that exists.
+       *
+       * The method is in the answer on purpose. When this fires, what nobody
+       * can see from a screenshot is what the request actually was, and that is
+       * the one fact that separates "the client sent the wrong thing" from
+       * "something between the client and here changed it".
+       */
+      const OWN_ENDPOINTS = { queue: "POST", folders: "GET" };
+      const lastSegment = url.pathname.slice("/api/contacts/".length);
+      if (Object.hasOwn(OWN_ENDPOINTS, lastSegment)) {
+        const expected = OWN_ENDPOINTS[lastSegment];
+        addEvent("contacts", `/api/contacts/${lastSegment} answered ${request.method}, expects ${expected}.`);
+        sendJson(response, 405, {
+          error: `Цей маршрут приймає ${expected}, а прийшов ${request.method}. Це не про CRM — перезавантаж сторінку, і якщо повториться, покажи це повідомлення.`,
+          route: `/api/contacts/${lastSegment}`,
+          expected,
+          received: request.method
+        });
+        return;
+      }
+
       const contactMatch = url.pathname.match(/^\/api\/contacts\/([^/]+)(\/messages|\/import)?$/);
       if (contactMatch) {
         const contactId = decodeURIComponent(contactMatch[1]);
