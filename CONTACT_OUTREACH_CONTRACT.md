@@ -291,13 +291,14 @@ body { action: "invite.sent", accountId, outreachId,
        outcome: "sent" | "already_pending" | "already_connected"
               | "no_button" | "profile_gone" | "blocked" }
 
-200  { success: true, status: "pending", moved: true,  connectsLeft: 2 }
+200  { success: true, status: "pending", moved: true,  overQuota: false, stopSending: false, connectsLeft: 2 }
+200  { success: true, status: "pending", moved: true,  overQuota: true,  stopSending: true,  connectsLeft: 0 }
 200  { success: true, status: "waiting", moved: false, recorded: "no_button" }
 200  { success: true, status: "pending", moved: false, reason: "already" | "refused" | "raced" | "gone" }
+400  { success: false, error: "Unknown outcome. One of: sent, already_pending, …" }
 404  { success: false, error: "That invitation is gone" }
 409  { success: false, error: "That invitation belongs to another account" }
 409  { success: false, error: "No warm-up in progress" }
-409  { success: false, error: "Daily quota reached (5)", quota: 5, done: 5 }
 ```
 
 | outcome | status becomes | allowance | what it means |
@@ -309,9 +310,19 @@ body { action: "invite.sent", accountId, outreachId,
 | `profile_gone` | unchanged (`waiting`) | not spent | 404, redirect, or a members-only wall |
 | `blocked` | unchanged (`waiting`) | not spent | an interstitial or rate-limit page |
 
-A `409` on quota is an ordinary answer, not a failure: **stop the send step for
-the day** and leave the rest queued. A `moved: false` with a `reason` is also
-ordinary — somebody else moved the row — and is worth one log line, not a retry.
+**There is no refusal on quota, and that changed while this was built.** An
+earlier draft answered 409 and moved nothing, which was wrong for the reason
+set out under *Recording is not permission*: by the time this call is made
+LinkedIn has already sent the request, and refusing the report throws away the
+record of something that exists. So a send past the day's allowance is
+**recorded** — the row moves, the day counter does not, the `invite.sent` event
+carries `overQuota: true` at `warn` — and the answer carries `stopSending:
+true`. **That flag is how the run ends its send step**, not a 409 to interpret.
+Everything already sent stays recorded; everything still queued waits.
+
+A `moved: false` with a `reason` is ordinary — somebody else moved the row —
+and is worth one log line, not a retry. A `400` is not ordinary: it means the
+outcome string is not one this portal knows, and the fix is in the agent.
 
 ### `POST /api/warmup/agent` — `invites.checked`
 
