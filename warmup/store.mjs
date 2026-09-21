@@ -53,6 +53,16 @@ export async function logEvent(input) {
  * its id can go and remove it.
  */
 export async function probeEventWriteAccess() {
+  // "No keys here" and "the key is not allowed to" are different answers, and
+  // on the screen the second one reads as a broken deployment. Locally the
+  // first is the only one there can be.
+  if (!anty.configured()) {
+    return {
+      insert: { ok: false, error: `The Anty database is not configured: ${anty.missing().join(", ")} are not set` },
+      update: null, remove: null, probeId: null, canUpdate: false, verdict: "not_configured"
+    };
+  }
+
   const marker = `probe-${Date.now().toString(36)}`;
   const step = { insert: null, update: null, remove: null };
   let probeId = null;
