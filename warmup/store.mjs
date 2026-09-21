@@ -255,16 +255,30 @@ export async function checkQuota(account, run, kind, step = 1) {
   // No quota in this phase means forbidden, not unlimited.
   if (quota === 0) return { ok: false, status: 409, error: `${ACTION_LABEL[kind]} are not allowed on day ${day}` };
 
+  // Every row for this day and kind, summed, rather than one row read with
+  // `maybeSingle`. There is no unique index on (run_id, on_date, kind) and
+  // there cannot be one without a migration, so two writers that both found
+  // nothing can each insert — and reading only the first of them would report
+  // half the day's work and hand out the quota twice.
   const existing = await anty.from("wl_day_actions").select("id,done")
     .eq("run_id", run.id).eq("on_date", today()).eq("kind", kind)
-    .maybeSingle();
+    .order("created_at", { ascending: true }).rows();
+  const already = existing.reduce((total, row) => total + (Number(row.done) || 0), 0);
 
-  const done = (existing?.done ?? 0) + step;
+  const done = already + step;
   if (done > quota) {
-    return { ok: false, status: 409, error: `Daily quota reached (${quota})`, quota, done: existing?.done ?? 0 };
+    return { ok: false, status: 409, error: `Daily quota reached (${quota})`, quota, done: already };
   }
 
-  return { ok: true, day, quota, done, step, existingRowId: existing?.id ?? null };
+  return {
+    ok: true, day, quota, done, step,
+    existingRowId: existing[0]?.id ?? null,
+    // That row's own number, which is what the write is guarded on. It is not
+    // the day's total when a duplicate row exists, and conflating the two is
+    // how the guard would start refusing correct writes.
+    rowDone: Number(existing[0]?.done) || 0,
+    duplicateRows: existing.length > 1 ? existing.length : 0
+  };
 }
 
 /**
@@ -273,14 +287,62 @@ export async function checkQuota(account, run, kind, step = 1) {
  * number that gets stored.
  */
 export async function commitAction(account, run, kind, allowance, detail = null) {
-  const { day, quota, done, step, existingRowId } = allowance;
+  const { day, quota, done, step, existingRowId, rowDone = 0, duplicateRows = 0 } = allowance;
+
+  if (duplicateRows) {
+    // Not repaired here: merging rows under a writer that may be racing is how
+    // a count gets lost for good. `checkQuota` sums them, so the arithmetic is
+    // right; this is so somebody knows the rows are there.
+    await logEvent({
+      accountId: account.id, runId: run.id, level: "warn", type: "action.duplicate_day_row",
+      message: `${duplicateRows} rows count today's ${ACTION_LABEL[kind]} — they are summed, not merged`,
+      meta: { kind, day, rows: duplicateRows }
+    });
+  }
 
   if (existingRowId) {
-    await anty.from("wl_day_actions").update({ done, updated_at: new Date().toISOString() }).eq("id", existingRowId).rows();
+    // Conditional on the number that was read. `done` is an absolute, and
+    // several awaits sit between the check and this write in every caller, so
+    // two requests that both read `n` would both write `n + 1` and one of the
+    // two actions would vanish from the day's count — an account sending more
+    // than its plan allows, with the counter saying otherwise. Guarded, the
+    // loser writes nothing and finds out.
+    const written = await anty.from("wl_day_actions")
+      .update({ done: rowDone + step, updated_at: new Date().toISOString() })
+      .eq("id", existingRowId).eq("done", rowDone)
+      .select("id").rows();
+    if (!written.length) {
+      // Somebody counted between the read and the write. Re-read and add this
+      // action on top of whatever the truth now is, rather than overwriting it.
+      const current = await anty.from("wl_day_actions").select("done").eq("id", existingRowId).maybeSingle();
+      const corrected = (Number(current?.done) || 0) + step;
+      await anty.from("wl_day_actions")
+        .update({ done: corrected, updated_at: new Date().toISOString() })
+        .eq("id", existingRowId).rows();
+      await logEvent({
+        accountId: account.id, runId: run.id, level: "warn", type: "action.recount",
+        message: `Two ${ACTION_LABEL[kind]} were counted at once; the day now stands at ${corrected}`,
+        meta: { kind, day, expected: done, corrected, quota }
+      });
+    }
   } else {
-    await anty.from("wl_day_actions").insert({
-      run_id: run.id, account_id: account.id, day, on_date: today(), kind, quota, done
-    }).rows();
+    // Re-read first: between the check and here another writer may have made
+    // the row this one is about to duplicate. It does not close the window —
+    // nothing without a unique index can — but it closes the common one, where
+    // two requests arrive a few hundred milliseconds apart.
+    const appeared = await anty.from("wl_day_actions").select("id,done")
+      .eq("run_id", run.id).eq("on_date", today()).eq("kind", kind)
+      .order("created_at", { ascending: true }).rows();
+    if (appeared.length) {
+      const mine = appeared[0];
+      await anty.from("wl_day_actions")
+        .update({ done: (Number(mine.done) || 0) + step, updated_at: new Date().toISOString() })
+        .eq("id", mine.id).rows();
+    } else {
+      await anty.from("wl_day_actions").insert({
+        run_id: run.id, account_id: account.id, day, on_date: today(), kind, quota, done
+      }).rows();
+    }
   }
 
   await recordSessionAction(account.id, kind, step);

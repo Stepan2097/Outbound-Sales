@@ -6,7 +6,7 @@ import { HEALTH_LABEL, HEALTH_VALUES, deriveStatus, isHealth } from "./status.mj
 import { PLATFORMS, parseProxy, platformOf, proxyString, retag } from "./platform.mjs";
 import { CLAIM_STATUS, OUTREACH_COLUMNS, OUTREACH_STATUSES, describeClaim, describeOutreach, personSnapshot, sentBy } from "./outreach.mjs";
 import {
-  ACCEPTED_STATUS, MAX_INVITES_PER_RUN, MAX_INVITE_CHECKS_PER_RUN, WAITING_STATUS, cancelInvite,
+  ACCEPTED_STATUS, INVITE_OUTCOMES, MAX_INVITES_PER_RUN, MAX_INVITE_CHECKS_PER_RUN, WAITING_STATUS, cancelInvite,
   describeInvite, inviteEvents, invitesToCheck, invitesToSend, lastCheckedAt as invitesLastCheckedAt,
   checkedTodayAccounts, moveStatus, openConversationCounts, outreachForContact, pendingCounts,
   reassignInvite, recordCheck, recordFailed, recordSent, requestInvite
@@ -172,6 +172,19 @@ async function connectAllowance(account) {
     spent: allowance.ok ? allowance.done - allowance.step : allowance.done ?? 0,
     startsDay: connectStartsDay(run)
   };
+}
+
+/**
+ * One invitation as a screen sees it, with the account-level facts filled in.
+ *
+ * `lastCheckedAt` belongs to the account, not to the person: a check is one
+ * pass over the whole board and its event names no contact. Looked for among
+ * the person's own events it was null forever, and the line that says when we
+ * last looked never appeared.
+ */
+async function inviteView(row, events = []) {
+  if (!row) return null;
+  return describeInvite(row, events, { checkedAt: await invitesLastCheckedAt(row.account_id) });
 }
 
 /**
@@ -1232,7 +1245,13 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       // time always means "when they answered". Kept as it was when one is
       // already recorded: correcting declined to connected should not move the
       // answer to the moment somebody fixed the typo.
-      patch.responded_at = status === "pending" ? null : existing.responded_at ?? new Date().toISOString();
+      // `pending` has not answered and `accepted` has not either — it means
+      // accepted and silent, which is the whole reason that status exists.
+      // Stamping it would put a reply time on somebody who never wrote, and
+      // that is the column the panel reads to say they did.
+      patch.responded_at = ["pending", ACCEPTED_STATUS].includes(status)
+        ? (status === "pending" ? null : existing.responded_at ?? null)
+        : existing.responded_at ?? new Date().toISOString();
 
       const updated = await anty.from("wl_outreach").update(patch).eq("id", existing.id).select(OUTREACH_COLUMNS).single();
       await logEvent({
@@ -1704,7 +1723,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         })
         : [];
 
-      const invite = describeInvite(outreach, events);
+      const invite = await inviteView(outreach, events);
       const entries = [
         ...events
           // `invite.checked` is written on every look, including the ones that
@@ -1748,7 +1767,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       if (!crmContactId) return fail(response, sendJson, 400, "Який контакт?");
       const row = await outreachForContact(crmContactId);
       const events = row ? await inviteEvents(crmContactId) : [];
-      sendJson(response, 200, { success: true, invite: describeInvite(row, events), events });
+      sendJson(response, 200, { success: true, invite: await inviteView(row, events), events });
       return true;
     }
 
@@ -1785,7 +1804,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           sendJson(response, 409, {
             success: false,
             error: "Ця людина вже в аутрічі",
-            existing: describeInvite(existing, existing ? await inviteEvents(lead.id) : [])
+            existing: await inviteView(existing, existing ? await inviteEvents(lead.id) : [])
           });
           return true;
         }
@@ -1795,7 +1814,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       const allowance = await connectAllowance(account);
       sendJson(response, 200, {
         success: true,
-        invite: describeInvite(row, await inviteEvents(lead.id)),
+        invite: await inviteView(row, await inviteEvents(lead.id)),
         connectsLeft: allowance.blocked ? 0 : Math.max(0, (allowance.quota || 0) - (allowance.spent || 0))
       });
       return true;
@@ -1824,7 +1843,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         movedBy: request.auth?.profile?.email || ""
       });
       if (!moved) return fail(response, sendJson, 409, "Перекинути можна лише те, що ще не надіслано");
-      sendJson(response, 200, { success: true, invite: describeInvite(moved, await inviteEvents(moved.crm_contact_id)) });
+      sendJson(response, 200, { success: true, invite: await inviteView(moved, await inviteEvents(moved.crm_contact_id)) });
       return true;
     }
 
@@ -1892,7 +1911,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
 
       sendJson(response, 200, {
         success: true,
-        invite: describeInvite(outreach, await inviteEvents(lead.id)),
+        invite: await inviteView(outreach, await inviteEvents(lead.id)),
         overQuota
       });
       return true;
@@ -2432,10 +2451,30 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       if (action === "invite.sent") {
         const outreachId = String(body.outreachId || "");
         if (!outreachId) return fail(response, sendJson, 400, "Which invitation?");
-        const outcome = String(body.outcome || "sent");
+        // A vocabulary, checked the way `record` checks its kind. Unvalidated,
+        // any unknown string — a capitalised "Sent", a "rate_limited" from a
+        // newer agent build — fell through to "treat as already pending":
+        // the row moved as though the request had gone out and the allowance
+        // was never spent, so the account quietly sent one more than its day
+        // allowed and nothing anywhere said so.
+        const outcome = String(body.outcome || "");
+        if (!INVITE_OUTCOMES.includes(outcome)) {
+          return fail(response, sendJson, 400, `Unknown outcome. One of: ${INVITE_OUTCOMES.join(", ")}`);
+        }
 
         const outreach = await anty.from("wl_outreach").select(OUTREACH_COLUMNS).eq("id", outreachId).maybeSingle();
-        if (!outreach) return fail(response, sendJson, 404, "That invitation is gone");
+        if (!outreach) {
+          // A seller cancelled between the agent being handed this row and the
+          // browser clicking Connect. The person is back in the pool, but the
+          // invitation is on their LinkedIn — so the orphan goes on the record
+          // rather than vanishing with the row.
+          await logEvent({
+            accountId: account.id, level: "warn", type: "invite.failed",
+            message: "Agent reported a request for an invitation that no longer exists — it was cancelled mid-send",
+            meta: { outreachId, outcome: "row_gone", reported: outcome }
+          });
+          return fail(response, sendJson, 404, "That invitation is gone");
+        }
         if (outreach.account_id !== account.id) return fail(response, sendJson, 409, "That invitation belongs to another account");
 
         if (["no_button", "profile_gone", "blocked"].includes(outcome)) {
@@ -2454,12 +2493,18 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         const target = outcome === "already_connected" ? ACCEPTED_STATUS : "pending";
         const spends = outcome === "sent";
 
+        // The agent reports only after LinkedIn's own card has changed to
+        // Pending, so by the time this runs the invitation exists. Refusing it
+        // for want of allowance would not un-send it — it would throw away the
+        // record of a request that is already on somebody's screen, and hand
+        // the person back to the next campaign that asks. The same rule the
+        // seller's "I sent it myself" already follows: quota governs what we
+        // cause, not what we observe.
         let allowance = null;
+        let overQuota = false;
         if (spends) {
           allowance = await checkQuota(account, run, "connect");
-          // A refusal is an ordinary answer: the agent stops sending for today
-          // and the rest of the queue keeps waiting for tomorrow.
-          if (!allowance.ok) return refusal(response, sendJson, allowance);
+          overQuota = !allowance.ok;
         }
 
         const moved = await moveStatus({ outreachId, to: target });
@@ -2468,14 +2513,18 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           return true;
         }
 
-        if (spends) await commitAction(account, run, "connect", allowance, `invite to ${outreach.person_name || "a contact"}`);
-        await recordSent({ account, run, outreach: moved.row, by: "agent", allowance });
+        if (spends && !overQuota) await commitAction(account, run, "connect", allowance, `invite to ${outreach.person_name || "a contact"}`);
+        await recordSent({ account, run, outreach: moved.row, by: "agent", overQuota, allowance: overQuota ? null : allowance });
 
         sendJson(response, 200, {
           success: true,
           status: moved.row.status,
           moved: true,
-          connectsLeft: spends ? Math.max(0, allowance.quota - allowance.done) : null
+          overQuota,
+          // The agent stops sending for the day on this, rather than on a 409
+          // it would have to interpret. What it already sent is recorded.
+          stopSending: overQuota,
+          connectsLeft: spends && !overQuota ? Math.max(0, allowance.quota - allowance.done) : 0
         });
         return true;
       }
@@ -2484,6 +2533,11 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       if (action === "invites.checked") {
         const results = Array.isArray(body.results) ? body.results.slice(0, MAX_INVITE_CHECKS_PER_RUN) : [];
         const run = await activeRun(account.id);
+        // Scoped inside `recordCheck`, the way `invite.sent` above refuses a
+        // row it does not own. Unscoped, a stale or misattributed results
+        // array moved another account's rows to a terminal status they can
+        // never leave, filed the event under the wrong account, and dropped
+        // the person out of every query that would have surfaced them again.
         sendJson(response, 200, { success: true, ...(await recordCheck({ account, run, results })) });
         return true;
       }

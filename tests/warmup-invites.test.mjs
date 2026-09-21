@@ -378,7 +378,7 @@ test("a request the browser could not send leaves the person held, with the reas
   assert.equal(failed.level, "warn");
 });
 
-test("a spent quota refuses the send and leaves the invitation for tomorrow", async () => {
+test("a request past the day's allowance is still recorded, and the agent is told to stop", async () => {
   const outreachId = await queueOne();
   rows.wl_day_actions = [{
     id: "d-1", run_id: "run-1", account_id: "acc-1", on_date: new Date().toISOString().slice(0, 10),
@@ -389,8 +389,59 @@ test("a spent quota refuses the send and leaves the invitation for tomorrow", as
     method: "POST", path: "/api/warmup/agent",
     body: { action: "invite.sent", accountId: "acc-1", outreachId, outcome: "sent" }
   });
-  assert.equal(answer.status, 409, "an ordinary answer, not a failure");
-  assert.equal(rows.wl_outreach[0].status, WAITING_STATUS);
+
+  // The agent reports only after LinkedIn's card reads Pending, so the request
+  // already exists. A 409 here would not un-send it — it would throw away the
+  // record and hand the person to the next campaign that asks.
+  assert.equal(answer.status, 200);
+  assert.equal(answer.payload.overQuota, true);
+  assert.equal(answer.payload.stopSending, true, "and this is how the run stops, not an error it has to read");
+  assert.equal(rows.wl_outreach[0].status, "pending", "the person stays approached, because they were");
+  assert.equal(rows.wl_day_actions[0].done, 99, "but the counter is not pushed past its own quota");
+  const sent = rows.wl_events.find((event) => event.type === "invite.sent");
+  assert.equal(sent.meta.overQuota, true);
+  assert.equal(sent.level, "warn");
+});
+
+test("an outcome the portal does not know is refused rather than guessed at", async () => {
+  const outreachId = await queueOne();
+  const answer = await call({
+    method: "POST", path: "/api/warmup/agent",
+    body: { action: "invite.sent", accountId: "acc-1", outreachId, outcome: "rate_limited" }
+  });
+
+  // Unvalidated, an unknown string fell through to "treat as already pending":
+  // the row moved as though the request had gone out and the allowance was
+  // never spent — one more request than the day allowed, and nothing said so.
+  assert.equal(answer.status, 400);
+  assert.match(answer.payload.error, /Unknown outcome/);
+  assert.equal(rows.wl_outreach[0].status, WAITING_STATUS, "and nothing moved");
+  assert.equal(rows.wl_day_actions.length, 0);
+});
+
+test("a check may only move the reporting account's own rows", async () => {
+  const outreachId = await queueOne();
+  await call({
+    method: "POST", path: "/api/warmup/agent",
+    body: { action: "invite.sent", accountId: "acc-1", outreachId, outcome: "sent" }
+  });
+  rows.wl_accounts.push({
+    id: "acc-2", label: "Dan Moreau", login: "dan@example.com",
+    profile_remote_id: "profile-2", status: "warming", health: "ok"
+  });
+  rows.wl_runs.push({ ...rows.wl_runs[0], id: "run-2", account_id: "acc-2" });
+
+  const answer = await call({
+    method: "POST", path: "/api/warmup/agent",
+    body: { action: "invites.checked", accountId: "acc-2", results: [{ outreachId, state: "gone" }] }
+  });
+
+  // `withdrawn` has no exit, and the row would have dropped out of every query
+  // that could ever surface that person again — while the event was filed
+  // under the wrong account's log.
+  assert.equal(answer.payload.withdrawn, 0);
+  assert.deepEqual(answer.payload.foreign, [outreachId], "and the mis-scoped report is visible, not swallowed");
+  assert.equal(rows.wl_outreach[0].status, "pending", "acc-1's row is untouched");
 });
 
 test("the daily check cannot turn somebody who already replied back into somebody to write to", async () => {
@@ -578,6 +629,27 @@ test("a person nobody has written to says so rather than showing an empty list",
   assert.equal(answer.payload.empty, true);
   assert.deepEqual(answer.payload.entries, []);
   assert.equal(answer.payload.invite, null);
+});
+
+test("two actions counted at once both reach the day's counter", async () => {
+  const { checkQuota, commitAction } = await import("../warmup/store.mjs");
+  const account = rows.wl_accounts[0];
+  const run = rows.wl_runs[0];
+
+  // The interleaving that loses a count: both read the same `done`, both then
+  // write an absolute number on top of it. Unguarded, the second write lands
+  // on the first and one real connection request disappears from the day.
+  const first = await checkQuota(account, run, "connect");
+  const second = await checkQuota(account, run, "connect");
+  assert.ok(first.ok && second.ok);
+
+  await commitAction(account, run, "connect", first);
+  await commitAction(account, run, "connect", second);
+
+  // One row, holding both. The second commit found the row the first had just
+  // made and added to it rather than writing a second row beside it.
+  assert.equal(rows.wl_day_actions.length, 1);
+  assert.equal(rows.wl_day_actions[0].done, 2, "both were counted");
 });
 
 test("the write-access probe answers for each of the three writes, and cleans up", async () => {

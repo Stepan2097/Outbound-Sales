@@ -38,6 +38,17 @@ export const INVITE_CANCELLED = "invite.cancelled";
 export const INVITE_REASSIGNED = "invite.reassigned";
 export const INVITE_FAILED = "invite.failed";
 
+/**
+ * Everything the agent may report about one attempt, and nothing else.
+ *
+ * A closed list because the route derives two decisions from it — which status
+ * to move to, and whether the day's allowance is spent — and an unknown string
+ * silently answered "pending, and free".
+ */
+export const INVITE_OUTCOMES = [
+  "sent", "already_pending", "already_connected", "no_button", "profile_gone", "blocked"
+];
+
 export const INVITE_TYPES = [
   INVITE_REQUESTED, INVITE_SENT, INVITE_CHECKED, INVITE_CANCELLED, INVITE_REASSIGNED, INVITE_FAILED
 ];
@@ -273,12 +284,32 @@ export async function invitesToSend(accountId, limit = MAX_INVITES_PER_RUN) {
   }));
 }
 
-/** Sent invitations still waiting for an answer, oldest first. */
+/**
+ * Sent invitations still waiting for an answer — the ones looked at longest ago.
+ *
+ * Oldest-first alone does not work. A `pending` row only leaves this set when
+ * somebody accepts or the request disappears, so the twenty oldest are the
+ * twenty least likely to move: with twenty-five outstanding, the same twenty
+ * are re-read every day and the last five are never checked at all. So the
+ * previous run's `seen` list is stepped over first, and the window fills from
+ * the oldest only when there is room left. Everybody is looked at inside
+ * ceil(n / 20) days instead of never.
+ */
 export async function invitesToCheck(accountId, limit = MAX_INVITE_CHECKS_PER_RUN) {
   if (!accountId || limit <= 0) return [];
-  const rows = await anty.from("wl_outreach").select(OUTREACH_COLUMNS)
+  const all = await anty.from("wl_outreach").select(OUTREACH_COLUMNS)
     .eq("account_id", accountId).eq("status", "pending")
-    .order("created_at", { ascending: true }).limit(limit).rows();
+    .order("created_at", { ascending: true }).limit(500).rows();
+  if (!all.length) return [];
+
+  const lastCheck = await anty.from("wl_events").select("meta")
+    .eq("account_id", accountId).eq("type", INVITE_CHECKED)
+    .order("created_at", { ascending: false }).limit(1).maybeSingle();
+  const seen = new Set(Array.isArray(lastCheck?.meta?.seen) ? lastCheck.meta.seen : []);
+
+  const unseen = all.filter((row) => !seen.has(row.id));
+  const rows = [...unseen, ...all.filter((row) => seen.has(row.id))].slice(0, limit);
+
   return rows.map((row) => ({
     outreachId: row.id,
     crmContactId: row.crm_contact_id,
@@ -374,9 +405,23 @@ export async function recordCheck({ account, run = null, results = [] }) {
   let accepted = 0;
   let withdrawn = 0;
   const refused = [];
+  const foreign = [];
+
+  // Which of the reported rows this account actually holds. Without it a stale
+  // or misattributed results array moved somebody else's rows — to `withdrawn`,
+  // which has no exit — filed the event under the wrong account's log, and
+  // dropped that person out of every query that would have surfaced them again.
+  const ids = [...new Set(results.map((result) => String(result?.outreachId || "")).filter(Boolean))];
+  const ours = new Set(ids.length
+    ? (await anty.from("wl_outreach").select("id").eq("account_id", account.id).in("id", ids).rows()).map((row) => row.id)
+    : []);
 
   for (const result of results) {
     if (!result?.outreachId) continue;
+    if (!ours.has(String(result.outreachId))) {
+      foreign.push(String(result.outreachId));
+      continue;
+    }
     if (result.state === "accepted") {
       const moved = await moveStatus({ outreachId: String(result.outreachId), to: ACCEPTED_STATUS });
       if (moved.moved) accepted += 1;
@@ -393,13 +438,23 @@ export async function recordCheck({ account, run = null, results = [] }) {
     runId: run?.id ?? null,
     type: INVITE_CHECKED,
     message: `Checked ${results.length} sent invitation${results.length === 1 ? "" : "s"}: ${accepted} accepted, ${withdrawn} gone`,
-    // `refused` is the interesting column when something looks wrong: it means
-    // the check tried to move a row the table would not let it move, which is
-    // either a stale report or a rule somebody should look at.
-    meta: { checked: results.length, accepted, withdrawn, ...(refused.length ? { refused } : {}) }
+    // `refused` and `foreign` are the interesting columns when something looks
+    // wrong: the first means the check tried a move the table would not make —
+    // usually the inbox already recorded a real reply — and the second means
+    // the agent reported rows this account does not hold, which is a bug in
+    // whatever built that list and should be visible rather than swallowed.
+    meta: {
+      checked: results.length, accepted, withdrawn,
+      // The rows this check actually looked at, so the next one can move past
+      // them: without it the same twenty oldest are re-checked every day and
+      // the twenty-first person is never looked at again.
+      seen: [...ours],
+      ...(refused.length ? { refused } : {}),
+      ...(foreign.length ? { foreign } : {})
+    }
   });
 
-  return { checked: results.length, accepted, withdrawn, refused };
+  return { checked: results.length, accepted, withdrawn, refused, foreign };
 }
 
 /** An invitation the browser could not send, and why — the row stays waiting. */
@@ -442,11 +497,10 @@ export async function inviteEvents(crmContactId, limit = 50) {
  * ordered by `created_at` puts the invitation before things that happened
  * before it.
  */
-export function describeInvite(row, events = []) {
+export function describeInvite(row, events = [], { checkedAt = null } = {}) {
   if (!row) return null;
   const requested = events.find((event) => event.type === INVITE_REQUESTED);
   const sent = events.filter((event) => event.type === INVITE_SENT).at(-1);
-  const checked = events.filter((event) => event.type === INVITE_CHECKED).at(-1);
   return {
     outreachId: row.id,
     accountId: row.account_id,
@@ -462,7 +516,11 @@ export function describeInvite(row, events = []) {
     sentAt: sent?.at || null,
     sentByWhom: sent?.meta?.by || "",
     overQuota: Boolean(sent?.meta?.overQuota),
-    lastCheckedAt: checked?.at || null,
+    // Passed in rather than found among this person's events: a check is one
+    // pass over an account's whole board, so its event carries no contact and
+    // could never match here. Read from the events, this was null forever and
+    // the line on the card never rendered.
+    lastCheckedAt: checkedAt,
     respondedAt: row.responded_at,
     waitingDays: row.status === WAITING_STATUS ? daysSince(row.created_at) : 0
   };
