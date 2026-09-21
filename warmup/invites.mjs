@@ -23,9 +23,12 @@ import { CLAIM_STATUS, OUTREACH_COLUMNS, personSnapshot, sentBy } from "./outrea
  *   the fact that somebody cancelled it is the only thing left.
  *
  * **This module is the containment.** Every read and write of an `invite.*`
- * event happens here and nowhere else, and so does every automatic status move
- * on `wl_outreach`. When a password arrives, moving to real tables is this file
- * and no call sites.
+ * event happens here and nowhere else, and so does every status move made by
+ * something other than a person: the inbox sync's `markReplied` and, from the
+ * next phase, the agent's two reports. A seller pressing a button in the panel
+ * still writes through the routes — those moves have a human behind them who
+ * can be asked what they meant. When a password arrives, moving to real tables
+ * is this file and no call sites.
  */
 
 export const INVITE_REQUESTED = "invite.requested";

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import { anty, crm } from "./db.mjs";
 import { logEvent } from "./store.mjs";
+import { moveStatus } from "./invites.mjs";
 
 /**
  * The inbox: threads, messages, what has been read, and when an account was
@@ -403,28 +404,23 @@ async function insertMessages(accountId, threadKey, participant, messages) {
 /**
  * Move a matched approach to `connected` and stamp when they answered.
  *
- * From `pending` or `accepted` and nowhere else. A row still `queued` or
- * `waiting` is a person nobody has written to, and somebody writing to an
- * account we never wrote to is not a reply to us; `connected`, `declined` and
- * `withdrawn` are answers a human already gave, and a sync must not overwrite
- * one of those every morning.
+ * Which statuses may become `connected` is not decided here. It is decided by
+ * the transition table in `invites.mjs`, and this goes through it like every
+ * other automatic writer — a row still `queued` or `waiting` is a person nobody
+ * has written to, and `connected`, `declined` and `withdrawn` are answers a
+ * human already gave that a sync must not overwrite every morning.
  *
- * `accepted` is here because it is the normal road: the invitation check marks
- * an invitation accepted, and the reply arrives after it. Without it the first
- * message from every accepted invitation would be stored and never counted as
- * a reply.
+ * It used to hold its own copy of that rule. The copy happened to agree with
+ * the table, but it agreed by coincidence rather than by construction, and the
+ * daily invitation check is a third writer arriving on the same column.
  */
-const REPLIABLE_STATUSES = ["pending", "accepted"];
-
 async function markReplied(row, sentAt) {
-  if (!REPLIABLE_STATUSES.includes(row.status)) return false;
-  const moved = await anty.from("wl_outreach")
-    .update({ status: "connected", responded_at: sentAt })
-    // Re-checked in the filter as well as above, so a status a human changed
-    // while the sync was in flight wins rather than losing to a stale read.
-    .eq("id", row.id).eq("status", row.status)
-    .select("id").rows();
-  return moved.length > 0;
+  const outcome = await moveStatus({
+    outreachId: row.id,
+    to: "connected",
+    patch: { responded_at: sentAt }
+  });
+  return outcome.moved;
 }
 
 /**

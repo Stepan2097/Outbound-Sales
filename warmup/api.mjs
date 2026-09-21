@@ -1589,7 +1589,12 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
     // says which account and since when.
 
     if (method === "GET" && path === "/invites/accounts") {
-      const rows = await anty.from("wl_accounts").select("*").neq("status", "excluded").rows();
+      // Named columns rather than `*`: this answer is assembled field by field
+      // so nothing leaks today, but the next route copied from this one will
+      // return whatever it selected, and `wl_accounts` holds a password cipher.
+      const rows = await anty.from("wl_accounts")
+        .select("id,label,login,status,health,profile_remote_id")
+        .neq("status", "excluded").rows();
       const accounts = await Promise.all(rows.map(async (account) => {
         const allowance = await connectAllowance(account);
         const waiting = await anty.from("wl_outreach").select("id")
