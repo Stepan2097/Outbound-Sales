@@ -24,6 +24,24 @@ const LIST_COLUMNS = "id,name,company,position,country,email,phone,linkedin,tele
 
 export const MAX_PAGE = 100;
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Never ask the CRM for a uuid we have not looked at.
+ *
+ * Postgres answers a malformed one with `invalid input syntax for type uuid:
+ * "queue"`, which travels all the way to a seller's screen as a database error
+ * about a folder they picked from a list. Worse, that sentence is identical
+ * whichever field was wrong — the contact id from a path or the folder id from
+ * a body — so it says nothing about where to look. Checked here, the answer
+ * names the field and the value instead.
+ */
+function badUuid(field, value) {
+  const error = new Error(`${field} має бути ідентифікатором, а прийшло «${String(value).slice(0, 40)}». Вибери папку зі списку заново.`);
+  error.statusCode = 400;
+  return error;
+}
+
 export function contactsConfigured() {
   return crm.configured();
 }
@@ -79,6 +97,7 @@ export async function listFolderContacts({ folderId = "", search = "", limit = 2
     error.statusCode = 400;
     throw error;
   }
+  if (!UUID.test(folderId)) throw badUuid("Папка", folderId);
   const size = Math.min(Math.max(Number(limit) || 25, 1), MAX_PAGE);
   const from = Math.max(Number(offset) || 0, 0);
   const term = String(search || "").trim().replace(/[(),*]/g, " ").trim();
@@ -101,7 +120,10 @@ export async function listFolderContacts({ folderId = "", search = "", limit = 2
 
 /** One contact, with everything the CRM knows about them. */
 export async function readContact(id) {
-  if (!id) return null;
+  // A malformed id is nobody we have — answered as "not found" rather than
+  // handed to Postgres, which would reply with a type error about a table the
+  // person reading it has never heard of.
+  if (!id || !UUID.test(id)) return null;
   return crm.from("contacts").select(CONTACT_COLUMNS).eq("id", id).maybeSingle();
 }
 
@@ -149,6 +171,7 @@ export async function folderContactAt({ folderId = "", index = 0 } = {}) {
     error.statusCode = 400;
     throw error;
   }
+  if (!UUID.test(folderId)) throw badUuid("Папка", folderId);
   const position = Math.max(Math.trunc(Number(index) || 0), 0);
   const [rows, total] = await Promise.all([
     crm.from("contacts").select(CONTACT_COLUMNS).eq("folder_id", folderId)

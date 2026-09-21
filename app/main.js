@@ -8,8 +8,8 @@ let activeLeadSectionId = "dashboard-client";
 // Панель працює папку CRM по черзі: вибрана папка, місце в ній, скільки там
 // людей і що сервер сказав про це місце. Позиція — не фільтр і не пошук: це
 // рівно те, на кому продавець зупинився, тому вона переживає перезавантаження.
-let panelFolderId = window.localStorage.getItem("outbound.panel.folder") || "";
-let panelIndex = Number(window.localStorage.getItem("outbound.panel.index") || 0) || 0;
+let panelFolderId = rememberedFolderId();
+let panelIndex = panelFolderId ? Number(window.localStorage.getItem("outbound.panel.index") || 0) || 0 : 0;
 let panelTotal = 0;
 let panelContact = null;
 let panelQueueNotice = "";
@@ -716,6 +716,30 @@ function renderPanelSource() {
 
   const refreshButton = document.getElementById("panelFoldersRefreshBtn");
   if (refreshButton) refreshButton.disabled = panelQueueBusy;
+}
+
+/**
+ * Папка, на якій зупинилися, якщо збережене взагалі може бути папкою.
+ *
+ * Значення живе в localStorage і переживає все — оновлення застосунку, зміну
+ * вкладки, помилку. Тому воно єдине в цьому потоці, чого ніхто ніколи не
+ * перевіряв: якщо туди потрапить щось, що не є ідентифікатором, Панель питає
+ * про це CRM при кожному завантаженні і показує помилку бази замість людей, і
+ * вийти з цього стану можна лише вручну почистивши сховище. Непридатне
+ * значення просто не береться, і сторінка просить вибрати папку заново.
+ */
+function rememberedFolderId() {
+  try {
+    const saved = window.localStorage.getItem("outbound.panel.folder") || "";
+    if (!saved) return "";
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(saved)) return saved;
+    window.localStorage.removeItem("outbound.panel.folder");
+    window.localStorage.removeItem("outbound.panel.index");
+    return "";
+  } catch {
+    // Приватне вікно без сховища — просто немає збереженої папки.
+    return "";
+  }
 }
 
 function rememberPanelPosition() {

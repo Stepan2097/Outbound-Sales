@@ -29,11 +29,11 @@ function startFakeCrm(contacts) {
     };
 
     if (url.pathname === "/rest/v1/contact_folders") {
-      send([{ id: "folder-1", name: "Mobile studios", color: "#fff", owner_id: null, is_archived: false }]);
+      send([{ id: "11111111-1111-4111-8111-111111111111", name: "Mobile studios", color: "#fff", owner_id: null, is_archived: false }]);
       return;
     }
     if (url.pathname === "/rest/v1/folder_stats") {
-      send([{ folder_id: "folder-1", contact_count: contacts.length }]);
+      send([{ folder_id: "11111111-1111-4111-8111-111111111111", contact_count: contacts.length }]);
       return;
     }
     if (url.pathname === "/rest/v1/contacts") {
@@ -65,9 +65,14 @@ function startFakeCrm(contacts) {
   });
 }
 
+// Real uuids, not readable stand-ins: the CRM's own columns are uuid, and a
+// fixture that could not exist in that database tests a path production never
+// takes — which is exactly how a missing check on those ids stayed invisible.
+const FOLDER = "11111111-1111-4111-8111-111111111111";
+
 const people = [
   {
-    id: "contact-1",
+    id: "22222222-2222-4222-8222-222222222221",
     created_at: "2026-09-01T10:00:00Z",
     name: "Marta Kovalenko",
     company: "Fleetify",
@@ -80,11 +85,11 @@ const people = [
     lead_status: "new",
     lifecycle_stage: "lead",
     description: "Met at a conference, runs UA for two titles.",
-    folder_id: "folder-1",
+    folder_id: "11111111-1111-4111-8111-111111111111",
     custom_fields: { source: "conference" }
   },
   {
-    id: "contact-2",
+    id: "22222222-2222-4222-8222-222222222222",
     created_at: "2026-08-20T10:00:00Z",
     name: "Piotr Nowak",
     company: "Gamebridge",
@@ -92,7 +97,7 @@ const people = [
     country: "Poland",
     email: "piotr@gamebridge.example",
     lead_status: "new",
-    folder_id: "folder-1"
+    folder_id: "11111111-1111-4111-8111-111111111111"
   }
 ];
 
@@ -120,14 +125,14 @@ test("contacts are read from the CRM, and three drafts are written for one of th
     const { folders } = await getJson("/api/contacts/folders");
     assert.deepEqual(folders.map((folder) => [folder.name, folder.contactCount]), [["Mobile studios", 2]]);
 
-    const page = await getJson("/api/contacts?folderId=folder-1&limit=1");
+    const page = await getJson("/api/contacts?folderId=11111111-1111-4111-8111-111111111111&limit=1");
     assert.equal(page.total, 2, "the total counts the folder, not the page");
     assert.equal(page.contacts.length, 1, "the page is the page that was asked for");
 
-    const searched = await getJson("/api/contacts?folderId=folder-1&search=gamebridge");
+    const searched = await getJson("/api/contacts?folderId=11111111-1111-4111-8111-111111111111&search=gamebridge");
     assert.deepEqual(searched.contacts.map((contact) => contact.name), ["Piotr Nowak"]);
 
-    const card = await getJson("/api/contacts/contact-1");
+    const card = await getJson("/api/contacts/22222222-2222-4222-8222-222222222221");
     assert.equal(card.contact.telegram, "@marta");
     assert.equal(card.contact.description, "Met at a conference, runs UA for two titles.");
     assert.equal(card.drafts, null, "nothing has been written for her yet");
@@ -135,7 +140,7 @@ test("contacts are read from the CRM, and three drafts are written for one of th
 
     // No OpenRouter key in a test, so this is the fallback path: it still has
     // to answer with three usable drafts rather than an error.
-    const { drafts } = await postJson("/api/contacts/contact-1/messages", { language: "uk" });
+    const { drafts } = await postJson("/api/contacts/22222222-2222-4222-8222-222222222221/messages", { language: "uk" });
     assert.equal(drafts.provider, "local");
     assert.ok(drafts.email.subject, "an email needs a subject");
     assert.match(drafts.email.body, /Marta/, "the person's name reaches the draft");
@@ -145,17 +150,17 @@ test("contacts are read from the CRM, and three drafts are written for one of th
     assert.equal(drafts.language, "uk");
     assert.ok(drafts.verifyBeforeSending.length, "a draft written without a model says so");
 
-    const reopened = await getJson("/api/contacts/contact-1");
+    const reopened = await getJson("/api/contacts/22222222-2222-4222-8222-222222222221");
     assert.equal(reopened.drafts.email.subject, drafts.email.subject, "reopening shows what was already written");
 
-    const imported = await postJson("/api/contacts/contact-1/import", {});
+    const imported = await postJson("/api/contacts/22222222-2222-4222-8222-222222222221/import", {});
     const prospect = imported.prospects.find((item) => item.id === imported.prospectId);
     assert.equal(prospect.name, "Marta Kovalenko");
-    assert.equal(prospect.crmSource.contact_id, "contact-1");
+    assert.equal(prospect.crmSource.contact_id, "22222222-2222-4222-8222-222222222221");
     // Twice is still one lead: the CRM id is what makes them the same person.
-    const again = await postJson("/api/contacts/contact-1/import", {});
-    assert.equal(again.prospects.filter((item) => item.crmSource?.contact_id === "contact-1").length, 1);
-    assert.equal((await getJson("/api/contacts/contact-1")).prospectId, again.prospectId);
+    const again = await postJson("/api/contacts/22222222-2222-4222-8222-222222222221/import", {});
+    assert.equal(again.prospects.filter((item) => item.crmSource?.contact_id === "22222222-2222-4222-8222-222222222221").length, 1);
+    assert.equal((await getJson("/api/contacts/22222222-2222-4222-8222-222222222221")).prospectId, again.prospectId);
 
     const missing = await fetch(`${origin}/api/contacts/nope`);
     assert.equal(missing.status, 404);
@@ -168,7 +173,7 @@ test("contacts are read from the CRM, and three drafts are written for one of th
 
     await waitForFile(statePath);
     const saved = JSON.parse(await readFile(statePath, "utf8"));
-    assert.ok(saved.contactDrafts["contact-1"], "drafts outlive the process that wrote them");
+    assert.ok(saved.contactDrafts["22222222-2222-4222-8222-222222222221"], "drafts outlive the process that wrote them");
   } finally {
     if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
     await Promise.race([exitPromise, new Promise((resolve) => setTimeout(resolve, 2000))]);
@@ -223,7 +228,7 @@ test("the panel walks a folder by position and takes each person into the queue"
   const roster = [
     people[0],
     people[1],
-    { id: "contact-3", created_at: "2026-09-05T10:00:00Z", name: "Olena Bila", company: "", position: "", folder_id: "folder-1" }
+    { id: "22222222-2222-4222-8222-222222222223", created_at: "2026-09-05T10:00:00Z", name: "Olena Bila", company: "", position: "", folder_id: "11111111-1111-4111-8111-111111111111" }
   ];
   const { server: crm, url: crmUrl } = await startFakeCrm(roster);
   const directory = await mkdtemp(join(tmpdir(), "outbound-panel-test-"));
@@ -246,7 +251,7 @@ test("the panel walks a folder by position and takes each person into the queue"
     const response = await fetch(`${walkOrigin}/api/contacts/queue`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ folderId: "folder-1", index })
+      body: JSON.stringify({ folderId: "11111111-1111-4111-8111-111111111111", index })
     });
     assert.ok(response.ok, `position ${index} answered ${response.status}`);
     return response.json();
@@ -257,14 +262,14 @@ test("the panel walks a folder by position and takes each person into the queue"
 
     const first = await open(0);
     assert.equal(first.queue.total, 3, "the position is reported against the whole folder");
-    assert.equal(first.queue.contact.id, "contact-1");
+    assert.equal(first.queue.contact.id, "22222222-2222-4222-8222-222222222221");
     assert.ok(first.queue.prospectId, "the person opened is a lead the rest of the page can work with");
     assert.equal(first.prospects.find((item) => item.id === first.queue.prospectId).name, "Marta Kovalenko");
 
-    const fromFolder = (payload) => payload.prospects.filter((item) => item.crmSource?.folder_id === "folder-1");
+    const fromFolder = (payload) => payload.prospects.filter((item) => item.crmSource?.folder_id === "11111111-1111-4111-8111-111111111111");
 
     const second = await open(1);
-    assert.equal(second.queue.contact.id, "contact-2");
+    assert.equal(second.queue.contact.id, "22222222-2222-4222-8222-222222222222");
     assert.equal(fromFolder(second).length, 2);
 
     // Coming back to somebody already walked past reopens the same lead rather
@@ -274,7 +279,7 @@ test("the panel walks a folder by position and takes each person into the queue"
     assert.equal(fromFolder(back).length, 2, "walking back does not grow the queue");
 
     const unusable = await open(2);
-    assert.equal(unusable.queue.contact.id, "contact-3");
+    assert.equal(unusable.queue.contact.id, "22222222-2222-4222-8222-222222222223");
     assert.equal(unusable.queue.prospectId, "", "a row with no company is not a lead");
     assert.match(unusable.queue.warning, /компанії/, "and the panel is told why");
 
@@ -300,6 +305,27 @@ test("the panel walks a folder by position and takes each person into the queue"
     const foldersWrongMethod = await fetch(`${walkOrigin}/api/contacts/folders`, { method: "POST" });
     assert.equal(foldersWrongMethod.status, 405);
     assert.equal((await foldersWrongMethod.json()).expected, "GET");
+
+    // A folder id that cannot be one is answered by us, naming the field and
+    // the value, rather than by Postgres naming a type. The two produced the
+    // same sentence before — `invalid input syntax for type uuid: "queue"` —
+    // whichever field was wrong, which is why a live report of it could not be
+    // traced to either the path or the body.
+    const badFolder = await fetch(`${walkOrigin}/api/contacts/queue`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ folderId: "queue", index: 0 })
+    });
+    assert.equal(badFolder.status, 400);
+    const complaint = await badFolder.json();
+    assert.match(complaint.error, /Папка/);
+    assert.match(complaint.error, /queue/);
+    assert.doesNotMatch(complaint.error, /uuid/i);
+
+    // And a contact id that cannot be one is nobody we have, not a type error.
+    const badContact = await fetch(`${walkOrigin}/api/contacts/not-an-id`);
+    assert.equal(badContact.status, 404);
+    assert.doesNotMatch((await badContact.json()).error, /uuid/i);
 
     // A folder is still required: a position in the whole CRM is not a queue.
     const unscoped = await fetch(`${walkOrigin}/api/contacts/queue`, {
