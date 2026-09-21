@@ -32,6 +32,76 @@ export async function logEvent(input) {
 }
 
 /**
+ * Can this key write, rewrite and remove a row in `wl_events`?
+ *
+ * Asked because a whole design decision hangs on it. Message and invitation
+ * history lives in `wl_events` — there is no Postgres password and no
+ * `exec_sql`, so no migration can give either its own table — and the plan for
+ * suppressing a duplicate when a seller records a message they sent by hand is
+ * to **update** the provisional row in place when the sync later brings the
+ * real one. Nothing in this codebase has ever updated `wl_events`. A
+ * service-role grant that allows INSERT and SELECT but not UPDATE would leave
+ * that plan silently broken, and the alternative — carrying two rows forever
+ * and hiding one at render time — has to be chosen before the code is written,
+ * not after.
+ *
+ * It answers where the keys are, which is the deployed server: nobody can run
+ * this locally, and guessing was the only other option.
+ *
+ * It cleans up after itself, and says so if it could not: a probe row that
+ * survives is the one artefact this leaves behind, and an operator who can see
+ * its id can go and remove it.
+ */
+export async function probeEventWriteAccess() {
+  const marker = `probe-${Date.now().toString(36)}`;
+  const step = { insert: null, update: null, remove: null };
+  let probeId = null;
+
+  try {
+    const row = await anty.from("wl_events").insert({
+      level: "debug",
+      type: "diagnostic.write",
+      message: "Write-access probe. Removed immediately; if you are reading this, the delete failed.",
+      meta: { marker, stage: "inserted" }
+    }).select("id").single();
+    probeId = row.id;
+    step.insert = { ok: true };
+  } catch (error) {
+    step.insert = { ok: false, error: errorText(error) };
+    return { ...step, probeId: null, canUpdate: false, verdict: "cannot_write" };
+  }
+
+  try {
+    const updated = await anty.from("wl_events")
+      .update({ meta: { marker, stage: "updated" } })
+      .eq("id", probeId).select("id").rows();
+    // A grant can also be silently no-op: the request succeeds and nothing
+    // changes. An empty representation is that case, and it is not a yes.
+    step.update = updated.length ? { ok: true } : { ok: false, error: "The update was accepted but changed no rows" };
+  } catch (error) {
+    step.update = { ok: false, error: errorText(error) };
+  }
+
+  try {
+    const gone = await anty.from("wl_events").eq("id", probeId).remove().select("id").rows();
+    step.remove = gone.length ? { ok: true } : { ok: false, error: "The delete was accepted but removed no rows" };
+  } catch (error) {
+    step.remove = { ok: false, error: errorText(error) };
+  }
+
+  return {
+    ...step,
+    probeId: step.remove.ok ? null : probeId,
+    canUpdate: Boolean(step.update?.ok),
+    verdict: step.update?.ok ? (step.remove.ok ? "full" : "no_delete") : "no_update"
+  };
+}
+
+function errorText(error) {
+  return error instanceof Error ? error.message.slice(0, 300) : String(error).slice(0, 300);
+}
+
+/**
  * Today's connection-request allowance, read from the run's own strategy
  * snapshot — the same source the record path checks against, so the number the
  * list shows, the number the forecast adds up and the number an action is

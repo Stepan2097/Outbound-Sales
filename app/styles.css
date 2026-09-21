@@ -3270,6 +3270,47 @@ dialog {
   line-height: 1.5;
 }
 
+/* Перевірка прав на запис у базу прогріву. */
+.warmup-header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.warmup-probe-note {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-sunk);
+  font-size: 13px;
+}
+
+.warmup-probe-note.is-ok {
+  border-color: color-mix(in srgb, var(--teal) 45%, var(--line));
+}
+
+.warmup-probe-note.is-bad {
+  border-color: color-mix(in srgb, #f87171 45%, var(--line));
+}
+
+.warmup-probe-note ul {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 2px;
+  color: var(--muted);
+}
+
+.warmup-probe-note li.is-ok { color: var(--teal); }
+.warmup-probe-note li.is-bad { color: #f87171; }
+
+.warmup-probe-note code {
+  font-size: 12px;
+}
+
 /* Запрошення в друзі. */
 .invite-content {
   display: grid;

@@ -2873,6 +2873,45 @@ document.getElementById("enrichLeadBtn").addEventListener("click", async () => {
   await runUiAction("research", "Шукаємо все про людину і компанію, пишемо опис і підходи...", () => researchAndPrepareSelected());
 });
 
+/**
+ * Чи може ключ цього середовища оновити рядок у wl_events.
+ *
+ * Від відповіді залежить, яким шляхом іти в дедуплікації історії: оновлювати
+ * тимчасовий рядок на місці чи назавжди тримати два і ховати один при
+ * показі. Перевірити можна лише там, де є ключі — тобто на розгорнутому
+ * сервері, — тож це кнопка в застосунку, а не скрипт, який нікому не запустити.
+ */
+document.getElementById("warmupProbeBtn").addEventListener("click", async () => {
+  const note = document.getElementById("warmupProbeNote");
+  const button = document.getElementById("warmupProbeBtn");
+  note.hidden = false;
+  note.className = "warmup-probe-note";
+  note.textContent = "Перевіряємо...";
+  button.disabled = true;
+  try {
+    const { probe } = await warmupApi("/diagnostics/event-write", { method: "POST", body: "{}" });
+    const line = (label, step) => `<li class="${step?.ok ? "is-ok" : "is-bad"}">${escapeHtml(label)}: ${step?.ok ? "так" : `ні — ${escapeHtml(step?.error || "без пояснення")}`}</li>`;
+    const verdict = {
+      full: "Ключ уміє все три дії. Дедуплікацію історії можна робити оновленням рядка на місці.",
+      no_update: "Ключ пише, але не оновлює. Дедуплікацію доведеться робити придушенням під час показу — два рядки лишаться в базі назавжди.",
+      no_delete: "Ключ пише й оновлює, але не прибирає. Оновлення на місці доступне; тестовий рядок треба прибрати руками.",
+      cannot_write: "Ключ не пише в wl_events узагалі. Це ламає не лише дедуплікацію, а й усю історію — розбирайся з цього."
+    }[probe.verdict] || "Невідомий результат.";
+    note.className = `warmup-probe-note ${probe.canUpdate ? "is-ok" : "is-bad"}`;
+    note.innerHTML = `
+      <strong>${escapeHtml(verdict)}</strong>
+      <ul>${line("Запис", probe.insert)}${line("Оновлення", probe.update)}${line("Прибирання", probe.remove)}</ul>
+      ${probe.probeId ? `<small>Тестовий рядок лишився в базі: <code>${escapeHtml(probe.probeId)}</code></small>` : ""}
+    `;
+  } catch (error) {
+    note.className = "warmup-probe-note is-bad";
+    note.textContent = error.message || "Перевірка не пройшла.";
+  } finally {
+    button.disabled = false;
+    refreshIcons();
+  }
+});
+
 document.getElementById("inviteContent").addEventListener("click", async (event) => {
   const button = event.target.closest("button");
   if (!button || button.disabled) return;

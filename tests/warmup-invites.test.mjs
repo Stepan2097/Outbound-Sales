@@ -72,6 +72,9 @@ test("an invitation is dated by when it was sent, not by when the person was hel
 // handful of filters these routes actually build.
 
 const rows = { wl_accounts: [], wl_runs: [], wl_day_actions: [], wl_outreach: [], wl_events: [] };
+// What the stub should refuse, as `{ table: { METHOD: status } }`. A probe that
+// can only ever answer yes is not a probe.
+const refuse = {};
 let stub;
 let previousEnv;
 let nextId = 0;
@@ -129,6 +132,14 @@ test.before(async () => {
     const table = route.replace("/rest/v1/", "");
     const params = new URLSearchParams(query || "");
     const found = (rows[table] ?? []).filter((row) => matches(row, params));
+
+    const refused = refuse[table]?.[request.method];
+    if (refused) {
+      request.resume();
+      response.writeHead(refused, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ message: "permission denied for table", code: "42501" }));
+      return;
+    }
 
     const answer = (payload, status = 200) => {
       const headers = { "Content-Type": "application/json" };
@@ -196,6 +207,7 @@ test.beforeEach(() => {
   rows.wl_day_actions = [];
   rows.wl_outreach = [];
   rows.wl_events = [];
+  for (const table of Object.keys(refuse)) delete refuse[table];
   rows.contacts = [{
     id: "c-1", name: "Marta Kovalenko", company: "Fleetify", position: "Head of UA",
     linkedin: "https://linkedin.com/in/marta", country: "Poland"
@@ -478,6 +490,39 @@ test("an account that finished warming is still told to come and check what it s
   const third = await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" });
   assert.equal(third.payload.runnable, false, "checked and read — nothing owing until tomorrow");
   assert.equal(third.payload.reason, "Warm-up is finished");
+});
+
+test("the write-access probe answers for each of the three writes, and cleans up", async () => {
+  // Which way the history dedupe has to be built hangs on this answer, and it
+  // can only be asked where the keys are — the deployed server.
+  const answer = await call({ method: "POST", path: "/api/warmup/diagnostics/event-write", body: {} });
+  assert.equal(answer.status, 200);
+  assert.equal(answer.payload.probe.verdict, "full");
+  assert.equal(answer.payload.probe.canUpdate, true);
+  assert.equal(answer.payload.probe.probeId, null, "nothing left behind");
+  assert.equal(rows.wl_events.length, 0, "and the row really is gone");
+});
+
+test("a key that cannot update says so instead of quietly passing", async () => {
+  refuse.wl_events = { PATCH: 403 };
+  const answer = await call({ method: "POST", path: "/api/warmup/diagnostics/event-write", body: {} });
+
+  assert.equal(answer.payload.probe.verdict, "no_update");
+  assert.equal(answer.payload.probe.canUpdate, false);
+  assert.equal(answer.payload.probe.insert.ok, true);
+  assert.match(answer.payload.probe.update.error, /permission denied|42501|403/);
+  assert.equal(answer.payload.probe.remove.ok, true, "a failed update still cleans up after itself");
+  assert.equal(rows.wl_events.length, 0);
+});
+
+test("a probe row that could not be removed is reported by id", async () => {
+  refuse.wl_events = { DELETE: 403 };
+  const answer = await call({ method: "POST", path: "/api/warmup/diagnostics/event-write", body: {} });
+
+  assert.equal(answer.payload.probe.verdict, "no_delete");
+  assert.equal(answer.payload.probe.canUpdate, true);
+  assert.ok(answer.payload.probe.probeId, "an operator has to be able to go and find it");
+  assert.equal(rows.wl_events.length, 1);
 });
 
 test("a person waiting for an invitation is not counted as somebody we approached", async () => {

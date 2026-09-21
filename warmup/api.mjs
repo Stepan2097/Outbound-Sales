@@ -15,7 +15,8 @@ import { antyTimestampToIso, describeSession, durationMin } from "./sessions.mjs
 import { encryptSecret, secretsConfigured } from "./secretbox.mjs";
 import {
   activeRun, checkQuota, commitAction, connectQuotaToday, describeAccount, ensureDefaultStrategy,
-  logEvent, loadAccount, loginIdentities, newestRun, openSession, recordAction, toStrategy
+  logEvent, loadAccount, loginIdentities, newestRun, openSession, probeEventWriteAccess, recordAction,
+  toStrategy
 } from "./store.mjs";
 import {
   describeTargeting, folderNameOf, forecastFor, listFolders, normalizeFilters
@@ -1910,6 +1911,18 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         outreach: describeOutreach(outreach),
         account: await describeAccount(await loadAccount(account.id))
       });
+      return true;
+    }
+
+    /**
+     * Whether this deployment's key may update a row in `wl_events`.
+     *
+     * A POST because it writes — the scheduler already learned what a GET with
+     * a side effect costs, and a probe somebody curls should not be the thing
+     * that leaves a row behind.
+     */
+    if (method === "POST" && path === "/diagnostics/event-write") {
+      sendJson(response, 200, { success: true, probe: await probeEventWriteAccess() });
       return true;
     }
 

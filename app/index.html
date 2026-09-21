@@ -718,9 +718,13 @@
                   <h2>Прогрів LinkedIn</h2>
                   <p>Профілі Anty, розклад, за яким вони працюють, і що вже сталося сьогодні</p>
                 </div>
-                <button class="text-button" id="warmupRefreshBtn" type="button"><i data-lucide="refresh-cw"></i><span>Оновити</span></button>
+                <div class="warmup-header-actions">
+                  <button class="text-button" id="warmupProbeBtn" type="button" title="Перевірити, чи ключ цього середовища може писати, оновлювати і прибирати рядок у wl_events"><i data-lucide="database-zap"></i><span>Перевірити права на запис</span></button>
+                  <button class="text-button" id="warmupRefreshBtn" type="button"><i data-lucide="refresh-cw"></i><span>Оновити</span></button>
+                </div>
               </div>
               <div class="warmup-config-note" id="warmupConfigNote" hidden></div>
+              <div class="warmup-probe-note" id="warmupProbeNote" hidden></div>
               <div class="warmup-stats-strip" id="warmupStatsStrip"></div>
             </section>
 
