@@ -5,6 +5,10 @@ import { SESSION_WINDOW, insideWindow, nextSession, windowLabel } from "./schedu
 import { HEALTH_LABEL, HEALTH_VALUES, deriveStatus, isHealth } from "./status.mjs";
 import { PLATFORMS, parseProxy, platformOf, proxyString, retag } from "./platform.mjs";
 import { CLAIM_STATUS, OUTREACH_COLUMNS, OUTREACH_STATUSES, describeClaim, describeOutreach, personSnapshot, sentBy } from "./outreach.mjs";
+import {
+  ACCEPTED_STATUS, WAITING_STATUS, cancelInvite, describeInvite, inviteEvents, outreachForContact,
+  reassignInvite, recordSent, requestInvite
+} from "./invites.mjs";
 import { antyTimestampToIso, describeSession, durationMin } from "./sessions.mjs";
 import { encryptSecret, secretsConfigured } from "./secretbox.mjs";
 import {
@@ -1146,9 +1150,10 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       const limit = intParam(url.searchParams.get("limit"), 100, 500);
       // Claims are deliberately not here: this list means "who we approached",
       // and a queued row is an allocation nobody has sent yet. GET /queue is
-      // where those live.
+      // where those live. A waiting invitation is the same kind of thing — a
+      // person held, nothing sent — and belongs with them.
       const rows = await anty.from("wl_outreach").select(OUTREACH_COLUMNS)
-        .eq("account_id", accountId).neq("status", CLAIM_STATUS)
+        .eq("account_id", accountId).notIn("status", [CLAIM_STATUS, WAITING_STATUS])
         .order("created_at", { ascending: false }).limit(limit).rows();
       sendJson(response, 200, { success: true, outreach: rows.map(describeOutreach) });
       return true;
@@ -1575,6 +1580,198 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
      * been taken from another account a second ago — and only once it is safely
      * in does the day counter move.
      */
+    // ── invitations asked for from the lead workspace ─────────────────────
+    //
+    // The quota is read here and spent elsewhere: what is worth counting is
+    // the request that actually leaves an account, and the agent is the only
+    // thing that knows when that happened. A seller may queue an invitation on
+    // an account with nothing left today — it goes out tomorrow, and the screen
+    // says which account and since when.
+
+    if (method === "GET" && path === "/invites/accounts") {
+      const rows = await anty.from("wl_accounts").select("*").neq("status", "excluded").rows();
+      const accounts = await Promise.all(rows.map(async (account) => {
+        const allowance = await connectAllowance(account);
+        const waiting = await anty.from("wl_outreach").select("id")
+          .eq("account_id", account.id).eq("status", WAITING_STATUS).count();
+        const left = allowance.blocked ? 0 : Math.max(0, (allowance.quota || 0) - (allowance.spent || 0));
+        return {
+          id: account.id,
+          label: account.label,
+          login: account.login,
+          status: account.status,
+          health: account.health,
+          connectQuota: allowance.blocked ? 0 : allowance.quota || 0,
+          connectsDone: allowance.blocked ? 0 : allowance.spent || 0,
+          connectsLeft: left,
+          waiting,
+          // An account that cannot carry an invitation is still listed, with
+          // the reason. Hiding it leaves a seller wondering where their login
+          // went; saying "on a captcha" tells them what to go and fix.
+          canSend: !allowance.blocked && Boolean(account.profile_remote_id),
+          reason: allowance.blocked || (account.profile_remote_id ? "" : "Профіль Anty не прив'язано")
+        };
+      }));
+      accounts.sort((left, right) => Number(right.canSend) - Number(left.canSend) || right.connectsLeft - left.connectsLeft);
+      sendJson(response, 200, { success: true, accounts });
+      return true;
+    }
+
+    if (method === "GET" && path === "/invites") {
+      const crmContactId = url.searchParams.get("crmContactId");
+      if (!crmContactId) return fail(response, sendJson, 400, "Який контакт?");
+      const row = await outreachForContact(crmContactId);
+      const events = row ? await inviteEvents(crmContactId) : [];
+      sendJson(response, 200, { success: true, invite: describeInvite(row, events), events });
+      return true;
+    }
+
+    if (method === "POST" && path === "/invites") {
+      const body = await readJson(request);
+      if (!body) return fail(response, sendJson, 400, "Некоректне тіло JSON");
+      if (!body.crmContactId) return fail(response, sendJson, 400, "Який контакт?");
+
+      const account = body.accountId ? await loadAccount(String(body.accountId)) : null;
+      if (!account) return fail(response, sendJson, 404, "Акаунт не знайдено");
+
+      let lead;
+      try {
+        lead = await leadById(String(body.crmContactId));
+      } catch (error) {
+        return fail(response, sendJson, 502, crmError(error));
+      }
+      if (!lead) return fail(response, sendJson, 404, "Цього контакту вже немає в CRM");
+      if (!lead.linkedin) return fail(response, sendJson, 400, "У цього контакту немає LinkedIn — нема куди слати запит");
+
+      let row;
+      try {
+        row = await requestInvite({
+          account,
+          lead,
+          note: String(body.note || ""),
+          requestedBy: request.auth?.profile?.email || ""
+        });
+      } catch (error) {
+        // wl_outreach_person_once. Not an error — the answer to "who has this
+        // person", which is a screen rather than a failure.
+        if (error instanceof RestError && error.code === "23505") {
+          const existing = await outreachForContact(lead.id);
+          sendJson(response, 409, {
+            success: false,
+            error: "Ця людина вже в аутрічі",
+            existing: describeInvite(existing, existing ? await inviteEvents(lead.id) : [])
+          });
+          return true;
+        }
+        throw error;
+      }
+
+      const allowance = await connectAllowance(account);
+      sendJson(response, 200, {
+        success: true,
+        invite: describeInvite(row, await inviteEvents(lead.id)),
+        connectsLeft: allowance.blocked ? 0 : Math.max(0, (allowance.quota || 0) - (allowance.spent || 0))
+      });
+      return true;
+    }
+
+    if (method === "POST" && path === "/invites/cancel") {
+      const body = await readJson(request);
+      if (!body?.outreachId) return fail(response, sendJson, 400, "Яке запрошення?");
+      const gone = await cancelInvite({
+        outreachId: String(body.outreachId),
+        cancelledBy: request.auth?.profile?.email || ""
+      });
+      if (!gone) return fail(response, sendJson, 409, "Скасувати можна лише те, що ще не надіслано");
+      sendJson(response, 200, { success: true, released: gone.crm_contact_id });
+      return true;
+    }
+
+    if (method === "POST" && path === "/invites/reassign") {
+      const body = await readJson(request);
+      if (!body?.outreachId || !body?.accountId) return fail(response, sendJson, 400, "Яке запрошення і на який акаунт?");
+      const account = await loadAccount(String(body.accountId));
+      if (!account) return fail(response, sendJson, 404, "Акаунт не знайдено");
+      const moved = await reassignInvite({
+        outreachId: String(body.outreachId),
+        account,
+        movedBy: request.auth?.profile?.email || ""
+      });
+      if (!moved) return fail(response, sendJson, 409, "Перекинути можна лише те, що ще не надіслано");
+      sendJson(response, 200, { success: true, invite: describeInvite(moved, await inviteEvents(moved.crm_contact_id)) });
+      return true;
+    }
+
+    /**
+     * "I sent it myself" — the seller clicked Connect in their own browser.
+     *
+     * This is the one place the quota gives way, and it gives way on purpose:
+     * the request already exists on LinkedIn. Refusing to write it down does
+     * not un-send it, it only makes our own record false — and a person with no
+     * `wl_outreach` row is handed straight back to the next campaign that asks.
+     * The quota governs what we *cause*; this is recording what we *observe*.
+     * Beyond the allowance it is still written, flagged, and logged at warn.
+     */
+    if (method === "POST" && path === "/invites/sent-by-hand") {
+      const body = await readJson(request);
+      if (!body) return fail(response, sendJson, 400, "Некоректне тіло JSON");
+      if (!body.crmContactId) return fail(response, sendJson, 400, "Який контакт?");
+
+      const account = body.accountId ? await loadAccount(String(body.accountId)) : null;
+      if (!account) return fail(response, sendJson, 404, "Акаунт не знайдено");
+
+      let lead;
+      try {
+        lead = await leadById(String(body.crmContactId));
+      } catch (error) {
+        return fail(response, sendJson, 502, crmError(error));
+      }
+      if (!lead) return fail(response, sendJson, 404, "Цього контакту вже немає в CRM");
+
+      const run = await activeRun(account.id);
+      const allowance = run ? await checkQuota(account, run, "connect") : { ok: false };
+      const overQuota = !allowance.ok;
+
+      const existing = await outreachForContact(lead.id);
+      let outreach;
+      if (existing && existing.status === WAITING_STATUS) {
+        const moved = await moveStatus({
+          outreachId: existing.id,
+          to: "pending",
+          patch: { account_id: account.id, ...personSnapshot(lead), sent_by: sentBy(account) }
+        });
+        if (!moved.moved) return fail(response, sendJson, 409, "Це запрошення вже не чекає — перечитай картку");
+        outreach = moved.row;
+      } else if (existing) {
+        return fail(response, sendJson, 409, `Ця людина вже в аутрічі (${existing.sent_by}, ${existing.status})`);
+      } else {
+        try {
+          outreach = await anty.from("wl_outreach").insert({
+            account_id: account.id,
+            ...personSnapshot(lead),
+            sent_by: sentBy(account),
+            status: "pending",
+            note: String(body.note || "").trim() || null
+          }).select(OUTREACH_COLUMNS).single();
+        } catch (error) {
+          if (error instanceof RestError && error.code === "23505") {
+            return fail(response, sendJson, 409, "Ця людина вже в аутрічі");
+          }
+          throw error;
+        }
+      }
+
+      if (!overQuota) await commitAction(account, run, "connect", allowance, "sent by hand");
+      await recordSent({ account, run, outreach, by: "seller", overQuota, allowance: overQuota ? null : allowance });
+
+      sendJson(response, 200, {
+        success: true,
+        invite: describeInvite(outreach, await inviteEvents(lead.id)),
+        overQuota
+      });
+      return true;
+    }
+
     if (method === "POST" && path === "/leads/take") {
       const body = await readJson(request);
       if (!body) return fail(response, sendJson, 400, "Некоректне тіло JSON");
@@ -1603,8 +1800,23 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       // A claim already standing for this person is the row this send belongs
       // to. Updating it keeps one row per person and never fights the unique
       // index — an insert beside a claim would lose to it every time.
-      const claim = await anty.from("wl_outreach").select("id")
-        .eq("crm_contact_id", lead.id).eq("status", CLAIM_STATUS).maybeSingle();
+      //
+      // Scoped to this account on purpose. Unscoped, a send from account B
+      // rewrote a claim account A was holding — the patch sets `account_id` —
+      // and A's allocation vanished with nothing recording the reassignment.
+      // Harmless while only campaigns claimed; reachable the day a person can
+      // pick the account by hand.
+      const claim = await anty.from("wl_outreach").select("id,account_id")
+        .eq("crm_contact_id", lead.id).eq("account_id", account.id).eq("status", CLAIM_STATUS).maybeSingle();
+      if (!claim) {
+        const elsewhere = await anty.from("wl_outreach").select("id,sent_by,status,created_at")
+          .eq("crm_contact_id", lead.id).maybeSingle();
+        if (elsewhere) {
+          return fail(response, sendJson, 409, elsewhere.status === CLAIM_STATUS
+            ? `Цю людину закріпив інший акаунт (${elsewhere.sent_by})`
+            : "Ця людина вже в аутрічі");
+        }
+      }
 
       let outreach;
       try {

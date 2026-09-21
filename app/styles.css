@@ -3270,6 +3270,57 @@ dialog {
   line-height: 1.5;
 }
 
+/* Запрошення в друзі. */
+.invite-content {
+  display: grid;
+  gap: 14px;
+}
+
+.invite-form {
+  display: grid;
+  gap: 12px;
+}
+
+.invite-form textarea {
+  width: 100%;
+  resize: vertical;
+}
+
+.invite-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.invite-state {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-sunk);
+}
+
+.invite-state strong {
+  font-size: 15px;
+}
+
+.invite-state span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.invite-state pre {
+  margin: 4px 0 0;
+  padding: 10px 12px;
+  border-left: 2px solid var(--teal);
+  border-radius: 0 10px 10px 0;
+  background: var(--surface-strong);
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+
 .compliance-list {
   margin: 8px 0 0;
   padding-left: 18px;

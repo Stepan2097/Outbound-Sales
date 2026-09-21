@@ -260,6 +260,14 @@ export function progressFrom(rows, { todayIso, sentToday = 0 }) {
       if (typeof row.created_at === "string" && row.created_at.slice(0, 10) === todayIso) progress.claimedToday += 1;
       continue;
     }
+    // A person held for an invitation that has not gone out yet. Counted with
+    // the claims, not with the sends: this split is binary, so a status it has
+    // not been taught reads as "already approached" and inflates every
+    // campaign's progress by everything the lead workspace is waiting on.
+    if (row.status === "waiting") {
+      progress.queued += 1;
+      continue;
+    }
     progress.sent += 1;
     if (row.status === "connected") progress.replied += 1;
   }

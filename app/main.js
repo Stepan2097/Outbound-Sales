@@ -16,6 +16,13 @@ let panelQueueNotice = "";
 let panelQueueBusy = false;
 // Чий вибір зараз стоїть у селекторах повідомлень. Порожньо — ліда змінили.
 let messageControlsLeadId = "";
+// Запрошення в друзі. Дані живуть у базі прогріву, а не в /api/state, тож
+// сторінка тримає їх окремо і перечитує, коли відкривають іншого ліда.
+let inviteAccounts = [];
+let inviteAccountsLoaded = false;
+let inviteState = null;
+let inviteLoadedFor = "";
+let inviteNotice = "";
 let authState = null;
 let authMode = "login";
 let activeResearchJob = null;
@@ -913,6 +920,10 @@ function renderLeadWorkspaceExtras(prospect) {
   setText("committeeCount", prospect ? `${committeeForProspect(prospect).length} ${uaPlural(committeeForProspect(prospect).length, "контакт", "контакти", "контактів")}` : "0 контактів");
 
   renderMessageControls(prospect);
+  renderInvite(prospect);
+  // Стан запрошення живе в базі прогріву, тож його читають окремо — і лише
+  // коли відкрили іншу людину, а не на кожне перемальовування.
+  void loadInviteContext(prospect).catch(() => {});
   setHtml("clientProfileContent", clientProfileRows(prospect));
   setText("clientProfilePill", clientProfileStatusLabel(prospect));
   setText("clientProfileMeta", prospect
@@ -939,6 +950,12 @@ function renderLeadSectionTabs() {
     const active = button.dataset.leadTab === activeLeadSectionId;
     button.classList.toggle("active", active);
     button.setAttribute("aria-selected", active ? "true" : "false");
+    // Смужка вкладок — один рядок із горизонтальним скролом, і з одинадцятою
+    // вкладкою активна регулярно опиняється за екраном: видно, що розділ
+    // змінився, і не видно який.
+    if (active && typeof button.scrollIntoView === "function") {
+      button.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+    }
   });
   sections.forEach((section) => {
     const active = section.id === activeLeadSectionId;
@@ -981,6 +998,225 @@ function leadTableRow(prospect) {
         </div>
       </td>
     </tr>
+  `;
+}
+
+/* ── Запрошення в друзі ────────────────────────────────────────────────────
+ *
+ * Механічне робить машина, слова пише людина. Тут — механічне: вибрати акаунт,
+ * поставити людину в чергу і показати, що з цього вийшло. Квота не списується
+ * при постановці в чергу: рахується те, що справді вийшло з акаунта, а це знає
+ * лише агент у момент відправки.
+ *
+ * Прив'язка — до контакту в CRM, а не до ліда: рядок аутрічу живе в базі
+ * прогріву і переживає і ліда, і кампанію, через яку його взяли.
+ */
+
+const INVITE_STATUS_LABEL = {
+  waiting: "У черзі",
+  queued: "Закріплено кампанією",
+  pending: "Надіслано",
+  accepted: "Прийняв(ла)",
+  connected: "Відповів(ла)",
+  declined: "Відхилив(ла)",
+  withdrawn: "Запит зник"
+};
+
+function crmContactIdOf(prospect) {
+  return prospect?.crmSource?.contact_id || "";
+}
+
+async function loadInviteContext(prospect, { force = false } = {}) {
+  const contactId = crmContactIdOf(prospect);
+  if (!contactId) {
+    inviteState = null;
+    inviteLoadedFor = "";
+    // Помилка попереднього ліда не є станом цього: без скидання картка людини
+    // без LinkedIn підписувалася «невідомо» через збій, якого на ній не було.
+    inviteNotice = "";
+    renderInvite(prospect);
+    return;
+  }
+  if (inviteLoadedFor === contactId && !force) return;
+  inviteLoadedFor = contactId;
+  inviteState = null;
+  inviteNotice = "";
+  renderInvite(prospect);
+  try {
+    const [invite, accounts] = await Promise.all([
+      warmupApi(`/invites?crmContactId=${encodeURIComponent(contactId)}`),
+      inviteAccountsLoaded && !force ? Promise.resolve(null) : warmupApi("/invites/accounts")
+    ]);
+    if (accounts) {
+      inviteAccounts = accounts.accounts || [];
+      inviteAccountsLoaded = true;
+    }
+    // Ліда могли перемкнути, поки відповідь ішла — тоді ця відповідь уже не про
+    // ту людину, і показати її означало б збрехати про те, кого запросили.
+    if (inviteLoadedFor !== contactId) return;
+    inviteState = invite.invite || null;
+  } catch (error) {
+    inviteNotice = error.message || "Прогрів не відповів.";
+  }
+  renderInvite(state.prospects?.find((item) => item.id === selectedProspectId));
+  refreshIcons();
+}
+
+function renderInvite(prospect) {
+  const content = document.getElementById("inviteContent");
+  if (!content) return;
+  const contactId = crmContactIdOf(prospect);
+  const invite = inviteState;
+
+  // «Не надсилали» — це твердження, і після невдалого читання воно неправдиве:
+  // ми не знаємо. Помилка має лишатися помилкою, а не ставати відповіддю.
+  const unknown = !prospect || !prospect.linkedin || !contactId;
+  setText("invitePill", unknown ? "—" : inviteNotice && !invite ? "невідомо" : invite ? INVITE_STATUS_LABEL[invite.status] || invite.status : "не надсилали");
+  setText("inviteMeta", prospect?.linkedin
+    ? "Щоб написати в LinkedIn, спершу треба бути в контактах"
+    : "У цього ліда немає LinkedIn");
+
+  if (!prospect) {
+    content.innerHTML = `<div class="empty-state">Відкрий ліда.</div>`;
+    return;
+  }
+  if (!prospect.linkedin) {
+    content.innerHTML = `<div class="empty-state">У цього ліда немає посилання на LinkedIn — запрошення нема куди слати. Додай його в CRM або знайди профіль через «Контактні дані».</div>`;
+    return;
+  }
+  if (!contactId) {
+    // Лід із вставленого посилання або імпорту не має рядка в CRM, а запрошення
+    // прив'язується саме до нього — інакше нічим тримати людину від того, щоб
+    // її взяла кампанія.
+    content.innerHTML = `<div class="empty-state">Цей лід не з CRM, а запрошення прив'язується до контакту в CRM. Відкрий людину з папки на Панелі, щоб надіслати запит.</div>`;
+    return;
+  }
+
+  const notice = inviteNotice ? `<div class="outreach-warning"><i data-lucide="triangle-alert"></i><span>${escapeHtml(inviteNotice)}</span></div>` : "";
+
+  if (!invite) {
+    content.innerHTML = `${notice}${inviteFormHtml(prospect)}`;
+    return;
+  }
+  content.innerHTML = `${notice}${inviteStateHtml(invite, prospect)}`;
+}
+
+function inviteFormHtml(prospect) {
+  const options = inviteAccounts.map((account) => {
+    const left = account.canSend ? `${account.connectsLeft} з ${account.connectQuota} на сьогодні` : account.reason;
+    return `<option value="${escapeAttr(account.id)}" ${account.canSend ? "" : "disabled"}>${escapeHtml(account.label)} · ${escapeHtml(left)}</option>`;
+  }).join("");
+  const usable = inviteAccounts.filter((account) => account.canSend);
+  const note = suggestedInviteNote(prospect);
+
+  // Читання впало — причина вже стоїть повідомленням вище, і дублювати її
+  // формою, яка вдає, що досі вантажиться, гірше за порожнє місце.
+  if (inviteNotice && !inviteAccounts.length) return "";
+  if (!inviteAccountsLoaded) {
+    return `<div class="empty-state">Читаємо акаунти прогріву...</div>`;
+  }
+  if (!inviteAccounts.length) {
+    return `<div class="empty-state">Немає жодного акаунта LinkedIn. Додай його у вкладці «Прогрів».</div>`;
+  }
+
+  return `
+    <div class="invite-form">
+      <label class="lead-source-field">
+        <span>З якого акаунта</span>
+        <select id="inviteAccountSelect" aria-label="Акаунт LinkedIn">${options}</select>
+      </label>
+      <label class="lead-source-field">
+        <span>Записка до запиту · до 300 символів, без продажу</span>
+        <textarea id="inviteNoteInput" rows="3" maxlength="300">${escapeHtml(note)}</textarea>
+      </label>
+      ${usable.some((account) => account.connectsLeft > 0)
+        ? ""
+        : `<p class="is-muted">Сьогоднішню квоту вибрано на всіх акаунтах — запит стане в чергу і піде завтра.</p>`}
+      <div class="invite-actions">
+        <button class="primary-button" id="inviteSendBtn" type="button"><i data-lucide="user-plus"></i><span>Додати в друзі</span></button>
+        <button id="inviteByHandBtn" type="button" title="Я вже натиснув Connect у своєму браузері"><i data-lucide="check"></i><span>Я надіслав сам</span></button>
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * Текст записки, узятий із того, що модель уже написала для LinkedIn.
+ *
+ * Не вигадується тут заново: правила каналу (до 300 символів, без пропозиції)
+ * живуть в одному місці, і другий автор із власним уявленням про них — це те,
+ * через що два екрани починають слати різні речі.
+ */
+function suggestedInviteNote(prospect) {
+  const invite = (prospect?.outreach?.messages || []).find((message) => message.channel === "linkedin_invite" && !message.hold);
+  if (invite?.body) return String(invite.body).slice(0, 300);
+  const approach = (prospect?.clientProfile?.approaches || []).find((item) => item.channel === "linkedin");
+  return String(approach?.opener || "").slice(0, 300);
+}
+
+function inviteStateHtml(invite, prospect) {
+  const account = inviteAccounts.find((item) => item.id === invite.accountId);
+  const accountName = account?.label || invite.sentBy || "акаунт";
+  const when = (iso) => (iso ? new Date(iso).toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit" }) : "");
+
+  const line = {
+    waiting: `В черзі на акаунті «${accountName}»${invite.waitingDays ? ` · чекає ${invite.waitingDays} ${uaPlural(invite.waitingDays, "день", "дні", "днів")}` : " · піде найближчою сесією"}`,
+    queued: `Цю людину закріпила кампанія на акаунті «${accountName}»`,
+    pending: `Надіслано ${when(invite.sentAt || invite.heldAt)} з акаунта «${accountName}»${invite.sentByWhom === "seller" ? " · вручну" : ""}`,
+    accepted: `Прийняв(ла) — можна писати. Запит ішов з акаунта «${accountName}»`,
+    connected: `Уже відповів(ла)${invite.respondedAt ? ` ${when(invite.respondedAt)}` : ""} — дивись переписку у «Прогрів → Вхідні»`,
+    declined: `Не прийняв(ла) запит із акаунта «${accountName}»`,
+    withdrawn: `Запит більше не висить у надісланих — або відкликано, або профіль зник`
+  }[invite.status] || `Статус: ${invite.status}`;
+
+  const stale = invite.status === "waiting" && invite.waitingDays >= 7
+    ? `<div class="outreach-warning"><i data-lucide="triangle-alert"></i><span>Чекає понад тиждень. Акаунт «${escapeHtml(accountName)}» міг перестати гріти — перекинь на інший або скасуй.</span></div>`
+    : "";
+
+  const movable = inviteAccounts.filter((item) => item.canSend && item.id !== invite.accountId);
+  const actions = invite.status === "waiting"
+    ? `
+      <div class="invite-actions">
+        ${movable.length ? `<select id="inviteMoveSelect" aria-label="Перекинути на інший акаунт">${movable.map((item) => `<option value="${escapeAttr(item.id)}">${escapeHtml(item.label)} · ${item.connectsLeft} на сьогодні</option>`).join("")}</select>
+        <button id="inviteMoveBtn" type="button"><i data-lucide="arrow-right-left"></i><span>Перекинути</span></button>` : ""}
+        <button id="inviteByHandBtn" type="button"><i data-lucide="check"></i><span>Я надіслав сам</span></button>
+        <button class="danger-button" id="inviteCancelBtn" type="button"><i data-lucide="x"></i><span>Скасувати</span></button>
+      </div>`
+    : "";
+
+  const draft = invite.status === "accepted"
+    ? inviteFirstMessageHtml(prospect)
+    : "";
+
+  return `
+    ${stale}
+    <div class="invite-state">
+      <strong>${escapeHtml(INVITE_STATUS_LABEL[invite.status] || invite.status)}</strong>
+      <span>${escapeHtml(line)}</span>
+      ${invite.note ? `<pre>${escapeHtml(invite.note)}</pre>` : ""}
+      ${invite.overQuota ? `<small class="is-muted">Записано понад денну норму акаунта — видно в його історії.</small>` : ""}
+      ${invite.lastCheckedAt ? `<small class="is-muted">Востаннє перевіряли ${relativeTime(invite.lastCheckedAt)}</small>` : ""}
+    </div>
+    ${actions}
+    ${draft}
+  `;
+}
+
+/** Прийняли — час писати, і пише людина. Тут лише чернетка і кнопка копіювати. */
+function inviteFirstMessageHtml(prospect) {
+  const message = (prospect?.outreach?.messages || []).find((item) => item.channel === "linkedin_follow_up" && !item.hold);
+  if (!message?.body) {
+    return `<div class="empty-state">Чернетки першого повідомлення ще немає — натисни «Збагатити», і вона з'явиться у «Повідомленнях».</div>`;
+  }
+  return `
+    <article class="message-card">
+      <div class="message-heading">
+        <span class="pill">Перше повідомлення</span>
+        <button data-copy-text="${escapeAttr(message.body)}" data-copy-channel="linkedin" data-copy-label="Перше повідомлення в LinkedIn"><i data-lucide="copy"></i><span>Копіювати</span></button>
+      </div>
+      <pre>${escapeHtml(message.body)}</pre>
+      <small class="message-basis">Надсилає людина зі свого акаунта — платформа цього не робить.</small>
+    </article>
   `;
 }
 
@@ -2179,6 +2415,7 @@ async function runUiAction(actionName, message, work) {
   try {
     await work();
     uiNotice = {
+      invite: "Готово. Що сталося із запитом, видно тут же — статус оновлюється, коли агент його надішле або перевірить.",
       messages: "Тексти переписано. Копіюй з картки каналу — копія одразу лягає в історію по ліду.",
       research: "Збагачено. Опис клієнта і підходи до розмови — у першому блоці; компанію записано в базу, вдруге її вже не шукатимемо.",
       enrich: "Контактні дані оновлено. Перевір впевненість, перш ніж брати телефон чи соцмережу в роботу.",
@@ -2634,6 +2871,65 @@ document.getElementById("panelFoldersRefreshBtn").addEventListener("click", asyn
 
 document.getElementById("enrichLeadBtn").addEventListener("click", async () => {
   await runUiAction("research", "Шукаємо все про людину і компанію, пишемо опис і підходи...", () => researchAndPrepareSelected());
+});
+
+document.getElementById("inviteContent").addEventListener("click", async (event) => {
+  const button = event.target.closest("button");
+  if (!button || button.disabled) return;
+  const prospect = state?.prospects?.find((item) => item.id === selectedProspectId);
+  const crmContactId = crmContactIdOf(prospect);
+  if (!crmContactId) return;
+
+  const run = async (message, work) => {
+    await runUiAction("invite", message, work);
+    await loadInviteContext(prospect, { force: true });
+  };
+
+  if (button.id === "inviteSendBtn") {
+    const accountId = document.getElementById("inviteAccountSelect")?.value || "";
+    const note = document.getElementById("inviteNoteInput")?.value || "";
+    if (!accountId) return;
+    await run("Ставимо запит у чергу...", async () => {
+      const answer = await warmupApi("/invites", { method: "POST", body: JSON.stringify({ accountId, crmContactId, note }) });
+      inviteState = answer.invite;
+    });
+    return;
+  }
+
+  if (button.id === "inviteByHandBtn") {
+    const accountId = document.getElementById("inviteAccountSelect")?.value || inviteState?.accountId || "";
+    if (!accountId) return;
+    await run("Записуємо, що запит уже надіслано...", async () => {
+      const answer = await warmupApi("/invites/sent-by-hand", {
+        method: "POST",
+        body: JSON.stringify({ accountId, crmContactId, note: document.getElementById("inviteNoteInput")?.value || "" })
+      });
+      inviteState = answer.invite;
+      if (answer.overQuota) uiNotice = "Записано. Це понад денну норму акаунта — видно в його історії.";
+    });
+    return;
+  }
+
+  if (button.id === "inviteMoveBtn") {
+    const accountId = document.getElementById("inviteMoveSelect")?.value || "";
+    if (!accountId || !inviteState) return;
+    await run("Перекидаємо на інший акаунт...", async () => {
+      const answer = await warmupApi("/invites/reassign", {
+        method: "POST",
+        body: JSON.stringify({ outreachId: inviteState.outreachId, accountId })
+      });
+      inviteState = answer.invite;
+    });
+    return;
+  }
+
+  if (button.id === "inviteCancelBtn" && inviteState) {
+    if (!window.confirm("Скасувати запит і відпустити людину назад у пул?")) return;
+    await run("Скасовуємо запит...", async () => {
+      await warmupApi("/invites/cancel", { method: "POST", body: JSON.stringify({ outreachId: inviteState.outreachId }) });
+      inviteState = null;
+    });
+  }
 });
 
 document.getElementById("writeMessagesBtn").addEventListener("click", async () => {
@@ -5646,22 +5942,32 @@ const WARMUP_SYNC_STALE_HOURS = 36;
 const WARMUP_INBOX_PREVIEW = 8;
 
 /** Статус — це дані; пігулка на екрані — це текст. */
+/**
+ * Статуси аутрічу українською — єдине місце, де вони стають словами.
+ *
+ * Мапа була написана під статуси, яких сервер ніколи не писав («replied»,
+ * «skipped», «failed»), і не мала трьох, які він пише. Невідомий статус падав
+ * сюди англійським рядком посеред українського екрана. Тут рівно той набір, що
+ * існує в OUTREACH_STATUSES плюс дві машинні черги.
+ */
 const WARMUP_OUTREACH_LABEL = {
-  pending: "очікує",
-  connected: "у контактах",
-  replied: "відповів",
-  accepted: "прийнято",
-  skipped: "пропущено",
-  failed: "не вдалося"
+  waiting: "у черзі на запит",
+  queued: "закріплено",
+  pending: "запит надіслано",
+  accepted: "прийняв(ла)",
+  connected: "відповів(ла)",
+  declined: "не прийняв(ла)",
+  withdrawn: "запит зник"
 };
 
 const WARMUP_OUTREACH_TONE = {
+  waiting: "tone-warn",
+  queued: "tone-muted",
   pending: "tone-muted",
-  connected: "tone-live",
-  replied: "tone-live",
   accepted: "tone-live",
-  skipped: "tone-muted",
-  failed: "tone-bad"
+  connected: "tone-live",
+  declined: "tone-bad",
+  withdrawn: "tone-bad"
 };
 
 /** How long ago, said the way a person would say it. */

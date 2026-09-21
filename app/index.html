@@ -134,6 +134,7 @@
             <nav class="lead-section-nav" aria-label="Розділи робочої області ліда" role="tablist">
               <select id="mobileLeadSectionSelect" aria-label="Розділ робочої області ліда">
                 <option value="dashboard-client">Опис клієнта</option>
+                <option value="dashboard-invite">Запрошення</option>
                 <option value="dashboard-account">Компанія</option>
                 <option value="dashboard-strategy">Стратегія</option>
                 <option value="dashboard-intelligence">Бриф</option>
@@ -146,6 +147,7 @@
                 <option value="dashboard-cycle">Цикл продажу</option>
               </select>
               <button type="button" role="tab" data-lead-tab="dashboard-client">Опис клієнта</button>
+              <button type="button" role="tab" data-lead-tab="dashboard-invite">Запрошення</button>
               <button type="button" role="tab" data-lead-tab="dashboard-account">Компанія</button>
               <button type="button" role="tab" data-lead-tab="dashboard-strategy">Стратегія</button>
               <button type="button" role="tab" data-lead-tab="dashboard-intelligence">Бриф</button>
@@ -173,6 +175,17 @@
                     </div>
                   </div>
                   <div class="client-profile-content" id="clientProfileContent"></div>
+                </section>
+
+                <section class="panel lead-section invite-panel" id="dashboard-invite">
+                  <div class="panel-heading">
+                    <div>
+                      <h2>Запрошення в друзі</h2>
+                      <p id="inviteMeta">Щоб написати в LinkedIn, спершу треба бути в контактах</p>
+                    </div>
+                    <span class="pill" id="invitePill">—</span>
+                  </div>
+                  <div class="invite-content" id="inviteContent"></div>
                 </section>
 
                 <section class="panel lead-section intelligence-panel" id="dashboard-intelligence">

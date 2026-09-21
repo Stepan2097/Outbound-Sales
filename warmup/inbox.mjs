@@ -403,18 +403,26 @@ async function insertMessages(accountId, threadKey, participant, messages) {
 /**
  * Move a matched approach to `connected` and stamp when they answered.
  *
- * Only from `pending`. A row still `queued` is a claim nobody has sent yet, and
- * a person writing to an account we never wrote to is not a reply to us;
- * `connected`, `declined` and `withdrawn` are answers a human already gave, and
- * a sync must not overwrite one of those every morning.
+ * From `pending` or `accepted` and nowhere else. A row still `queued` or
+ * `waiting` is a person nobody has written to, and somebody writing to an
+ * account we never wrote to is not a reply to us; `connected`, `declined` and
+ * `withdrawn` are answers a human already gave, and a sync must not overwrite
+ * one of those every morning.
+ *
+ * `accepted` is here because it is the normal road: the invitation check marks
+ * an invitation accepted, and the reply arrives after it. Without it the first
+ * message from every accepted invitation would be stored and never counted as
+ * a reply.
  */
+const REPLIABLE_STATUSES = ["pending", "accepted"];
+
 async function markReplied(row, sentAt) {
-  if (row.status !== "pending") return false;
+  if (!REPLIABLE_STATUSES.includes(row.status)) return false;
   const moved = await anty.from("wl_outreach")
     .update({ status: "connected", responded_at: sentAt })
     // Re-checked in the filter as well as above, so a status a human changed
     // while the sync was in flight wins rather than losing to a stale read.
-    .eq("id", row.id).eq("status", "pending")
+    .eq("id", row.id).eq("status", row.status)
     .select("id").rows();
   return moved.length > 0;
 }

@@ -6,7 +6,14 @@
  * when the contact is edited, moved or deleted in the CRM.
  */
 
-export const OUTREACH_STATUSES = ["pending", "connected", "declined", "withdrawn"];
+/**
+ * The answers a human may set by hand. `accepted` joined them when invitations
+ * grew a daily check: "they accepted and said nothing" is a real state of a
+ * real conversation, and a seller correcting a record needs to be able to say
+ * it. `waiting` is deliberately absent, like `queued` — it is a machine state,
+ * not an answer.
+ */
+export const OUTREACH_STATUSES = ["pending", "accepted", "connected", "declined", "withdrawn"];
 
 /**
  * A claim: this person is allocated to an account and nobody else may take
