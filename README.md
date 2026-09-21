@@ -82,6 +82,59 @@ for a good part of this market is the only channel that answers. Approval is
 still a human decision; until it is given, the copy button is locked and says
 why.
 
+### Connection requests, and what came of them
+
+Writing to a stranger on LinkedIn means connecting first, so the **Запрошення**
+tab turns the account list into something a seller can use without leaving the
+person they are reading about: pick one of the warmed logins, edit the note the
+model already wrote, and the request goes into that account's queue.
+
+Into the queue, not out the door. **The daily allowance belongs to the account,
+not to whoever is feeling productive** — an account with nothing left today
+takes the request anyway and the screen says it goes out at the next session,
+naming the account it is waiting on. Nothing is sent by this app in any case:
+the agent on somebody's Mac does the clicking, and until it learns to, **Я
+надіслав сам** records a request the seller sent in their own browser. That one
+is never refused for want of allowance: the request already exists on LinkedIn,
+and refusing to write it down would only make our own record false. The quota
+governs what we cause, not what we observe.
+
+**One person gets one approach, from every account and every campaign.** A
+unique index says so, so choosing an account is a decision, not a preference —
+and when somebody is already taken, the panel says which login has them, since
+when, and how it ended, instead of failing.
+
+Then the account looks, once a day, at everything it has sent and reports what
+LinkedIn shows: accepted, still pending, or gone. **It opens for this even after
+its warm-up plan has finished** — warming has a last day and watching what it
+sent does not, and an account reaches that last day holding exactly the requests
+it sent most recently. It only opens when something is actually outstanding.
+
+A reply in the inbox counts as an acceptance too. That is deliberate
+duplication: the sent-invitations page is a screen somebody else controls and
+its markup will change, and when it does, the record has to keep moving on the
+evidence that matters more — that the person wrote back.
+
+Accepted and silent is its own state, separate from "they replied". The first
+message after acceptance is then written **by a person**, from a draft the panel
+prepares. That is a decision about where judgement belongs, not a missing
+feature: the mechanical half — sending, checking, recording — is the machine's,
+and the conversation is not.
+
+### One history per person
+
+The **Історія** tab answers the question a seller actually has in front of a
+lead: what has anybody here ever said to this person, and what came back. It is
+keyed by the contact, not by the conversation — a thread is one exchange on one
+login, and the request, the messages and (when email lands) the letters are all
+the same story.
+
+Entries stored from this version on carry the contact's id and are exact.
+Older ones are matched on a LinkedIn slug or a name, which is the matching that
+breaks when somebody renames their profile, so those lines **say on screen that
+they were matched by name**. A history that quietly guessed would be worse than
+one that admits which half it is sure about.
+
 ## Contacts
 
 The Contacts tab reads the CRM directly: its folders, one page of a folder at a
@@ -152,9 +205,14 @@ here that Anty does not have would be a browser profile nobody can open.
   rewrites what an account part-way through was working to.
 - Connection requests go to real people from the CRM lead queue and are recorded
   against the account that sent them, with the person snapshotted. A unique index
-  means the same person cannot be approached twice from any account, and the
-  quota is checked *before* the outreach row is written — a refused request
-  leaves nothing behind.
+  means the same person cannot be approached twice from any account.
+- **A request the campaign queue sends is refused before anything is written**,
+  so a request that was never allowed leaves no trace claiming the person was
+  approached. A request *asked for from the lead workspace* is the other way
+  round: it is written first and waits for an allowance, because the seller is
+  recording an intention rather than causing a send. And a request somebody
+  already made by hand is recorded whatever the allowance says, flagged as over
+  it — refusing a fact does not undo it.
 
 Requests are recorded, not sent: the portal holds the plan and the record, and a
 person or the local agent performs the actions. See `.env.example` for the

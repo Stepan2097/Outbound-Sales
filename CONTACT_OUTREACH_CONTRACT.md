@@ -524,7 +524,13 @@ does not, the fallback is to suppress at render time and carry two rows forever.
 
 ## Phase 4 — email
 
-**Stop here and show the provider choice before writing any of it.** SMTP is out:
+> **Decided on 2026-09-21: not now.** The choice below was put to the user and
+> the answer was to connect none of the three. This is a decision, not an
+> outstanding question — nobody needs to ask again. The comparison stays
+> because the day email comes back is the day somebody needs it, and it was
+> assembled while the code around it was fresh.
+
+**Show the provider choice before writing any of it.** SMTP is out:
 `package.json` has no `dependencies`, `node_modules` does not exist, and the
 Dockerfile runs no install. Mail goes over HTTP through `fetch`, the way
 OpenRouter, Apify and FullEnrich already do.
@@ -562,11 +568,12 @@ one-directional. The eighty lines of MIME and JWT are written once and never
 touched again; the domain reputation of a new sending domain is the thing that
 is never finished.
 
-**What to ask the user, in these words:** are you willing to have a Workspace
-admin add one client id with two scopes, so that letters go out from your own
-address and replies come back to your own inbox? If yes, Gmail. If that admin
-access is not available — it is somebody else's Google Workspace, or the answer
-is slow — Postmark is the fallback, and then the contract must say that email
+**What was asked, and the answer.** Is a Workspace admin willing to add one
+client id with two scopes, so letters go out from the seller's own address and
+replies come back to their own inbox? Asked on 2026-09-21; the answer was to
+leave email alone for now. If it is ever yes, Gmail. If that admin access turns
+out not to be available — somebody else's Workspace, or an answer that never
+comes — Postmark is the fallback, and then this contract has to say that email
 is a separate identity from the seller, with its own domain to warm.
 
 ### Whichever is chosen
@@ -577,10 +584,15 @@ Keys in the existing encrypted vault, one `email.out` event per letter with
 one-directional.** A history with only our own letters in it is the half that
 makes the other half misleading.
 
-One schema problem to solve before any of this: `wl_events.account_id` is a
-LinkedIn account, and an email has none. Either emails carry a null account and
-every reader learns to expect it, or they live somewhere else entirely. Decide it
-in the Phase 4 contract, not in the code.
+**One schema problem outlives the decision to wait, and must not be filed away
+with it.** `wl_events.account_id` is a LinkedIn account, and an email has none.
+Every reader of that table — the audit feed, the inbox listing, the upkeep
+evidence, `messagesForContact` — currently assumes an account is there. So the
+question returns the moment email does, and it returns even if all that arrives
+is a record of a letter somebody sent by hand, with no sending integration at
+all. Either emails carry a null account and every one of those readers is taught
+to expect it, or they live somewhere else entirely. **Unresolved**, and the
+place to resolve it is here, before the first `email.*` row is written.
 
 ## Shared code this touches, and must not break
 
