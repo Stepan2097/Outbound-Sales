@@ -92,6 +92,10 @@ test("no run, a pause that covers today, and a plan that has run out all take an
       run("c", { startedAt: startedForDay(20, now) })
     ],
     dayActions: [],
+    // "c" is past the last day of its plan, which takes it out of the warming
+    // queue — but not out of upkeep, which outlives the plan. Saying its inbox
+    // was read today is what leaves it owing nothing at all.
+    inboxSyncedToday: new Set(["c"]),
     todayIso: TODAY,
     nowMs
   });
@@ -106,6 +110,51 @@ test("no run, a pause that covers today, and a plan that has run out all take an
     nowMs
   });
   assert.equal(after.length, 1);
+});
+
+test("an account past the end of its plan is still opened for what it is holding", () => {
+  const now = new Date("2026-09-17T10:00:00.000Z");
+  const finished = { accounts: [account("c")], runs: [run("c", { startedAt: startedForDay(20, now) })], dayActions: [], todayIso: TODAY, nowMs: now.getTime() };
+
+  // Warming ends; looking after what it sent does not. An account reaches its
+  // last day holding exactly the invitations it sent most recently, which is
+  // the worst moment to stop watching them.
+  const { ready } = dueFrom({ ...finished, pendingInvites: new Map([["c", 4]]), inboxSyncedToday: new Set(["c"]) });
+  assert.equal(ready.length, 1);
+  assert.equal(ready[0].remaining, 0, "nothing is owed against a quota — the plan is over");
+  assert.equal(ready[0].upkeep.checks, 4);
+  assert.deepEqual(ready[0].kinds, [], "and it is not offered any warming work to do");
+
+  // Once a day. A second poll the same day finds nothing owing.
+  const { ready: again } = dueFrom({
+    ...finished,
+    pendingInvites: new Map([["c", 4]]),
+    checkedToday: new Set(["c"]),
+    inboxSyncedToday: new Set(["c"])
+  });
+  assert.equal(again.length, 0);
+});
+
+test("an account with a plan to follow goes before one that only needs looking after", () => {
+  const now = new Date("2026-09-17T10:00:00.000Z");
+  const { ready } = dueFrom({
+    accounts: [account("older"), account("newer")],
+    runs: [
+      // The upkeep-only account has the older run, so without the rule it wins.
+      run("older", { startedAt: startedForDay(20, now) }),
+      run("newer", { startedAt: startedForDay(2, now) })
+    ],
+    dayActions: [],
+    pendingInvites: new Map([["older", 2]]),
+    todayIso: TODAY,
+    nowMs: now.getTime()
+  });
+
+  // One account runs at a time inside a four-hour window. Upkeep keeps until
+  // tomorrow; a day of a plan does not.
+  assert.equal(ready[0].account.id, "newer");
+  assert.ok(ready[0].remaining > 0);
+  assert.equal(ready[1].account.id, "older");
 });
 
 test("the oldest run goes first", () => {

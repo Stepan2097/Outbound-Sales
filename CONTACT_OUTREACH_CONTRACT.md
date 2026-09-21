@@ -315,6 +315,50 @@ error — it means nobody is queued. Do not fall back to inventing recipients;
 that is the rule `run-account.mjs` has followed from the beginning and it is
 why every request in this system is attached to a person and a status.
 
+### Upkeep: what wakes an account once warming is over
+
+Warming is finite. A plan has a last day and every account reaches it. Checking
+whether a sent invitation was accepted is not finite, and neither is reading
+what people wrote back — and until this phase both rode along on warming work.
+The day an account's views and likes were done, nobody looked; the day its plan
+ended, nobody looked again, ever. An account reaches its last day holding
+exactly the invitations it sent most recently.
+
+So `dueFrom` now has a second reason to hand an account over, with the same two
+rules as the first: evidence rather than allowance, and a bound.
+
+```
+upkeep: { checks: 4, inbox: false, any: true }
+```
+
+- **checks** — `pending` rows for this account, capped at `MAX_INVITE_CHECKS_PER_RUN`,
+  and zero once an `invite.checked` row exists for today. Any day, in plan or out.
+- **inbox** — true only **past the last day of the plan**, when the inbox has not
+  been read today. Inside the plan tomorrow's quota opens the browser anyway and
+  the inbox is read while it is there; making "not read today" a reason of its
+  own would hand every account a session every morning whether or not it had
+  anything else to do.
+
+`remaining` stays what it was — the day's quota, and the worker's pacing. An
+account can be handed over with `remaining: 0`, an empty `kinds`, and `upkeep`
+set; `GET /api/warmup/agent` answers `runnable: true` with
+`reason: "Warm-up is finished — upkeep only"` and an empty `plan`.
+
+**For the agent:** `runnable` answers "is it worth opening the browser", not "is
+there warming left". Do not exit on an empty `plan` alone — exit when the plan is
+empty **and** `upkeep.any` is false. The gate at `run-account.mjs:140-146` must
+learn this, or a finished account is leased, opens nothing and reports back.
+
+Warming accounts with a plan sort ahead of upkeep-only ones: one account runs at
+a time inside a four-hour window, and upkeep keeps until tomorrow where a day of
+a plan does not.
+
+**What this costs.** The fleet's daily session count no longer shrinks as
+accounts finish their plans. Every account still in `warming` status gets at
+most one session a day for as long as it holds pending invitations or has an
+unread inbox — forever, for a finished account. The lever is the one that
+already exists: excluding an account takes it out of `candidates()` entirely.
+
 ### The second, cheaper road to the same answer
 
 If the inbox sync stores an inbound message from somebody whose row is `pending`

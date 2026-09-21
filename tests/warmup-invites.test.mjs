@@ -442,6 +442,44 @@ test("an account is woken for invitations only when somebody is actually waiting
   assert.equal(busy.ready[0].invites, 2);
 });
 
+test("an account that finished warming is still told to come and check what it sent", async () => {
+  // The run is past the last day of the plan.
+  rows.wl_runs[0].started_at = startedForDay(30);
+  rows.wl_outreach = [{
+    id: "o-1", account_id: "acc-1", crm_contact_id: "c-1", person_name: "Marta Kovalenko",
+    person_linkedin: "https://linkedin.com/in/marta", sent_by: "chloe@example.com",
+    status: "pending", created_at: "2026-09-10T10:00:00.000Z", responded_at: null
+  }];
+
+  const answer = await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" });
+  assert.equal(answer.status, 200);
+  assert.equal(answer.payload.runnable, true, "a flat false here is what left sent invitations unwatched for good");
+  assert.match(answer.payload.reason, /upkeep only/);
+  assert.deepEqual(answer.payload.plan, [], "and there is genuinely no warming left to do");
+  assert.equal(answer.payload.upkeep.checks, 1);
+  assert.equal(answer.payload.invites.toCheck.length, 1, "with the person to check already in hand");
+
+  // Once a day: after the check is written, there is nothing left to check.
+  await call({
+    method: "POST", path: "/api/warmup/agent",
+    body: { action: "invites.checked", accountId: "acc-1", results: [{ outreachId: "o-1", state: "pending" }] }
+  });
+  const second = await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" });
+  assert.equal(second.payload.upkeep.checks, 0);
+  // Still worth opening, though — past the last day of the plan nothing else
+  // will ever wake this account to read what people wrote back.
+  assert.equal(second.payload.runnable, true);
+  assert.equal(second.payload.upkeep.inbox, true);
+
+  await call({
+    method: "POST", path: "/api/warmup/agent",
+    body: { action: "inbox.done", accountId: "acc-1", threadsSeen: 0 }
+  });
+  const third = await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" });
+  assert.equal(third.payload.runnable, false, "checked and read — nothing owing until tomorrow");
+  assert.equal(third.payload.reason, "Warm-up is finished");
+});
+
 test("a person waiting for an invitation is not counted as somebody we approached", async () => {
   const { progressFrom } = await import("../warmup/campaigns.mjs");
   const todayIso = new Date().toISOString().slice(0, 10);

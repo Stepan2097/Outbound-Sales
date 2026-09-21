@@ -298,6 +298,33 @@ export async function waitingCounts(accountIds = []) {
   return counts;
 }
 
+/** How many sent invitations each of these accounts is still waiting on. */
+export async function pendingCounts(accountIds = []) {
+  const counts = new Map();
+  if (!accountIds.length) return counts;
+  const rows = await anty.from("wl_outreach").select("account_id")
+    .in("account_id", accountIds).eq("status", "pending").rows();
+  for (const row of rows) counts.set(row.account_id, (counts.get(row.account_id) || 0) + 1);
+  return counts;
+}
+
+/**
+ * Which of these accounts has already had its invitations looked at today.
+ *
+ * One query for all of them rather than one `lastCheckedAt` per account: this
+ * runs on every worker poll, and a poll that costs one request per account is
+ * a poll nobody can afford to make often.
+ */
+export async function checkedTodayAccounts(accountIds = [], todayIso) {
+  const seen = new Set();
+  if (!accountIds.length || !todayIso) return seen;
+  const rows = await anty.from("wl_events").select("account_id")
+    .in("account_id", accountIds).eq("type", INVITE_CHECKED)
+    .gte("created_at", `${todayIso}T00:00:00.000Z`).rows();
+  for (const row of rows) seen.add(row.account_id);
+  return seen;
+}
+
 /** When this account's invitations were last looked at, whatever was seen. */
 export async function lastCheckedAt(accountId) {
   if (!accountId) return null;

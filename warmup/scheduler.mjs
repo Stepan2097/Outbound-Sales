@@ -4,7 +4,8 @@ import { anty, today } from "./db.mjs";
 import { SESSION_WINDOW, insideWindow, windowLabel } from "./schedule.mjs";
 import { currentDay, dailyQuota, totalDays } from "./strategy.mjs";
 import { logEvent } from "./store.mjs";
-import { waitingCounts } from "./invites.mjs";
+import { MAX_INVITE_CHECKS_PER_RUN, checkedTodayAccounts, pendingCounts, waitingCounts } from "./invites.mjs";
+import { syncedTodayAccounts } from "./inbox.mjs";
 
 /**
  * Who is allowed to run, and when the asker should come back.
@@ -215,7 +216,44 @@ export function resetScheduler() {
  * because both have to go through it to get a browser, so an account whose
  * profile is already open is not due however much it owes.
  */
-export function dueFrom({ accounts, runs, dayActions, openProfiles, invitesWaiting, todayIso, nowMs = Date.now() }) {
+/**
+ * Looking after what was already done, as opposed to warming.
+ *
+ * Warming is finite: a plan has a last day and every account reaches it. Two
+ * things are not finite — checking whether a sent invitation was accepted, and
+ * reading what people wrote back — and until now both rode along on warming
+ * work. The day an account's views and likes were done, nobody looked; the day
+ * its plan ended, nobody ever looked again. An account reaches the end of its
+ * plan holding exactly the invitations it sent last, which is the worst
+ * possible moment to stop watching them.
+ *
+ * So upkeep is its own reason to open a browser, with the same two rules the
+ * rest of this function follows: evidence rather than allowance — there must be
+ * something outstanding — and a bound, which here is once a day.
+ */
+function upkeepFor({ accountId, inPlan, pendingInvites, checkedToday, inboxSyncedToday }) {
+  // Invitations are checked on any day, in or out of plan: a sent request can
+  // be accepted on a day this account happens to owe nothing else, and "every
+  // day" was the ask.
+  const checks = checkedToday?.has(accountId) ? 0 : Math.min(pendingInvites?.get(accountId) ?? 0, MAX_INVITE_CHECKS_PER_RUN);
+
+  // The inbox is different, and only out-of-plan accounts need it as a reason.
+  // An account inside its plan is woken by tomorrow's quota anyway and reads
+  // the inbox while it is there; making "not read today" a reason on its own
+  // would hand every account a session every morning whether or not it had
+  // anything else to do, which is a fleet-wide change in behaviour bought for
+  // nothing. Past the last day nothing else will ever wake it, and then it is
+  // the only reason left.
+  const inbox = !inPlan && !inboxSyncedToday?.has(accountId);
+
+  return { checks, inbox, any: checks > 0 || inbox };
+}
+
+export function dueFrom({
+  accounts, runs, dayActions, openProfiles, invitesWaiting,
+  pendingInvites, checkedToday, inboxSyncedToday,
+  todayIso, nowMs = Date.now()
+}) {
   const runByAccount = new Map((runs ?? []).map((row) => [row.account_id, row]));
 
   const doneByAccount = new Map();
@@ -240,12 +278,15 @@ export function dueFrom({ accounts, runs, dayActions, openProfiles, invitesWaiti
     // day it passed went red the following week. A decision function takes its
     // time as an argument.
     const day = currentDay(new Date(run.started_at), run.paused_days ?? 0, new Date(nowMs));
-    if (day > totalDays(run.strategy_snapshot)) continue;
+    // An account past the last day of its plan has no warming left — but it
+    // may still be holding invitations nobody has looked at and replies nobody
+    // has read, and those do not end when the plan does.
+    const inPlan = day <= totalDays(run.strategy_snapshot);
 
     const done = doneByAccount.get(account.id);
     const kinds = [];
     let remaining = 0;
-    for (const kind of AGENT_KINDS) {
+    for (const kind of inPlan ? AGENT_KINDS : []) {
       const left = Math.max(0, dailyQuota(run.strategy_snapshot, account.id, day, kind) - (done?.get(kind) ?? 0));
       if (left > 0) kinds.push(kind);
       remaining += left;
@@ -256,23 +297,29 @@ export function dueFrom({ accounts, runs, dayActions, openProfiles, invitesWaiti
     // left and nobody queued owes nothing, and waking it would open a browser
     // to do nothing at all. Bounded by the allowance too, so an account is
     // never handed more invitations than it may send today.
-    const connectLeft = Math.max(0, dailyQuota(run.strategy_snapshot, account.id, day, "connect") - (done?.get("connect") ?? 0));
+    const connectLeft = inPlan
+      ? Math.max(0, dailyQuota(run.strategy_snapshot, account.id, day, "connect") - (done?.get("connect") ?? 0))
+      : 0;
     const invites = Math.min(invitesWaiting?.get(account.id) ?? 0, connectLeft);
     if (invites > 0) {
       kinds.push("connect");
       remaining += invites;
     }
 
-    if (remaining <= 0) continue;
+    const upkeep = upkeepFor({ accountId: account.id, inPlan, pendingInvites, checkedToday, inboxSyncedToday });
+    // Upkeep is counted apart from `remaining` on purpose: `remaining` is the
+    // day's quota and paces the worker, and a check spends none of it. An
+    // account can be due on upkeep alone, with `remaining: 0`.
+    if (remaining <= 0 && !upkeep.any) continue;
 
     if (openProfiles?.has(account.profile_remote_id)) {
-      busy.push({ account, run, day, remaining, kinds, invites });
+      busy.push({ account, run, day, remaining, kinds, invites, upkeep });
       continue;
     }
 
     const until = coolingOff.get(account.id) ?? 0;
     if (until > nowMs) {
-      held.push({ account, run, day, remaining, kinds, invites, until });
+      held.push({ account, run, day, remaining, kinds, invites, upkeep, until });
       continue;
     }
     // Expiry rather than presence: a lease is swept by the tick and by the
@@ -280,12 +327,16 @@ export function dueFrom({ accounts, runs, dayActions, openProfiles, invitesWaiti
     // even if nothing has got round to deleting it yet.
     if ((leases.get(account.id)?.expiresAt ?? 0) > nowMs) continue;
 
-    ready.push({ account, run, day, remaining, kinds, invites });
+    ready.push({ account, run, day, remaining, kinds, invites, upkeep });
   }
 
-  // Oldest run first: an account that has been waiting since day 1 goes before
-  // one that was enabled five minutes ago.
-  ready.sort((a, b) => Date.parse(a.run.started_at) - Date.parse(b.run.started_at));
+  // Warming before upkeep, then oldest run first. One account runs at a time
+  // inside a four-hour window, so an account that only needs looking after must
+  // not take a session from one that still has a plan to follow — its work
+  // keeps until tomorrow, and the plan does not.
+  ready.sort((a, b) =>
+    Number(b.remaining > 0) - Number(a.remaining > 0)
+    || Date.parse(a.run.started_at) - Date.parse(b.run.started_at));
   held.sort((a, b) => a.until - b.until);
   return { ready, held, busy };
 }
@@ -315,8 +366,18 @@ async function candidates(todayIso, nowMs) {
   // Who is holding somebody for an invitation. One query for every account,
   // not one per account: this runs on every worker poll.
   const invitesWaiting = await waitingCounts(ids);
+  // The upkeep evidence: what is outstanding, and what has already been done
+  // today. Three queries for every account rather than three per account.
+  const [pendingInvites, checkedToday, inboxSyncedToday] = await Promise.all([
+    pendingCounts(ids),
+    checkedTodayAccounts(ids, todayIso),
+    syncedTodayAccounts(ids, todayIso)
+  ]);
 
-  return dueFrom({ accounts, runs, dayActions, openProfiles, invitesWaiting, todayIso, nowMs });
+  return dueFrom({
+    accounts, runs, dayActions, openProfiles, invitesWaiting,
+    pendingInvites, checkedToday, inboxSyncedToday, todayIso, nowMs
+  });
 }
 
 /**
@@ -398,6 +459,10 @@ function offer(pick) {
     day: pick.day,
     remaining: pick.remaining,
     kinds: pick.kinds,
+    // What is owed that is not the day's quota: invitations to look at, and
+    // whether the inbox has been read today. An account can be handed over with
+    // `remaining: 0` and one of these set.
+    upkeep: pick.upkeep ?? { checks: 0, inbox: false, any: false },
     // How many of `remaining` are invitations. A worker that sees `connect` in
     // `kinds` still has to ask `/agent` for who they are; this is so the log
     // line says "3 views, 2 invitations" rather than "5 things".

@@ -8,7 +8,8 @@ import { CLAIM_STATUS, OUTREACH_COLUMNS, OUTREACH_STATUSES, describeClaim, descr
 import {
   ACCEPTED_STATUS, MAX_INVITES_PER_RUN, MAX_INVITE_CHECKS_PER_RUN, WAITING_STATUS, cancelInvite,
   describeInvite, inviteEvents, invitesToCheck, invitesToSend, lastCheckedAt as invitesLastCheckedAt,
-  moveStatus, outreachForContact, reassignInvite, recordCheck, recordFailed, recordSent, requestInvite
+  checkedTodayAccounts, moveStatus, outreachForContact, pendingCounts, reassignInvite,
+  recordCheck, recordFailed, recordSent, requestInvite
 } from "./invites.mjs";
 import { antyTimestampToIso, describeSession, durationMin } from "./sessions.mjs";
 import { encryptSecret, secretsConfigured } from "./secretbox.mjs";
@@ -21,7 +22,7 @@ import {
 } from "./targeting.mjs";
 import {
   AUDIT_HIDDEN_TYPES, MAX_THREADS_PER_RUN, lastSyncedAt, listThreads, markRead, markSynced, normalizeThreadInput,
-  outreachFor, readThread, storeThread, syncSummary, threadKeyOf, unreadCount
+  outreachFor, readThread, storeThread, syncSummary, syncedTodayAccounts, threadKeyOf, unreadCount
 } from "./inbox.mjs";
 import { decideNext, finishRun, leaseAccount } from "./scheduler.mjs";
 import {
@@ -169,6 +170,29 @@ async function connectAllowance(account) {
     spent: allowance.ok ? allowance.done - allowance.step : allowance.done ?? 0,
     startsDay: connectStartsDay(run)
   };
+}
+
+/**
+ * What this account owes that is not the day's quota.
+ *
+ * The same rule the scheduler decides by, asked per account: invitations are
+ * checked on any day once a day, and the inbox becomes a reason of its own only
+ * past the last day of the plan — inside it, tomorrow's quota opens the browser
+ * anyway and the inbox is read while it is there.
+ */
+async function upkeepWorkFor(account, run) {
+  if (!run) return { checks: 0, inbox: false, any: false };
+  const todayIso = today();
+  const [pending, checked, synced] = await Promise.all([
+    pendingCounts([account.id]),
+    checkedTodayAccounts([account.id], todayIso),
+    syncedTodayAccounts([account.id], todayIso)
+  ]);
+  const day = currentDay(new Date(run.started_at), run.paused_days ?? 0);
+  const inPlan = day <= totalDays(run.strategy_snapshot);
+  const checks = checked.has(account.id) ? 0 : Math.min(pending.get(account.id) ?? 0, MAX_INVITE_CHECKS_PER_RUN);
+  const inbox = !inPlan && !synced.has(account.id);
+  return { checks, inbox, any: checks > 0 || inbox };
 }
 
 /**
@@ -2039,6 +2063,10 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
 
       const run = await activeRun(account.id);
       const session = await openSession(account.id);
+      // Warming ends; looking after what it sent does not. Computed here, where
+      // the run is already in hand, so the "finished" answer below can say
+      // "nothing to warm, but something to check" instead of a flat no.
+      const upkeep = await upkeepWorkFor(account, run);
 
       // What is already claimed to this account, so a run does not need a
       // second call to find its work. Expired claims are left out: they belong
@@ -2072,6 +2100,9 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         // check costs no quota and would otherwise grow into a crawl of every
         // person this account ever wrote to.
         invites: await inviteWorkFor(account),
+        // What is owed that is not the day's quota. A run may be handed an
+        // account with an empty plan and one of these set.
+        upkeep,
         // The agent asks rather than carrying its own copy, so moving the
         // window on screen moves it for today's run too.
         window: { ...SESSION_WINDOW, label: windowLabel(), open: insideWindow() }
@@ -2093,7 +2124,18 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       const snapshot = run.strategy_snapshot;
       const day = currentDay(new Date(run.started_at), run.paused_days ?? 0);
       if (day > totalDays(snapshot)) {
-        sendJson(response, 200, { ...base, runnable: false, reason: "Warm-up is finished", plan: [], day });
+        // `runnable` answers "is it worth opening the browser", not "is there
+        // warming left". An account past its last day still holds invitations
+        // nobody has looked at and replies nobody has read, and a flat `false`
+        // here is exactly the answer that sent the agent home and left them
+        // unwatched for good.
+        sendJson(response, 200, {
+          ...base,
+          runnable: upkeep.any,
+          reason: upkeep.any ? "Warm-up is finished — upkeep only" : "Warm-up is finished",
+          plan: [],
+          day
+        });
         return true;
       }
 

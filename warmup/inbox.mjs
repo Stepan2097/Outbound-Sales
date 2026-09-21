@@ -52,6 +52,23 @@ export const READ_TYPE = "inbox.read";
  */
 export const AUDIT_HIDDEN_TYPES = [MESSAGE_IN, MESSAGE_OUT, READ_TYPE];
 
+/**
+ * Which of these accounts has already been read today.
+ *
+ * Here rather than in the scheduler because `inbox.synced` is this module's
+ * row, and the scheduler has no business knowing which type string means "the
+ * inbox was looked at".
+ */
+export async function syncedTodayAccounts(accountIds = [], todayIso) {
+  const seen = new Set();
+  if (!accountIds.length || !todayIso) return seen;
+  const rows = await anty.from("wl_events").select("account_id")
+    .in("account_id", accountIds).eq("type", SYNCED_TYPE)
+    .gte("created_at", `${todayIso}T00:00:00.000Z`).rows();
+  for (const row of rows) seen.add(row.account_id);
+  return seen;
+}
+
 /** A body is kept to this many characters, marker included. */
 export const BODY_LIMIT = 4000;
 export const TRUNCATION_MARKER = "… [truncated]";
