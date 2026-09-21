@@ -6,8 +6,9 @@ import { HEALTH_LABEL, HEALTH_VALUES, deriveStatus, isHealth } from "./status.mj
 import { PLATFORMS, parseProxy, platformOf, proxyString, retag } from "./platform.mjs";
 import { CLAIM_STATUS, OUTREACH_COLUMNS, OUTREACH_STATUSES, describeClaim, describeOutreach, personSnapshot, sentBy } from "./outreach.mjs";
 import {
-  ACCEPTED_STATUS, WAITING_STATUS, cancelInvite, describeInvite, inviteEvents, outreachForContact,
-  reassignInvite, recordSent, requestInvite
+  ACCEPTED_STATUS, MAX_INVITES_PER_RUN, MAX_INVITE_CHECKS_PER_RUN, WAITING_STATUS, cancelInvite,
+  describeInvite, inviteEvents, invitesToCheck, invitesToSend, lastCheckedAt as invitesLastCheckedAt,
+  moveStatus, outreachForContact, reassignInvite, recordCheck, recordFailed, recordSent, requestInvite
 } from "./invites.mjs";
 import { antyTimestampToIso, describeSession, durationMin } from "./sessions.mjs";
 import { encryptSecret, secretsConfigured } from "./secretbox.mjs";
@@ -167,6 +168,24 @@ async function connectAllowance(account) {
     quota: allowance.quota ?? 0,
     spent: allowance.ok ? allowance.done - allowance.step : allowance.done ?? 0,
     startsDay: connectStartsDay(run)
+  };
+}
+
+/**
+ * The invitation work this account may actually do right now.
+ *
+ * `toSend` is cut to today's remaining allowance before it leaves the portal.
+ * The refusal on `invite.sent` is a real answer and stays, but it should be the
+ * rare case rather than the way the agent finds out.
+ */
+async function inviteWorkFor(account) {
+  const allowance = await connectAllowance(account);
+  const left = allowance.blocked ? 0 : Math.max(0, (allowance.quota || 0) - (allowance.spent || 0));
+  return {
+    toSend: await invitesToSend(account.id, Math.min(left, MAX_INVITES_PER_RUN)),
+    toCheck: await invitesToCheck(account.id, MAX_INVITE_CHECKS_PER_RUN),
+    lastCheckedAt: await invitesLastCheckedAt(account.id),
+    connectsLeft: left
   };
 }
 
@@ -2047,6 +2066,12 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         // a portal that gets re-pointed would otherwise re-read a year of
         // history — slow, and a pattern somebody notices.
         inbox: { lastSyncedAt: await lastSyncedAt(account.id), maxThreads: MAX_THREADS_PER_RUN },
+        // The invitation work, ready to act on. `toSend` is already cut to what
+        // today's allowance permits, so the agent is not handed a request the
+        // server would refuse a moment later; `toCheck` is bounded because a
+        // check costs no quota and would otherwise grow into a crawl of every
+        // person this account ever wrote to.
+        invites: await inviteWorkFor(account),
         // The agent asks rather than carrying its own copy, so moving the
         // window on screen moves it for today's run too.
         window: { ...SESSION_WINDOW, label: windowLabel(), open: insideWindow() }
@@ -2259,6 +2284,75 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         const seen = Number(body.threadsSeen);
         const threadsSeen = Number.isFinite(seen) ? Math.max(0, Math.trunc(seen)) : 0;
         sendJson(response, 200, { success: true, threadsSeen, syncedAt: await markSynced(account.id, threadsSeen) });
+        return true;
+      }
+
+      /**
+       * One invitation, reported after LinkedIn confirmed it — never before.
+       *
+       * The allowance moves here and only here, which is why `already_pending`
+       * spends nothing: it is the reconciliation for a previous run that
+       * clicked and died before it could say so, and charging for it would
+       * bill the account twice for one request. Reading the button state
+       * before clicking is what makes that outcome reachable at all, and it is
+       * the reconciliation itself rather than an optimisation.
+       */
+      if (action === "invite.sent") {
+        const outreachId = String(body.outreachId || "");
+        if (!outreachId) return fail(response, sendJson, 400, "Which invitation?");
+        const outcome = String(body.outcome || "sent");
+
+        const outreach = await anty.from("wl_outreach").select(OUTREACH_COLUMNS).eq("id", outreachId).maybeSingle();
+        if (!outreach) return fail(response, sendJson, 404, "That invitation is gone");
+        if (outreach.account_id !== account.id) return fail(response, sendJson, 409, "That invitation belongs to another account");
+
+        if (["no_button", "profile_gone", "blocked"].includes(outcome)) {
+          // The row stays waiting: the person is still held, the reason is on
+          // the record, and a human decides whether to cancel or move it.
+          await recordFailed({ account, outreach, outcome });
+          sendJson(response, 200, { success: true, status: outreach.status, moved: false, recorded: outcome });
+          return true;
+        }
+
+        const run = await activeRun(account.id);
+        if (!run) return fail(response, sendJson, 409, "No warm-up in progress");
+
+        // `already_connected` skips `pending` entirely: they are in the
+        // contacts, whatever we thought we were about to do.
+        const target = outcome === "already_connected" ? ACCEPTED_STATUS : "pending";
+        const spends = outcome === "sent";
+
+        let allowance = null;
+        if (spends) {
+          allowance = await checkQuota(account, run, "connect");
+          // A refusal is an ordinary answer: the agent stops sending for today
+          // and the rest of the queue keeps waiting for tomorrow.
+          if (!allowance.ok) return refusal(response, sendJson, allowance);
+        }
+
+        const moved = await moveStatus({ outreachId, to: target });
+        if (!moved.moved) {
+          sendJson(response, 200, { success: true, status: outreach.status, moved: false, reason: moved.reason });
+          return true;
+        }
+
+        if (spends) await commitAction(account, run, "connect", allowance, `invite to ${outreach.person_name || "a contact"}`);
+        await recordSent({ account, run, outreach: moved.row, by: "agent", allowance });
+
+        sendJson(response, 200, {
+          success: true,
+          status: moved.row.status,
+          moved: true,
+          connectsLeft: spends ? Math.max(0, allowance.quota - allowance.done) : null
+        });
+        return true;
+      }
+
+      /** What the sent-invitations page said today. Written even when nothing changed. */
+      if (action === "invites.checked") {
+        const results = Array.isArray(body.results) ? body.results.slice(0, MAX_INVITE_CHECKS_PER_RUN) : [];
+        const run = await activeRun(account.id);
+        sendJson(response, 200, { success: true, ...(await recordCheck({ account, run, results })) });
         return true;
       }
 

@@ -244,6 +244,120 @@ export async function recordSent({ account, run = null, outreach, by, overQuota 
   });
 }
 
+/**
+ * How much invitation work one run may do.
+ *
+ * The send is bounded by the day's quota anyway; this is the second bound, on
+ * the thing quota does not cover — the check is a read, costs no allowance, and
+ * would otherwise grow into a crawl of every person the account ever wrote to.
+ * Twenty is the inbox's number for the same reason, kept the same so an
+ * operator watching a run sees one shape of behaviour rather than two.
+ */
+export const MAX_INVITES_PER_RUN = 10;
+export const MAX_INVITE_CHECKS_PER_RUN = 20;
+
+/** Waiting invitations for this account, oldest first — the ones queued longest go first. */
+export async function invitesToSend(accountId, limit = MAX_INVITES_PER_RUN) {
+  if (!accountId || limit <= 0) return [];
+  const rows = await anty.from("wl_outreach").select(OUTREACH_COLUMNS)
+    .eq("account_id", accountId).eq("status", WAITING_STATUS)
+    .order("created_at", { ascending: true }).limit(limit).rows();
+  return rows.map((row) => ({
+    outreachId: row.id,
+    crmContactId: row.crm_contact_id,
+    name: row.person_name,
+    company: row.person_company,
+    position: row.person_position,
+    linkedin: row.person_linkedin,
+    note: row.note || ""
+  }));
+}
+
+/** Sent invitations still waiting for an answer, oldest first. */
+export async function invitesToCheck(accountId, limit = MAX_INVITE_CHECKS_PER_RUN) {
+  if (!accountId || limit <= 0) return [];
+  const rows = await anty.from("wl_outreach").select(OUTREACH_COLUMNS)
+    .eq("account_id", accountId).eq("status", "pending")
+    .order("created_at", { ascending: true }).limit(limit).rows();
+  return rows.map((row) => ({
+    outreachId: row.id,
+    crmContactId: row.crm_contact_id,
+    name: row.person_name,
+    linkedin: row.person_linkedin,
+    heldAt: row.created_at
+  }));
+}
+
+/** How many people this account is holding for an invitation nobody has sent. */
+export async function waitingCounts(accountIds = []) {
+  const counts = new Map();
+  if (!accountIds.length) return counts;
+  const rows = await anty.from("wl_outreach").select("account_id")
+    .in("account_id", accountIds).eq("status", WAITING_STATUS).rows();
+  for (const row of rows) counts.set(row.account_id, (counts.get(row.account_id) || 0) + 1);
+  return counts;
+}
+
+/** When this account's invitations were last looked at, whatever was seen. */
+export async function lastCheckedAt(accountId) {
+  if (!accountId) return null;
+  const row = await anty.from("wl_events").select("created_at")
+    .eq("account_id", accountId).eq("type", INVITE_CHECKED)
+    .order("created_at", { ascending: false }).limit(1).maybeSingle();
+  return row?.created_at ?? null;
+}
+
+/**
+ * What the agent saw when it looked at the sent invitations.
+ *
+ * The event is written **every time**, including when nothing moved. A run of
+ * zeros is the one signal that the sent-invitations page changed its markup,
+ * and without the row "nobody is accepting" and "the agent stopped looking"
+ * are the same empty screen. `inbox.synced` earned its place the same way.
+ */
+export async function recordCheck({ account, run = null, results = [] }) {
+  let accepted = 0;
+  let withdrawn = 0;
+  const refused = [];
+
+  for (const result of results) {
+    if (!result?.outreachId) continue;
+    if (result.state === "accepted") {
+      const moved = await moveStatus({ outreachId: String(result.outreachId), to: ACCEPTED_STATUS });
+      if (moved.moved) accepted += 1;
+      else if (moved.reason === "refused") refused.push({ outreachId: result.outreachId, from: moved.from, to: ACCEPTED_STATUS });
+    } else if (result.state === "gone") {
+      const moved = await moveStatus({ outreachId: String(result.outreachId), to: "withdrawn" });
+      if (moved.moved) withdrawn += 1;
+      else if (moved.reason === "refused") refused.push({ outreachId: result.outreachId, from: moved.from, to: "withdrawn" });
+    }
+  }
+
+  await logEvent({
+    accountId: account.id,
+    runId: run?.id ?? null,
+    type: INVITE_CHECKED,
+    message: `Checked ${results.length} sent invitation${results.length === 1 ? "" : "s"}: ${accepted} accepted, ${withdrawn} gone`,
+    // `refused` is the interesting column when something looks wrong: it means
+    // the check tried to move a row the table would not let it move, which is
+    // either a stale report or a rule somebody should look at.
+    meta: { checked: results.length, accepted, withdrawn, ...(refused.length ? { refused } : {}) }
+  });
+
+  return { checked: results.length, accepted, withdrawn, refused };
+}
+
+/** An invitation the browser could not send, and why — the row stays waiting. */
+export async function recordFailed({ account, outreach, outcome }) {
+  await logEvent({
+    accountId: account.id,
+    level: "warn",
+    type: INVITE_FAILED,
+    message: `Could not invite ${outreach.person_name || "a contact"}: ${outcome}`,
+    meta: { outreachId: outreach.id, crmContactId: outreach.crm_contact_id, outcome }
+  });
+}
+
 /** Every invite event for one person, oldest first — the invitation's own story. */
 export async function inviteEvents(crmContactId, limit = 50) {
   if (!crmContactId) return [];

@@ -4,6 +4,7 @@ import { anty, today } from "./db.mjs";
 import { SESSION_WINDOW, insideWindow, windowLabel } from "./schedule.mjs";
 import { currentDay, dailyQuota, totalDays } from "./strategy.mjs";
 import { logEvent } from "./store.mjs";
+import { waitingCounts } from "./invites.mjs";
 
 /**
  * Who is allowed to run, and when the asker should come back.
@@ -30,6 +31,15 @@ import { logEvent } from "./store.mjs";
  * do would hand out an account every poll to open a browser and achieve nothing.
  *
  * Keep in step with `agent/run-account.mjs` in the warm-up repo.
+ */
+/**
+ * The kinds the agent does on its own initiative, against nobody in particular.
+ *
+ * Connection requests are deliberately absent and stay absent. They go to a
+ * named person from the lead workspace, and an account is woken for them only
+ * when one is actually waiting — see `invitesWaiting` in `dueFrom`. Putting
+ * `connect` here instead would make every account due every morning for as long
+ * as it had allowance, and the browser would open to send nothing.
  */
 export const AGENT_KINDS = ["profile_view", "like"];
 
@@ -205,7 +215,7 @@ export function resetScheduler() {
  * because both have to go through it to get a browser, so an account whose
  * profile is already open is not due however much it owes.
  */
-export function dueFrom({ accounts, runs, dayActions, openProfiles, todayIso, nowMs = Date.now() }) {
+export function dueFrom({ accounts, runs, dayActions, openProfiles, invitesWaiting, todayIso, nowMs = Date.now() }) {
   const runByAccount = new Map((runs ?? []).map((row) => [row.account_id, row]));
 
   const doneByAccount = new Map();
@@ -240,16 +250,29 @@ export function dueFrom({ accounts, runs, dayActions, openProfiles, todayIso, no
       if (left > 0) kinds.push(kind);
       remaining += left;
     }
+
+    // Invitations are work only when there is somebody to invite. The evidence
+    // is a waiting row, not an unspent allowance: an account with five connects
+    // left and nobody queued owes nothing, and waking it would open a browser
+    // to do nothing at all. Bounded by the allowance too, so an account is
+    // never handed more invitations than it may send today.
+    const connectLeft = Math.max(0, dailyQuota(run.strategy_snapshot, account.id, day, "connect") - (done?.get("connect") ?? 0));
+    const invites = Math.min(invitesWaiting?.get(account.id) ?? 0, connectLeft);
+    if (invites > 0) {
+      kinds.push("connect");
+      remaining += invites;
+    }
+
     if (remaining <= 0) continue;
 
     if (openProfiles?.has(account.profile_remote_id)) {
-      busy.push({ account, run, day, remaining, kinds });
+      busy.push({ account, run, day, remaining, kinds, invites });
       continue;
     }
 
     const until = coolingOff.get(account.id) ?? 0;
     if (until > nowMs) {
-      held.push({ account, run, day, remaining, kinds, until });
+      held.push({ account, run, day, remaining, kinds, invites, until });
       continue;
     }
     // Expiry rather than presence: a lease is swept by the tick and by the
@@ -257,7 +280,7 @@ export function dueFrom({ accounts, runs, dayActions, openProfiles, todayIso, no
     // even if nothing has got round to deleting it yet.
     if ((leases.get(account.id)?.expiresAt ?? 0) > nowMs) continue;
 
-    ready.push({ account, run, day, remaining, kinds });
+    ready.push({ account, run, day, remaining, kinds, invites });
   }
 
   // Oldest run first: an account that has been waiting since day 1 goes before
@@ -289,8 +312,11 @@ async function candidates(todayIso, nowMs) {
   const openProfiles = new Set(
     profiles.filter((profile) => profile.status === "running" && !profile.is_deleted).map((profile) => profile.id)
   );
+  // Who is holding somebody for an invitation. One query for every account,
+  // not one per account: this runs on every worker poll.
+  const invitesWaiting = await waitingCounts(ids);
 
-  return dueFrom({ accounts, runs, dayActions, openProfiles, todayIso, nowMs });
+  return dueFrom({ accounts, runs, dayActions, openProfiles, invitesWaiting, todayIso, nowMs });
 }
 
 /**
@@ -371,7 +397,11 @@ function offer(pick) {
     profileRemoteId: pick.account.profile_remote_id,
     day: pick.day,
     remaining: pick.remaining,
-    kinds: pick.kinds
+    kinds: pick.kinds,
+    // How many of `remaining` are invitations. A worker that sees `connect` in
+    // `kinds` still has to ask `/agent` for who they are; this is so the log
+    // line says "3 views, 2 invitations" rather than "5 things".
+    invites: pick.invites ?? 0
   };
 }
 

@@ -269,6 +269,23 @@ test("a request the seller already sent by hand is recorded even past the day's 
   assert.equal(rows.wl_day_actions[0].done, 99, "the counter is not pushed past its own quota");
 });
 
+test("a seller who queued somebody and then sent the request by hand keeps one row", async () => {
+  // The path that goes through the transition table rather than an insert. It
+  // had no test, and the import it depends on was missing — the module still
+  // loaded, because a free identifier is only a ReferenceError when it runs.
+  await call({ method: "POST", path: "/api/warmup/invites", body: { accountId: "acc-1", crmContactId: "c-1" } });
+  assert.equal(rows.wl_outreach[0].status, WAITING_STATUS);
+
+  const answer = await call({
+    method: "POST", path: "/api/warmup/invites/sent-by-hand",
+    body: { accountId: "acc-1", crmContactId: "c-1" }
+  });
+  assert.equal(answer.status, 200);
+  assert.equal(rows.wl_outreach.length, 1, "the waiting row became the sent row rather than a second one");
+  assert.equal(rows.wl_outreach[0].status, "pending");
+  assert.equal(answer.payload.invite.status, "pending");
+});
+
 test("only an unsent invitation can be cancelled or moved to another account", async () => {
   await call({ method: "POST", path: "/api/warmup/invites", body: { accountId: "acc-1", crmContactId: "c-1" } });
   const outreachId = rows.wl_outreach[0].id;
@@ -295,6 +312,134 @@ test("only an unsent invitation can be cancelled or moved to another account", a
   assert.equal(cancelled.status, 200);
   assert.equal(rows.wl_outreach.length, 0, "the person goes back to the pool");
   assert.ok(rows.wl_events.some((event) => event.type === "invite.cancelled"));
+});
+
+// ── what the agent reports ────────────────────────────────────────────────
+
+/** Queue one invitation and hand back its id. */
+async function queueOne() {
+  await call({ method: "POST", path: "/api/warmup/invites", body: { accountId: "acc-1", crmContactId: "c-1" } });
+  return rows.wl_outreach[0].id;
+}
+
+test("the allowance moves when the agent says a request really went out", async () => {
+  const outreachId = await queueOne();
+  const answer = await call({
+    method: "POST", path: "/api/warmup/agent",
+    body: { action: "invite.sent", accountId: "acc-1", outreachId, outcome: "sent" }
+  });
+
+  assert.equal(answer.status, 200);
+  assert.equal(answer.payload.moved, true);
+  assert.equal(rows.wl_outreach[0].status, "pending");
+  assert.equal(rows.wl_day_actions.length, 1, "counted at the send, which is the thing that happened");
+  assert.equal(rows.wl_day_actions[0].kind, "connect");
+  const sent = rows.wl_events.find((event) => event.type === "invite.sent");
+  assert.equal(sent.meta.by, "agent");
+});
+
+test("a request the agent finds already pending costs no allowance", async () => {
+  const outreachId = await queueOne();
+  const answer = await call({
+    method: "POST", path: "/api/warmup/agent",
+    body: { action: "invite.sent", accountId: "acc-1", outreachId, outcome: "already_pending" }
+  });
+
+  // The reconciliation for a run that clicked and died before it could report.
+  // Charging for it would bill the account twice for one request.
+  assert.equal(answer.payload.moved, true);
+  assert.equal(rows.wl_outreach[0].status, "pending");
+  assert.equal(rows.wl_day_actions.length, 0, "nothing new happened on LinkedIn, so nothing is counted");
+});
+
+test("a request the browser could not send leaves the person held, with the reason", async () => {
+  const outreachId = await queueOne();
+  const answer = await call({
+    method: "POST", path: "/api/warmup/agent",
+    body: { action: "invite.sent", accountId: "acc-1", outreachId, outcome: "no_button" }
+  });
+
+  assert.equal(answer.payload.moved, false);
+  assert.equal(rows.wl_outreach[0].status, WAITING_STATUS, "still held — a human decides whether to cancel");
+  const failed = rows.wl_events.find((event) => event.type === "invite.failed");
+  assert.equal(failed.meta.outcome, "no_button");
+  assert.equal(failed.level, "warn");
+});
+
+test("a spent quota refuses the send and leaves the invitation for tomorrow", async () => {
+  const outreachId = await queueOne();
+  rows.wl_day_actions = [{
+    id: "d-1", run_id: "run-1", account_id: "acc-1", on_date: new Date().toISOString().slice(0, 10),
+    kind: "connect", quota: 99, done: 99
+  }];
+
+  const answer = await call({
+    method: "POST", path: "/api/warmup/agent",
+    body: { action: "invite.sent", accountId: "acc-1", outreachId, outcome: "sent" }
+  });
+  assert.equal(answer.status, 409, "an ordinary answer, not a failure");
+  assert.equal(rows.wl_outreach[0].status, WAITING_STATUS);
+});
+
+test("the daily check cannot turn somebody who already replied back into somebody to write to", async () => {
+  // The headline bug, end to end: the inbox sync got there first inside the
+  // same run, and the invitation check arrives afterwards with a stale view.
+  const outreachId = await queueOne();
+  rows.wl_outreach[0].status = "connected";
+  rows.wl_outreach[0].responded_at = "2026-09-21T11:00:00.000Z";
+
+  const answer = await call({
+    method: "POST", path: "/api/warmup/agent",
+    body: { action: "invites.checked", accountId: "acc-1", results: [{ outreachId, state: "accepted" }] }
+  });
+
+  assert.equal(answer.payload.accepted, 0);
+  assert.equal(rows.wl_outreach[0].status, "connected");
+  assert.equal(rows.wl_outreach[0].responded_at, "2026-09-21T11:00:00.000Z", "and the reply time survives");
+  const checked = rows.wl_events.find((event) => event.type === "invite.checked");
+  assert.equal(checked.meta.refused.length, 1, "a refused move is worth seeing, not swallowing");
+});
+
+test("a check that changed nothing is still written down", async () => {
+  await call({
+    method: "POST", path: "/api/warmup/agent",
+    body: { action: "invites.checked", accountId: "acc-1", results: [] }
+  });
+  const checked = rows.wl_events.find((event) => event.type === "invite.checked");
+  // Without this row, "nobody is accepting" and "the agent stopped looking"
+  // are the same empty screen.
+  assert.ok(checked, "the check is recorded even with nothing to report");
+  assert.equal(checked.meta.checked, 0);
+});
+
+test("an account is woken for invitations only when somebody is actually waiting", async () => {
+  const { dueFrom } = await import("../warmup/scheduler.mjs");
+  const now = new Date("2026-09-21T10:00:00.000Z");
+  const started = new Date(now);
+  started.setUTCDate(started.getUTCDate() - 12);
+  const base = {
+    accounts: [{ id: "acc-1", label: "Chloe", profile_remote_id: "p-1", status: "warming", health: "ok" }],
+    runs: [{
+      id: "run-1", account_id: "acc-1", state: "running", started_at: started.toISOString(),
+      paused_days: 0, paused_until: null, strategy_snapshot: DEFAULT_STRATEGY
+    }],
+    // Day 13: views and likes are done, so the only thing that could owe work
+    // is an invitation.
+    dayActions: [
+      { account_id: "acc-1", kind: "profile_view", done: 99 },
+      { account_id: "acc-1", kind: "like", done: 99 }
+    ],
+    todayIso: "2026-09-21",
+    nowMs: now.getTime()
+  };
+
+  const idle = dueFrom(base);
+  assert.equal(idle.ready.length, 0, "allowance alone is not work — the browser would open to send nothing");
+
+  const busy = dueFrom({ ...base, invitesWaiting: new Map([["acc-1", 2]]) });
+  assert.equal(busy.ready.length, 1, "two people queued is a reason to open a browser");
+  assert.ok(busy.ready[0].kinds.includes("connect"));
+  assert.equal(busy.ready[0].invites, 2);
 });
 
 test("a person waiting for an invitation is not counted as somebody we approached", async () => {
