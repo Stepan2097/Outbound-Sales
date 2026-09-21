@@ -365,17 +365,35 @@ test("a request the agent finds already pending costs no allowance", async () =>
 });
 
 test("a request the browser could not send leaves the person held, with the reason", async () => {
+  for (const outcome of ["no_button", "no_note", "profile_gone", "blocked"]) {
+    rows.wl_outreach = [];
+    rows.wl_events = [];
+    const outreachId = await queueOne();
+    const answer = await call({
+      method: "POST", path: "/api/warmup/agent",
+      body: { action: "invite.sent", accountId: "acc-1", outreachId, outcome }
+    });
+
+    assert.equal(answer.payload.moved, false, outcome);
+    assert.equal(rows.wl_outreach[0].status, WAITING_STATUS, `${outcome}: still held — a human decides what to do`);
+    const failed = rows.wl_events.find((event) => event.type === "invite.failed");
+    assert.equal(failed.meta.outcome, outcome);
+    assert.equal(failed.level, "warn");
+    assert.equal(rows.wl_day_actions.length, 0, `${outcome}: nothing went out, so nothing is counted`);
+  }
+});
+
+test("a note LinkedIn will not carry stops the request rather than sending it bare", async () => {
+  // The only approach this person will ever get, from anybody here — so a
+  // blank request does not cost a retry, it costs the person.
   const outreachId = await queueOne();
   const answer = await call({
     method: "POST", path: "/api/warmup/agent",
-    body: { action: "invite.sent", accountId: "acc-1", outreachId, outcome: "no_button" }
+    body: { action: "invite.sent", accountId: "acc-1", outreachId, outcome: "no_note" }
   });
-
-  assert.equal(answer.payload.moved, false);
-  assert.equal(rows.wl_outreach[0].status, WAITING_STATUS, "still held — a human decides whether to cancel");
-  const failed = rows.wl_events.find((event) => event.type === "invite.failed");
-  assert.equal(failed.meta.outcome, "no_button");
-  assert.equal(failed.level, "warn");
+  assert.equal(answer.status, 200);
+  assert.equal(answer.payload.recorded, "no_note");
+  assert.equal(rows.wl_outreach[0].status, WAITING_STATUS);
 });
 
 test("a request past the day's allowance is still recorded, and the agent is told to stop", async () => {

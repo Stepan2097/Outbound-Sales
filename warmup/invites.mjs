@@ -46,8 +46,24 @@ export const INVITE_FAILED = "invite.failed";
  * silently answered "pending, and free".
  */
 export const INVITE_OUTCOMES = [
-  "sent", "already_pending", "already_connected", "no_button", "profile_gone", "blocked"
+  "sent", "already_pending", "already_connected", "no_button", "no_note", "profile_gone", "blocked"
 ];
+
+/**
+ * The outcomes that leave the person held and the row untouched.
+ *
+ * `no_note` is here and it is the one worth explaining. LinkedIn does not
+ * always offer a note — it depends on the account and sometimes on the profile
+ * — and it caps the length. The browser is then one click away from sending a
+ * bare connection request, which is a different object: it arrives with no
+ * reason why anybody wants to connect, and the text a seller wrote and
+ * approved never reaches them. `wl_outreach_person_once` makes that the only
+ * approach this person will ever get from anybody here, so a blank request
+ * does not cost a retry — it costs the person. Better to stop and leave it to
+ * a human, who can shorten the note, use an account that can attach one, or
+ * decide a bare request is fine this once.
+ */
+export const INVITE_HELD_OUTCOMES = ["no_button", "no_note", "profile_gone", "blocked"];
 
 export const INVITE_TYPES = [
   INVITE_REQUESTED, INVITE_SENT, INVITE_CHECKED, INVITE_CANCELLED, INVITE_REASSIGNED, INVITE_FAILED

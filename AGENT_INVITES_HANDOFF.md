@@ -6,6 +6,13 @@ built the seam. `CONTACT_OUTREACH_CONTRACT.md` in the Outbound Sales repo has
 the exact shapes — this is the part a contract is bad at: what will surprise
 you, and why things are the way they are.
 
+## Authentication has not changed
+
+The same `X-Agent-Token` your `portal.mjs` already sends, on the same
+`/api/warmup/agent` routes. Nothing new to configure. It is said here only
+because this page is a list of what changed, and a seam that goes unmentioned
+in such a list reads as a seam that moved.
+
 ## What you are building
 
 Two steps inside an existing run of `agent/run-account.mjs`:
@@ -84,10 +91,58 @@ changed to Pending. The portal spends the allowance on your word, and
 invitation that never went out is permanent, across every account, and there is
 no screen to undo it from.
 
+## Invitations are spread through the run, never batched
+
+Nothing above stops you sending five requests in twenty seconds, and every one
+of them would follow every rule on this page. Do not. **Five Connects in twenty
+seconds is the shape this entire project exists to avoid** — the randomised
+daily figures, the session time seeded per account per day, the 120–420 second
+gap the portal puts between accounts, all of it is about what an account looks
+like from outside, and the most expensive action in the run must not be the one
+thing done in a burst.
+
+The numbers to work inside, all of them already in the code rather than
+invented here:
+
+- **A lease is 25 minutes** (`WARMUP_LEASE_MINUTES`, `scheduler.mjs`). That is
+  the whole run — views, likes, invitations and the inbox share it.
+- **`MAX_INVITES_PER_RUN` is 10**, and it is a ceiling, not a target. `toSend`
+  is already cut to what today's allowance permits; sending fewer is normal.
+- So: **45–120 seconds between invitations, randomised**, in the
+  `sleep(rand(min, max))` idiom that file already uses everywhere else. Ten
+  invitations then take 8–20 minutes of the lease and leave room for the rest.
+
+**If the lease is running out, stop and leave the rest queued.** They are still
+`waiting`; tomorrow's run picks them up. An expired lease in the middle of a
+Connect is worse than an invitation that goes out a day later.
+
+## When the note cannot be attached: `no_note`
+
+`toSend[].note` is the text a person wrote or approved. LinkedIn does not
+always let you attach one — it depends on the account, sometimes on the profile
+— and it caps the length when it does.
+
+**Then do not send.** Report `no_note`; the row stays `waiting` and the person
+stays held. Two reasons, and the second is the one that settles it:
+
+- A bare invitation is a different object. It arrives with no reason why
+  anybody wants to connect, and the sentence the seller wrote never reaches
+  them.
+- `wl_outreach_person_once` means this is **the only approach this person will
+  ever get** from this workspace, from any account. A blank request does not
+  cost a retry. It costs the person.
+
+**Do not truncate the note to make it fit either.** That turns text a human
+approved into text nobody did. Report `no_note` and let a person shorten it,
+move the invitation to an account that can attach one, or decide a bare request
+is acceptable this once — a decision they can make in a second, and you cannot
+make at all.
+
 ## The outcome vocabulary is closed
 
-`sent`, `already_pending`, `already_connected`, `no_button`, `profile_gone`,
-`blocked`. Anything else is a `400` and the row does not move. Do not invent
+`sent`, `already_pending`, `already_connected`, `no_button`, `no_note`,
+`profile_gone`, `blocked`. Anything else is a `400` and the row does not move.
+Do not invent
 `rate_limited` or `Sent` — an unvalidated string used to fall through to "treat
 as already pending", which moved the row and spent nothing, and that is exactly
 the silent overspend the validation now stops.

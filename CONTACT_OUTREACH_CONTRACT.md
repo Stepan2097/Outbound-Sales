@@ -289,7 +289,7 @@ invitation note, do not compose one.
 ```
 body { action: "invite.sent", accountId, outreachId,
        outcome: "sent" | "already_pending" | "already_connected"
-              | "no_button" | "profile_gone" | "blocked" }
+              | "no_button" | "no_note" | "profile_gone" | "blocked" }
 
 200  { success: true, status: "pending", moved: true,  overQuota: false, stopSending: false, connectsLeft: 2 }
 200  { success: true, status: "pending", moved: true,  overQuota: true,  stopSending: true,  connectsLeft: 0 }
@@ -307,8 +307,21 @@ body { action: "invite.sent", accountId, outreachId,
 | `already_pending` | `pending` | not spent | it already read Pending before we clicked — last run's crash |
 | `already_connected` | `accepted` | not spent | they are already in the contacts |
 | `no_button` | unchanged (`waiting`) | not spent | no Connect control on the profile |
+| `no_note` | unchanged (`waiting`) | not spent | Connect is there, but the note cannot be attached or will not fit |
 | `profile_gone` | unchanged (`waiting`) | not spent | 404, redirect, or a members-only wall |
 | `blocked` | unchanged (`waiting`) | not spent | an interstitial or rate-limit page |
+
+**`no_note` exists because a bare request is a different object.** LinkedIn
+does not always offer a note, and caps its length when it does. Sending the
+request anyway is one click away and looks harmless: the person receives an
+invitation with no reason why anybody wants to connect, and the text a seller
+wrote and approved never reaches them. `wl_outreach_person_once` makes that the
+only approach this person will ever get from this workspace, so a blank request
+does not cost a retry — it costs the person. The browser stops; a human can
+shorten the note, move the invitation to an account that can attach one, or
+decide a bare request is acceptable this once. **Truncating the note to fit is
+not an option the agent has:** it would change text a person approved into text
+nobody did.
 
 **There is no refusal on quota, and that changed while this was built.** An
 earlier draft answered 409 and moved nothing, which was wrong for the reason

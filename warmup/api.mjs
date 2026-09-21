@@ -6,7 +6,8 @@ import { HEALTH_LABEL, HEALTH_VALUES, deriveStatus, isHealth } from "./status.mj
 import { PLATFORMS, parseProxy, platformOf, proxyString, retag } from "./platform.mjs";
 import { CLAIM_STATUS, OUTREACH_COLUMNS, OUTREACH_STATUSES, describeClaim, describeOutreach, personSnapshot, sentBy } from "./outreach.mjs";
 import {
-  ACCEPTED_STATUS, INVITE_OUTCOMES, MAX_INVITES_PER_RUN, MAX_INVITE_CHECKS_PER_RUN, WAITING_STATUS, cancelInvite,
+  ACCEPTED_STATUS, INVITE_HELD_OUTCOMES, INVITE_OUTCOMES, MAX_INVITES_PER_RUN, MAX_INVITE_CHECKS_PER_RUN,
+  WAITING_STATUS, cancelInvite,
   describeInvite, inviteEvents, invitesToCheck, invitesToSend, lastCheckedAt as invitesLastCheckedAt,
   checkedTodayAccounts, moveStatus, openConversationCounts, outreachForContact, pendingCounts,
   reassignInvite, recordCheck, recordFailed, recordSent, requestInvite
@@ -2477,7 +2478,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         }
         if (outreach.account_id !== account.id) return fail(response, sendJson, 409, "That invitation belongs to another account");
 
-        if (["no_button", "profile_gone", "blocked"].includes(outcome)) {
+        if (INVITE_HELD_OUTCOMES.includes(outcome)) {
           // The row stays waiting: the person is still held, the reason is on
           // the record, and a human decides whether to cancel or move it.
           await recordFailed({ account, outreach, outcome });
