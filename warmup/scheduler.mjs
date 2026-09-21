@@ -223,7 +223,13 @@ export function dueFrom({ accounts, runs, dayActions, openProfiles, todayIso, no
     if (!run) continue;
     if (run.paused_until && run.paused_until >= todayIso) continue;
 
-    const day = currentDay(new Date(run.started_at), run.paused_days ?? 0);
+    // The clock comes from the caller, like every other time in this function.
+    // Left to default, `currentDay` read the wall clock while `nowMs` and
+    // `todayIso` were pinned — so which day of the plan an account is on
+    // depended on the date the suite happened to run, and a test written on the
+    // day it passed went red the following week. A decision function takes its
+    // time as an argument.
+    const day = currentDay(new Date(run.started_at), run.paused_days ?? 0, new Date(nowMs));
     if (day > totalDays(run.strategy_snapshot)) continue;
 
     const done = doneByAccount.get(account.id);
