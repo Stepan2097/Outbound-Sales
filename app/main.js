@@ -196,7 +196,6 @@ function renderTopbar() {
   document.getElementById("keyState").textContent = state.hasOpenRouterKey
     ? `Версія ключа ${state.keyMetadata.keyVersion} · ${state.keyMetadata.environment}`
     : "Ключ не налаштовано";
-  fillSelect(document.getElementById("productSelect"), state.products, (product) => product.id, (product) => product.name, state.selectedProductId);
 }
 
 async function bootApplication() {
@@ -2508,7 +2507,6 @@ function setCopyText(id, value, channel = "", label = "") {
 
 function renderBusyState() {
   const anyBusy = Boolean(busyAction);
-  setBusyButton("quickPrepareBtn", "research", "Виконується...");
   setBusyButton("runResearchTopBtn", "research", "Виконується...");
   setBusyButton("enrichLeadBtn", "research", "Збагачуємо...");
   setBusyButton("writeMessagesBtn", "messages", "Пишемо...");
@@ -2529,7 +2527,7 @@ function renderBusyState() {
   // і інакше просто ввімкнув би їх назад.
   if (!selectedProspectId) {
     for (const id of [
-      "quickPrepareBtn", "runResearchTopBtn", "enrichLeadBtn", "writeMessagesBtn", "refreshCompanyBtn",
+      "runResearchTopBtn", "enrichLeadBtn", "writeMessagesBtn", "refreshCompanyBtn",
       "prepareOutreachBtn", "analyzeIntelligenceBtn", "refreshIntelligenceBtn", "analyzeIntelligenceQuick",
       "enrichProspectBtn", "removeLeadQuick"
     ]) {
@@ -2877,8 +2875,6 @@ document.getElementById("mobileLeadSectionSelect").addEventListener("change", (e
   document.querySelector(".lead-section-nav")?.scrollIntoView({ behavior: "smooth", block: "start" });
 });
 
-document.getElementById("accountMenuBtn").addEventListener("click", () => setView("account"));
-
 document.getElementById("authModeBtn").addEventListener("click", () => {
   authMode = authMode === "recover" ? "login" : "recover";
   setText("authMessage", "");
@@ -2978,23 +2974,10 @@ document.getElementById("modelSearch").addEventListener("input", renderModels);
 document.getElementById("modelTierFilter").addEventListener("change", renderModels);
 document.getElementById("prospectSearch").addEventListener("input", renderProspects);
 document.getElementById("prospectStatusFilter").addEventListener("change", renderProspects);
-document.getElementById("productSelect").addEventListener("change", async (event) => {
-  await runUiAction("product", "Перемикаємо контекст продукту...", async () => {
-    state = await api("/api/products/select", {
-      method: "POST",
-      body: JSON.stringify({ productId: event.target.value })
-    });
-  });
-});
-
 
 document.getElementById("syncMcpBtn").addEventListener("click", async () => {
   state = await api("/api/products/sync-mcp", { method: "POST", body: "{}" });
   render();
-});
-
-document.getElementById("quickPrepareBtn").addEventListener("click", async () => {
-  await runUiAction("research", "Шукаємо все про людину і компанію, пишемо опис і підходи...", () => researchAndPrepareSelected());
 });
 
 document.getElementById("runResearchTopBtn").addEventListener("click", async () => {
@@ -4468,34 +4451,7 @@ const warmupState = {
   leadsTargeting: null,
   leadsPrompt: "",
   leadsError: "",
-  leadsReady: false,
-  // The inbox. `ready` is "the endpoint answered", `available` is "this server
-  // has the endpoint at all" — a portal built before the inbox landed should
-  // say so rather than claim nobody has written.
-  inbox: {
-    threads: [],
-    // One entry per account that holds a thread: how much it holds, how much of
-    // it is unread. The list groups by this and the accounts table reads the
-    // same numbers, so the two can never tell a seller different things.
-    accounts: [],
-    unread: 0,
-    sync: null,
-    ready: false,
-    available: true,
-    error: "",
-    unreadOnly: false,
-    showAll: false,
-    // The open thread, held as account + thread because a thread key is only
-    // unique within the account it arrived on.
-    openAccountId: null,
-    openThreadKey: null,
-    open: null,
-    openError: "",
-    openBusy: false
-  },
-  // Null is "not asked yet", which is not the same as zero: a badge that has
-  // never been told a number must not claim there is nothing to read.
-  unreadReplies: null
+  leadsReady: false
 };
 
 function warmupApi(path, options) {
@@ -4705,15 +4661,6 @@ function warmupCount(value) {
   return Math.round(number).toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
 }
 
-/** A thousand days is not a figure anybody can feel; "2.7 years" is. */
-function warmupDuration(days) {
-  const number = Number(days);
-  if (!Number.isFinite(number) || number <= 0) return null;
-  if (number < 45) return `${Math.round(number)} ${uaPlural(Math.round(number), "день", "дні", "днів")}`;
-  if (number < 365) return `${Math.round(number / 30)} ${uaPlural(Math.round(number / 30), "місяць", "місяці", "місяців")}`;
-  return `${(number / 365).toFixed(1)} року`;
-}
-
 function warmupFolderName(folderId) {
   if (!folderId) return null;
   const listed = warmupState.folders.find((folder) => folder.id === folderId)?.name;
@@ -4781,92 +4728,6 @@ function renderWarmupProductOptions(selectedId) {
   select.innerHTML = options.join("");
 }
 
-/**
- * The forecast, in the words Phase 1 settled on. Four shapes: no API, nothing
- * targeted, a folder the ticked accounts can finish, and — the one that matters
- * — a folder they cannot. Returns the tone and the markup so a campaign can be
- * handed its own verdict without this being recomputed per row.
- */
-function warmupForecastHtml(campaign, { stale = "" } = {}) {
-  const forecast = campaign?.forecast || null;
-
-  if (!forecast) {
-    const reason = campaign?.forecastError
-      || (campaign?.folderId ? "Для цієї папки прогноз не повернувся." : "У цієї кампанії ще немає папки.");
-    return {
-      tone: "is-muted",
-      html: `<p class="warmup-forecast-line">${escapeHtml(reason)}</p>
-        <p class="warmup-forecast-hint">${campaign?.folderId
-          ? "Поки сервер не порахує, ніщо не скаже, скільки ця папка займе, — тож вважай цю кампанію неперевіреною."
-          : "Відредагуй її й обери папку — доти їй нізвідки брати людей."}</p>${stale}`
-    };
-  }
-
-  const matching = Number(forecast.matching) || 0;
-  const approached = Number(forecast.alreadyApproached) || 0;
-  const remaining = Number(forecast.remaining) || 0;
-  const perMonth = Number(forecast.reachedThisMonth) || 0;
-  const peak = Number(forecast.perDayAtPeak) || 0;
-  const now = Number(forecast.perDayNow) || 0;
-  const chosen = Number(forecast.accountsChosen) || 0;
-  const fullPass = warmupDuration(forecast.daysToFinish);
-
-  const parts = [
-    `<span>${warmupCount(matching)} у папці</span>`,
-    `<span>до ${warmupCount(approached)} уже зверталися</span>`,
-    `<strong>${warmupCount(peak)} на день</strong>`,
-    `<span>~${warmupCount(perMonth)} за місяць</span>`,
-    remaining === 0
-      ? `<span>опрацьовувати більше нікого</span>`
-      : fullPass
-        ? `<span>повний прохід ~${escapeHtml(fullPass)}</span>`
-        : `<span>повний прохід не завершиться ніколи</span>`
-  ];
-
-  let tone = "is-ok";
-  let hint = "";
-
-  // A folder that matches nobody and a folder worked to the end are both "0
-  // left", and they need opposite things done about them.
-  if (matching === 0) {
-    tone = "is-bad";
-    hint = "Під ці фільтри в папці не підпадає ніхто, тож цій кампанії немає з ким працювати взагалі. Розшир фільтри або спрямуй її на іншу папку.";
-  } else if (chosen === 0) {
-    tone = "is-bad";
-    hint = `Цю кампанію ніхто не веде, тож із ${warmupCount(remaining)}, що лишились, не дійде черга ні до кого. Познач унизу, у Профілях, акаунти, які мають з неї надсилати.`;
-  } else if (peak === 0) {
-    tone = "is-bad";
-    hint = `${chosen === 1 ? "Позначений акаунт не має" : `${chosen} позначених акаунтів не мають`} квоти на запити навіть на піку, тож ця кампанія ніколи не зрушить. Познач акаунт, який справді прогрівається.`;
-  } else if (remaining === 0) {
-    tone = "is-muted";
-    hint = "До всіх, кого ця кампанія знаходить, уже зверталися. Розшир фільтри або спрямуй її на іншу папку.";
-  } else if (remaining > perMonth * 3) {
-    tone = "is-bad";
-    hint = `Такими темпами ця папка — це ${escapeHtml(fullPass || "більше роботи, ніж ці акаунти колись подужають")} роботи: за перший місяць черга дійде до ${warmupCount(perMonth)} із ${warmupCount(remaining)}, що лишились, а решта просто лежатиме. Відредагуй кампанію і звузь її за країною, посадою чи статусом ліда, поки не лишиться список, який ці акаунти справді закінчать.`;
-  } else if (remaining > perMonth) {
-    tone = "is-warn";
-    hint = `${warmupCount(remaining)}, що лишились, — це більше ніж місяць надсилань. Закінчиться приблизно за ${escapeHtml(fullPass || "невідомо скільки")} — звузь фільтри, якщо це довше за саму кампанію.`;
-  }
-
-  // Today and at peak are different promises, and the panel should not let the
-  // better one stand for both.
-  let today = "";
-  if (peak && now === 0) {
-    today = `<p class="warmup-forecast-today"><strong>Сьогодні не піде нічого.</strong> Жодному з позначених акаунтів ще не можна надсилати запит на контакт — стратегія притримує їх перші дні, — тож <strong>${warmupCount(peak)} на день</strong> це те, до чого вони дійдуть, коли прогріється кожен, а не те, що буде сьогодні.</p>`;
-  } else if (peak && now !== peak) {
-    today = `<p class="warmup-forecast-today">Сьогодні це <strong>${warmupCount(now)} на день</strong>, а не ${warmupCount(peak)}: решта позначених акаунтів ще набирають обертів, стоять на паузі або взагалі не прогріваються.</p>`;
-  }
-
-  return {
-    tone,
-    html: `
-      <p class="warmup-forecast-line">${parts.join('<span class="warmup-forecast-dot" aria-hidden="true">·</span>')}</p>
-      ${hint ? `<p class="warmup-forecast-hint">${hint}</p>` : ""}
-      ${today}
-      ${stale}`
-  };
-}
-
 function warmupTickedAccountsLine(campaign) {
   const ids = warmupCampaignAccountIds(campaign);
   if (!ids.size) return "Не позначено жодного акаунта, тож ця кампанія нічого не надсилає.";
@@ -4882,13 +4743,11 @@ function warmupTickedAccountsLine(campaign) {
 }
 
 /**
- * One row. It carries the scale of the campaign — sent of what is left — and
- * the tone of its forecast, so a folder nobody can finish is visible in the
- * list too. The sentence that says why still lives under the selected row.
+ * One row: the scale of the campaign — sent of what is left — and the controls
+ * that change it.
  */
 function warmupCampaignRowHtml(campaign, rank) {
   const selected = campaign.id === warmupState.selectedCampaignId;
-  const { tone } = warmupForecastHtml(campaign);
   const progress = campaign.progress || {};
   const sent = Number(progress.sent) || 0;
   const queued = Number(progress.queued) || 0;
@@ -4935,7 +4794,7 @@ function warmupCampaignRowHtml(campaign, rank) {
     : `<strong>${warmupCount(sent)}</strong><span>надіслано з ${warmupCount(remaining)}, що лишились</span>`;
 
   return `
-    <article class="warmup-campaign-row ${tone} ${selected ? "is-selected" : ""}" data-warmup-campaign="${escapeAttr(campaign.id)}">
+    <article class="warmup-campaign-row ${selected ? "is-selected" : ""}" data-warmup-campaign="${escapeAttr(campaign.id)}">
       <div class="warmup-campaign-who">
         <div class="warmup-campaign-name">
           <button class="warmup-campaign-select" type="button" data-warmup-campaign-select aria-pressed="${selected}">${escapeHtml(campaign.name || "Кампанія без назви")}</button>
@@ -4984,10 +4843,7 @@ function renderWarmupCampaignList() {
   refreshIcons();
 }
 
-/**
- * The selected campaign's verdict, at the width it had when there was one form.
- * This is the part of the panel that must not shrink into a table cell.
- */
+/** Who works the selected campaign, and what its state means in practice. */
 function renderWarmupCampaignDetail() {
   const host = document.getElementById("warmupCampaignDetail");
   if (!host) return;
@@ -5000,17 +4856,9 @@ function renderWarmupCampaignDetail() {
     return;
   }
 
-  // The form is allowed to disagree with the campaign it is editing; the
-  // forecast belongs to what is saved, and says so rather than looking current.
-  const stale = warmupState.formOpen && warmupState.formCampaignId === campaign.id && warmupFormDirty()
-    ? '<p class="warmup-forecast-stale">Ці числа — для збереженої кампанії. Збережи, щоб порахувати те, що на екрані.</p>'
-    : "";
-
-  const { tone, html } = warmupForecastHtml(campaign, { stale });
   const note = WARMUP_CAMPAIGN_STATE_NOTE[campaign.state] || "";
 
   host.innerHTML = `
-    <div class="warmup-forecast ${tone}">${html}</div>
     <div class="warmup-campaign-detail-foot">
       <p class="warmup-campaign-accounts">${warmupState.campaignNotice
         ? `<em class="warmup-campaign-problem">${escapeHtml(warmupState.campaignNotice)}</em>`
@@ -5283,23 +5131,6 @@ function renderWarmupLeads() {
   refreshIcons();
 }
 
-/**
- * The waiting replies on this account, said next to its name.
- *
- * The nav badge counts every account at once, which answers "is anyone waiting"
- * but never "on which login" — and that is the question in front of somebody
- * looking at five profiles. Clicking it opens that account's group in the inbox
- * below rather than filtering, because the number and the threads it counts
- * should be one gesture apart.
- */
-function warmupAccountUnreadHtml(accountId) {
-  const unread = warmupInboxUnreadFor(accountId);
-  if (!unread) return "";
-  const label = `${warmupCount(unread)} ${uaPlural(unread, "нова відповідь", "нові відповіді", "нових відповідей")}`;
-  return `<button class="warmup-account-unread" type="button" data-warmup-inbox-jump="${escapeAttr(accountId)}"
-    title="${escapeAttr(`${label} на цьому акаунті — показати їх у вхідних`)}"><i data-lucide="mail"></i><span>${escapeHtml(label)}</span></button>`;
-}
-
 function renderWarmupProfiles() {
   const body = document.getElementById("warmupProfileTableBody");
   if (!body) return;
@@ -5336,7 +5167,6 @@ function renderWarmupProfiles() {
           </td>
           <td>
             <strong>${escapeHtml(profile.name)}</strong>
-            ${account ? warmupAccountUnreadHtml(account.id) : ""}
             ${identity?.name
               ? `<div class="warmup-identity" title="На останньому вході агента залогінений як ця особа"><i data-lucide="badge-check"></i><span>${escapeHtml(identity.name)}${identity.slug ? ` · ${escapeHtml(identity.slug)}` : ""}</span></div>`
               : ""}
@@ -5959,19 +5789,13 @@ async function loadWarmup({ full = true } = {}) {
       warmupState.config = await warmupApi("/config");
     }
     renderWarmupConfigNote();
-    if (Number.isFinite(warmupState.config?.unreadReplies)) setWarmupUnread(warmupState.config.unreadReplies);
     if (!warmupState.config.configured) {
       warmupState.profiles = [];
       warmupState.foldersReady = false;
       warmupState.campaignsReady = false;
       warmupState.campaignsError = "Прогрів на цьому сервері не налаштований, тож немає папок, на яких будувати кампанію.";
-      // Nothing can have arrived on accounts this server cannot even reach, and
-      // the config note above already says why. An inbox promising otherwise
-      // would be a second, softer answer to the same question.
-      warmupState.inbox.available = false;
       renderWarmupProfiles();
       renderWarmupStats();
-      renderWarmupInbox();
       renderWarmupCampaigns();
       renderWarmupQueue();
       return;
@@ -5984,9 +5808,6 @@ async function loadWarmup({ full = true } = {}) {
 
     warmupState.dashboard = await warmupApi("/dashboard");
     renderWarmupStats();
-    // The inbox before the plan: it is the top panel, it depends on nothing
-    // else here, and it is the one thing on this screen somebody else wrote.
-    await loadWarmupInbox();
     // Campaigns first: the tick column in the profiles table is drawn from the
     // selected one, and the queue below is drawn from its accounts.
     await loadWarmupCampaigns({ resetForm: full });
@@ -6168,871 +5989,6 @@ document.getElementById("warmupQueueRefreshBtn")?.addEventListener("click", () =
 
 document.getElementById("warmupLeadsRefreshBtn")?.addEventListener("click", () => loadWarmupLeads());
 
-/* ── The inbox ─────────────────────────────────────────────────────────────
- *
- * Everything else on this screen is outbound: who will be approached, at what
- * rate, for how long. This panel is the only part that is somebody else
- * talking, which is why it sits above the campaigns rather than below them.
- *
- * Two rules govern it.
- *
- * The first is that message bodies are text typed by strangers on the
- * internet, and this is the one place in the app where hostile input arrives.
- * Every body, name and headline reaches the DOM through `escapeHtml`, and line
- * breaks are kept by CSS rather than by turning newlines into markup — so a
- * reply containing a script tag is read as the characters somebody typed and
- * can never be anything else.
- *
- * The second is that an empty inbox has two meanings that want opposite
- * reactions. Nothing arrived is fine. No account has synced means the agent is
- * not running, every reply on every account is currently invisible, and the
- * operator needs to know today. `lastSyncedAt` is what tells them apart, so a
- * panel that cannot read it says that too rather than guessing the calm one.
- */
-
-/** A run is roughly daily, so a gap longer than this is a stopped agent. */
-const WARMUP_SYNC_STALE_HOURS = 36;
-
-/**
- * How many threads the panel shows before it offers the rest. The inbox leads
- * this screen; it is not supposed to swallow it. Twenty-two conversations at
- * full height push the campaigns panel and its forecast off the bottom of the
- * page, which is the same harm as shrinking them by a different route. Unread
- * sorts first, so the ones above the fold are the ones that were waiting.
- */
-const WARMUP_INBOX_PREVIEW = 8;
-
-/** Статус — це дані; пігулка на екрані — це текст. */
-/**
- * Статуси аутрічу українською — єдине місце, де вони стають словами.
- *
- * Мапа була написана під статуси, яких сервер ніколи не писав («replied»,
- * «skipped», «failed»), і не мала трьох, які він пише. Невідомий статус падав
- * сюди англійським рядком посеред українського екрана. Тут рівно той набір, що
- * існує в OUTREACH_STATUSES плюс дві машинні черги.
- */
-const WARMUP_OUTREACH_LABEL = {
-  waiting: "у черзі на запит",
-  queued: "закріплено",
-  pending: "запит надіслано",
-  accepted: "прийняв(ла)",
-  connected: "відповів(ла)",
-  declined: "не прийняв(ла)",
-  withdrawn: "запит зник"
-};
-
-const WARMUP_OUTREACH_TONE = {
-  waiting: "tone-warn",
-  queued: "tone-muted",
-  pending: "tone-muted",
-  accepted: "tone-live",
-  connected: "tone-live",
-  declined: "tone-bad",
-  withdrawn: "tone-bad"
-};
-
-/** How long ago, said the way a person would say it. */
-function warmupAgo(iso) {
-  if (!iso) return "";
-  const then = Date.parse(iso);
-  if (!Number.isFinite(then)) return "";
-  const minutes = Math.round((Date.now() - then) / 60000);
-  if (minutes < 0) return new Date(then).toLocaleString();
-  if (minutes < 1) return "щойно";
-  if (minutes < 60) return `${minutes} хв тому`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} год тому`;
-  const days = Math.round(hours / 24);
-  if (days === 1) return "вчора";
-  if (days < 30) return `${days} дн тому`;
-  return new Date(then).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" });
-}
-
-/** The same moment in full, for the tooltip behind the short version. */
-function warmupStamp(iso) {
-  if (!iso) return "";
-  const then = Date.parse(iso);
-  return Number.isFinite(then) ? new Date(then).toLocaleString() : "";
-}
-
-function warmupHoursSince(iso) {
-  const then = Date.parse(iso || "");
-  if (!Number.isFinite(then)) return null;
-  return (Date.now() - then) / 3600000;
-}
-
-/**
- * A stranger's message, escaped. The return value is HTML, so there is no
- * version of this text that reaches the DOM unescaped: newlines survive
- * because `.warmup-message-body` is `white-space: pre-wrap`, not because
- * anything here builds tags out of what was typed.
- */
-function warmupBodyHtml(body) {
-  return escapeHtml(String(body ?? ""));
-}
-
-/** The first line of a message, for a list row that has one line to spend. */
-function warmupPreviewHtml(body, limit = 150) {
-  const text = String(body ?? "").replace(/\s+/g, " ").trim();
-  if (!text) return '<em class="warmup-subtle">у цьому повідомленні немає тексту</em>';
-  const chars = Array.from(text);
-  const clipped = chars.length > limit ? `${chars.slice(0, limit - 1).join("")}…` : text;
-  // Quoted, because the row is half app copy and half somebody's words, and
-  // without the quotes a reply reads as a sentence this screen is saying.
-  return `«${escapeHtml(clipped)}»`;
-}
-
-/**
- * A LinkedIn link built from a slug somebody else supplied. Anything that is
- * not plainly a slug or an http(s) URL gets no link at all — a person's own
- * profile is not worth inventing a destination for.
- */
-function warmupProfileUrl(slug) {
-  const value = String(slug || "").trim();
-  if (!value) return null;
-  if (/^https?:\/\//i.test(value)) return value;
-  if (!/^[A-Za-z0-9._-]+$/.test(value)) return null;
-  return `https://www.linkedin.com/in/${value}`;
-}
-
-/**
- * The strings that are not names. The server folds all of these to "Unknown"
- * before they reach here and its matcher refuses that sentinel from both sides,
- * which is where the rule with teeth lives — a thread that cannot name somebody
- * must never be filed against a CRM contact. This list is the display half of
- * the same idea, kept because an older server, or one whose normaliser is
- * bypassed, would otherwise have "LinkedIn Member" printed as a surname on ten
- * rows that are ten different people. Whole string, trimmed, case-insensitive:
- * "Linda Memberly" is a person.
- */
-const WARMUP_UNNAMED = new Set([
-  "unknown",
-  "linkedin member",
-  "linkedin user",
-  "deleted member",
-  "deleted user",
-  "member"
-]);
-
-function warmupParticipantUnnamed(participant) {
-  // Runs of whitespace are collapsed before the comparison: the agent reads
-  // these strings out of the DOM, where "LinkedIn Member" can arrive as
-  // "LinkedIn\n      Member". Collapsing cannot swallow a real name — "Linda
-  // Memberly" is still not in the set however it was spaced.
-  const name = String(participant?.name || "").replace(/\s+/g, " ").trim();
-  return !name || WARMUP_UNNAMED.has(name.toLowerCase());
-}
-
-/** Who wrote, or an honest admission that nobody here knows. */
-function warmupParticipantName(participant) {
-  if (warmupParticipantUnnamed(participant)) return "Хтось, кого цей тред не називає";
-  return String(participant.name).trim();
-}
-
-/**
- * Why there is no name, which has two ordinary causes that look identical by
- * the time they reach this screen: LinkedIn withholding it on a restricted or
- * out-of-network profile, and the agent failing to read it. Worth saying,
- * because only the second one is a fault.
- */
-function warmupParticipantNameAttr(participant) {
-  return warmupParticipantUnnamed(participant)
-    ? ' title="LinkedIn не показав імені цієї людини — зазвичай це закритий профіль або профіль поза мережею, іноді невдале зчитування. Цей тред навмисно не зіставлено ні з ким у CRM."'
-    : "";
-}
-
-/**
- * Which account a thread arrived on, by the person the browser is signed in as
- * rather than by the label somebody typed into Anty. When only the label is
- * known the row says that, because "arrived on Profile 7" and "arrived on Anna
- * Kovalenko" are not the same claim.
- */
-function warmupThreadAccount(thread) {
-  const identity = thread?.accountIdentity;
-  const name = typeof identity === "string" ? identity.trim() : String(identity?.name || "").trim();
-  if (name) return { name, exact: true };
-  const label = String(thread?.accountLabel || "").trim();
-  if (label) return { name: label, exact: false };
-  return { name: "акаунт, який цей портал не може назвати", exact: false };
-}
-
-/**
- * What is known about syncing, from wherever it landed. The server carries the
- * summary at the top level — the only place it can be read when there are no
- * threads at all — and the contract also puts `lastSyncedAt` on each thread.
- * Read both, so the two halves of this phase can land in either order.
- */
-function warmupInboxSync() {
-  const inbox = warmupState.inbox;
-  const sync = inbox.sync && typeof inbox.sync === "object" ? inbox.sync : null;
-
-  let lastSyncedAt = sync?.lastSyncedAt || null;
-  let fromThreads = false;
-  for (const thread of inbox.threads) {
-    const seen = thread?.lastSyncedAt;
-    if (!seen) continue;
-    if (!lastSyncedAt || Date.parse(seen) > Date.parse(lastSyncedAt)) {
-      lastSyncedAt = seen;
-      fromThreads = true;
-    }
-  }
-
-  const accountsTotal = Number.isFinite(sync?.accountsTotal) ? sync.accountsTotal : null;
-  const accountsSynced = Number.isFinite(sync?.accountsSynced) ? sync.accountsSynced : null;
-
-  // "Never synced" is a claim, and it can only be made when the server actually
-  // reports on syncing. Without that, the honest answer is that this is not
-  // known — which is itself worth saying rather than dressing up as calm.
-  const known = Boolean(sync) || fromThreads;
-  const hours = warmupHoursSince(lastSyncedAt);
-
-  return {
-    known,
-    lastSyncedAt,
-    accountsTotal,
-    accountsSynced,
-    stale: Number.isFinite(hours) && hours > WARMUP_SYNC_STALE_HOURS
-  };
-}
-
-/** The accounts that have never been read, said as a sentence or not at all. */
-function warmupSyncGapHtml(sync) {
-  if (sync.accountsTotal === null || sync.accountsSynced === null) return "";
-  if (sync.accountsSynced >= sync.accountsTotal) return "";
-  const missing = sync.accountsTotal - sync.accountsSynced;
-  return `<div class="warmup-inbox-note is-warn">
-    <strong>${warmupCount(missing)} ${uaPlural(missing, "акаунт із", "акаунти із", "акаунтів із")} ${warmupCount(sync.accountsTotal)} не читали жодного разу.</strong>
-    <span>Те, що надійшло ${missing === 1 ? "на нього" : "на них"}, не показане нижче і не враховане — цей список повний рівно настільки, наскільки агент справді відкривав акаунти.</span>
-  </div>`;
-}
-
-/**
- * The empty inbox, which is the screen this panel will show most often until
- * the agent runs against real LinkedIn — so it is the part that has to be
- * right. Each branch says which of the two empties this is.
- */
-function warmupInboxEmptyHtml() {
-  const inbox = warmupState.inbox;
-
-  if (inbox.unreadOnly) {
-    return `<div class="warmup-inbox-note is-calm">
-      <strong>Непрочитаного немає.</strong>
-      <span>Усе, що надійшло, уже відкривали. <button class="warmup-inbox-link" type="button" data-warmup-inbox-showall>Показати всі треди</button>, щоб перечитати.</span>
-    </div>`;
-  }
-
-  const sync = warmupInboxSync();
-
-  if (!sync.known) {
-    return `<div class="warmup-inbox-note is-warn">
-      <strong>Відповідей немає — і цей сервер не каже, коли акаунти читали востаннє.</strong>
-      <span>Тому тут не відрізнити порожні вхідні від агента, який жодного разу не заглядав, а це не те саме: у першому випадку просто тихий тиждень, у другому — кожна відповідь на кожному акаунті лишається непоміченою. Розрізняє їх саме час останнього читання.</span>
-    </div>`;
-  }
-
-  if (!sync.lastSyncedAt) {
-    return `<div class="warmup-inbox-note is-bad">
-      <strong>Жодного акаунта ще не читали. Це не порожні вхідні — це агент, який жодного разу не заглядав.</strong>
-      <span>Наприкінці кожного прогону агент прогріву відкриває повідомлення LinkedIn і складає знайдене сюди. Сюди не склали ще нічого, тож відповідь на будь-якому з цих акаунтів не бачить ніхто, крім того, хто відкриє акаунт руками. Перевір, що агент працює, дивиться саме на цей портал і що його токен заданий з обох боків.</span>
-    </div>`;
-  }
-
-  if (sync.stale) {
-    return `<div class="warmup-inbox-note is-warn">
-      <strong>Нічого не надходило, а востаннє сюди заглядали ${escapeHtml(warmupAgo(sync.lastSyncedAt))}.</strong>
-      <span>Останнє читання — ${escapeHtml(warmupStamp(sync.lastSyncedAt))}. Агент читає акаунти наприкінці кожного прогону, тож така пауза — це радше зупинений агент, ніж тихий тиждень: вхідні, яких ніхто не читає, виглядають точно так само, як вхідні, куди ніхто не написав.</span>
-    </div>`;
-  }
-
-  const coverage = sync.accountsTotal !== null && sync.accountsSynced !== null
-    ? ` Прочитано всі ${warmupCount(sync.accountsSynced)} із ${warmupCount(sync.accountsTotal)} ${uaPlural(sync.accountsTotal, "акаунта", "акаунтів", "акаунтів")}.`
-    : "";
-
-  return `<div class="warmup-inbox-note is-calm">
-    <strong>Нічого не надходило.</strong>
-    <span>Акаунти востаннє читали ${escapeHtml(warmupAgo(sync.lastSyncedAt))}, і відтоді ніхто не написав у відповідь.${escapeHtml(coverage)} Це порожні вхідні, а не непрочитані.</span>
-  </div>`;
-}
-
-function warmupThreadRowHtml(thread) {
-  const participant = thread.participant || {};
-  const name = warmupParticipantName(participant);
-  const account = warmupThreadAccount(thread);
-  const last = thread.lastMessage || {};
-  const inbound = last.direction !== "out";
-  const count = Number(thread.messageCount) || 0;
-  const status = String(thread.outreachStatus || "").trim();
-
-  // No "на <account>" here any more: the rows sit under a heading that names
-  // the account, and repeating it on every row is what made a thread look like
-  // it belonged to whoever was printed last.
-  return `
-    <button class="warmup-thread ${thread.unread ? "is-unread" : ""}" type="button"
-      data-warmup-thread="${escapeAttr(thread.threadKey || "")}"
-      data-warmup-thread-account="${escapeAttr(thread.accountId || "")}"
-      aria-label="${escapeAttr(`Розмова з ${name}, акаунт ${account.name}`)}">
-      <span class="warmup-thread-mark" aria-hidden="true"></span>
-      <span class="warmup-thread-who">
-        <strong${warmupParticipantNameAttr(participant)}>${escapeHtml(name)}</strong>
-        ${participant.headline ? `<span class="warmup-subtle">${escapeHtml(participant.headline)}</span>` : ""}
-      </span>
-      <span class="warmup-thread-preview">
-        <span class="warmup-thread-from">${inbound ? "Написали нам" : "Писали ми"}:</span>
-        ${warmupPreviewHtml(last.body)}
-      </span>
-      <span class="warmup-thread-meta">
-        <time datetime="${escapeAttr(last.sentAt || "")}" title="${escapeAttr(warmupStamp(last.sentAt))}">${escapeHtml(warmupAgo(last.sentAt) || "—")}</time>
-        <span class="warmup-subtle">${warmupCount(count)} ${uaPlural(count, "повідомлення", "повідомлення", "повідомлень")}</span>
-        ${status ? `<span class="pill ${WARMUP_OUTREACH_TONE[status] || "tone-muted"}">${escapeHtml(WARMUP_OUTREACH_LABEL[status] || status)}</span>` : ""}
-        ${thread.unread ? '<span class="warmup-thread-unread">непрочитане</span>' : ""}
-      </span>
-    </button>`;
-}
-
-/**
- * The account a group of threads arrived on, taken from the server's summary
- * when it is there and from the threads themselves when it is not — an older
- * server that answers without the summary still groups correctly.
- */
-function warmupInboxAccount(accountId, threads) {
-  const summary = warmupState.inbox.accounts.find((account) => account.accountId === accountId);
-  if (summary?.identity) return { name: summary.identity, exact: true };
-  if (summary?.label) return { name: summary.label, exact: false };
-  return warmupThreadAccount(threads[0] || { accountId });
-}
-
-/** How many of this account's threads are unread, whatever the list is filtering. */
-function warmupInboxUnreadFor(accountId) {
-  const summary = warmupState.inbox.accounts.find((account) => account.accountId === accountId);
-  if (summary) return Number(summary.unread) || 0;
-  return warmupState.inbox.threads.filter((thread) => thread.accountId === accountId && thread.unread).length;
-}
-
-/**
- * The list, grouped by the account each reply arrived on.
- *
- * Which login somebody answered is the first thing a seller needs and the last
- * thing the flat list gave them: five accounts' conversations interleaved by
- * time, each naming its account in small print under a stranger's name. A
- * heading per account says it once, and carries that account's unread count so
- * the fresh reply is visible before any row is read.
- */
-function warmupThreadGroupsHtml(threads) {
-  const order = [];
-  const byAccount = new Map();
-  for (const thread of threads) {
-    const id = thread.accountId || "";
-    if (!byAccount.has(id)) {
-      byAccount.set(id, []);
-      order.push(id);
-    }
-    byAccount.get(id).push(thread);
-  }
-
-  return order.map((accountId) => {
-    const held = byAccount.get(accountId);
-    const account = warmupInboxAccount(accountId, held);
-    const unread = warmupInboxUnreadFor(accountId);
-    const title = account.exact
-      ? "Особа, під якою залогінений цей акаунт"
-      : "Назва профілю в Anty — цей портал не знає, під ким залогінений цей акаунт";
-
-    return `<section class="warmup-thread-group" id="${escapeAttr(warmupInboxAnchor(accountId))}">
-      <h3 class="warmup-thread-group-head">
-        <span class="warmup-identity" title="${escapeAttr(title)}">
-          <i data-lucide="${account.exact ? "badge-check" : "circle-help"}"></i>
-          <span>${escapeHtml(account.name)}</span>
-        </span>
-        ${unread
-          ? `<span class="warmup-group-unread">${warmupCount(unread)} ${uaPlural(unread, "нова відповідь", "нові відповіді", "нових відповідей")}</span>`
-          : '<span class="warmup-subtle">усе прочитано</span>'}
-        <span class="warmup-subtle">${warmupCount(held.length)} ${uaPlural(held.length, "розмова", "розмови", "розмов")} тут</span>
-      </h3>
-      <div class="warmup-threads">${held.map((thread) => warmupThreadRowHtml(thread)).join("")}</div>
-    </section>`;
-  }).join("");
-}
-
-/** The id a group heading carries, so the accounts table can jump to it. */
-function warmupInboxAnchor(accountId) {
-  return `warmupInboxAccount-${String(accountId || "none").replace(/[^A-Za-z0-9_-]/g, "")}`;
-}
-
-function warmupMessageHtml(message, participantName, accountName) {
-  const inbound = message.direction !== "out";
-  const who = inbound ? (participantName || "Вони") : accountName;
-  return `<li class="warmup-message ${inbound ? "is-in" : "is-out"}">
-    <div class="warmup-message-head">
-      <strong>${escapeHtml(who)}</strong>
-      <time datetime="${escapeAttr(message.sentAt || "")}" title="${escapeAttr(warmupStamp(message.sentAt))}">${escapeHtml(warmupAgo(message.sentAt) || "—")}</time>
-    </div>
-    <div class="warmup-message-body">${warmupBodyHtml(message.body)}</div>
-  </li>`;
-}
-
-/**
- * One conversation, oldest first. Above it the things that make a reply
- * actionable: who wrote, where to find them, which account holds the thread,
- * and where that person stands in the outreach they were part of.
- */
-function warmupThreadViewHtml() {
-  const inbox = warmupState.inbox;
-  const back = '<button class="text-button warmup-thread-back" type="button" data-warmup-inbox-back><i data-lucide="arrow-left"></i><span>Усі відповіді</span></button>';
-
-  if (inbox.openError) {
-    return `${back}<div class="warmup-inbox-note is-bad">
-      <strong>${escapeHtml(inbox.openError)}</strong>
-      <span>Розмову не вдалося прочитати. У списку — останнє, що цьому порталу про неї сказали.</span>
-    </div>`;
-  }
-  if (!inbox.open) {
-    return `${back}<div class="empty-state">Відкриваємо розмову...</div>`;
-  }
-
-  const thread = inbox.open.thread || {};
-  const participant = thread.participant || {};
-  const name = warmupParticipantName(participant);
-  const account = warmupThreadAccount(thread);
-  const link = warmupProfileUrl(participant.slug);
-  const status = String(thread.outreachStatus || "").trim();
-  const messages = Array.isArray(inbox.open.messages) ? inbox.open.messages : [];
-  const accountTitle = account.exact
-    ? "Особа, під якою залогінений цей акаунт"
-    : "Назва профілю в Anty — цей портал не знає, під ким залогінений цей акаунт";
-
-  const head = `
-    <div class="warmup-thread-head">
-      ${back}
-      <div class="warmup-thread-head-who">
-        <strong${warmupParticipantNameAttr(participant)}>${escapeHtml(name)}</strong>
-        ${participant.headline ? `<span class="warmup-subtle">${escapeHtml(participant.headline)}</span>` : ""}
-        ${link
-          ? `<a href="${escapeAttr(link)}" target="_blank" rel="noreferrer noopener"><i data-lucide="external-link"></i><span>їхній LinkedIn</span></a>`
-          : '<span class="warmup-subtle">з цим тредом не прийшло посилання на профіль</span>'}
-      </div>
-      <div class="warmup-thread-head-meta">
-        <span class="warmup-identity" title="${escapeAttr(accountTitle)}">
-          <i data-lucide="${account.exact ? "badge-check" : "circle-help"}"></i>
-          <span>надійшло на ${escapeHtml(account.name)}</span>
-        </span>
-        ${status
-          ? `<span class="pill ${WARMUP_OUTREACH_TONE[status] || "tone-muted"}">${escapeHtml(WARMUP_OUTREACH_LABEL[status] || status)}</span>`
-          : '<span class="warmup-subtle">не зіставлено ні з ким, до кого цей акаунт звертався</span>'}
-      </div>
-    </div>`;
-
-  if (!messages.length) {
-    return `${head}<div class="warmup-inbox-note is-warn">
-      <strong>У цьому треді не збережено жодного повідомлення.</strong>
-      <span>Розмову побачили, але нічого в ній не прочитали — на боці агента так виглядає протухлий селектор.</span>
-    </div>`;
-  }
-
-  return `${head}
-    <ol class="warmup-messages">${messages.map((message) => warmupMessageHtml(message, name, account.name)).join("")}</ol>
-    <p class="warmup-thread-foot">Тут можна тільки читати. Відповідь іде з живого акаунта живій людині, тож потребує власного поводження з квотою — у цій фазі її немає, відповідай із самого акаунта.</p>`;
-}
-
-function renderWarmupInbox() {
-  const title = document.getElementById("warmupInboxTitle");
-  const subtitle = document.getElementById("warmupInboxSubtitle");
-  const pill = document.getElementById("warmupInboxPill");
-  const toggleLabel = document.getElementById("warmupInboxUnreadLabel");
-  const toggle = document.getElementById("warmupInboxUnreadOnly");
-  const body = document.getElementById("warmupInboxBody");
-  if (!body || !title || !subtitle) return;
-
-  const inbox = warmupState.inbox;
-  if (toggle) toggle.checked = inbox.unreadOnly;
-  renderWarmupNavBadge();
-
-  // A thread is open: the panel becomes that conversation, and the controls
-  // that belong to the list step out of the way rather than filter nothing.
-  if (inbox.openThreadKey !== null) {
-    const open = inbox.open?.thread?.participant;
-    title.textContent = open ? `Вхідні · ${warmupParticipantName(open)}` : "Вхідні · одна розмова";
-    subtitle.textContent = "Розмова такою, як її прочитав агент, від найстарішого";
-    if (toggleLabel) toggleLabel.hidden = true;
-    if (pill) pill.hidden = true;
-    body.innerHTML = warmupThreadViewHtml();
-    refreshIcons();
-    return;
-  }
-
-  title.textContent = "Вхідні";
-  if (toggleLabel) toggleLabel.hidden = false;
-  if (pill) pill.hidden = false;
-
-  if (pill) {
-    if (!inbox.available) {
-      pill.className = "pill tone-muted";
-      pill.textContent = "немає на цьому сервері";
-    } else if (inbox.error) {
-      pill.className = "pill tone-bad";
-      pill.textContent = "недоступно";
-    } else if (!inbox.ready) {
-      pill.className = "pill tone-muted";
-      pill.textContent = "завантаження";
-    } else if (inbox.unread > 0) {
-      pill.className = "pill tone-live";
-      pill.textContent = `${warmupCount(inbox.unread)} ${uaPlural(inbox.unread, "непрочитана", "непрочитані", "непрочитаних")}`;
-    } else {
-      // With nothing unread the pill stops counting and starts reporting on the
-      // reading, because "nothing yet" beside a panel saying nothing has ever
-      // looked is the calm half of the very distinction this panel exists for.
-      const state = warmupInboxSync();
-      if (state.known && !state.lastSyncedAt) {
-        pill.className = "pill tone-bad";
-        pill.textContent = "жодного разу не читали";
-      } else if (state.stale) {
-        pill.className = "pill tone-warn";
-        pill.textContent = "давно не читали";
-      } else if (!state.known && !inbox.threads.length) {
-        pill.className = "pill tone-warn";
-        pill.textContent = "невідомо, чи читали";
-      } else {
-        pill.className = "pill tone-muted";
-        pill.textContent = inbox.threads.length ? "усе прочитано" : "поки нічого";
-      }
-    }
-  }
-
-  if (!inbox.available) {
-    subtitle.textContent = "Вхідних на цьому сервері ще немає";
-    body.innerHTML = `<div class="warmup-inbox-note is-warn">
-      <strong>На цьому сервері немає ендпоїнта вхідних.</strong>
-      <span>З акаунтами все гаразд — просто цей портал старший за вхідні. Нічия відповідь не губиться, але й ніхто її не читає.</span>
-    </div>`;
-    refreshIcons();
-    return;
-  }
-
-  if (inbox.error) {
-    subtitle.textContent = "Вхідні не вдалося прочитати";
-    body.innerHTML = `<div class="warmup-inbox-note is-bad">
-      <strong>${escapeHtml(inbox.error)}</strong>
-      <span>«Вхідні не відповідають» і «ніхто не написав» — це різні відповіді; тут перша.</span>
-    </div>`;
-    refreshIcons();
-    return;
-  }
-
-  if (!inbox.ready) {
-    subtitle.textContent = "Читаємо, що прийшло";
-    body.innerHTML = '<div class="empty-state">Завантажуємо вхідні...</div>';
-    return;
-  }
-
-  const sync = warmupInboxSync();
-  // Three answers, not two: read at a time, never read, and not reported. The
-  // subtitle must not turn the third into the second.
-  const read = sync.lastSyncedAt
-    ? `акаунти востаннє читали ${warmupAgo(sync.lastSyncedAt)}`
-    : (sync.known ? "жодного акаунта ще не читали" : "цей сервер не каже, коли акаунти читали востаннє");
-
-  if (!inbox.threads.length) {
-    subtitle.textContent = inbox.unreadOnly ? "Тільки непрочитані" : read;
-    body.innerHTML = warmupInboxEmptyHtml();
-    refreshIcons();
-    return;
-  }
-
-  // How many accounts the list spans, said before the groups themselves: five
-  // conversations on one login and five on five are different days of work.
-  const spread = new Set(inbox.threads.map((thread) => thread.accountId)).size;
-  const across = spread
-    ? ` на ${warmupCount(spread)} ${uaPlural(spread, "акаунті", "акаунтах", "акаунтах")}`
-    : "";
-  subtitle.textContent = `${warmupCount(inbox.threads.length)} ${uaPlural(inbox.threads.length, "розмова", "розмови", "розмов")}${inbox.unreadOnly ? " непрочитаних" : ""}${across} · ${read}`;
-
-  const shown = inbox.showAll ? inbox.threads : inbox.threads.slice(0, WARMUP_INBOX_PREVIEW);
-  const hidden = inbox.threads.length - shown.length;
-  // Collapsing must never hide a waiting reply quietly, so the button says how
-  // many of what it is holding back are still unread.
-  const hiddenUnread = hidden > 0
-    ? inbox.threads.slice(shown.length).filter((thread) => thread.unread).length
-    : 0;
-  const more = hidden > 0
-    ? `<button class="warmup-inbox-more" type="button" data-warmup-inbox-expand>Показати ще ${warmupCount(hidden)} ${uaPlural(hidden, "розмову", "розмови", "розмов")}${hiddenUnread ? ` · ${warmupCount(hiddenUnread)} досі непрочитаних` : ""}</button>`
-    : (inbox.showAll && inbox.threads.length > WARMUP_INBOX_PREVIEW
-      ? '<button class="warmup-inbox-more" type="button" data-warmup-inbox-collapse>Показати менше</button>'
-      : "");
-
-  body.innerHTML = `${warmupSyncGapHtml(sync)}
-    ${warmupThreadGroupsHtml(shown)}
-    ${more}`;
-  refreshIcons();
-}
-
-/* ── The badge ─────────────────────────────────────────────────────────────
- *
- * The count on the Warm-up nav item is the entire notification this phase
- * ships: the workspace's notification settings have channels for email and
- * Slack, none of them are wired to anything, and a badge that is true beats a
- * channel that silently does nothing.
- *
- * Which means it cannot wait for somebody to open the tab — a reply nobody is
- * told about is the problem being solved. So the count is read once at boot and
- * then on a slow timer, but only while the window is actually in front, and
- * never again on a server that says it has no warm-up configured.
- */
-
-const WARMUP_BADGE_POLL_MS = 120000;
-let warmupBadgeTimer = null;
-
-function renderWarmupNavBadge() {
-  const badge = document.getElementById("warmupNavBadge");
-  if (!badge) return;
-  const count = warmupState.unreadReplies;
-  if (!Number.isFinite(count) || count <= 0) {
-    badge.hidden = true;
-    badge.textContent = "";
-    return;
-  }
-  badge.hidden = false;
-  badge.textContent = count > 99 ? "99+" : String(count);
-  badge.title = `${count} ${uaPlural(count, "непрочитана відповідь", "непрочитані відповіді", "непрочитаних відповідей")}`;
-  badge.setAttribute("aria-label", badge.title);
-}
-
-function setWarmupUnread(count) {
-  warmupState.unreadReplies = Number.isFinite(count) ? Math.max(0, count) : null;
-  renderWarmupNavBadge();
-}
-
-function stopWarmupBadgePoll() {
-  if (warmupBadgeTimer) clearInterval(warmupBadgeTimer);
-  warmupBadgeTimer = null;
-}
-
-async function refreshWarmupBadge() {
-  if (!authState?.authenticated) return;
-  if (document.visibilityState === "hidden") return;
-  try {
-    const config = await warmupApi("/config");
-    // A server with no warm-up will never have an unread reply, and should not
-    // be asked again for the rest of the session.
-    if (config && config.configured === false) {
-      setWarmupUnread(0);
-      stopWarmupBadgePoll();
-      return;
-    }
-    if (Number.isFinite(config?.unreadReplies)) setWarmupUnread(config.unreadReplies);
-  } catch (error) {
-    // A portal without the count is not a portal with a wrong count: leave the
-    // badge as it was, and stop pestering a server that has no such route.
-    if (error?.status === 404) stopWarmupBadgePoll();
-  }
-}
-
-function startWarmupBadge() {
-  stopWarmupBadgePoll();
-  warmupBadgeTimer = setInterval(() => refreshWarmupBadge(), WARMUP_BADGE_POLL_MS);
-  refreshWarmupBadge();
-}
-
-/* ── Loading and opening ───────────────────────────────────────────────── */
-
-async function loadWarmupInbox() {
-  const inbox = warmupState.inbox;
-  const params = new URLSearchParams();
-  if (inbox.unreadOnly) params.set("unread", "1");
-  const query = params.toString();
-
-  try {
-    const payload = await warmupApi(`/inbox${query ? `?${query}` : ""}`);
-    inbox.threads = Array.isArray(payload.threads) ? payload.threads : [];
-    inbox.accounts = Array.isArray(payload.accounts) ? payload.accounts : [];
-    inbox.unread = Number.isFinite(payload.unread) ? payload.unread : 0;
-    inbox.sync = payload.sync && typeof payload.sync === "object" ? payload.sync : null;
-    inbox.available = true;
-    inbox.ready = true;
-    inbox.error = "";
-    setWarmupUnread(inbox.unread);
-  } catch (error) {
-    inbox.threads = [];
-    inbox.accounts = [];
-    inbox.sync = null;
-    if (error?.status === 404) {
-      // The endpoint is not built here. That is a different sentence from "the
-      // inbox is empty", and drawing the empty one would be a lie.
-      inbox.available = false;
-      inbox.ready = false;
-      inbox.error = "";
-    } else {
-      inbox.available = true;
-      inbox.ready = true;
-      inbox.error = error.message || "Вхідні не вдалося прочитати.";
-    }
-  }
-  renderWarmupInbox();
-  // The accounts table carries the same unread numbers, and it was drawn before
-  // this answer arrived — so it is redrawn with it rather than sitting there
-  // saying nothing is waiting.
-  if (warmupState.profiles.length) renderWarmupProfiles();
-}
-
-function warmupThreadIsOpen(accountId, threadKey) {
-  const inbox = warmupState.inbox;
-  return inbox.openAccountId === accountId && inbox.openThreadKey === threadKey;
-}
-
-/** Opening a thread marks it read — that is what opening it means. */
-async function markWarmupThreadRead(accountId, threadKey) {
-  const thread = warmupState.inbox.threads.find(
-    (row) => row.threadKey === threadKey && row.accountId === accountId
-  );
-  if (thread && !thread.unread) return;
-
-  let payload = null;
-  try {
-    payload = await warmupApi("/inbox/read", {
-      method: "POST",
-      body: JSON.stringify({ threadKey, accountId })
-    });
-  } catch (error) {
-    // Failing to mark it read leaves it unread, which is the safe direction: a
-    // reply shown twice costs a glance, a reply hidden costs the reply.
-    return;
-  }
-
-  if (thread) thread.unread = false;
-  warmupState.inbox.unread = Math.max(0, (warmupState.inbox.unread || 0) - 1);
-  // The account this thread arrived on is one reply less busy, on the heading
-  // above it and on its row in the table alike.
-  const summary = warmupState.inbox.accounts.find((account) => account.accountId === accountId);
-  if (summary) summary.unread = Math.max(0, (Number(summary.unread) || 0) - 1);
-  if (warmupState.profiles.length) renderWarmupProfiles();
-  // The mark comes back with the new global count, so the badge is the server's
-  // number rather than this screen's arithmetic about it.
-  if (Number.isFinite(payload?.unread)) {
-    setWarmupUnread(payload.unread);
-  } else if (Number.isFinite(warmupState.unreadReplies)) {
-    setWarmupUnread(warmupState.unreadReplies - 1);
-  }
-}
-
-async function openWarmupThread(accountId, threadKey) {
-  const inbox = warmupState.inbox;
-  inbox.openAccountId = accountId;
-  inbox.openThreadKey = threadKey;
-  inbox.open = null;
-  inbox.openError = "";
-  inbox.openBusy = true;
-  renderWarmupInbox();
-
-  try {
-    const payload = await warmupApi(
-      `/inbox/thread?threadKey=${encodeURIComponent(threadKey)}&accountId=${encodeURIComponent(accountId)}`
-    );
-    // The reader may have gone back, or opened something else, while this was
-    // in flight. Whatever is open now wins.
-    if (!warmupThreadIsOpen(accountId, threadKey)) return;
-    inbox.open = { thread: payload.thread || {}, messages: payload.messages || [] };
-    inbox.openError = "";
-  } catch (error) {
-    if (!warmupThreadIsOpen(accountId, threadKey)) return;
-    // A 404 here means the thread, not the route — a row can be listed and then
-    // be gone by the time somebody clicks it. Unless the list never answered
-    // either, in which case it is the route after all.
-    inbox.openError = error?.status === 404
-      ? (inbox.available
-        ? "Цієї розмови вже немає на сервері."
-        : "Цей сервер ще не вміє відкривати окремий тред.")
-      : (error.message || "Розмову не вдалося прочитати.");
-  } finally {
-    if (warmupThreadIsOpen(accountId, threadKey)) {
-      inbox.openBusy = false;
-      renderWarmupInbox();
-    }
-  }
-
-  if (warmupThreadIsOpen(accountId, threadKey) && !inbox.openError) {
-    await markWarmupThreadRead(accountId, threadKey);
-    if (warmupThreadIsOpen(accountId, threadKey)) renderWarmupInbox();
-  }
-}
-
-function closeWarmupThread() {
-  const inbox = warmupState.inbox;
-  inbox.openAccountId = null;
-  inbox.openThreadKey = null;
-  inbox.open = null;
-  inbox.openError = "";
-  inbox.openBusy = false;
-  renderWarmupInbox();
-}
-
-/**
- * Show one account's replies in the inbox below, from the badge on its row.
- *
- * Nothing is filtered away: the other accounts stay where they are, the list is
- * expanded so the group cannot be one of the ones collapsing hid, and the page
- * is moved to it. A seller who clicks "2 нові відповіді" should land on those
- * two threads without losing the rest of the screen.
- */
-function showWarmupInboxAccount(accountId) {
-  if (!accountId) return;
-  const inbox = warmupState.inbox;
-  if (inbox.openThreadKey !== null) closeWarmupThread();
-  inbox.showAll = true;
-  renderWarmupInbox();
-
-  const group = document.getElementById(warmupInboxAnchor(accountId));
-  if (!group) return;
-  group.scrollIntoView({ behavior: "smooth", block: "start" });
-  // A brief mark, because a smooth scroll ending on one of several headings
-  // does not by itself say which one was asked for.
-  group.classList.add("is-called");
-  setTimeout(() => group.classList.remove("is-called"), 2000);
-}
-
-document.getElementById("warmupInboxRefreshBtn")?.addEventListener("click", () => {
-  const inbox = warmupState.inbox;
-  if (inbox.openThreadKey !== null) {
-    openWarmupThread(inbox.openAccountId, inbox.openThreadKey);
-    return;
-  }
-  loadWarmupInbox();
-});
-
-document.getElementById("warmupInboxUnreadOnly")?.addEventListener("change", (event) => {
-  warmupState.inbox.unreadOnly = Boolean(event.target.checked);
-  warmupState.inbox.ready = false;
-  renderWarmupInbox();
-  loadWarmupInbox();
-});
-
-document.getElementById("warmupInboxBody")?.addEventListener("click", (event) => {
-  if (event.target.closest("[data-warmup-inbox-back]")) {
-    closeWarmupThread();
-    return;
-  }
-  if (event.target.closest("[data-warmup-inbox-expand]")) {
-    warmupState.inbox.showAll = true;
-    renderWarmupInbox();
-    return;
-  }
-  if (event.target.closest("[data-warmup-inbox-collapse]")) {
-    warmupState.inbox.showAll = false;
-    renderWarmupInbox();
-    return;
-  }
-  if (event.target.closest("[data-warmup-inbox-showall]")) {
-    warmupState.inbox.unreadOnly = false;
-    warmupState.inbox.ready = false;
-    renderWarmupInbox();
-    loadWarmupInbox();
-    return;
-  }
-  // A link inside a row is the link, not the row.
-  if (event.target.closest("a")) return;
-  const row = event.target.closest("[data-warmup-thread]");
-  if (!row) return;
-  openWarmupThread(row.dataset.warmupThreadAccount, row.dataset.warmupThread);
-});
-
-startWarmupBadge();
 
 
 /* ── Профіль: модель, витрати, час ─────────────────────────────────────────

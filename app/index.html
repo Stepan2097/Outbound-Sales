@@ -44,7 +44,7 @@
           <button class="nav-item active" data-view="prospects"><i data-lucide="layout-dashboard"></i><span>Панель</span></button>
           <button class="nav-item" data-view="contacts"><i data-lucide="contact"></i><span>Контакти</span></button>
           <button class="nav-item" data-view="ai"><i data-lucide="bot"></i><span>AI-оператор</span></button>
-          <button class="nav-item" data-view="warmup"><i data-lucide="flame"></i><span>Прогрів</span><span class="nav-badge" id="warmupNavBadge" hidden></span></button>
+          <button class="nav-item" data-view="warmup"><i data-lucide="flame"></i><span>Прогрів</span></button>
           <button class="nav-item" data-view="products"><i data-lucide="book-open"></i><span>Продукти</span></button>
           <button class="nav-item" data-view="account"><i data-lucide="users-round"></i><span>Користувачі</span></button>
         </nav>
@@ -63,9 +63,6 @@
             <p id="workspaceMeta">Відкрий лід · запусти дослідження · підготуй аутріч · признач наступну дію</p>
           </div>
           <div class="topbar-actions">
-            <select id="productSelect" aria-label="Продукт для аутрічу"></select>
-            <button class="icon-button" id="accountMenuBtn" type="button" title="Користувачі" aria-label="Відкрити користувачів"><i data-lucide="users-round"></i></button>
-            <button class="primary-button" id="quickPrepareBtn"><i data-lucide="sparkles"></i><span>Збагатити</span></button>
             <button class="utility-hidden" id="syncMcpBtn"><i data-lucide="database-zap"></i><span>Синхронізувати MCP</span></button>
             <button class="icon-button utility-hidden" id="syncModelsBtn" title="Синхронізувати моделі" aria-label="Синхронізувати моделі">
               <i data-lucide="refresh-cw"></i>
@@ -682,24 +679,6 @@
             <!-- Above Campaigns because a reply outranks a plan: everything below
                  this panel is what the accounts are about to do, and this is what
                  already came back. -->
-            <section class="panel warmup-inbox-panel span-2">
-              <div class="panel-heading">
-                <div>
-                  <h2 id="warmupInboxTitle">Вхідні</h2>
-                  <p id="warmupInboxSubtitle">Що прийшло у відповідь — згруповано за акаунтом, на який надійшло, спочатку нові й непрочитані</p>
-                </div>
-                <div class="warmup-inbox-controls" id="warmupInboxControls">
-                  <span class="pill tone-muted" id="warmupInboxPill">завантаження</span>
-                  <label class="warmup-inbox-toggle" id="warmupInboxUnreadLabel">
-                    <input type="checkbox" id="warmupInboxUnreadOnly" />
-                    <span>Лише непрочитані</span>
-                  </label>
-                  <button class="text-button" id="warmupInboxRefreshBtn" type="button"><i data-lucide="refresh-cw"></i><span>Оновити</span></button>
-                </div>
-              </div>
-              <div id="warmupInboxBody"></div>
-            </section>
-
             <section class="panel warmup-campaigns-panel span-2">
               <div class="panel-heading">
                 <div>
