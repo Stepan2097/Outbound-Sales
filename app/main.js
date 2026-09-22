@@ -4499,14 +4499,6 @@ const warmupState = {
   detail: null,
   busy: false,
   error: "",
-  // Campaigns: a folder, the filters that narrow it, the accounts that work it
-  // and a product, each with the server's forecast for that combination. The
-  // forecast is never recomputed here — a second copy of that arithmetic is a
-  // second answer.
-  folders: [],
-  foldersReady: false,
-  campaigns: [],
-  campaignsReady: false,
   // The warm-up schedule itself: one strategy for every account, held as the
   // server sends it and edited as `strategyDraft`, day by day. The draft is
   // null until somebody opens the editor, so an open panel with no edits and a
@@ -4517,17 +4509,8 @@ const warmupState = {
   strategyBusy: false,
   strategyError: "",
   strategyNotice: "",
-  campaignsError: "",
-  campaignNotice: "",
-  selectedCampaignId: null,
-  // The form is open on exactly one thing at a time: a new campaign (id null)
-  // or an existing one. Nothing is a draft in two places.
-  formOpen: false,
-  formCampaignId: null,
-  savingCampaign: false,
-  pendingAccountIds: null,
-  // Per account: what is claimed to it now, or the server's sentence saying why
-  // nothing is. An empty box is never the answer here.
+  // The pool: the next people from the folder this server is pointed at, minus
+  // everyone already approached from any account.
   leads: [],
   leadsTotal: null,
   leadsTargeting: null,
@@ -4634,387 +4617,6 @@ function renderWarmupStats() {
   strip.innerHTML = cards
     .map((card) => `<div class="warmup-stat"><span>${escapeHtml(card.label)}</span><strong>${escapeHtml(String(card.value))}</strong></div>`)
     .join("");
-}
-
-/* ── Campaigns ─────────────────────────────────────────────────────────────
- *
- * A campaign is a folder, the filters that narrow it, the accounts that work it
- * and a product. The list is not the point of this panel; the sentence under
- * the selected row is. A folder of 22 088 contacts at about 22 requests a day
- * is three years of work, and a screen that shows that as "0 of 22 088" in a
- * table cell has presented three years as a progress bar. So the forecast keeps
- * the whole width it had when there was only one form, and every number on it
- * comes from the server.
- *
- * A campaign proposes; the warm-up disposes. Nothing here sets a pace — the
- * numbers are what the accounts' own warm-up days already allow.
- */
-
-const WARMUP_EMPTY_FILTERS = { country: "", position: "", leadStatus: "", ownerId: "" };
-
-const WARMUP_CAMPAIGN_TONE = {
-  draft: "tone-muted",
-  running: "tone-live",
-  paused: "tone-warn",
-  done: "tone-done"
-};
-
-/** What a campaign in this state is doing, said once rather than implied. */
-const WARMUP_CAMPAIGN_STATE_NOTE = {
-  draft: "Чернетка не закріплює нікого. Запусти її — і її акаунти почнуть брати людей із цієї папки.",
-  running: "Працює: усе, що лишається від сьогоднішньої квоти, пропонується цій кампанії в порядку нижче.",
-  paused: "На паузі. Її акаунти витрачають квоту на кампанії, що нижче; уже закріплене нікуди не дівається.",
-  done: "Позначена завершеною. З неї більше нічого не закріплюється, а надіслане лишається історією."
-};
-
-/** Стан кампанії — це дані; те, що видно в пігулці, — це текст. */
-const WARMUP_CAMPAIGN_STATE_LABEL = {
-  draft: "чернетка",
-  running: "працює",
-  paused: "на паузі",
-  done: "завершена"
-};
-
-function warmupFilterInputs() {
-  return {
-    country: document.getElementById("warmupFilterCountry"),
-    position: document.getElementById("warmupFilterPosition"),
-    leadStatus: document.getElementById("warmupFilterStatus"),
-    ownerId: document.getElementById("warmupFilterOwner")
-  };
-}
-
-/** What the form says right now, which is not always what is saved. */
-function warmupFormValues() {
-  const filters = { ...WARMUP_EMPTY_FILTERS };
-  for (const [key, input] of Object.entries(warmupFilterInputs())) {
-    filters[key] = (input?.value || "").trim();
-  }
-  return {
-    name: (document.getElementById("warmupCampaignName")?.value || "").trim(),
-    folderId: document.getElementById("warmupFolderSelect")?.value || "",
-    productId: document.getElementById("warmupCampaignProduct")?.value || "",
-    filters
-  };
-}
-
-function warmupCampaignById(id) {
-  return warmupState.campaigns.find((campaign) => campaign.id === id) || null;
-}
-
-function warmupSelectedCampaign() {
-  return warmupCampaignById(warmupState.selectedCampaignId);
-}
-
-/** The campaign the open form is editing, or null when it is a new one. */
-function warmupEditingCampaign() {
-  return warmupState.formOpen ? warmupCampaignById(warmupState.formCampaignId) : null;
-}
-
-function warmupCampaignSaved(campaign) {
-  return {
-    name: campaign?.name || "",
-    folderId: campaign?.folderId || "",
-    productId: campaign?.productId || "",
-    filters: { ...WARMUP_EMPTY_FILTERS, ...(campaign?.filters || {}) }
-  };
-}
-
-/** Does the open form differ from the campaign it is editing? */
-function warmupFormDirty() {
-  if (!warmupState.formOpen || !warmupState.foldersReady) return false;
-  const editing = warmupEditingCampaign();
-  if (!editing) return true;
-  const form = warmupFormValues();
-  const saved = warmupCampaignSaved(editing);
-  if (form.name !== saved.name || form.folderId !== saved.folderId || form.productId !== saved.productId) return true;
-  return Object.keys(WARMUP_EMPTY_FILTERS).some((key) => form.filters[key] !== saved.filters[key]);
-}
-
-/** The accounts ticked against one campaign — the tick column follows this. */
-function warmupCampaignAccountIds(campaign) {
-  return new Set(campaign?.accountIds || []);
-}
-
-/** 12 038 rather than 12038: these are counts somebody has to weigh. */
-function warmupCount(value) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return "—";
-  return Math.round(number).toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
-}
-
-function warmupFolderName(folderId) {
-  if (!folderId) return null;
-  const listed = warmupState.folders.find((folder) => folder.id === folderId)?.name;
-  if (listed) return listed;
-  // A folder the CRM no longer lists is still the folder a campaign is pointed
-  // at, and the name stored with the campaign is what answers for it.
-  return warmupState.campaigns.find((campaign) => campaign.folderId === folderId && campaign.folderName)?.folderName || null;
-}
-
-function warmupProductName(productId) {
-  if (!productId) return null;
-  return (state?.products || []).find((product) => product.id === productId)?.name || null;
-}
-
-function renderWarmupFolderOptions(selectedId) {
-  const select = document.getElementById("warmupFolderSelect");
-  if (!select) return;
-  const signature = `${warmupState.foldersReady}|${warmupState.folders.length}|${selectedId || ""}|${warmupState.campaignsError}`;
-  if (select.dataset.signature === signature) return;
-  select.dataset.signature = signature;
-
-  if (!warmupState.foldersReady) {
-    select.innerHTML = `<option value="">${escapeHtml(warmupState.campaignsError ? "Папки недоступні" : "Завантажуємо папки...")}</option>`;
-    select.disabled = true;
-    return;
-  }
-
-  select.disabled = false;
-  const options = [`<option value="">Обери папку</option>`];
-  const known = new Set();
-  for (const folder of warmupState.folders) {
-    known.add(folder.id);
-    const count = warmupCount(folder.contactCount);
-    const archived = folder.isArchived ? " · в архіві" : "";
-    options.push(`<option value="${escapeAttr(folder.id)}" ${folder.id === selectedId ? "selected" : ""}>${escapeHtml(folder.name)} · ${escapeHtml(count)} контактів${archived}</option>`);
-  }
-  // A folder the list no longer carries (archived, or renamed away) is still
-  // the folder this campaign is pointed at, so it stays selectable rather than
-  // silently becoming "none".
-  if (selectedId && !known.has(selectedId)) {
-    const name = warmupEditingCampaign()?.folderName || warmupFolderName(selectedId) || selectedId;
-    options.splice(1, 0, `<option value="${escapeAttr(selectedId)}" selected>${escapeHtml(name)} · немає в списку папок</option>`);
-  }
-  select.innerHTML = options.join("");
-}
-
-/** Products are the workspace's own — one list, not a second copy of it. */
-function renderWarmupProductOptions(selectedId) {
-  const select = document.getElementById("warmupCampaignProduct");
-  if (!select) return;
-  const products = state?.products || [];
-  const signature = `${products.length}|${selectedId || ""}`;
-  if (select.dataset.signature === signature) return;
-  select.dataset.signature = signature;
-
-  const options = [`<option value="" ${selectedId ? "" : "selected"}>Без продукту</option>`];
-  const known = new Set();
-  for (const product of products) {
-    known.add(product.id);
-    options.push(`<option value="${escapeAttr(product.id)}" ${product.id === selectedId ? "selected" : ""}>${escapeHtml(product.name)}</option>`);
-  }
-  if (selectedId && !known.has(selectedId)) {
-    options.push(`<option value="${escapeAttr(selectedId)}" selected>${escapeHtml(selectedId)} · немає в цьому робочому просторі</option>`);
-  }
-  select.innerHTML = options.join("");
-}
-
-function warmupTickedAccountsLine(campaign) {
-  const ids = warmupCampaignAccountIds(campaign);
-  if (!ids.size) return "Не позначено жодного акаунта, тож ця кампанія нічого не надсилає.";
-  const names = [];
-  for (const profile of warmupState.profiles) {
-    if (profile.account && ids.has(profile.account.id)) names.push(profile.name);
-  }
-  const hidden = ids.size - names.length;
-  if (!names.length) return `Її ведуть ${ids.size} ${uaPlural(ids.size, "акаунт", "акаунти", "акаунтів")}, яких цей список не показує.`;
-  const listed = escapeHtml(names.slice(0, 4).join(", "));
-  const more = names.length > 4 ? ` +${names.length - 4} ще` : "";
-  return `Ведуть: ${listed}${more}${hidden > 0 ? ` · ще ${hidden} немає у списку нижче` : ""}`;
-}
-
-/**
- * One row: the scale of the campaign — sent of what is left — and the controls
- * that change it.
- */
-function warmupCampaignRowHtml(campaign, rank) {
-  const selected = campaign.id === warmupState.selectedCampaignId;
-  const progress = campaign.progress || {};
-  const sent = Number(progress.sent) || 0;
-  const queued = Number(progress.queued) || 0;
-  const remaining = campaign.forecast ? Number(campaign.forecast.remaining) || 0 : null;
-  const accounts = (campaign.accountIds || []).length;
-  const folder = campaign.folderName || warmupFolderName(campaign.folderId) || (campaign.folderId ? "папка, якої CRM не показує" : "без папки");
-  const product = warmupProductName(campaign.productId);
-
-  const meta = [
-    escapeHtml(folder),
-    `${accounts} ${uaPlural(accounts, "акаунт", "акаунти", "акаунтів")}`,
-    product ? escapeHtml(product) : "без продукту"
-  ];
-
-  const controls = [];
-  // The order is the only thing deciding which campaign an account actually
-  // serves — the first running one with work takes the whole quota. So the rank
-  // is not a tooltip on a label somebody cannot change; it is the readout of
-  // the two arrows that set it.
-  const index = warmupState.campaigns.indexOf(campaign);
-  const rankLabel = rank
-    ? `<strong title="Квота її акаунтів пропонується активним кампаніям у цьому порядку, і бере її перша, у якої є робота.">#${rank} у черзі</strong>`
-    : `<em title="Її місце в порядку. У чергу вона стає, коли запрацює.">поза чергою</em>`;
-  controls.push(`<span class="warmup-campaign-move">
-    <button class="text-button" type="button" data-warmup-campaign-move="up" ${index <= 0 ? "disabled" : ""} title="Пропонувати цій кампанії квоту її акаунтів раніше" aria-label="Підняти ${escapeAttr(campaign.name || "цю кампанію")} вище в порядку"><i data-lucide="chevron-up"></i></button>
-    ${rankLabel}
-    <button class="text-button" type="button" data-warmup-campaign-move="down" ${index < 0 || index >= warmupState.campaigns.length - 1 ? "disabled" : ""} title="Пропонувати цій кампанії квоту її акаунтів пізніше" aria-label="Опустити ${escapeAttr(campaign.name || "цю кампанію")} нижче в порядку"><i data-lucide="chevron-down"></i></button>
-  </span>`);
-  if (campaign.state === "running") {
-    controls.push(`<button class="text-button" type="button" data-warmup-campaign-state="paused" title="Припинити закріплення з цієї кампанії"><i data-lucide="pause"></i><span>Пауза</span></button>`);
-  } else if (campaign.state !== "done") {
-    controls.push(`<button class="text-button" type="button" data-warmup-campaign-state="running" title="Дозволити її акаунтам закріплювати людей із цієї кампанії"><i data-lucide="play"></i><span>Старт</span></button>`);
-  }
-  if (campaign.state !== "done") {
-    controls.push(`<button class="text-button" type="button" data-warmup-campaign-state="done" title="З неї більше нічого не закріплюється"><i data-lucide="check"></i><span>Завершити</span></button>`);
-  } else {
-    controls.push(`<button class="text-button" type="button" data-warmup-campaign-state="running" title="Знову дозволити її акаунтам закріплювати з неї"><i data-lucide="rotate-ccw"></i><span>Відкрити знову</span></button>`);
-  }
-  controls.push(`<button class="text-button" type="button" data-warmup-campaign-edit><i data-lucide="pencil"></i><span>Редагувати</span></button>`);
-  controls.push(`<button class="text-button warmup-campaign-delete" type="button" data-warmup-campaign-delete><i data-lucide="trash-2"></i><span>Видалити</span></button>`);
-
-  const count = remaining === null
-    ? `<span class="warmup-campaign-count-unknown">${warmupCount(sent)} надіслано · скільки лишилось, порахувати не вдалося</span>`
-    : `<strong>${warmupCount(sent)}</strong><span>надіслано з ${warmupCount(remaining)}, що лишились</span>`;
-
-  return `
-    <article class="warmup-campaign-row ${selected ? "is-selected" : ""}" data-warmup-campaign="${escapeAttr(campaign.id)}">
-      <div class="warmup-campaign-who">
-        <div class="warmup-campaign-name">
-          <button class="warmup-campaign-select" type="button" data-warmup-campaign-select aria-pressed="${selected}">${escapeHtml(campaign.name || "Кампанія без назви")}</button>
-          <span class="pill ${WARMUP_CAMPAIGN_TONE[campaign.state] || "tone-muted"}">${escapeHtml(WARMUP_CAMPAIGN_STATE_LABEL[campaign.state] || campaign.state || "чернетка")}</span>
-        </div>
-        <div class="warmup-campaign-meta">${meta.join('<span class="warmup-forecast-dot" aria-hidden="true">·</span>')}</div>
-      </div>
-      <div class="warmup-campaign-count">
-        ${count}
-        ${queued ? `<span class="warmup-campaign-claimed">${warmupCount(queued)} закріплено й не надіслано</span>` : ""}
-        ${campaign.progressApproximate
-          ? '<span class="warmup-campaign-approx" title="Інша кампанія ділить із цією акаунт і цю папку, тож її рядки рахуються тут теж. Щоб їх розрізнити, потрібна колонка, якої в wl_outreach немає.">рахується разом зі спільним акаунтом</span>'
-          : ""}
-      </div>
-      <div class="warmup-campaign-actions">${controls.join("")}</div>
-    </article>`;
-}
-
-function renderWarmupCampaignList() {
-  const host = document.getElementById("warmupCampaignList");
-  if (!host) return;
-
-  if (warmupState.campaignsError) {
-    host.innerHTML = `<div class="warmup-leads-prompt is-bad"><strong>${escapeHtml(warmupState.campaignsError)}</strong>
-      <span>Поки сервер не відповідає, ніщо на цій панелі не зберігається, і акаунти далі закріплюють людей звідти, куди їх спрямували раніше.</span></div>`;
-    refreshIcons();
-    return;
-  }
-
-  if (!warmupState.campaignsReady) {
-    host.innerHTML = '<div class="empty-state">Завантажуємо кампанії...</div>';
-    return;
-  }
-
-  if (!warmupState.campaigns.length) {
-    host.innerHTML = `<div class="warmup-leads-prompt"><strong>Кампаній поки немає.</strong>
-      <span>Кампанія — це одна папка, акаунти, які її ведуть, і продукт. Створи одну, і ця панель скаже, у що вона насправді виллється, ще до першого надсилання.</span></div>`;
-    refreshIcons();
-    return;
-  }
-
-  let rank = 0;
-  host.innerHTML = warmupState.campaigns
-    .map((campaign) => warmupCampaignRowHtml(campaign, campaign.state === "running" ? ++rank : 0))
-    .join("");
-  refreshIcons();
-}
-
-/** Who works the selected campaign, and what its state means in practice. */
-function renderWarmupCampaignDetail() {
-  const host = document.getElementById("warmupCampaignDetail");
-  if (!host) return;
-
-  const campaign = warmupSelectedCampaign();
-  if (!campaign) {
-    host.innerHTML = warmupState.campaignsReady && warmupState.campaigns.length
-      ? '<div class="empty-state">Обери кампанію, щоб побачити, у що вона виллється.</div>'
-      : "";
-    return;
-  }
-
-  const note = WARMUP_CAMPAIGN_STATE_NOTE[campaign.state] || "";
-
-  host.innerHTML = `
-    <div class="warmup-campaign-detail-foot">
-      <p class="warmup-campaign-accounts">${warmupState.campaignNotice
-        ? `<em class="warmup-campaign-problem">${escapeHtml(warmupState.campaignNotice)}</em>`
-        : warmupTickedAccountsLine(campaign)}</p>
-      ${note ? `<p class="warmup-campaign-state-note">${escapeHtml(note)}</p>` : ""}
-    </div>`;
-  refreshIcons();
-}
-
-function renderWarmupCampaignForm({ resetForm = false } = {}) {
-  const form = document.getElementById("warmupCampaignForm");
-  const saveButton = document.getElementById("warmupCampaignSaveBtn");
-  const note = document.getElementById("warmupCampaignFormNote");
-  if (!form || !saveButton) return;
-
-  form.hidden = !warmupState.formOpen;
-  if (!warmupState.formOpen) return;
-
-  const editing = warmupEditingCampaign();
-  const saved = warmupCampaignSaved(editing);
-  if (resetForm) {
-    const nameInput = document.getElementById("warmupCampaignName");
-    if (nameInput) nameInput.value = saved.name;
-    for (const [key, input] of Object.entries(warmupFilterInputs())) {
-      if (input) input.value = saved.filters[key] || "";
-    }
-    // A new campaign starts on the product this workspace is already working.
-    renderWarmupProductOptions(editing ? saved.productId : (state?.selectedProductId || ""));
-    renderWarmupFolderOptions(saved.folderId);
-  } else {
-    renderWarmupProductOptions(document.getElementById("warmupCampaignProduct")?.value || saved.productId);
-    renderWarmupFolderOptions(document.getElementById("warmupFolderSelect")?.value || saved.folderId);
-  }
-
-  for (const input of Object.values(warmupFilterInputs())) {
-    if (input) input.disabled = !warmupState.foldersReady;
-  }
-
-  saveButton.disabled = !warmupState.campaignsReady || warmupState.savingCampaign;
-  saveButton.querySelector("span").textContent = warmupState.savingCampaign
-    ? "Зберігаємо..."
-    : (editing ? "Зберегти зміни" : "Створити кампанію");
-
-  if (note) {
-    note.innerHTML = warmupState.campaignNotice
-      ? `<em class="warmup-campaign-problem">${escapeHtml(warmupState.campaignNotice)}</em>`
-      : (editing
-        ? escapeHtml(`Редагуємо: ${editing.name || "ця кампанія"}. Які акаунти її ведуть — позначається нижче, у Профілях, а не тут.`)
-        : "Нова кампанія починається як чернетка, останньою в черзі. Познач унизу, у Профілях, акаунти, які її ведуть, і запусти її.");
-  }
-}
-
-function renderWarmupCampaigns({ resetForm = false } = {}) {
-  const pill = document.getElementById("warmupCampaignsPill");
-  const newButton = document.getElementById("warmupCampaignNewBtn");
-
-  if (pill) {
-    if (!warmupState.campaignsReady) {
-      pill.className = "pill tone-muted";
-      pill.textContent = warmupState.campaignsError ? "недоступно" : "завантаження";
-    } else {
-      const running = warmupState.campaigns.filter((campaign) => campaign.state === "running").length;
-      pill.className = running ? "pill tone-live" : "pill tone-muted";
-      pill.textContent = warmupState.campaigns.length
-        ? `${warmupState.campaigns.length} ${uaPlural(warmupState.campaigns.length, "кампанія", "кампанії", "кампаній")} · ${running} ${uaPlural(running, "працює", "працюють", "працюють")}`
-        : "поки жодної";
-    }
-  }
-  if (newButton) newButton.disabled = !warmupState.campaignsReady || !warmupState.foldersReady;
-
-  renderWarmupCampaignForm({ resetForm });
-  renderWarmupCampaignList();
-  renderWarmupCampaignDetail();
-  refreshIcons();
 }
 
 /* ── The schedule ──────────────────────────────────────────────────────────
@@ -5311,7 +4913,7 @@ function renderWarmupLeads() {
   // The header names the folder: a queue that does not say where it comes from
   // is a list of strangers.
   const targeting = warmupState.leadsTargeting;
-  const folderName = targeting?.folderName || warmupFolderName(targeting?.folderId);
+  const folderName = targeting?.folderName || null;
   // A queue answering "nothing is targeted" must not carry a folder name in
   // its header — that would be two answers to the same question.
   title.textContent = folderName && !warmupState.leadsPrompt ? `Черга лідів · ${folderName}` : "Черга лідів";
@@ -5319,8 +4921,8 @@ function renderWarmupLeads() {
   if (warmupState.leadsPrompt) {
     subtitle.textContent = "Ціль ще не задана";
     body.innerHTML = `<div class="warmup-leads-prompt">
-      <strong>${escapeHtml(warmupState.leadsPrompt)}</strong>
-      <span>Створи кампанію вгорі й запусти її — цей список і є те, що підпадає під її папку й фільтри, ще до закріплення за акаунтом.</span>
+      <strong>Цьому серверу не задано, з якої папки CRM брати людей.</strong>
+      <span>Папку й фільтри більше не обирають із цього екрана — вони лишилися на сервері, разом із маршрутами кампаній. Доки там нічого не вибрано, цей список порожній не тому, що людей немає.</span>
     </div>`;
     refreshIcons();
     return;
@@ -5371,20 +4973,9 @@ function renderWarmupProfiles() {
   if (!body) return;
 
   if (!warmupState.profiles.length) {
-    body.innerHTML = '<tr><td colspan="7"><div class="empty-state">Профілів за цим запитом немає.</div></td></tr>';
-    renderWarmupCampaignDetail();
+    body.innerHTML = '<tr><td colspan="6"><div class="empty-state">Профілів за цим запитом немає.</div></td></tr>';
     return;
   }
-
-  // The tick column belongs to the selected campaign: an account works a
-  // campaign, not "the targeting", and there is no second place that answers
-  // which folder an account is on.
-  const campaign = warmupSelectedCampaign();
-  const ticked = warmupCampaignAccountIds(campaign);
-  const tickable = Boolean(campaign) && warmupState.campaignsReady;
-  const tickTitle = campaign
-    ? `Вести «${campaign.name || "цю кампанію"}» з цього акаунта`
-    : "Спочатку обери кампанію вгорі, потім познач акаунти, які її ведуть";
 
   body.innerHTML = warmupState.profiles
     .map((profile) => {
@@ -5395,11 +4986,6 @@ function renderWarmupProfiles() {
       const identity = profile.identity || account?.identity || null;
       return `
         <tr data-warmup-profile="${escapeHtml(profile.id)}" class="${profile.id === warmupState.selectedProfileId ? "is-selected" : ""}">
-          <td class="warmup-tick">
-            ${account
-              ? `<input type="checkbox" data-warmup-account-tick="${escapeAttr(account.id)}" ${ticked.has(account.id) ? "checked" : ""} ${tickable ? "" : "disabled"} aria-label="Вести вибрану кампанію з акаунта ${escapeAttr(profile.name)}" title="${escapeAttr(tickTitle)}" />`
-              : '<span class="warmup-subtle" title="Ще не на прогріві, тож із нього не можна надсилати">—</span>'}
-          </td>
           <td>
             <strong>${escapeHtml(profile.name)}</strong>
             ${identity?.name
@@ -5420,7 +5006,6 @@ function renderWarmupProfiles() {
     })
     .join("");
 
-  renderWarmupCampaignDetail();
   refreshIcons();
 }
 
@@ -5526,323 +5111,11 @@ function renderWarmupDetail() {
   refreshIcons();
 }
 
-/**
- * Folders and the campaigns, in one round. Both are allowed to be missing —
- * the server may not carry them yet — and the panel says so rather than
- * pretending there are no campaigns.
- */
-async function loadWarmupCampaigns({ resetForm = true } = {}) {
-  const [folders, campaigns] = await Promise.allSettled([
-    warmupApi("/folders"),
-    warmupApi("/campaigns")
-  ]);
-
-  const problems = [];
-  if (folders.status === "fulfilled") {
-    warmupState.folders = folders.value.folders || [];
-    warmupState.foldersReady = true;
-  } else {
-    warmupState.foldersReady = false;
-    problems.push(folders.reason?.status === 404
-      ? "Цей сервер ще не віддає список папок, тож тут не вибрати папку."
-      : `Список папок не вдалося прочитати: ${folders.reason?.message}`);
-  }
-
-  if (campaigns.status === "fulfilled") {
-    warmupState.campaigns = campaigns.value.campaigns || [];
-    warmupState.campaignsReady = true;
-  } else {
-    warmupState.campaignsReady = false;
-    warmupState.campaigns = [];
-    problems.push(campaigns.reason?.status === 404
-      ? "Цей сервер ще не тримає кампаній, тож створене тут не збережеться."
-      : `Кампанії не вдалося прочитати: ${campaigns.reason?.message}`);
-  }
-  warmupState.campaignsError = problems.join(" ");
-
-  // A selection that no longer exists is not a selection. Falling back to the
-  // first campaign keeps the forecast on screen rather than emptying the panel.
-  if (!warmupCampaignById(warmupState.selectedCampaignId)) {
-    warmupState.selectedCampaignId = warmupState.campaigns[0]?.id || null;
-  }
-  if (warmupState.formOpen && warmupState.formCampaignId && !warmupCampaignById(warmupState.formCampaignId)) {
-    warmupState.formOpen = false;
-    warmupState.formCampaignId = null;
-  }
-
-  renderWarmupCampaigns({ resetForm });
-  renderWarmupProfiles();
-}
-
-/**
- * Show one campaign's own answer immediately. It is not the whole answer:
- * `progressApproximate` and the order ranks are about how campaigns relate to
- * each other, so a write that can change a folder or an account is followed by
- * a reload of the list rather than left as one fresh row among stale ones.
- */
-function spliceWarmupCampaign(campaign) {
-  if (!campaign?.id) return;
-  const index = warmupState.campaigns.findIndex((item) => item.id === campaign.id);
-  if (index === -1) warmupState.campaigns.push(campaign);
-  else warmupState.campaigns[index] = campaign;
-}
-
-function openWarmupCampaignForm(campaignId = null) {
-  warmupState.formOpen = true;
-  warmupState.formCampaignId = campaignId;
-  warmupState.campaignNotice = "";
-  if (campaignId) warmupState.selectedCampaignId = campaignId;
-  renderWarmupCampaigns({ resetForm: true });
-  renderWarmupProfiles();
-  document.getElementById("warmupCampaignName")?.focus();
-}
-
-function closeWarmupCampaignForm() {
-  warmupState.formOpen = false;
-  warmupState.formCampaignId = null;
-  warmupState.campaignNotice = "";
-  renderWarmupCampaigns();
-}
-
-async function saveWarmupCampaignForm() {
-  if (!warmupState.campaignsReady || warmupState.savingCampaign) return;
-  const form = warmupFormValues();
-  const editing = warmupEditingCampaign();
-
-  if (!form.folderId) {
-    warmupState.campaignNotice = "Спочатку обери папку — кампанії треба звідкись брати людей.";
-    renderWarmupCampaigns();
-    return;
-  }
-  if (!form.name) {
-    warmupState.campaignNotice = "Дай їй назву — список кампаній без назв ніхто не прочитає.";
-    renderWarmupCampaigns();
-    return;
-  }
-
-  warmupState.savingCampaign = true;
-  warmupState.campaignNotice = "";
-  renderWarmupCampaigns();
-
-  let saved = false;
-  try {
-    const body = {
-      name: form.name,
-      folderId: form.folderId,
-      filters: form.filters,
-      productId: form.productId || null
-    };
-    const payload = editing
-      ? await warmupApi("/campaigns", { method: "PATCH", body: JSON.stringify({ id: editing.id, ...body }) })
-      : await warmupApi("/campaigns", { method: "POST", body: JSON.stringify(body) });
-    const campaign = payload.campaign;
-    if (campaign) {
-      spliceWarmupCampaign(campaign);
-      warmupState.selectedCampaignId = campaign.id;
-    }
-    saved = true;
-  } catch (error) {
-    // Kept in the panel rather than the page-wide note: this is about the
-    // campaign somebody just wrote, not about the warm-up being broken.
-    warmupState.campaignNotice = error.message;
-  } finally {
-    warmupState.savingCampaign = false;
-  }
-
-  if (saved) {
-    warmupState.formOpen = false;
-    warmupState.formCampaignId = null;
-  }
-  renderWarmupCampaigns({ resetForm: true });
-  renderWarmupProfiles();
-  if (saved) await loadWarmupCampaigns({ resetForm: false });
-  if (saved) await loadWarmupLeads();
-}
-
-/** Start, pause, reopen, mark done — all one PATCH of `state`. */
-async function setWarmupCampaignState(campaignId, nextState) {
-  const campaign = warmupCampaignById(campaignId);
-  if (!campaign || campaign.state === nextState) return;
-  try {
-    const payload = await warmupApi("/campaigns", {
-      method: "PATCH",
-      body: JSON.stringify({ id: campaignId, state: nextState })
-    });
-    if (payload.campaign) spliceWarmupCampaign(payload.campaign);
-    warmupState.campaignNotice = "";
-  } catch (error) {
-    warmupState.campaignNotice = error.message;
-  }
-  // The order ranks are relative, so one campaign starting renumbers the rest.
-  await loadWarmupCampaigns({ resetForm: false });
-  await loadWarmupLeads();
-}
-
-/**
- * Moving a campaign one place up or down the order.
- *
- * `order` is a position, not a number to be compared: PATCHing it puts the
- * campaign at that index and renumbers the rest around it, so one write does
- * the whole move and the list stays a dense 0..n-1 with nothing sharing a
- * place. Past either end is that end, so a move from the last row needs no
- * clamping beyond the disabled button.
- *
- * Every other row's position changes too, which is why this reloads the list
- * rather than splicing the one campaign that came back.
- */
-async function moveWarmupCampaign(campaignId, direction) {
-  const index = warmupState.campaigns.findIndex((item) => item.id === campaignId);
-  const target = index + (direction === "up" ? -1 : 1);
-  if (index === -1 || target < 0 || target >= warmupState.campaigns.length) return;
-  if (warmupState.savingCampaign) return;
-
-  warmupState.savingCampaign = true;
-  renderWarmupCampaigns();
-
-  try {
-    await warmupApi("/campaigns", {
-      method: "PATCH",
-      body: JSON.stringify({ id: campaignId, order: target })
-    });
-    warmupState.campaignNotice = "";
-  } catch (error) {
-    warmupState.campaignNotice = error.message;
-  } finally {
-    warmupState.savingCampaign = false;
-  }
-
-  await loadWarmupCampaigns({ resetForm: false });
-  await loadWarmupLeads();
-}
-
-/**
- * Deleting releases every claim its accounts hold; what was already sent stays,
- * because history is not the campaign's to delete. Both halves are said before
- * anything is removed.
- */
-async function deleteWarmupCampaign(campaignId) {
-  const campaign = warmupCampaignById(campaignId);
-  if (!campaign) return;
-  const queued = Number(campaign.progress?.queued) || 0;
-  const sent = Number(campaign.progress?.sent) || 0;
-  const consequence = [
-    queued ? `${warmupCount(queued)} закріплених, але не надісланих, ${uaPlural(queued, "людина повертається", "людини повертаються", "людей повертаються")} в пул` : "",
-    sent ? `${warmupCount(sent)} уже надісланих ${uaPlural(sent, "лишається", "лишаються", "лишаються")} в історії` : ""
-  ].filter(Boolean).join(", ");
-  if (!window.confirm(`Видалити «${campaign.name || "цю кампанію"}»?${consequence ? `\n\n${consequence}.` : ""}`)) return;
-
-  try {
-    const payload = await warmupApi(`/campaigns?id=${encodeURIComponent(campaignId)}`, { method: "DELETE" });
-    warmupState.campaigns = warmupState.campaigns.filter((item) => item.id !== campaignId);
-    const released = Number(payload?.released) || 0;
-    warmupState.campaignNotice = released
-      ? `${warmupCount(released)} закріплених ${uaPlural(released, "людина знову в пулі", "людини знову в пулі", "людей знову в пулі")}.`
-      : "";
-    if (warmupState.selectedCampaignId === campaignId) {
-      warmupState.selectedCampaignId = warmupState.campaigns[0]?.id || null;
-    }
-    if (warmupState.formCampaignId === campaignId) {
-      warmupState.formOpen = false;
-      warmupState.formCampaignId = null;
-    }
-  } catch (error) {
-    warmupState.campaignNotice = error.message;
-  }
-  renderWarmupCampaigns();
-  renderWarmupProfiles();
-  await loadWarmupCampaigns({ resetForm: false });
-  await loadWarmupLeads();
-}
-
-function selectWarmupCampaign(campaignId) {
-  if (warmupState.selectedCampaignId === campaignId) return;
-  warmupState.selectedCampaignId = campaignId;
-  warmupState.campaignNotice = "";
-  // Editing one campaign while another is selected would leave the tick column
-  // answering for a campaign the form is not about.
-  if (warmupState.formOpen && warmupState.formCampaignId !== campaignId) {
-    warmupState.formOpen = false;
-    warmupState.formCampaignId = null;
-  }
-  renderWarmupCampaigns();
-  renderWarmupProfiles();
-  loadWarmupLeads();
-}
-
-/** Ticking an account is itself a save: the forecast has to follow the tick. */
-function toggleWarmupAccount(accountId, on) {
-  const campaign = warmupSelectedCampaign();
-  if (!campaign) {
-    warmupState.campaignNotice = "Спочатку обери кампанію вгорі — акаунт веде кампанію, а не окрему папку.";
-    renderWarmupCampaigns();
-    renderWarmupProfiles();
-    return;
-  }
-  const ids = warmupCampaignAccountIds(campaign);
-  if (on) ids.add(accountId);
-  else ids.delete(accountId);
-  const accountIds = Array.from(ids);
-
-  // Shown before it is saved, then corrected by whatever comes back: a tick
-  // that waits for a round trip reads as a click that did not land.
-  spliceWarmupCampaign({ ...campaign, accountIds });
-  saveWarmupCampaignAccounts(campaign.id, accountIds);
-}
-
-async function saveWarmupCampaignAccounts(campaignId, accountIds) {
-  // A second tick while the first save is still in flight is not a lost click,
-  // it is the next thing to save — otherwise ticking two accounts quickly
-  // leaves the second one on screen and absent from the server.
-  if (warmupState.savingCampaign) {
-    warmupState.pendingAccountIds = { campaignId, accountIds };
-    renderWarmupCampaigns();
-    renderWarmupProfiles();
-    return;
-  }
-
-  warmupState.savingCampaign = true;
-  warmupState.campaignNotice = "";
-  renderWarmupCampaigns();
-  renderWarmupProfiles();
-
-  try {
-    const payload = await warmupApi("/campaigns", {
-      method: "PATCH",
-      body: JSON.stringify({ id: campaignId, accountIds })
-    });
-    if (payload.campaign) spliceWarmupCampaign(payload.campaign);
-  } catch (error) {
-    warmupState.campaignNotice = error.message;
-    // Put back whatever the server still believes, rather than leaving a tick
-    // on screen that nothing behind it agrees with.
-    await loadWarmupCampaigns({ resetForm: false });
-  } finally {
-    warmupState.savingCampaign = false;
-  }
-
-  renderWarmupCampaigns();
-  renderWarmupProfiles();
-
-  if (warmupState.pendingAccountIds) {
-    const next = warmupState.pendingAccountIds;
-    warmupState.pendingAccountIds = null;
-    await saveWarmupCampaignAccounts(next.campaignId, next.accountIds);
-    return;
-  }
-  // An account joining a campaign can make another campaign's count
-  // approximate, so the whole list is re-read once the ticks have settled.
-  await loadWarmupCampaigns({ resetForm: false });
-}
-
 async function loadWarmupLeads() {
   try {
-    // The pool belongs to the campaign on screen. Left to itself the server
-    // answers for the first running one, which is a different folder from the
-    // one somebody is looking at as soon as there are two campaigns.
-    const campaignId = warmupState.selectedCampaignId;
-    const params = new URLSearchParams({ limit: "10" });
-    if (campaignId) params.set("campaignId", campaignId);
-    const payload = await warmupApi(`/leads?${params}`);
+    // No campaign is named: the server answers for the one it is already
+    // running, which is now the only campaign anybody can be looking at.
+    const payload = await warmupApi("/leads?limit=10");
     warmupState.leads = payload.leads || [];
     warmupState.leadsTotal = Number.isFinite(payload.queueTotal) ? payload.queueTotal : null;
     warmupState.leadsTargeting = payload.campaign || payload.targeting || null;
@@ -5858,7 +5131,7 @@ async function loadWarmupLeads() {
     // drawing it in red would be calling the user's unfinished setup a fault.
     if (error.payload?.needsCampaign || error.payload?.needsTargeting || error.status === 409) {
       warmupState.leadsReady = true;
-      warmupState.leadsPrompt = error.message || "Створи кампанію, перш ніж тягнути лідів";
+      warmupState.leadsPrompt = "no-target";
     } else if (error.status === 404) {
       warmupState.leadsReady = false;
     } else {
@@ -5910,9 +5183,6 @@ async function loadWarmup({ full = true } = {}) {
     renderWarmupConfigNote();
     if (!warmupState.config.configured) {
       warmupState.profiles = [];
-      warmupState.foldersReady = false;
-      warmupState.campaignsReady = false;
-      warmupState.campaignsError = "Прогрів на цьому сервері не налаштований, тож немає папок, на яких будувати кампанію.";
       // The schedule lives in the Anty database too, so it is unreachable for
       // the same reason — and has to say so. Left alone it sat on its loading
       // text for good, which reads as a panel that is still trying.
@@ -5921,7 +5191,6 @@ async function loadWarmup({ full = true } = {}) {
       warmupState.strategyError = "Розклад лежить у базі Anty, а цей сервер до неї не підключений — тож і днів тут показати нізвідки.";
       renderWarmupProfiles();
       renderWarmupStats();
-      renderWarmupCampaigns();
       renderWarmupStrategy();
       return;
     }
@@ -5936,9 +5205,6 @@ async function loadWarmup({ full = true } = {}) {
     // The schedule every account runs on. It depends on nothing else here and
     // nothing here depends on it, so it is read once and left alone.
     await loadWarmupStrategy();
-    // Campaigns first: the tick column in the profiles table is drawn from the
-    // selected one, and the queue below is drawn from its accounts.
-    await loadWarmupCampaigns({ resetForm: full });
     await loadWarmupProfiles();
     await loadWarmupLeads();
     if (warmupState.selectedAccountId) await loadWarmupAccountDetail(warmupState.selectedAccountId);
@@ -6048,56 +5314,6 @@ document.getElementById("warmupDetailBody")?.addEventListener("click", (event) =
         renderWarmupConfigNote();
       });
   }
-});
-
-/* The form only ever redraws the detail: it is what says the numbers on screen
-   are for the saved campaign, not for what is being typed. */
-function warmupCampaignFormTouched() {
-  warmupState.campaignNotice = "";
-  renderWarmupCampaignDetail();
-  renderWarmupCampaignForm();
-}
-
-document.getElementById("warmupFolderSelect")?.addEventListener("change", warmupCampaignFormTouched);
-document.getElementById("warmupCampaignProduct")?.addEventListener("change", warmupCampaignFormTouched);
-document.getElementById("warmupCampaignName")?.addEventListener("input", warmupCampaignFormTouched);
-
-for (const id of ["warmupFilterCountry", "warmupFilterPosition", "warmupFilterStatus", "warmupFilterOwner"]) {
-  document.getElementById(id)?.addEventListener("input", warmupCampaignFormTouched);
-}
-
-document.getElementById("warmupCampaignNewBtn")?.addEventListener("click", () => openWarmupCampaignForm(null));
-document.getElementById("warmupCampaignCancelBtn")?.addEventListener("click", () => closeWarmupCampaignForm());
-document.getElementById("warmupCampaignForm")?.addEventListener("submit", (event) => {
-  event.preventDefault();
-  saveWarmupCampaignForm();
-});
-
-document.getElementById("warmupCampaignList")?.addEventListener("click", (event) => {
-  const row = event.target.closest("[data-warmup-campaign]");
-  if (!row) return;
-  const campaignId = row.dataset.warmupCampaign;
-
-  const move = event.target.closest("[data-warmup-campaign-move]");
-  if (move) {
-    moveWarmupCampaign(campaignId, move.dataset.warmupCampaignMove);
-    return;
-  }
-
-  const stateButton = event.target.closest("[data-warmup-campaign-state]");
-  if (stateButton) {
-    setWarmupCampaignState(campaignId, stateButton.dataset.warmupCampaignState);
-    return;
-  }
-  if (event.target.closest("[data-warmup-campaign-edit]")) {
-    openWarmupCampaignForm(campaignId);
-    return;
-  }
-  if (event.target.closest("[data-warmup-campaign-delete]")) {
-    deleteWarmupCampaign(campaignId);
-    return;
-  }
-  selectWarmupCampaign(campaignId);
 });
 
 document.getElementById("warmupLeadsRefreshBtn")?.addEventListener("click", () => loadWarmupLeads());

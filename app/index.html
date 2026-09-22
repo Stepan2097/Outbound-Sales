@@ -682,83 +682,18 @@
             <!-- Above Campaigns because a reply outranks a plan: everything below
                  this panel is what the accounts are about to do, and this is what
                  already came back. -->
-            <section class="panel warmup-campaigns-panel span-2">
+            <section class="panel warmup-strategy-panel span-2">
               <div class="panel-heading">
                 <div>
-                  <h2>Кампанії</h2>
-                  <p>Кожна кампанія — це папка, акаунти, які її ведуть, і продукт. І те, у що це виллється на практиці при швидкості, дозволеній цим акаунтам.</p>
+                  <h2>Стратегія прогріву</h2>
+                  <p id="warmupStrategySubtitle">Одна на всі акаунти: скільки чого дозволено кожного дня</p>
                 </div>
-                <div class="warmup-campaigns-controls">
-                  <span class="pill tone-muted" id="warmupCampaignsPill">завантаження</span>
-                  <button class="primary-button" id="warmupCampaignNewBtn" type="button"><i data-lucide="plus"></i><span>Нова кампанія</span></button>
+                <div class="warmup-strategy-controls">
+                  <span class="pill tone-muted" id="warmupStrategyPill">завантаження</span>
+                  <button class="text-button" id="warmupStrategyToggleBtn" type="button"><i data-lucide="chevron-down"></i><span>Відкрити деталі</span></button>
                 </div>
               </div>
-
-              <form class="warmup-campaign-form" id="warmupCampaignForm" hidden>
-                <div class="warmup-campaign-grid">
-                  <label class="warmup-field warmup-field-name">
-                    <span>Назва</span>
-                    <input id="warmupCampaignName" type="text" placeholder="Для чого ця кампанія?" autocomplete="off" />
-                  </label>
-                  <label class="warmup-field warmup-field-folder">
-                    <span>Папка</span>
-                    <select id="warmupFolderSelect" aria-label="Папка CRM">
-                      <option value="">Завантаження папок...</option>
-                    </select>
-                  </label>
-                  <label class="warmup-field warmup-field-product">
-                    <span>Продукт</span>
-                    <select id="warmupCampaignProduct" aria-label="Продукт">
-                      <option value="">Без продукту</option>
-                    </select>
-                  </label>
-                  <label class="warmup-field warmup-field-filter">
-                    <span>Країна</span>
-                    <input id="warmupFilterCountry" type="text" placeholder="Будь-яка країна" autocomplete="off" />
-                  </label>
-                  <label class="warmup-field warmup-field-filter">
-                    <span>Посада містить</span>
-                    <input id="warmupFilterPosition" type="text" placeholder="Будь-яка посада" autocomplete="off" />
-                  </label>
-                  <label class="warmup-field warmup-field-filter">
-                    <span>Статус ліда</span>
-                    <input id="warmupFilterStatus" type="text" placeholder="Будь-який статус" list="warmupLeadStatusOptions" autocomplete="off" />
-                    <datalist id="warmupLeadStatusOptions">
-                      <option value="new"></option>
-                    </datalist>
-                  </label>
-                  <label class="warmup-field warmup-field-filter">
-                    <span>Власник</span>
-                    <input id="warmupFilterOwner" type="text" placeholder="Будь-який власник (id користувача CRM)" autocomplete="off" />
-                  </label>
-                </div>
-                <div class="warmup-campaign-form-footer">
-                  <button class="primary-button" id="warmupCampaignSaveBtn" type="submit"><i data-lucide="crosshair"></i><span>Зберегти кампанію</span></button>
-                  <button class="text-button" id="warmupCampaignCancelBtn" type="button"><i data-lucide="x"></i><span>Скасувати</span></button>
-                  <p class="warmup-campaign-form-note" id="warmupCampaignFormNote"></p>
-                </div>
-              </form>
-
-              <div class="warmup-campaign-list" id="warmupCampaignList"></div>
-
-              <div class="warmup-campaign-detail" id="warmupCampaignDetail"></div>
-
-              <!-- Кого вести — вище; як швидко — тут. Один блок, бо це дві
-                   половини одного рішення, і розведені по двох панелях вони
-                   читалися як дві різні теми. -->
-              <section class="warmup-strategy-section">
-                <div class="warmup-strategy-head">
-                  <div>
-                    <h3>Стратегія прогріву</h3>
-                    <p id="warmupStrategySubtitle">Одна на всі акаунти: скільки чого дозволено кожного дня</p>
-                  </div>
-                  <div class="warmup-strategy-controls">
-                    <span class="pill tone-muted" id="warmupStrategyPill">завантаження</span>
-                    <button class="text-button" id="warmupStrategyToggleBtn" type="button"><i data-lucide="chevron-down"></i><span>Відкрити деталі</span></button>
-                  </div>
-                </div>
-                <div id="warmupStrategyBody" hidden></div>
-              </section>
+              <div id="warmupStrategyBody" hidden></div>
             </section>
 
             <section class="panel warmup-list-panel">
@@ -782,7 +717,6 @@
                 <table>
                   <thead>
                     <tr>
-                      <th class="warmup-tick-head" title="Відмічені акаунти ведуть вибрану кампанію">Веде</th>
                       <th>Профіль</th>
                       <th>Статус</th>
                       <th>День</th>
