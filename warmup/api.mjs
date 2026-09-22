@@ -1,7 +1,8 @@
 import { anty, crm, CONTACT_ID_BATCH, antyTeamId, crmError, leadById, leadQueue, queueTotal, today } from "./db.mjs";
 import { RestError } from "./rest.mjs";
 import {
-  ACTION_KINDS, ACTION_LABEL, currentDay, fromDays, planForDay, toDays, totalDays, validateStrategy
+  ACTION_KINDS, ACTION_LABEL, currentDay, fromDays, nextNoteDay, noteAllowedOnDay, planForDay, toDays,
+  totalDays, validateStrategy
 } from "./strategy.mjs";
 import { SESSION_WINDOW, insideWindow, nextSession, windowLabel } from "./schedule.mjs";
 import { HEALTH_LABEL, HEALTH_VALUES, deriveStatus, isHealth } from "./status.mjs";
@@ -232,11 +233,20 @@ async function upkeepWorkFor(account, run, { now = new Date() } = {}) {
 async function inviteWorkFor(account) {
   const allowance = await connectAllowance(account);
   const left = allowance.blocked ? 0 : Math.max(0, (allowance.quota || 0) - (allowance.spent || 0));
+  const strategy = allowance.run?.strategy_snapshot;
+  // Today's rule about notes, and the first day that has one. Both travel with
+  // the work rather than being left for the agent to derive: an empty `toSend`
+  // on an account with people queued is otherwise indistinguishable from a
+  // fault, and "their note cannot go out until day 11" is the one sentence
+  // that explains it.
+  const notesAllowed = Boolean(strategy) && noteAllowedOnDay(strategy, allowance.day);
   return {
-    toSend: await invitesToSend(account.id, Math.min(left, MAX_INVITES_PER_RUN)),
+    toSend: await invitesToSend(account.id, Math.min(left, MAX_INVITES_PER_RUN), { notesAllowed }),
     toCheck: await invitesToCheck(account.id, MAX_INVITE_CHECKS_PER_RUN),
     lastCheckedAt: await invitesLastCheckedAt(account.id),
-    connectsLeft: left
+    connectsLeft: left,
+    notesAllowedToday: notesAllowed,
+    nextNoteDay: strategy ? nextNoteDay(strategy, allowance.day || 1) : null
   };
 }
 
@@ -1691,6 +1701,14 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         const waiting = await anty.from("wl_outreach").select("id")
           .eq("account_id", account.id).eq("status", WAITING_STATUS).count();
         const left = allowance.blocked ? 0 : Math.max(0, (allowance.quota || 0) - (allowance.spent || 0));
+        const strategy = allowance.run?.strategy_snapshot;
+        // What this account's plan says about notes, sent to the screen where
+        // the note is actually written. A seller approves a sentence days
+        // before the request goes out, and on a day that forbids notes it
+        // would never reach anybody — silently, and looking like a success.
+        // Saying it at the keyboard is the only place it can still be acted
+        // on.
+        const notesAllowed = Boolean(strategy) && noteAllowedOnDay(strategy, allowance.day);
         return {
           id: account.id,
           label: account.label,
@@ -1701,6 +1719,9 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           connectsDone: allowance.blocked ? 0 : allowance.spent || 0,
           connectsLeft: left,
           waiting,
+          day: allowance.blocked ? null : allowance.day ?? null,
+          notesAllowedToday: notesAllowed,
+          nextNoteDay: strategy ? nextNoteDay(strategy, allowance.day || 1) : null,
           // An account that cannot carry an invitation is still listed, with
           // the reason. Hiding it leaves a seller wondering where their login
           // went; saying "on a captcha" tells them what to go and fix.

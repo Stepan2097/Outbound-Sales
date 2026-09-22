@@ -116,6 +116,29 @@ invented here:
 `waiting`; tomorrow's run picks them up. An expired lease in the middle of a
 Connect is worse than an invitation that goes out a day later.
 
+## Two kinds of empty note, and they ask for opposite things
+
+`toSend[].noteExpected` tells them apart, and you must read it before you
+decide anything about a note.
+
+**`noteExpected: false` — the day is meant to go without one.** The warm-up
+says per phase whether a note may be attached at all, and the early phases say
+no: those requests go to colleagues and verified contacts with nothing
+attached, because a new account writing to strangers is the shape this whole
+project exists to avoid. That rule is editable per day on the warm-up screen,
+so somebody decided it. **Send the request bare, without hesitating and without
+composing anything.** Reporting `no_note` here holds a person for a problem
+nobody has.
+
+**`noteExpected: true` — the note must go with it**, and everything below
+applies.
+
+You will never be handed a note-carrying invitation on a day that forbids
+notes: the portal holds it back and it returns on a day that can carry it. So
+an empty `toSend` with `connectsLeft: 3` now has a second innocent meaning
+besides "nobody is queued" — read `notesAllowedToday` and `nextNoteDay`, which
+travel in the same answer.
+
 ## When the note cannot be attached: `no_note`
 
 `toSend[].note` is the text a person wrote or approved. LinkedIn does not

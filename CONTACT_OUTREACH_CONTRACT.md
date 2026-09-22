@@ -268,10 +268,13 @@ not send it.
 
 ```
 invites: {
-  toSend:  [ { outreachId, crmContactId, name, company, position, linkedin, note } ],
+  toSend:  [ { outreachId, crmContactId, name, company, position, linkedin,
+               note, noteExpected } ],
   toCheck: [ { outreachId, crmContactId, name, linkedin, heldAt } ],
   lastCheckedAt: "2026-09-21T09:12:04.318Z" | null,
-  connectsLeft: 3
+  connectsLeft: 3,
+  notesAllowedToday: false,
+  nextNoteDay: 11 | null
 }
 ```
 
@@ -281,6 +284,35 @@ is every `pending` row for this account, oldest first, capped at 20 — a check
 costs no allowance, and without the cap it grows into a crawl of everybody this
 account ever wrote to. `note` is the text the seller wrote; send it as the
 invitation note, do not compose one.
+
+#### A bare request is sometimes the plan, and `noteExpected` is how you tell
+
+The warm-up says per phase whether a note may be attached at all, and the early
+phases say no: those days send requests to colleagues and verified contacts
+with nothing attached, because a new account writing to strangers is the shape
+the whole plan exists to avoid. That rule is now editable per day on the
+warm-up screen, so it is a decision somebody makes rather than a constant.
+
+This meets the rule that a seller's approved sentence must never vanish, and
+the two are resolved in the portal, not in the browser:
+
+- **An invitation that carries a note is not handed to you on a day that
+  forbids notes.** It stays `waiting` and comes back on a day that can carry
+  it. Sending it bare would drop a sentence a human wrote and approved, and
+  `wl_outreach_person_once` means that was the only approach that person will
+  ever get; sending it with the note would break the rule the warm-up made to
+  keep the account alive. "Not today" costs a day and nothing else.
+- **So `noteExpected: false` means bare is the intent.** Send it without
+  hesitating and without composing anything. Reporting `no_note` on one of
+  these is wrong — there is no text to lose.
+- **`noteExpected: true` means the note must go out with it**, and `no_note`
+  keeps exactly the meaning it always had: it was expected and LinkedIn would
+  not take it.
+
+`notesAllowedToday` and `nextNoteDay` are the account's own facts, said out
+loud so an empty `toSend` can be explained rather than guessed at.
+`nextNoteDay` is `null` when the rest of the plan allows no note at all — a
+decision, not a wait that ends on its own.
 
 ### `POST /api/warmup/agent` — `invite.sent`
 
@@ -322,6 +354,11 @@ shorten the note, move the invitation to an account that can attach one, or
 decide a bare request is acceptable this once. **Truncating the note to fit is
 not an option the agent has:** it would change text a person approved into text
 nobody did.
+
+**`no_note` is only ever the right report when `noteExpected` is true.** On a
+row handed over with `noteExpected: false` there is no text to lose and a bare
+request is what the day's plan means; reporting `no_note` there holds a person
+for a problem nobody has.
 
 **There is no refusal on quota, and that changed while this was built.** An
 earlier draft answered 409 and moved nothing, which was wrong for the reason
@@ -371,9 +408,12 @@ undone: `wl_outreach_person_once` is unique on the contact, so the row now says
 this account approached somebody it did not.
 
 `toSend` can be empty while `connectsLeft` is positive, and that is not an
-error — it means nobody is queued. Do not fall back to inventing recipients;
-that is the rule `run-account.mjs` has followed from the beginning and it is
-why every request in this system is attached to a person and a status.
+error. It means one of two things, and the answer says which: nobody is queued,
+or everybody queued is carrying a note on a day that forbids one — read
+`notesAllowedToday` and `nextNoteDay`. Do not fall back to inventing
+recipients; that is the rule `run-account.mjs` has followed from the beginning
+and it is why every request in this system is attached to a person and a
+status.
 
 ### Upkeep: what wakes an account once warming is over
 

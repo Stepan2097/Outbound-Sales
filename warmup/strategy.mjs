@@ -68,6 +68,41 @@ export function phaseForDay(strategy, day) {
   return (strategy?.phases || []).find((phase) => day >= phase.fromDay && day <= phase.toDay) || null;
 }
 
+/**
+ * Whether this day's plan permits a note on a connection request.
+ *
+ * The warm-up says this per phase, and it is a rule about the account rather
+ * than about the person: early days send requests to colleagues and verified
+ * contacts with nothing attached, because a new account writing to strangers
+ * is the pattern the whole plan exists to avoid.
+ *
+ * It matters to outreach because a seller writes and approves a note when the
+ * person is queued, which can be days before the request actually goes out. A
+ * day that forbids notes would send that request bare — the approved sentence
+ * silently gone, and a cold request made in a phase meant for people who
+ * already know the account. So the two are read together, and a note-carrying
+ * invitation waits for a day that can carry it.
+ */
+export function noteAllowedOnDay(strategy, day) {
+  return Boolean(phaseForDay(strategy, day)?.connectionNote);
+}
+
+/**
+ * The first day from `fromDay` onwards whose plan allows a note, or `null`
+ * when the rest of the plan has none.
+ *
+ * `null` is a real answer and the screens say it in words: a strategy edited
+ * to forbid notes throughout is a decision somebody made, not a wait that will
+ * end on its own.
+ */
+export function nextNoteDay(strategy, fromDay = 1) {
+  const last = totalDays(strategy);
+  for (let day = Math.max(1, Math.trunc(fromDay) || 1); day <= last; day += 1) {
+    if (noteAllowedOnDay(strategy, day)) return day;
+  }
+  return null;
+}
+
 function seedHash(text) {
   let hash = 2166136261;
   for (let index = 0; index < text.length; index += 1) {

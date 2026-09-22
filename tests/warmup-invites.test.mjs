@@ -4,7 +4,7 @@ import test from "node:test";
 
 import { handleWarmupApi } from "../warmup/api.mjs";
 import { ACCEPTED_STATUS, WAITING_STATUS, canMove, describeInvite } from "../warmup/invites.mjs";
-import { DEFAULT_STRATEGY } from "../warmup/strategy.mjs";
+import { DEFAULT_STRATEGY, nextNoteDay, noteAllowedOnDay } from "../warmup/strategy.mjs";
 
 // ── the transition table ──────────────────────────────────────────────────
 //
@@ -101,6 +101,10 @@ function matches(row, params) {
       if (!expression.slice(4, -1).split(",").includes(String(value))) return false;
     } else if (expression.startsWith("lt.")) {
       if (!(String(value) < expression.slice(3))) return false;
+    } else if (expression === "is.null") {
+      if (value !== null && value !== undefined) return false;
+    } else if (expression === "not.is.null") {
+      if (value === null || value === undefined) return false;
     }
   }
   return true;
@@ -744,4 +748,73 @@ test("the account picker offers only accounts that could carry a request, and sa
   assert.ok(chloe.connectQuota >= 0);
   assert.equal(sam.canSend, false);
   assert.match(sam.reason, /captcha|Account health/i, "a blocked account is listed with its reason, not hidden");
+});
+
+// ── the day's rule about notes, and the seller's approved sentence ─────────
+//
+// Two rules that were written apart and meet here. The warm-up says early days
+// send requests with nothing attached; outreach says a note a human approved
+// must never silently vanish. An invitation queued on day 2 and sent on day 5
+// used to satisfy the first by breaking the second — the request went out bare
+// and the screen called it sent.
+
+test("an invitation carrying a note is not handed over on a day that forbids notes", async () => {
+  // Day 5 of the shipped strategy: requests are allowed, notes are not.
+  await call({
+    method: "POST", path: "/api/warmup/invites",
+    body: { accountId: "acc-1", crmContactId: "c-1", note: "одне коротке питання" }
+  });
+
+  const answer = await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" });
+  assert.equal(answer.status, 200);
+  assert.deepEqual(answer.payload.invites.toSend, [], "sending it today would drop the sentence a human approved");
+  assert.equal(answer.payload.invites.notesAllowedToday, false);
+  assert.equal(answer.payload.invites.nextNoteDay, 11, "and the answer says when it can go");
+  assert.equal(rows.wl_outreach[0].status, WAITING_STATUS, "the person is held, not spent");
+});
+
+test("an invitation with no note goes out on that same day, because bare is what the day means", async () => {
+  await call({
+    method: "POST", path: "/api/warmup/invites",
+    body: { accountId: "acc-1", crmContactId: "c-1" }
+  });
+
+  const answer = await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" });
+  const [invitation] = answer.payload.invites.toSend;
+  assert.ok(invitation, "nothing is lost here — there is no text to lose");
+  assert.equal(invitation.note, "");
+  assert.equal(invitation.noteExpected, false, "so `no_note` would be the wrong report on this one");
+});
+
+test("on a day that allows a note the person and the note travel together", async () => {
+  rows.wl_runs[0].started_at = startedForDay(12);
+  await call({
+    method: "POST", path: "/api/warmup/invites",
+    body: { accountId: "acc-1", crmContactId: "c-1", note: "одне коротке питання" }
+  });
+
+  const answer = await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" });
+  const [invitation] = answer.payload.invites.toSend;
+  assert.ok(invitation);
+  assert.equal(invitation.note, "одне коротке питання");
+  assert.equal(invitation.noteExpected, true, "and here a missing note really is `no_note`");
+  assert.equal(answer.payload.invites.notesAllowedToday, true);
+  assert.equal(answer.payload.invites.nextNoteDay, 12, "today is the day");
+});
+
+test("the screen where the note is written learns the same rule", async () => {
+  const answer = await call({ method: "GET", path: "/api/warmup/invites/accounts" });
+  const [account] = answer.payload.accounts;
+  assert.equal(account.notesAllowedToday, false);
+  assert.equal(account.nextNoteDay, 11);
+  assert.equal(account.day, 5, "a seller can see which day they are on");
+});
+
+test("a strategy that never allows a note says so instead of promising a day", () => {
+  const silent = { phases: [{ fromDay: 1, toDay: 14, quotas: { connect: [1, 2] }, connectionNote: false }] };
+  assert.equal(noteAllowedOnDay(silent, 7), false);
+  assert.equal(nextNoteDay(silent, 1), null, "null is an answer: somebody decided this, it is not a wait that ends");
+  assert.equal(nextNoteDay(DEFAULT_STRATEGY, 1), 11);
+  assert.equal(nextNoteDay(DEFAULT_STRATEGY, 12), 12, "asking from a day that allows one answers that day");
+  assert.equal(nextNoteDay(DEFAULT_STRATEGY, 15), null, "past the end of the plan there is no next day");
 });

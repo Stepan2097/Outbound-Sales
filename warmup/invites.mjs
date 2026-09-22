@@ -284,11 +284,26 @@ export const MAX_INVITES_PER_RUN = 10;
 export const MAX_INVITE_CHECKS_PER_RUN = 20;
 
 /** Waiting invitations for this account, oldest first — the ones queued longest go first. */
-export async function invitesToSend(accountId, limit = MAX_INVITES_PER_RUN) {
+export async function invitesToSend(accountId, limit = MAX_INVITES_PER_RUN, { notesAllowed = true } = {}) {
   if (!accountId || limit <= 0) return [];
-  const rows = await anty.from("wl_outreach").select(OUTREACH_COLUMNS)
-    .eq("account_id", accountId).eq("status", WAITING_STATUS)
-    .order("created_at", { ascending: true }).limit(limit).rows();
+  let query = anty.from("wl_outreach").select(OUTREACH_COLUMNS)
+    .eq("account_id", accountId).eq("status", WAITING_STATUS);
+
+  // On a day whose plan forbids a note, an invitation carrying one is not
+  // handed over at all — it waits for a day that can carry it.
+  //
+  // Both other answers are wrong. Sending it bare drops a sentence a human
+  // wrote and approved, and `wl_outreach_person_once` means this is the only
+  // approach that person will ever get; sending it with the note breaks the
+  // rule the warm-up made to keep the account alive. "Not today" costs a day
+  // and nothing else.
+  //
+  // The filter is in the query rather than after it: applied to the page the
+  // limit already cut, a queue whose first ten rows all carry notes would come
+  // back empty while sendable rows sat behind them.
+  if (!notesAllowed) query = query.isNull("note");
+
+  const rows = await query.order("created_at", { ascending: true }).limit(limit).rows();
   return rows.map((row) => ({
     outreachId: row.id,
     crmContactId: row.crm_contact_id,
@@ -296,7 +311,13 @@ export async function invitesToSend(accountId, limit = MAX_INVITES_PER_RUN) {
     company: row.person_company,
     position: row.person_position,
     linkedin: row.person_linkedin,
-    note: row.note || ""
+    note: row.note || "",
+    // Whether a note is expected on this one, said out loud rather than
+    // inferred from an empty string. `note: ""` alone cannot tell "the text
+    // never arrived" from "today is meant to go without one" — and those two
+    // ask the agent for opposite behaviour: hold the person, or send bare
+    // without hesitating.
+    noteExpected: Boolean(row.note)
   }));
 }
 
