@@ -736,14 +736,14 @@ place to resolve it is here, before the first `email.*` row is written.
 - `AGENT_KINDS` — **unchanged**, deliberately. Invitations became a reason to be
   due through `invitesWaiting` in `dueFrom`, not through a quota kind; see the
   correction under Phase 2.
-- `POST /leads/take` — its claim lookup is `.eq("crm_contact_id").eq("status",
-  CLAIM_STATUS)` with **no account filter**, and the patch it applies sets
-  `account_id`. Sending from account B silently re-points a claim account A
-  holds, with no event recording it. **Still unfixed, and now dormant rather
-  than fixed:** the route is served but no screen calls it, so nothing can
-  reach the bug today. If it is ever wired to a button again, scope the lookup
-  or refuse with the holder's name *before* wiring it — the route coming back
-  is what makes this reachable, and by then nobody will be reading this page.
+- `POST /leads/take` — its claim lookup used to be `.eq("crm_contact_id")
+  .eq("status", CLAIM_STATUS)` with **no account filter**, and the patch it
+  applies sets `account_id`, so a send from account B silently re-pointed a
+  claim account A was holding. **Fixed in Phase 1** (`warmup/api.mjs:1994`):
+  the lookup is scoped to the account, and a claim held elsewhere is a `409`
+  naming the holder rather than a silent reassignment. Separately, the route
+  now has no screen calling it — but that is a fact about reachability, not
+  about the guard, which stands.
 
 ## Not in this phase
 
