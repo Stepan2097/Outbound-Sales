@@ -289,3 +289,18 @@ test("and with a key that does see everything, the helpful answer is still given
   assert.equal(status, 401);
   assert.match(body.error, /тут немає/, "a seller who typed their address wrong has nothing else to go on");
 });
+
+test("an auth route this server does not know is a missing route, not a missing session", async (t) => {
+  // This is how the page and the server come apart in practice: the browser
+  // loads `main.js` from disk on every request, while the routes live in a
+  // process that started before them. A dev server left running across a
+  // deploy serves a page with a button the process has never heard of.
+  const workspace = await withWorkspace(t);
+
+  const { status, body } = await workspace.post("/api/auth/does-not-exist", { email: "x@example.com" });
+
+  assert.equal(status, 404, "a session cannot expire for somebody standing at the sign-in screen");
+  assert.doesNotMatch(body.error, /Сесія/, "telling them to sign in sends them where signing in cannot help");
+  assert.match(body.error, /перезапусти сервер/i, "and the cause that actually explains it is named");
+  assert.equal(body.route, "/api/auth/does-not-exist");
+});

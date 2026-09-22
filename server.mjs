@@ -541,6 +541,32 @@ async function handleApi(request, response, url) {
     return;
   }
 
+  /**
+   * An `/api/auth/...` path nobody above handled is a missing route, not a
+   * missing session.
+   *
+   * Without this it falls through to the authenticated block below, and a
+   * visitor standing at the sign-in screen is told «Сесія завершилася. Увійди
+   * знову» — about a request made precisely because they have no session and
+   * are trying to get one. It sends them to log in when logging in cannot
+   * help, and it hides the real cause completely.
+   *
+   * The real cause has a name and it will happen again: the page is served
+   * from disk on every request while the routes live in a process that started
+   * before them. A dev server left running across a deploy, or a browser
+   * holding a newer page than the server it talks to, lands here — so the
+   * answer says which route is missing and what usually explains it.
+   */
+  if (url.pathname.startsWith("/api/auth/")) {
+    addEvent("auth", `${request.method} ${url.pathname} has no route on this server.`);
+    sendJson(response, 404, {
+      error: `Цей сервер не знає маршруту ${url.pathname}. Найчастіше це означає, що сторінка новіша за процес: перезапусти сервер.`,
+      route: url.pathname,
+      method: request.method
+    });
+    return;
+  }
+
   if (request.method === "POST" && url.pathname === "/api/webhooks/fullenrich") {
     const suppliedToken = cleanText(url.searchParams.get("token") || request.headers["x-webhook-token"] || "");
     const expectedToken = state.contactEnrichmentWebhookVault ? decryptSecret(state.contactEnrichmentWebhookVault) : "";
