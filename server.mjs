@@ -2325,6 +2325,13 @@ async function credentialFailure(email) {
   if (!known) {
     try {
       known = (await crmProfilesByEmail()).has(email);
+      // A miss is re-read from the CRM rather than believed, because the cache
+      // is up to a minute old and the person most likely to be missing from it
+      // is the one who registered thirty seconds ago — which is also the person
+      // most likely to fumble the password they have just chosen. Telling them
+      // their account does not exist would be the worst possible lie at that
+      // moment, and it costs one request to avoid.
+      if (!known) known = (await crmProfilesByEmail({ maxAgeMs: 0 })).has(email);
     } catch {
       return apiError("Пошта або пароль не підходять.", 401);
     }
