@@ -4942,6 +4942,13 @@ function warmupLeadLink(url) {
   return /^https?:\/\//i.test(value) ? value : null;
 }
 
+/** 12 038 rather than 12038: these are counts somebody has to weigh. */
+function warmupCount(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "—";
+  return Math.round(number).toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+}
+
 function renderWarmupLeads() {
   const title = document.getElementById("warmupLeadsTitle");
   const subtitle = document.getElementById("warmupLeadsSubtitle");
@@ -5303,21 +5310,7 @@ document.getElementById("warmupSearchInput")?.addEventListener("input", () => {
   warmupState.searchTimer = setTimeout(() => loadWarmupProfiles(), 250);
 });
 
-document.getElementById("warmupProfileTableBody")?.addEventListener("change", (event) => {
-  const tick = event.target.closest("[data-warmup-account-tick]");
-  if (!tick) return;
-  toggleWarmupAccount(tick.dataset.warmupAccountTick, tick.checked);
-});
-
 document.getElementById("warmupProfileTableBody")?.addEventListener("click", (event) => {
-  // Ticking an account is not the same gesture as opening it.
-  if (event.target.closest("[data-warmup-account-tick]")) return;
-  const jump = event.target.closest("[data-warmup-inbox-jump]");
-  if (jump) {
-    event.stopPropagation();
-    showWarmupInboxAccount(jump.dataset.warmupInboxJump);
-    return;
-  }
   const row = event.target.closest("[data-warmup-profile]");
   if (!row) return;
   const profileId = row.dataset.warmupProfile;
