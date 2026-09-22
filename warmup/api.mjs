@@ -1,6 +1,8 @@
 import { anty, crm, CONTACT_ID_BATCH, antyTeamId, crmError, leadById, leadQueue, queueTotal, today } from "./db.mjs";
 import { RestError } from "./rest.mjs";
-import { ACTION_KINDS, ACTION_LABEL, currentDay, planForDay, totalDays, validateStrategy } from "./strategy.mjs";
+import {
+  ACTION_KINDS, ACTION_LABEL, currentDay, fromDays, planForDay, toDays, totalDays, validateStrategy
+} from "./strategy.mjs";
 import { SESSION_WINDOW, insideWindow, nextSession, windowLabel } from "./schedule.mjs";
 import { HEALTH_LABEL, HEALTH_VALUES, deriveStatus, isHealth } from "./status.mjs";
 import { PLATFORMS, parseProxy, platformOf, proxyString, retag } from "./platform.mjs";
@@ -1055,17 +1057,31 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
     }
 
     // ── strategies ─────────────────────────────────────────────────────────
+    //
+    // A strategy is stored as phases and edited as days, and the fold from one
+    // to the other lives here rather than on the screen: it is the half with
+    // the rules — neighbouring days that say the same thing are one phase, and
+    // what comes out has to be contiguous from day 1 or `validateStrategy`
+    // refuses it. A client that sends `days` gets it done for them; one that
+    // sends `phases` is talking to the same endpoint it always was.
     if (method === "GET" && path === "/strategies") {
       await ensureDefaultStrategy();
       const rows = await anty.from("wl_strategies").select("*").eq("is_archived", false)
         .order("is_default", { ascending: false }).order("created_at").rows();
-      sendJson(response, 200, { success: true, strategies: rows.map(toStrategy) });
+      sendJson(response, 200, {
+        success: true,
+        strategies: rows.map((row) => {
+          const strategy = toStrategy(row);
+          return { ...strategy, days: toDays(strategy), totalDays: totalDays(strategy) };
+        })
+      });
       return true;
     }
 
     if (method === "POST" && path === "/strategies") {
       const body = await readJson(request);
       if (!body) return fail(response, sendJson, 400, "Некоректне тіло JSON");
+      if (Array.isArray(body.days)) body.phases = fromDays(body.days);
       const problem = validateStrategy(body);
       if (problem) return fail(response, sendJson, 400, problem);
 
@@ -1084,6 +1100,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
     if (method === "PATCH" && path === "/strategies") {
       const body = await readJson(request);
       if (!body?.id) return fail(response, sendJson, 400, "Яка стратегія?");
+      if (Array.isArray(body.days)) body.phases = fromDays(body.days);
       const problem = validateStrategy(body);
       if (problem) return fail(response, sendJson, 400, problem);
 

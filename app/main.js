@@ -4431,6 +4431,16 @@ const warmupState = {
   foldersReady: false,
   campaigns: [],
   campaignsReady: false,
+  // The warm-up schedule itself: one strategy for every account, held as the
+  // server sends it and edited as `strategyDraft`, day by day. The draft is
+  // null until somebody opens the editor, so an open panel with no edits and a
+  // panel nobody opened are the same thing to everything else here.
+  strategy: null,
+  strategyDraft: null,
+  strategyOpen: false,
+  strategyBusy: false,
+  strategyError: "",
+  strategyNotice: "",
   campaignsError: "",
   campaignNotice: "",
   selectedCampaignId: null,
@@ -4932,6 +4942,286 @@ function renderWarmupCampaigns({ resetForm = false } = {}) {
   renderWarmupCampaignDetail();
   refreshIcons();
 }
+
+/* ── The schedule ──────────────────────────────────────────────────────────
+ *
+ * One strategy governs every account, and until now it was only readable as
+ * the number in the Day column and whatever the agent happened to do. This is
+ * the same thing as a table: fourteen days, and for each of them how many
+ * profile views, likes and connection requests are allowed, plus whether a
+ * request may carry a note.
+ *
+ * Two things this panel must not pretend.
+ *
+ * A quota is a range, not a number: the agent picks within it, seeded on the
+ * account and the day, so that four accounts do not perform the same five
+ * views every morning. The editor therefore edits two numbers per action, and
+ * calls them «від» and «до».
+ *
+ * And an edit does not reach the accounts already warming. A run keeps the
+ * snapshot of the strategy it started under, which is what stops a change today
+ * from rewriting what an account halfway through was working to. The panel says
+ * so where somebody is about to save, not in a tooltip.
+ */
+
+/** The three actions this system actually performs. Others are kept, not shown. */
+const WARMUP_EDITABLE_KINDS = ["profile_view", "like", "connect"];
+
+const WARMUP_KIND_LABEL = {
+  profile_view: "Перегляди профілів",
+  like: "Лайки",
+  connect: "Запити в друзі"
+};
+
+function warmupStrategyDays() {
+  return warmupState.strategyDraft || warmupState.strategy?.days || [];
+}
+
+/** Has anything been moved since this draft was opened? */
+function warmupStrategyDirty() {
+  if (!warmupState.strategyDraft || !warmupState.strategy) return false;
+  return JSON.stringify(warmupState.strategyDraft) !== JSON.stringify(warmupState.strategy.days || []);
+}
+
+function warmupQuotaCell(day, kind) {
+  const [low = 0, high = 0] = day.quotas?.[kind] || [];
+  const disabled = warmupState.strategyBusy ? "disabled" : "";
+  return `<td class="warmup-day-quota">
+    <input type="number" min="0" max="99" value="${Number(low) || 0}" ${disabled}
+      data-warmup-day="${day.day}" data-warmup-kind="${escapeAttr(kind)}" data-warmup-bound="low"
+      aria-label="${escapeAttr(`${WARMUP_KIND_LABEL[kind]}, день ${day.day}, від`)}" />
+    <span aria-hidden="true">–</span>
+    <input type="number" min="0" max="99" value="${Number(high) || 0}" ${disabled}
+      data-warmup-day="${day.day}" data-warmup-kind="${escapeAttr(kind)}" data-warmup-bound="high"
+      aria-label="${escapeAttr(`${WARMUP_KIND_LABEL[kind]}, день ${day.day}, до`)}" />
+  </td>`;
+}
+
+function warmupStrategyRowHtml(day, previous) {
+  // A phase is a run of days that say the same thing, so the label is printed
+  // where it changes and left out where it repeats — the table then shows the
+  // phases without being built out of them.
+  const opens = !previous || previous.label !== day.label;
+  const note = day.connectionNote && typeof day.connectionNote === "object";
+  const allowsConnect = (day.quotas?.connect || [0, 0])[1] > 0;
+
+  return `<tr class="${opens ? "is-phase-start" : ""}">
+    <th scope="row">
+      <strong>День ${day.day}</strong>
+      ${opens ? `<span class="warmup-subtle">${escapeHtml(day.label || "без назви")}</span>` : ""}
+    </th>
+    ${WARMUP_EDITABLE_KINDS.map((kind) => warmupQuotaCell(day, kind)).join("")}
+    <td class="warmup-day-note">
+      <label title="${escapeAttr(allowsConnect
+        ? "Чи можна цього дня додавати коротку нотатку до запиту"
+        : "Цього дня запитів немає, тож нотатці нема на чому їхати")}">
+        <input type="checkbox" ${note ? "checked" : ""} ${warmupState.strategyBusy || !allowsConnect ? "disabled" : ""}
+          data-warmup-day="${day.day}" data-warmup-note="1"
+          aria-label="${escapeAttr(`Нотатка до запиту, день ${day.day}`)}" />
+        <span>${note ? `до ${Number(day.connectionNote.maxWords) || 3} слів` : "без нотатки"}</span>
+      </label>
+    </td>
+  </tr>`;
+}
+
+function renderWarmupStrategy() {
+  const pill = document.getElementById("warmupStrategyPill");
+  const subtitle = document.getElementById("warmupStrategySubtitle");
+  const toggle = document.getElementById("warmupStrategyToggleBtn");
+  const body = document.getElementById("warmupStrategyBody");
+  if (!body || !pill || !toggle) return;
+
+  const strategy = warmupState.strategy;
+  const days = warmupStrategyDays();
+
+  if (toggle) {
+    toggle.hidden = !strategy;
+    toggle.innerHTML = warmupState.strategyOpen
+      ? '<i data-lucide="chevron-up"></i><span>Згорнути</span>'
+      : '<i data-lucide="chevron-down"></i><span>Відкрити деталі</span>';
+  }
+
+  if (warmupState.strategyError && !strategy) {
+    pill.className = "pill tone-bad";
+    pill.textContent = "не прочиталася";
+    body.hidden = false;
+    body.innerHTML = `<div class="warmup-leads-prompt is-bad"><strong>${escapeHtml(warmupState.strategyError)}</strong>
+      <span>Поки сервер не відповідає, розклад тут не змінити. Акаунти працюють за тим, з яким почали.</span></div>`;
+    refreshIcons();
+    return;
+  }
+
+  if (!strategy) {
+    pill.className = "pill tone-muted";
+    pill.textContent = "завантаження";
+    body.hidden = true;
+    body.innerHTML = "";
+    return;
+  }
+
+  const phases = new Set(days.map((day) => day.label)).size;
+  pill.className = "pill tone-live";
+  pill.textContent = `${days.length} ${uaPlural(days.length, "день", "дні", "днів")} · ${phases} ${uaPlural(phases, "фаза", "фази", "фаз")}`;
+  if (subtitle) {
+    subtitle.textContent = strategy.name
+      ? `${strategy.name} — одна на всі акаунти: скільки чого дозволено кожного дня`
+      : "Одна на всі акаунти: скільки чого дозволено кожного дня";
+  }
+
+  body.hidden = !warmupState.strategyOpen;
+  if (!warmupState.strategyOpen) {
+    body.innerHTML = "";
+    return;
+  }
+
+  const dirty = warmupStrategyDirty();
+  const notice = warmupState.strategyNotice
+    ? `<p class="warmup-strategy-notice">${escapeHtml(warmupState.strategyNotice)}</p>`
+    : "";
+  const problem = warmupState.strategyError
+    ? `<p class="warmup-strategy-problem">${escapeHtml(warmupState.strategyError)}</p>`
+    : "";
+
+  body.innerHTML = `
+    <p class="warmup-strategy-lead">Кожна цифра — це діапазон: агент щодня бере число всередині нього, окреме для кожного акаунта, щоб чотири акаунти не робили щоранку однакові п'ять переглядів. Нуль означає, що цього дня така дія заборонена.</p>
+    <div class="table-wrap">
+      <table class="warmup-strategy-table">
+        <thead>
+          <tr>
+            <th>День</th>
+            ${WARMUP_EDITABLE_KINDS.map((kind) => `<th>${escapeHtml(WARMUP_KIND_LABEL[kind])}</th>`).join("")}
+            <th>Нотатка до запиту</th>
+          </tr>
+        </thead>
+        <tbody>${days.map((day, index) => warmupStrategyRowHtml(day, days[index - 1])).join("")}</tbody>
+      </table>
+    </div>
+    ${problem}${notice}
+    <div class="warmup-strategy-foot">
+      <button class="primary-button" type="button" id="warmupStrategySaveBtn" ${dirty && !warmupState.strategyBusy ? "" : "disabled"}>
+        <i data-lucide="save"></i><span>${warmupState.strategyBusy ? "Зберігаємо..." : "Зберегти розклад"}</span>
+      </button>
+      <button class="text-button" type="button" id="warmupStrategyResetBtn" ${dirty && !warmupState.strategyBusy ? "" : "disabled"}>
+        <i data-lucide="undo-2"></i><span>Скасувати зміни</span>
+      </button>
+      <p class="warmup-strategy-warning">Зміни діють на прогони, які почнуться після збереження. Акаунт, який уже прогрівається, доживе свої дні за тим розкладом, з яким стартував, — інакше правки сьогодні переписували б те, під що він уже працював.</p>
+    </div>`;
+  refreshIcons();
+}
+
+/** One number moved in the draft, without touching what is saved. */
+function editWarmupStrategyDay(day, apply) {
+  if (!warmupState.strategyDraft) {
+    warmupState.strategyDraft = JSON.parse(JSON.stringify(warmupState.strategy?.days || []));
+  }
+  const row = warmupState.strategyDraft.find((entry) => entry.day === day);
+  if (!row) return;
+  apply(row);
+  warmupState.strategyError = "";
+  warmupState.strategyNotice = "";
+}
+
+async function loadWarmupStrategy() {
+  try {
+    const payload = await warmupApi("/strategies");
+    const list = Array.isArray(payload.strategies) ? payload.strategies : [];
+    // The default is the one every account runs unless somebody pointed it
+    // elsewhere; with none marked, the first is the only candidate there is.
+    warmupState.strategy = list.find((row) => row.isDefault) || list[0] || null;
+    warmupState.strategyError = warmupState.strategy ? "" : "Цей сервер не має жодної стратегії прогріву.";
+  } catch (error) {
+    warmupState.strategy = null;
+    warmupState.strategyError = error.message || "Стратегію не вдалося прочитати.";
+  }
+  warmupState.strategyDraft = null;
+  renderWarmupStrategy();
+}
+
+async function saveWarmupStrategy() {
+  const strategy = warmupState.strategy;
+  const days = warmupState.strategyDraft;
+  if (!strategy || !days || warmupState.strategyBusy) return;
+
+  warmupState.strategyBusy = true;
+  warmupState.strategyError = "";
+  warmupState.strategyNotice = "";
+  renderWarmupStrategy();
+
+  try {
+    // Days go up, phases come back: folding neighbouring days into phases is
+    // the server's half, and doing it here too would be a second answer.
+    const payload = await warmupApi("/strategies", {
+      method: "PATCH",
+      body: JSON.stringify({
+        id: strategy.id,
+        name: strategy.name,
+        description: strategy.description,
+        pauseDays: strategy.pauseDays,
+        days
+      })
+    });
+    warmupState.strategy = { ...payload.strategy, days, totalDays: days.length };
+    warmupState.strategyDraft = null;
+    warmupState.strategyNotice = "Розклад збережено. Він діє на прогони, які почнуться далі.";
+    // Re-read rather than trust the echo: the fold may have merged days, and
+    // what the next account starts on is whatever the server now holds.
+    await loadWarmupStrategy();
+    warmupState.strategyNotice = "Розклад збережено. Він діє на прогони, які почнуться далі.";
+  } catch (error) {
+    warmupState.strategyError = error.message || "Розклад не зберігся.";
+  } finally {
+    warmupState.strategyBusy = false;
+    renderWarmupStrategy();
+  }
+}
+
+document.getElementById("warmupStrategyToggleBtn")?.addEventListener("click", () => {
+  warmupState.strategyOpen = !warmupState.strategyOpen;
+  renderWarmupStrategy();
+});
+
+document.getElementById("warmupStrategyBody")?.addEventListener("change", (event) => {
+  const field = event.target.closest("[data-warmup-day]");
+  if (!field) return;
+  const day = Number(field.dataset.warmupDay);
+
+  if (field.dataset.warmupNote) {
+    editWarmupStrategyDay(day, (row) => {
+      row.connectionNote = field.checked ? { maxWords: 3, allowLinks: false } : false;
+    });
+    renderWarmupStrategy();
+    return;
+  }
+
+  const kind = field.dataset.warmupKind;
+  const bound = field.dataset.warmupBound;
+  const value = Math.max(0, Math.min(99, Math.round(Number(field.value) || 0)));
+  editWarmupStrategyDay(day, (row) => {
+    const [low = 0, high = 0] = row.quotas?.[kind] || [];
+    const next = bound === "low" ? [value, Math.max(value, high)] : [Math.min(low, value), value];
+    row.quotas = { ...row.quotas };
+    // Zero to zero is "not allowed today", and it is stored as the absence of
+    // the action rather than as a range of nothing — the same shape the shipped
+    // strategy uses for a day that forbids something.
+    if (next[0] === 0 && next[1] === 0) delete row.quotas[kind];
+    else row.quotas[kind] = next;
+    if (!row.quotas.connect) row.connectionNote = false;
+  });
+  renderWarmupStrategy();
+});
+
+document.getElementById("warmupStrategyBody")?.addEventListener("click", (event) => {
+  if (event.target.closest("#warmupStrategySaveBtn")) {
+    saveWarmupStrategy();
+    return;
+  }
+  if (event.target.closest("#warmupStrategyResetBtn")) {
+    warmupState.strategyDraft = null;
+    warmupState.strategyError = "";
+    warmupState.strategyNotice = "";
+    renderWarmupStrategy();
+  }
+});
 
 /* ── The queue ─────────────────────────────────────────────────────────────
  *
@@ -5806,6 +6096,9 @@ async function loadWarmup({ full = true } = {}) {
 
     warmupState.dashboard = await warmupApi("/dashboard");
     renderWarmupStats();
+    // The schedule every account runs on. It depends on nothing else here and
+    // nothing here depends on it, so it is read once and left alone.
+    await loadWarmupStrategy();
     // Campaigns first: the tick column in the profiles table is drawn from the
     // selected one, and the queue below is drawn from its accounts.
     await loadWarmupCampaigns({ resetForm: full });

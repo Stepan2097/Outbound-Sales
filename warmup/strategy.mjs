@@ -143,3 +143,69 @@ export function validateStrategy(input = {}) {
   }
   return null;
 }
+
+/* ── Days, which is how a person reads a schedule ──────────────────────────
+ *
+ * Storage keeps phases — a label, a day range, one set of quotas — because
+ * that is what a strategy is: four stretches, not fourteen unrelated days.
+ * Nobody edits it that way. Asked to slow Tuesday down, a person looks for
+ * Tuesday, and a phase boundary is not something they should have to compute
+ * before they can change a number.
+ *
+ * So the screen reads days and writes days, and these two functions are the
+ * whole translation. `toDays` spreads a phase across the days it covers;
+ * `fromDays` folds neighbouring days back into one phase whenever they say the
+ * same thing. Edit day 5 alone and its phase splits in three; set day 5 back to
+ * what its neighbours say and the three become one again. What comes out is
+ * always contiguous and always starts at day 1, which is exactly what
+ * `validateStrategy` demands.
+ */
+
+function sameDay(left, right) {
+  return left.label === right.label
+    && JSON.stringify(left.quotas) === JSON.stringify(right.quotas)
+    && JSON.stringify(left.connectionNote ?? false) === JSON.stringify(right.connectionNote ?? false)
+    && JSON.stringify(left.rules || []) === JSON.stringify(right.rules || []);
+}
+
+export function toDays(strategy) {
+  const days = [];
+  for (const phase of strategy?.phases || []) {
+    for (let day = phase.fromDay; day <= phase.toDay; day += 1) {
+      days.push({
+        day,
+        label: phase.label,
+        quotas: JSON.parse(JSON.stringify(phase.quotas || {})),
+        connectionNote: phase.connectionNote ?? false,
+        rules: [...(phase.rules || [])]
+      });
+    }
+  }
+  return days.sort((left, right) => left.day - right.day);
+}
+
+export function fromDays(days) {
+  const phases = [];
+  for (const day of [...days].sort((left, right) => left.day - right.day)) {
+    const open = phases[phases.length - 1];
+    if (open && open.toDay === day.day - 1 && sameDay(open, day)) {
+      open.toDay = day.day;
+      continue;
+    }
+    phases.push({
+      fromDay: day.day,
+      toDay: day.day,
+      label: day.label,
+      quotas: JSON.parse(JSON.stringify(day.quotas || {})),
+      connectionNote: day.connectionNote ?? false,
+      rules: [...(day.rules || [])]
+    });
+  }
+  return phases;
+}
+
+/** One day changed, and the phases that fall out of it. */
+export function withDay(strategy, day, patch) {
+  const days = toDays(strategy).map((row) => (row.day === day ? { ...row, ...patch } : row));
+  return fromDays(days);
+}

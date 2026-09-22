@@ -5331,6 +5331,146 @@ dialog {
   }
 }
 
+/* ── The schedule ──────────────────────────────────────────────────────────
+ *
+ * A table of days, and the thing it must never do is read like a spreadsheet
+ * of unrelated rows: the phases are what a person thinks in, so the day a
+ * phase opens gets a line above it and carries the phase's name, while the
+ * days inside it are quiet. */
+
+.warmup-strategy-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.warmup-strategy-lead {
+  margin: 12px 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.warmup-strategy-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.warmup-strategy-table th,
+.warmup-strategy-table td {
+  padding: 7px 10px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.warmup-strategy-table thead th {
+  font-size: 11.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.warmup-strategy-table tbody th {
+  min-width: 120px;
+  font-weight: 700;
+}
+
+.warmup-strategy-table tbody th strong {
+  display: block;
+  font-size: 13.5px;
+}
+
+.warmup-strategy-table tbody th .warmup-subtle {
+  display: block;
+  font-size: 11.5px;
+  line-height: 1.3;
+}
+
+/* The seam between two phases, which is the only structure in the table. */
+.warmup-strategy-table tbody tr.is-phase-start > * {
+  border-top: 1px solid var(--line);
+}
+
+.warmup-strategy-table tbody tr.is-phase-start > th {
+  padding-top: 11px;
+}
+
+.warmup-day-quota {
+  white-space: nowrap;
+}
+
+.warmup-day-quota input {
+  width: 54px;
+  padding: 5px 6px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.warmup-day-quota span {
+  margin: 0 4px;
+  color: var(--muted);
+}
+
+.warmup-day-note label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.warmup-day-note input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--teal);
+}
+
+.warmup-strategy-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.warmup-strategy-warning {
+  flex: 1 1 260px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.warmup-strategy-notice,
+.warmup-strategy-problem {
+  margin: 10px 0 0;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.5;
+}
+
+.warmup-strategy-notice {
+  color: var(--teal);
+}
+
+.warmup-strategy-problem {
+  color: var(--red);
+}
+
+@media (max-width: 720px) {
+  .warmup-strategy-table th,
+  .warmup-strategy-table td {
+    padding: 6px 7px;
+  }
+
+  .warmup-day-quota input {
+    width: 44px;
+  }
+}
+
 /* ── The campaign list ─────────────────────────────────────────────────────
  *
  * Rows are deliberately quiet. The scale of a campaign is not something a row

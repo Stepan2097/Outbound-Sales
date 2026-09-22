@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ACTION_KINDS, DEFAULT_STRATEGY, currentDay, dailyQuota, planForDay, totalDays, validateStrategy } from "../warmup/strategy.mjs";
+import {
+  ACTION_KINDS, DEFAULT_STRATEGY, currentDay, dailyQuota, fromDays, planForDay, toDays, totalDays,
+  validateStrategy, withDay
+} from "../warmup/strategy.mjs";
 import { SESSION_WINDOW, insideWindow, nextSession, sessionTimeOn } from "../warmup/schedule.mjs";
 import { deriveStatus } from "../warmup/status.mjs";
 import { parseProxy, platformOf, retag } from "../warmup/platform.mjs";
@@ -169,4 +172,55 @@ test("a proxy line round-trips, including a password holding an @", () => {
 test("every action kind carries a label, so a refusal can name itself", async () => {
   const { ACTION_LABEL } = await import("../warmup/strategy.mjs");
   for (const kind of ACTION_KINDS) assert.ok(ACTION_LABEL[kind], `${kind} has no label`);
+});
+
+// ── a schedule read and written by days ───────────────────────────────────
+
+test("every day of the strategy is one row, in order", () => {
+  const days = toDays(DEFAULT_STRATEGY);
+  assert.equal(days.length, totalDays(DEFAULT_STRATEGY));
+  assert.deepEqual(days.map((row) => row.day), Array.from({ length: 14 }, (unused, index) => index + 1));
+});
+
+test("a day carries the phase it falls in", () => {
+  const [day5] = toDays(DEFAULT_STRATEGY).filter((row) => row.day === 5);
+  assert.equal(day5.label, "First contact");
+  assert.deepEqual(day5.quotas.connect, [1, 2]);
+});
+
+test("days fold back into exactly the phases they came from", () => {
+  assert.deepEqual(fromDays(toDays(DEFAULT_STRATEGY)), DEFAULT_STRATEGY.phases);
+});
+
+test("editing one day splits its phase around it", () => {
+  const phases = withDay(DEFAULT_STRATEGY, 5, { quotas: { profile_view: [5, 7], like: [1, 2], connect: [0, 0] } });
+  const around = phases.filter((phase) => phase.fromDay <= 6 && phase.toDay >= 4);
+  assert.deepEqual(around.map((phase) => [phase.fromDay, phase.toDay]), [[4, 4], [5, 5], [6, 6]]);
+  assert.equal(validateStrategy({ name: "x", phases }), null, "a split schedule is still contiguous from day 1");
+});
+
+test("a day set back to what its neighbours say merges again", () => {
+  const edited = { ...DEFAULT_STRATEGY, phases: withDay(DEFAULT_STRATEGY, 5, { quotas: { connect: [0, 0] } }) };
+  const restored = withDay(edited, 5, { quotas: { profile_view: [5, 7], like: [1, 2], connect: [1, 2] } });
+  assert.deepEqual(restored, DEFAULT_STRATEGY.phases, "an undone edit leaves no seam behind");
+});
+
+test("editing a day never touches the others", () => {
+  const phases = withDay(DEFAULT_STRATEGY, 12, { quotas: { connect: [9, 9] } });
+  const days = toDays({ phases });
+  assert.deepEqual(days.find((row) => row.day === 12).quotas, { connect: [9, 9] });
+  assert.deepEqual(days.find((row) => row.day === 11).quotas, { profile_view: [10, 12], like: [2, 3], connect: [5, 6] });
+  assert.equal(days.length, 14, "a day is changed, not added or lost");
+});
+
+test("a day edited to allow a note keeps that day alone", () => {
+  const phases = withDay(DEFAULT_STRATEGY, 8, { connectionNote: { maxWords: 3, allowLinks: false } });
+  const day8 = phases.find((phase) => phase.fromDay === 8);
+  assert.deepEqual(day8.connectionNote, { maxWords: 3, allowLinks: false });
+  assert.equal(toDays({ phases }).find((row) => row.day === 7).connectionNote, false);
+});
+
+test("an empty strategy has no days and no phases", () => {
+  assert.deepEqual(toDays({ phases: [] }), []);
+  assert.deepEqual(fromDays([]), []);
 });
