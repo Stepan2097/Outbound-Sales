@@ -607,15 +607,24 @@ test("one person's history is the invitation and the messages, newest first", as
     body: { action: "invite.sent", accountId: "acc-1", outreachId, outcome: "sent" }
   });
 
+  // The messages are counted from the moment this test queued the invitation,
+  // not written as dates. The invite events are stamped by the real clock, so
+  // a calendar fixture only sorts above them while it is still in the future —
+  // this test passed for as long as it did because the dates had not arrived
+  // yet, and broke at a midnight that changed nothing. Offsets make the order
+  // a property of the data.
+  const queuedAt = Date.parse(rows.wl_events.find((event) => event.type === "invite.requested").created_at);
+  const after = (minutes) => new Date(queuedAt + minutes * 60_000).toISOString();
+
   // Two messages: one carrying the person key written at store time, one from
   // before this phase that has to be matched the old way, on the slug.
   rows.wl_events.push({
-    id: "m-1", account_id: "acc-1", type: "message.out", created_at: "2026-09-22T09:00:00.000Z",
-    meta: { threadKey: "t-1", crmContactId: "c-1", direction: "out", body: "Дякую, що прийняли", sentAt: "2026-09-22T09:00:00.000Z" }
+    id: "m-1", account_id: "acc-1", type: "message.out", created_at: after(1),
+    meta: { threadKey: "t-1", crmContactId: "c-1", direction: "out", body: "Дякую, що прийняли", sentAt: after(1) }
   });
   rows.wl_events.push({
-    id: "m-2", account_id: "acc-1", type: "message.in", created_at: "2026-09-23T10:00:00.000Z",
-    meta: { threadKey: "t-1", direction: "in", body: "Привіт, розкажіть більше", sentAt: "2026-09-23T10:00:00.000Z",
+    id: "m-2", account_id: "acc-1", type: "message.in", created_at: after(2),
+    meta: { threadKey: "t-1", direction: "in", body: "Привіт, розкажіть більше", sentAt: after(2),
       participant: { name: "Marta Kovalenko", slug: "marta" } }
   });
 
