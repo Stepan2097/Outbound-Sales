@@ -37,7 +37,17 @@ export function deriveStatus(account, run, todayIso) {
   if (run.paused_until && run.paused_until >= todayIso) return "paused";
   // A run whose last day has passed is finished whether or not anything marked
   // it completed, so the list and the detail page agree.
-  const day = currentDay(new Date(run.started_at), run.paused_days ?? 0);
+  // The day comes from the `todayIso` this was called with, not from the wall
+  // clock. Same number in production — `today()` is UTC and `currentDay`
+  // reckons in UTC midnights — but a caller that pins the day now gets the day
+  // it pinned. Reading the clock here while honouring the argument two lines
+  // up is how a test passes for a month and then turns red on a morning when
+  // nobody changed anything.
+  // A missing day falls back to the clock rather than to `new Date(undefined)`,
+  // which is an Invalid Date and would make `day` NaN — every status silently
+  // "warming".
+  const asOf = todayIso ? new Date(todayIso) : new Date();
+  const day = currentDay(new Date(run.started_at), run.paused_days ?? 0, asOf);
   if (run.state === "completed" || day > totalDays(run.strategy_snapshot)) return "finished";
   return "warming";
 }
