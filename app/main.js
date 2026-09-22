@@ -1152,10 +1152,43 @@ function renderInvite(prospect) {
   content.innerHTML = `${notice}${inviteStateHtml(invite, prospect)}`;
 }
 
+/**
+ * Чому записка, написана сьогодні, може піти не сьогодні.
+ *
+ * Рання фаза прогріву шле запити без тексту взагалі — це правило про безпеку
+ * акаунта, а не про цю людину. Сервер такий запит агенту не віддає, доки не
+ * настане дозволений день: інакше запит вийшов би порожнім, схвалена людиною
+ * фраза зникла б мовчки, а на екрані це виглядало б як успіх.
+ *
+ * Сказати про це треба саме тут, біля поля: це єдине місце, де на це ще можна
+ * зреагувати — написати коротше, вибрати інший акаунт або просто знати, що
+ * чекати.
+ */
+function inviteNoteHoldHtml(usable) {
+  const holding = usable.filter((account) => !account.notesAllowedToday);
+  if (!usable.length || !holding.length) return "";
+
+  const days = holding.map((account) => account.nextNoteDay).filter((day) => Number.isFinite(day));
+  const soonest = days.length ? Math.min(...days) : null;
+  const all = holding.length === usable.length;
+
+  if (!soonest) {
+    return `<p class="is-muted">${all ? "Ця стратегія прогріву" : "Стратегія вибраного акаунта"} не дозволяє записку до запиту взагалі. Запит із текстом чекатиме, поки стратегію не змінять у вкладці «Прогрів» — порожнім він не піде.</p>`;
+  }
+  return `<p class="is-muted">${all
+    ? `Сьогодні записку не несе жоден акаунт — рання фаза прогріву шле запити без тексту. Найближчий дозволений день прогріву — ${soonest}-й: текст збережеться і піде з ним, порожнім запит не піде.`
+    : `Частина акаунтів сьогодні записку не несе — у списку вони позначені. Там текст дочекається дозволеного дня, а не піде порожнім.`}</p>`;
+}
+
 function inviteFormHtml(prospect) {
   const options = inviteAccounts.map((account) => {
     const left = account.canSend ? `${account.connectsLeft} з ${account.connectQuota} на сьогодні` : account.reason;
-    return `<option value="${escapeAttr(account.id)}" ${account.canSend ? "" : "disabled"}>${escapeHtml(account.label)} · ${escapeHtml(left)}</option>`;
+    // Обмеження на записку — властивість дня цього акаунта, тож воно стоїть
+    // у тому ж рядку, що й квота: людина обирає акаунт саме тут.
+    const note = account.canSend && !account.notesAllowedToday
+      ? Number.isFinite(account.nextNoteDay) ? ` · записка з ${account.nextNoteDay}-го дня` : " · записка не дозволена"
+      : "";
+    return `<option value="${escapeAttr(account.id)}" ${account.canSend ? "" : "disabled"}>${escapeHtml(account.label)} · ${escapeHtml(left)}${escapeHtml(note)}</option>`;
   }).join("");
   const usable = inviteAccounts.filter((account) => account.canSend);
   const note = suggestedInviteNote(prospect);
@@ -1180,6 +1213,7 @@ function inviteFormHtml(prospect) {
         <span>Записка до запиту · до 300 символів, без продажу</span>
         <textarea id="inviteNoteInput" rows="3" maxlength="300">${escapeHtml(note)}</textarea>
       </label>
+      ${inviteNoteHoldHtml(usable)}
       ${usable.length === 0
         ? `<p class="is-muted">Жоден акаунт зараз не може нести запит — подивись причини в списку вище. Поставити в чергу нема на кого.</p>`
         : usable.some((account) => account.connectsLeft > 0)
