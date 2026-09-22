@@ -98,7 +98,7 @@ function startFakeSupabase() {
 // падає раз на десять прогонів, гірший за відсутній — йому перестають вірити.
 let nextPort = 4900;
 
-async function startWorkspace(supabasePort, savedState = null) {
+async function startWorkspace(supabasePort, savedState = null, apiKey = "sb_secret_test") {
   const dir = await mkdtemp(join(tmpdir(), "outbound-register-"));
   const statePath = join(dir, "state.json");
   if (savedState) await writeFile(statePath, JSON.stringify(savedState), "utf8");
@@ -114,7 +114,9 @@ async function startWorkspace(supabasePort, savedState = null) {
       AUTH_DEV_BYPASS: "0",
       WARMUP_SCHEDULER_DISABLED: "1",
       SUPABASE_URL: `http://127.0.0.1:${supabasePort}`,
-      SUPABASE_API_KEY: "service-role-stub"
+      // Формат ключа — не декорація: за ним вирішується, чи маємо ми право
+      // заявляти, що адреси тут немає. Типово — той, що бачить усе.
+      SUPABASE_API_KEY: apiKey
     },
     stdio: ["ignore", "pipe", "pipe"]
   });
@@ -149,7 +151,7 @@ async function startWorkspace(supabasePort, savedState = null) {
   };
 }
 
-async function withWorkspace(t) {
+async function withWorkspace(t, { apiKey } = {}) {
   signedUp.clear();
   crmProfiles.length = 0;
   const supabase = await startFakeSupabase();
@@ -158,7 +160,7 @@ async function withWorkspace(t) {
     // Somebody already works here, so the screen is the sign-in screen rather
     // than the "create the first owner" one.
     users: [{ id: "u-owner", email: "owner@example.com", name: "Owner", role: "admin", status: "active", createdAt: new Date().toISOString() }]
-  });
+  }, apiKey);
   t.after(async () => { await workspace.stop(); supabase.service.close(); });
   return workspace;
 }
@@ -255,4 +257,35 @@ test("somebody who just registered is never told their account does not exist", 
   assert.equal(status, 401);
   assert.doesNotMatch(body.error, /тут немає/, "our own form made this account a moment ago — denying it exists is the worst lie available");
   assert.match(body.error, /[Пп]ароль/, "the true half: the address is known, the password is not");
+});
+
+test("a key that cannot see everything never says somebody is not here", async (t) => {
+  // An anon key reads `profiles` through RLS, so "not found" may only mean
+  // "not shown", and `admin/users` refuses it outright. Under such a key the
+  // sentence «Акаунта з поштою … тут немає» is a guess dressed as a fact, and
+  // the person it lands on is usually the one who just registered.
+  const workspace = await withWorkspace(t, { apiKey: "sb_publishable_test" });
+  crmProfiles.push({ id: "u-1", email: "known@example.com", role: "user", approval_status: "approved" });
+  await workspace.post("/api/auth/register", { email: "known@example.com", password: "correct-horse-battery" });
+
+  // Somebody nobody here has ever heard of — the one case where the sentence
+  // would be true, and still must not be said by a key that cannot check.
+  const { status, body } = await workspace.post("/api/auth/login", {
+    email: "total-stranger@example.com", password: "whatever-goes-here"
+  });
+
+  assert.equal(status, 401);
+  assert.doesNotMatch(body.error, /тут немає/, "no visibility, no claim about absence");
+  assert.match(body.error, /Пошта або пароль не підходять/);
+});
+
+test("and with a key that does see everything, the helpful answer is still given", async (t) => {
+  const workspace = await withWorkspace(t);
+
+  const { status, body } = await workspace.post("/api/auth/login", {
+    email: "total-stranger@example.com", password: "whatever-goes-here"
+  });
+
+  assert.equal(status, 401);
+  assert.match(body.error, /тут немає/, "a seller who typed their address wrong has nothing else to go on");
 });

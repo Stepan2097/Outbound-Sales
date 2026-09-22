@@ -7,7 +7,7 @@ import { connect as connectTcp } from "node:net";
 import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CHANNEL_RULES, LANGUAGES, buildFallbackDrafts, draftsPromptPayload, normalizeDrafts, normalizeLanguage } from "./contacts/drafts.mjs";
-import { contactAsProspect, contactsConfigured, contactsMissingConfig, crmKeyKind, folderContactAt, listContactFolders, listFolderContacts, readContact } from "./contacts/store.mjs";
+import { contactAsProspect, contactsConfigured, contactsMissingConfig, crmKeyKind, folderContactAt, listContactFolders, listFolderContacts, readContact, supabaseKeyKind } from "./contacts/store.mjs";
 import { handleKnowledgeLibraryApi } from "./knowledge/api.mjs";
 import { knowledgeExcerptsForPrompt, knowledgeFilesForProduct, loadKnowledgeLibrary } from "./knowledge/library.mjs";
 import { handleWarmupApi } from "./warmup/api.mjs";
@@ -2320,9 +2320,29 @@ function isInvalidCredentials(error) {
  * With the CRM unreachable we cannot tell the two apart, and the old sentence
  * is then the honest one.
  */
+/** What the key Auth signs in with can see. Not the CRM client's key — separate setting. */
+function authKeyKind() {
+  try {
+    return supabaseKeyKind(supabaseAuthConfig().apiKey);
+  } catch {
+    return "missing";
+  }
+}
+
 async function credentialFailure(email) {
   let known = state.users.some((user) => user.email === email);
   if (!known) {
+    // A key without visibility does not get to claim absence.
+    //
+    // Under an anon key `profiles` is read through RLS, so "not found" can
+    // just as well mean "not shown", and `admin/users` answers 403 — which
+    // makes the Auth lookup below silently inert. The neutral sentence still
+    // came out, but only because that request threw: the right answer for an
+    // accidental reason. Then any later tidy-up — a `catch` around the lookup
+    // "to be safe", a reordering — would bring the lie back with nothing
+    // failing. So the decision is made here and on purpose. Only a key we know
+    // sees everything may say somebody is not here.
+    if (authKeyKind() !== "service_role") return apiError("Пошта або пароль не підходять.", 401);
     try {
       known = (await crmProfilesByEmail()).has(email);
       // A miss is re-read from the CRM rather than believed, because the cache
