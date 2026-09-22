@@ -4,7 +4,7 @@ import test from "node:test";
 import {
   BODY_LIMIT, TRUNCATION_MARKER, byUnreadThenNewest, clampBody, crmContent, deriveThreads, externalIdFor,
   UNNAMED, linkedinSlug, matchOutreachRow, normalizeMessage, normalizeParticipant, normalizeThreadInput,
-  splitStored
+  splitStored, summarizeAccounts
 } from "../warmup/inbox.mjs";
 
 const RECEIVED = "2026-09-16T12:00:00.000Z";
@@ -370,4 +370,66 @@ test("an event with no thread key is skipped rather than grouped into nothing", 
     event({ sentAt: "2026-09-15T09:00:00Z", storedAt: "2026-09-15T09:05:00Z" })
   ]);
   assert.equal(threads.length, 1);
+});
+
+// ── counted per account ───────────────────────────────────────────────────
+
+/** A thread as the list hands it on, which is all the summary reads. */
+function listed({ accountId = "acc-1", threadKey = "t-1", unread = false, sentAt = "2026-09-15T09:00:00.000Z" }) {
+  return { accountId, threadKey, unread, lastMessage: { direction: "in", body: "hi", sentAt } };
+}
+
+test("each account is counted once, with its own unread", () => {
+  const [first, second] = summarizeAccounts([
+    listed({ accountId: "acc-1", threadKey: "a", unread: true }),
+    listed({ accountId: "acc-1", threadKey: "b" }),
+    listed({ accountId: "acc-2", threadKey: "c" })
+  ]);
+  assert.equal(first.accountId, "acc-1");
+  assert.deepEqual([first.threads, first.unread], [2, 1]);
+  assert.deepEqual([second.threads, second.unread], [1, 0]);
+});
+
+test("an account with something waiting outranks a busier one with nothing", () => {
+  const order = summarizeAccounts([
+    listed({ accountId: "quiet", threadKey: "a" }),
+    listed({ accountId: "quiet", threadKey: "b" }),
+    listed({ accountId: "quiet", threadKey: "c" }),
+    listed({ accountId: "waiting", threadKey: "d", unread: true })
+  ]).map((account) => account.accountId);
+  assert.deepEqual(order, ["waiting", "quiet"], "unread is what needs a person, volume is not");
+});
+
+test("two waiting accounts are ordered by how much is waiting", () => {
+  const order = summarizeAccounts([
+    listed({ accountId: "one", threadKey: "a", unread: true }),
+    listed({ accountId: "many", threadKey: "b", unread: true }),
+    listed({ accountId: "many", threadKey: "c", unread: true })
+  ]).map((account) => account.accountId);
+  assert.deepEqual(order, ["many", "one"]);
+});
+
+test("accounts with nothing unread fall back to the freshest reply", () => {
+  const order = summarizeAccounts([
+    listed({ accountId: "old", threadKey: "a", sentAt: "2026-09-01T09:00:00.000Z" }),
+    listed({ accountId: "new", threadKey: "b", sentAt: "2026-09-20T09:00:00.000Z" })
+  ]).map((account) => account.accountId);
+  assert.deepEqual(order, ["new", "old"]);
+});
+
+test("the newest reply on an account is the newest of its threads", () => {
+  const [account] = summarizeAccounts([
+    listed({ threadKey: "a", sentAt: "2026-09-10T09:00:00.000Z" }),
+    listed({ threadKey: "b", sentAt: "2026-09-18T09:00:00.000Z" }),
+    listed({ threadKey: "c", sentAt: "2026-09-14T09:00:00.000Z" })
+  ]);
+  assert.equal(account.newestAt, "2026-09-18T09:00:00.000Z");
+});
+
+test("a thread with no account is not a group of its own", () => {
+  assert.deepEqual(summarizeAccounts([{ threadKey: "orphan", unread: true }]), []);
+});
+
+test("no threads is no accounts, not an account holding nothing", () => {
+  assert.deepEqual(summarizeAccounts([]), []);
 });

@@ -4472,6 +4472,10 @@ const warmupState = {
   // say so rather than claim nobody has written.
   inbox: {
     threads: [],
+    // One entry per account that holds a thread: how much it holds, how much of
+    // it is unread. The list groups by this and the accounts table reads the
+    // same numbers, so the two can never tell a seller different things.
+    accounts: [],
     unread: 0,
     sync: null,
     ready: false,
@@ -5277,6 +5281,23 @@ function renderWarmupLeads() {
   refreshIcons();
 }
 
+/**
+ * The waiting replies on this account, said next to its name.
+ *
+ * The nav badge counts every account at once, which answers "is anyone waiting"
+ * but never "on which login" — and that is the question in front of somebody
+ * looking at five profiles. Clicking it opens that account's group in the inbox
+ * below rather than filtering, because the number and the threads it counts
+ * should be one gesture apart.
+ */
+function warmupAccountUnreadHtml(accountId) {
+  const unread = warmupInboxUnreadFor(accountId);
+  if (!unread) return "";
+  const label = `${warmupCount(unread)} ${uaPlural(unread, "нова відповідь", "нові відповіді", "нових відповідей")}`;
+  return `<button class="warmup-account-unread" type="button" data-warmup-inbox-jump="${escapeAttr(accountId)}"
+    title="${escapeAttr(`${label} на цьому акаунті — показати їх у вхідних`)}"><i data-lucide="mail"></i><span>${escapeHtml(label)}</span></button>`;
+}
+
 function renderWarmupProfiles() {
   const body = document.getElementById("warmupProfileTableBody");
   if (!body) return;
@@ -5313,6 +5334,7 @@ function renderWarmupProfiles() {
           </td>
           <td>
             <strong>${escapeHtml(profile.name)}</strong>
+            ${account ? warmupAccountUnreadHtml(account.id) : ""}
             ${identity?.name
               ? `<div class="warmup-identity" title="На останньому вході агента залогінений як ця особа"><i data-lucide="badge-check"></i><span>${escapeHtml(identity.name)}${identity.slug ? ` · ${escapeHtml(identity.slug)}` : ""}</span></div>`
               : ""}
@@ -6036,6 +6058,12 @@ document.getElementById("warmupProfileTableBody")?.addEventListener("change", (e
 document.getElementById("warmupProfileTableBody")?.addEventListener("click", (event) => {
   // Ticking an account is not the same gesture as opening it.
   if (event.target.closest("[data-warmup-account-tick]")) return;
+  const jump = event.target.closest("[data-warmup-inbox-jump]");
+  if (jump) {
+    event.stopPropagation();
+    showWarmupInboxAccount(jump.dataset.warmupInboxJump);
+    return;
+  }
   const row = event.target.closest("[data-warmup-profile]");
   if (!row) return;
   const profileId = row.dataset.warmupProfile;
@@ -6247,7 +6275,9 @@ function warmupPreviewHtml(body, limit = 150) {
   if (!text) return '<em class="warmup-subtle">у цьому повідомленні немає тексту</em>';
   const chars = Array.from(text);
   const clipped = chars.length > limit ? `${chars.slice(0, limit - 1).join("")}…` : text;
-  return escapeHtml(clipped);
+  // Quoted, because the row is half app copy and half somebody's words, and
+  // without the quotes a reply reads as a sentence this screen is saying.
+  return `«${escapeHtml(clipped)}»`;
 }
 
 /**
@@ -6430,25 +6460,22 @@ function warmupThreadRowHtml(thread) {
   const inbound = last.direction !== "out";
   const count = Number(thread.messageCount) || 0;
   const status = String(thread.outreachStatus || "").trim();
-  const accountTitle = account.exact
-    ? "Особа, під якою залогінений цей акаунт"
-    : "Назва профілю в Anty — цей портал не знає, під ким залогінений цей акаунт";
 
+  // No "на <account>" here any more: the rows sit under a heading that names
+  // the account, and repeating it on every row is what made a thread look like
+  // it belonged to whoever was printed last.
   return `
     <button class="warmup-thread ${thread.unread ? "is-unread" : ""}" type="button"
       data-warmup-thread="${escapeAttr(thread.threadKey || "")}"
-      data-warmup-thread-account="${escapeAttr(thread.accountId || "")}">
+      data-warmup-thread-account="${escapeAttr(thread.accountId || "")}"
+      aria-label="${escapeAttr(`Розмова з ${name}, акаунт ${account.name}`)}">
       <span class="warmup-thread-mark" aria-hidden="true"></span>
       <span class="warmup-thread-who">
         <strong${warmupParticipantNameAttr(participant)}>${escapeHtml(name)}</strong>
         ${participant.headline ? `<span class="warmup-subtle">${escapeHtml(participant.headline)}</span>` : ""}
-        <span class="warmup-identity" title="${escapeAttr(accountTitle)}">
-          <i data-lucide="${account.exact ? "badge-check" : "circle-help"}"></i>
-          <span>на ${escapeHtml(account.name)}</span>
-        </span>
       </span>
       <span class="warmup-thread-preview">
-        <span class="warmup-thread-from">${inbound ? "Вони" : "Ти"}:</span>
+        <span class="warmup-thread-from">${inbound ? "Написали нам" : "Писали ми"}:</span>
         ${warmupPreviewHtml(last.body)}
       </span>
       <span class="warmup-thread-meta">
@@ -6458,6 +6485,75 @@ function warmupThreadRowHtml(thread) {
         ${thread.unread ? '<span class="warmup-thread-unread">непрочитане</span>' : ""}
       </span>
     </button>`;
+}
+
+/**
+ * The account a group of threads arrived on, taken from the server's summary
+ * when it is there and from the threads themselves when it is not — an older
+ * server that answers without the summary still groups correctly.
+ */
+function warmupInboxAccount(accountId, threads) {
+  const summary = warmupState.inbox.accounts.find((account) => account.accountId === accountId);
+  if (summary?.identity) return { name: summary.identity, exact: true };
+  if (summary?.label) return { name: summary.label, exact: false };
+  return warmupThreadAccount(threads[0] || { accountId });
+}
+
+/** How many of this account's threads are unread, whatever the list is filtering. */
+function warmupInboxUnreadFor(accountId) {
+  const summary = warmupState.inbox.accounts.find((account) => account.accountId === accountId);
+  if (summary) return Number(summary.unread) || 0;
+  return warmupState.inbox.threads.filter((thread) => thread.accountId === accountId && thread.unread).length;
+}
+
+/**
+ * The list, grouped by the account each reply arrived on.
+ *
+ * Which login somebody answered is the first thing a seller needs and the last
+ * thing the flat list gave them: five accounts' conversations interleaved by
+ * time, each naming its account in small print under a stranger's name. A
+ * heading per account says it once, and carries that account's unread count so
+ * the fresh reply is visible before any row is read.
+ */
+function warmupThreadGroupsHtml(threads) {
+  const order = [];
+  const byAccount = new Map();
+  for (const thread of threads) {
+    const id = thread.accountId || "";
+    if (!byAccount.has(id)) {
+      byAccount.set(id, []);
+      order.push(id);
+    }
+    byAccount.get(id).push(thread);
+  }
+
+  return order.map((accountId) => {
+    const held = byAccount.get(accountId);
+    const account = warmupInboxAccount(accountId, held);
+    const unread = warmupInboxUnreadFor(accountId);
+    const title = account.exact
+      ? "Особа, під якою залогінений цей акаунт"
+      : "Назва профілю в Anty — цей портал не знає, під ким залогінений цей акаунт";
+
+    return `<section class="warmup-thread-group" id="${escapeAttr(warmupInboxAnchor(accountId))}">
+      <h3 class="warmup-thread-group-head">
+        <span class="warmup-identity" title="${escapeAttr(title)}">
+          <i data-lucide="${account.exact ? "badge-check" : "circle-help"}"></i>
+          <span>${escapeHtml(account.name)}</span>
+        </span>
+        ${unread
+          ? `<span class="warmup-group-unread">${warmupCount(unread)} ${uaPlural(unread, "нова відповідь", "нові відповіді", "нових відповідей")}</span>`
+          : '<span class="warmup-subtle">усе прочитано</span>'}
+        <span class="warmup-subtle">${warmupCount(held.length)} ${uaPlural(held.length, "розмова", "розмови", "розмов")} тут</span>
+      </h3>
+      <div class="warmup-threads">${held.map((thread) => warmupThreadRowHtml(thread)).join("")}</div>
+    </section>`;
+  }).join("");
+}
+
+/** The id a group heading carries, so the accounts table can jump to it. */
+function warmupInboxAnchor(accountId) {
+  return `warmupInboxAccount-${String(accountId || "none").replace(/[^A-Za-z0-9_-]/g, "")}`;
 }
 
 function warmupMessageHtml(message, participantName, accountName) {
@@ -6639,7 +6735,13 @@ function renderWarmupInbox() {
     return;
   }
 
-  subtitle.textContent = `${warmupCount(inbox.threads.length)} ${uaPlural(inbox.threads.length, "розмова", "розмови", "розмов")}${inbox.unreadOnly ? " непрочитаних" : ""} · ${read}`;
+  // How many accounts the list spans, said before the groups themselves: five
+  // conversations on one login and five on five are different days of work.
+  const spread = new Set(inbox.threads.map((thread) => thread.accountId)).size;
+  const across = spread
+    ? ` на ${warmupCount(spread)} ${uaPlural(spread, "акаунті", "акаунтах", "акаунтах")}`
+    : "";
+  subtitle.textContent = `${warmupCount(inbox.threads.length)} ${uaPlural(inbox.threads.length, "розмова", "розмови", "розмов")}${inbox.unreadOnly ? " непрочитаних" : ""}${across} · ${read}`;
 
   const shown = inbox.showAll ? inbox.threads : inbox.threads.slice(0, WARMUP_INBOX_PREVIEW);
   const hidden = inbox.threads.length - shown.length;
@@ -6655,7 +6757,7 @@ function renderWarmupInbox() {
       : "");
 
   body.innerHTML = `${warmupSyncGapHtml(sync)}
-    <div class="warmup-threads">${shown.map((thread) => warmupThreadRowHtml(thread)).join("")}</div>
+    ${warmupThreadGroupsHtml(shown)}
     ${more}`;
   refreshIcons();
 }
@@ -6738,6 +6840,7 @@ async function loadWarmupInbox() {
   try {
     const payload = await warmupApi(`/inbox${query ? `?${query}` : ""}`);
     inbox.threads = Array.isArray(payload.threads) ? payload.threads : [];
+    inbox.accounts = Array.isArray(payload.accounts) ? payload.accounts : [];
     inbox.unread = Number.isFinite(payload.unread) ? payload.unread : 0;
     inbox.sync = payload.sync && typeof payload.sync === "object" ? payload.sync : null;
     inbox.available = true;
@@ -6746,6 +6849,7 @@ async function loadWarmupInbox() {
     setWarmupUnread(inbox.unread);
   } catch (error) {
     inbox.threads = [];
+    inbox.accounts = [];
     inbox.sync = null;
     if (error?.status === 404) {
       // The endpoint is not built here. That is a different sentence from "the
@@ -6760,6 +6864,10 @@ async function loadWarmupInbox() {
     }
   }
   renderWarmupInbox();
+  // The accounts table carries the same unread numbers, and it was drawn before
+  // this answer arrived — so it is redrawn with it rather than sitting there
+  // saying nothing is waiting.
+  if (warmupState.profiles.length) renderWarmupProfiles();
 }
 
 function warmupThreadIsOpen(accountId, threadKey) {
@@ -6788,6 +6896,11 @@ async function markWarmupThreadRead(accountId, threadKey) {
 
   if (thread) thread.unread = false;
   warmupState.inbox.unread = Math.max(0, (warmupState.inbox.unread || 0) - 1);
+  // The account this thread arrived on is one reply less busy, on the heading
+  // above it and on its row in the table alike.
+  const summary = warmupState.inbox.accounts.find((account) => account.accountId === accountId);
+  if (summary) summary.unread = Math.max(0, (Number(summary.unread) || 0) - 1);
+  if (warmupState.profiles.length) renderWarmupProfiles();
   // The mark comes back with the new global count, so the badge is the server's
   // number rather than this screen's arithmetic about it.
   if (Number.isFinite(payload?.unread)) {
@@ -6846,6 +6959,30 @@ function closeWarmupThread() {
   inbox.openError = "";
   inbox.openBusy = false;
   renderWarmupInbox();
+}
+
+/**
+ * Show one account's replies in the inbox below, from the badge on its row.
+ *
+ * Nothing is filtered away: the other accounts stay where they are, the list is
+ * expanded so the group cannot be one of the ones collapsing hid, and the page
+ * is moved to it. A seller who clicks "2 нові відповіді" should land on those
+ * two threads without losing the rest of the screen.
+ */
+function showWarmupInboxAccount(accountId) {
+  if (!accountId) return;
+  const inbox = warmupState.inbox;
+  if (inbox.openThreadKey !== null) closeWarmupThread();
+  inbox.showAll = true;
+  renderWarmupInbox();
+
+  const group = document.getElementById(warmupInboxAnchor(accountId));
+  if (!group) return;
+  group.scrollIntoView({ behavior: "smooth", block: "start" });
+  // A brief mark, because a smooth scroll ending on one of several headings
+  // does not by itself say which one was asked for.
+  group.classList.add("is-called");
+  setTimeout(() => group.classList.remove("is-called"), 2000);
 }
 
 document.getElementById("warmupInboxRefreshBtn")?.addEventListener("click", () => {

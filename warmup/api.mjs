@@ -24,8 +24,8 @@ import {
 } from "./targeting.mjs";
 import {
   AUDIT_HIDDEN_TYPES, MAX_THREADS_PER_RUN, lastSyncedAt, listThreads, markRead, markSynced, normalizeThreadInput,
-  messagesForContact, outreachFor, readThread, storeThread, syncSummary, syncedTodayAccounts,
-  threadKeyOf, unreadCount
+  messagesForContact, outreachFor, readThread, storeThread, summarizeAccounts, syncSummary,
+  syncedTodayAccounts, threadKeyOf, unreadCount
 } from "./inbox.mjs";
 import { decideNext, finishRun, leaseAccount, upkeepFor } from "./scheduler.mjs";
 import {
@@ -2037,7 +2037,12 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
     // tables of their own, this file does not change.
     if (method === "GET" && path === "/inbox") {
       const accountId = url.searchParams.get("accountId") || null;
-      const threads = await listThreads({ accountId, unreadOnly: url.searchParams.get("unread") === "1" });
+      const unreadOnly = url.searchParams.get("unread") === "1";
+      // Everything first, then the filter: the per-account summary has to keep
+      // saying how much an account holds in total while the list above it shows
+      // only what is unread. Filtering first would make the two disagree.
+      const held = await listThreads({ accountId });
+      const threads = unreadOnly ? held.filter((thread) => thread.unread) : held;
 
       const accounts = await anty.from("wl_accounts").select("id,label").rows();
       const [identities, outreach] = await Promise.all([loginIdentities(), outreachFor(threads)]);
@@ -2045,7 +2050,14 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
 
       sendJson(response, 200, {
         success: true,
-        unread: threads.filter((thread) => thread.unread).length,
+        unread: held.filter((thread) => thread.unread).length,
+        // A reply belongs to the login it arrived on, and the screen groups by
+        // exactly this: one heading per account, carrying its own unread count.
+        accounts: summarizeAccounts(held).map((account) => ({
+          ...account,
+          label: labels.get(account.accountId) ?? null,
+          identity: identities.get(account.accountId)?.name ?? null
+        })),
         // Top level as well as per thread: the one case this value decides —
         // an empty inbox — is the case with no thread to carry it, and
         // "nothing arrived" and "the agent never ran" need different people to

@@ -810,3 +810,37 @@ export async function outreachFor(threads) {
 export function threadKeyOf(thread) {
   return threadId(thread.accountId, thread.threadKey);
 }
+
+/**
+ * The same threads, counted per account.
+ *
+ * A reply belongs to the login it arrived on, and until this existed the screen
+ * could only say so one row at a time — a line of small print under a stranger's
+ * name. Which account is waiting on somebody is a question about the account,
+ * so it gets an answer shaped like an account: how many threads it holds, how
+ * many are unread, and when the newest of them was written.
+ *
+ * Ordered by what needs a person: unread first, then the freshest.
+ */
+export function summarizeAccounts(threads) {
+  const found = new Map();
+
+  for (const thread of threads) {
+    if (!thread?.accountId) continue;
+    let account = found.get(thread.accountId);
+    if (!account) {
+      account = { accountId: thread.accountId, threads: 0, unread: 0, newestAt: null };
+      found.set(thread.accountId, account);
+    }
+    account.threads += 1;
+    if (thread.unread) account.unread += 1;
+    const sentAt = thread.lastMessage?.sentAt || null;
+    if (sentAt && (!account.newestAt || sentAt > account.newestAt)) account.newestAt = sentAt;
+  }
+
+  return [...found.values()].sort((left, right) => {
+    if (Boolean(left.unread) !== Boolean(right.unread)) return left.unread ? -1 : 1;
+    if (left.unread !== right.unread) return right.unread - left.unread;
+    return String(right.newestAt || "").localeCompare(String(left.newestAt || ""));
+  });
+}

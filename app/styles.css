@@ -5903,7 +5903,8 @@ dialog {
   font-size: 13px;
 }
 
-.warmup-inbox-note + .warmup-threads {
+.warmup-inbox-note + .warmup-threads,
+.warmup-inbox-note + .warmup-thread-group {
   margin-top: 12px;
 }
 
@@ -5957,6 +5958,80 @@ dialog {
 .warmup-threads {
   display: grid;
   gap: 8px;
+}
+
+/* ── Grouped by the account a reply arrived on ─────────────────────────── */
+
+.warmup-thread-group {
+  display: grid;
+  gap: 8px;
+  padding: 10px 10px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 55%, transparent);
+}
+
+.warmup-thread-group + .warmup-thread-group {
+  margin-top: 12px;
+}
+
+/* Where a jump from the accounts table lands, held long enough to be seen. */
+.warmup-thread-group.is-called {
+  border-color: var(--teal);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--teal) 18%, transparent);
+}
+
+.warmup-thread-group-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  margin: 0;
+  padding: 0 4px 2px;
+  font-size: 13px;
+}
+
+.warmup-thread-group-head .warmup-identity {
+  font-size: 13.5px;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.warmup-thread-group-head .warmup-subtle {
+  font-weight: 600;
+}
+
+.warmup-group-unread,
+.warmup-account-unread {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 99px;
+  border: 1px solid color-mix(in srgb, var(--teal) 45%, var(--line));
+  background: color-mix(in srgb, var(--teal) 14%, transparent);
+  color: var(--teal);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.warmup-account-unread {
+  margin-top: 3px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.warmup-account-unread:hover {
+  background: color-mix(in srgb, var(--teal) 24%, transparent);
+}
+
+.warmup-account-unread svg {
+  width: 12px;
+  height: 12px;
 }
 
 .warmup-inbox-more {
