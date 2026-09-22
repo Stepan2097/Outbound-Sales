@@ -30,6 +30,13 @@ const defaultSecondaryCompanyPeopleActorId = "scraper-engine/linkedin-company-em
 const defaultPersonEnrichmentActorId = "enrich-crm/enrich-crm-enrich-contact";
 const legacyPipelineLabsActorId = "kVYdvNOefemtiDXO5";
 const defaultFullEnrichBaseUrl = "https://app.fullenrich.com/api/v2";
+// Скільки разів дослідження відновлюється саме після перезапуску сервера.
+// Оголошено тут, а не біля самого дослідження: стан вантажиться на старті
+// модуля, тобто до того, як ініціалізуються `const` нижче по файлу.
+const MAX_RESEARCH_RESUMES = 3;
+// Черга записів стану на диск. Тут із тієї ж причини: завантаження стану вже
+// пише файл, а це відбувається раніше, ніж виконаються оголошення нижче.
+let stateWriteChain = Promise.resolve();
 // Who is making the current API call. Attribution has to reach two places
 // deep inside the AI paths — the model a request picks and the usage row it
 // writes — and threading a profile through every caller in between would touch
@@ -424,7 +431,41 @@ server.listen(port, () => {
   // process what to do — but the leases and cool-offs it keeps are in memory,
   // so they begin and end with the process that serves /agent/due.
   startScheduler();
+  // Дослідження, яке урвав перезапуск, доробляється саме — з тієї стадії, на
+  // якій його застали. Після того, як порт уже слухається, щоб сторінка бачила
+  // прогрес із першої ж секунди.
+  void resumeInterruptedResearch();
 });
+
+/**
+ * Вимкнення, яке не рве запис посередині.
+ *
+ * SIGTERM приходить при кожному деплої, а деплой тут — кожен пуш у `main`.
+ * Стадію дослідження, що саме в польоті, врятувати не можна: вона триває
+ * хвилини, а контейнеру дають секунди — її доробить наступний старт. Рятувати
+ * тут треба інше: `writeFile` перезаписує стан цілком, і процес, убитий
+ * посеред нього, лишає обрізаний JSON — тобто втрату всього робочого
+ * простору, а не однієї стадії.
+ *
+ * Тому тут не пишеться нічого нового: кожна зміна вже збережена у своєму
+ * місці, а зайвий запис на виході встигав створити файл у теці, яку вже
+ * прибирали, і ламав те, чого мав би не торкатися. Чекаємо рівно на запис,
+ * який уже почався.
+ */
+let stopping = false;
+
+for (const signal of ["SIGTERM", "SIGINT"]) {
+  process.on(signal, () => {
+    // Друге натискання — вихід без розмов: процес, який не дає себе спинити,
+    // гірший за будь-який недописаний байт.
+    if (stopping) process.exit(0);
+    stopping = true;
+    server.close();
+    const leave = () => process.exit(0);
+    setTimeout(leave, 1000).unref();
+    stateWriteChain.then(leave, leave);
+  });
+}
 
 async function handleApi(request, response, url) {
   if (request.method === "GET" && url.pathname === "/api/health") {
@@ -3224,11 +3265,40 @@ function applyPersistentWorkspaceState(saved = {}) {
   if (Array.isArray(saved.researchJobs)) {
     state.researchJobs = saved.researchJobs.slice(0, 100).map((job) => {
       if (!["queued", "running"].includes(job.status)) return job;
+      const resumes = Number(job.resumes || 0) + 1;
+      const now = new Date().toISOString();
+
+      // Перезапуск сервера більше не коштує людині натискання.
+      //
+      // Кожна стадія пише стан на диск одразу, щойно закінчилася, тож падіння
+      // посеред роботи коштує рівно одну стадію — ту, що була в польоті. Вона
+      // повертається в «очікує» і буде зроблена ще раз; усе, що вже зроблено,
+      // не переробляється. Раніше тут стояло «failed» і прохання натиснути
+      // кнопку ще раз — при автодеплої, який перезбирає прод з кожного пуша,
+      // це означало просити людину доробити чужу роботу.
+      if (resumes <= MAX_RESEARCH_RESUMES) {
+        return {
+          ...job,
+          status: "queued",
+          resumes,
+          interruptedAt: now,
+          updatedAt: now,
+          error: "",
+          stages: (job.stages || []).map((stage) =>
+            stage.status === "running" ? { ...stage, status: "pending", detail: "", startedAt: null } : stage)
+        };
+      }
+
+      // Запобіжник: робота, яка валить процес, інакше відновлювалася б вічно і
+      // з кожним колом витрачала гроші наново. Після трьох спроб це вже не
+      // перезапуск, а щось у самій роботі, і про це треба сказати людині.
       return {
         ...job,
         status: "failed",
-        error: "Дослідження перервав перезапуск сервера. Запусти його ще раз — воно продовжить зі збережених даних.",
-        completedAt: new Date().toISOString(),
+        resumes,
+        error: `Дослідження переривалося ${resumes} ${uaPlural(resumes, "раз", "рази", "разів")} поспіль і більше не відновлюється саме. Запусти його вручну — усе вже зібране збережено.`,
+        completedAt: now,
+        updatedAt: now,
         stages: (job.stages || []).map((stage) => stage.status === "running" ? { ...stage, status: "failed" } : stage)
       };
     });
@@ -3362,7 +3432,21 @@ function persistWorkspaceState() {
   }, 150);
 }
 
-async function writePersistentWorkspaceState() {
+/**
+ * Записи стану шикуються в чергу, а не йдуть навперейми.
+ *
+ * `writeFile` перезаписує файл цілком, тож два виклики одночасно можуть лягти
+ * один на одного і лишити обрізаний JSON — а це втрата всього робочого
+ * простору, не однієї стадії. Дослідження пише стан після кожної з семи
+ * стадій, а вимкнення пише його ще раз згори, тож збіг тут не теоретичний.
+ * Обгортка тримає той самий підпис, тому жоден виклик міняти не довелося.
+ */
+function writePersistentWorkspaceState() {
+  stateWriteChain = stateWriteChain.then(writeWorkspaceStateNow, writeWorkspaceStateNow);
+  return stateWriteChain;
+}
+
+async function writeWorkspaceStateNow() {
   try {
     await mkdir(dirname(stateFilePath), { recursive: true });
     await writeFile(stateFilePath, JSON.stringify({
@@ -6025,55 +6109,88 @@ function normalizeClientProfile(data = {}, fallback, modelUsed) {
   };
 }
 
+/**
+ * Сім стадій дослідження, кожна — крок, який можна пропустити.
+ *
+ * Список, а не сім пар рядків поспіль, саме тому, що роботу треба вміти
+ * продовжити з середини: `updateResearchJobStage` пише стан на диск після
+ * кожної стадії, тож після перезапуску видно, що вже зроблено, і залишається
+ * пройти рештою. Усе, що стадія здобула, лягає на самого проспекта, а він
+ * зберігається — тому пропущений крок нічого не забирає в наступних.
+ */
+function researchSteps(job, prospect, product) {
+  return [
+    ["company", "Шукаємо сайт, продукти, релізи, гео і модель монетизації.", async () => {
+      const companyDetail = await researchCompanyForProspect(prospect, { force: job.force });
+      prospect.companyProfile = buildCompanyProfile(prospect, product);
+      return companyDetail;
+    }],
+    ["people", "Дивимось, хто працює в компанії і хто з них ухвалює рішення.", async () => {
+      prospect.contactDiscovery = await enrichProspectContacts(prospect, { phase: "people" });
+      return `${prospect.companyPeople?.length || 0} релевантних людей у компанії.`;
+    }],
+    ["contacts", "Перевіряємо робочу пошту і прямий телефон.", async () => {
+      prospect.contactDiscovery = await enrichProspectContacts(prospect, { phase: "contacts" });
+      return `${prospect.contactDiscovery?.candidates?.length || 0} кандидатів у контакти перевірено.`;
+    }],
+    ["scoring", "Рахуємо відповідність, доступність і момент.", async () => {
+      await ensureLeadIntelligenceSnapshot(prospect, { force: true, useAi: true, refreshReason: "background_research", product });
+      prospect.companyProfile = buildCompanyProfile(prospect, product);
+      const analysis = analyzeLead(prospect, product);
+      return `Бал ${analysis.score}; відповідність продукту — ${analysis.productFit}.`;
+    }],
+    ["profile", "Пишемо опис клієнта і підходи до розмови.", async () => {
+      prospect.clientProfile = await buildClientProfile(prospect, product, job.profile);
+      const approaches = prospect.clientProfile.approaches.length;
+      return `${approaches} ${uaPlural(approaches, "підхід", "підходи", "підходів")} до розмови · ${prospect.clientProfile.modelUsed}.`;
+    }],
+    ["writing", "Готуємо три різні кути першого повідомлення.", async () => {
+      prospect.outreach = await prepareAndLogOutreach(prospect, job.profile, "SEQUENCE_GENERATION", {
+        source: "background-research",
+        actor: job.actor,
+        researchJobId: job.id,
+        product,
+        // Тексти пишуться мовою, яку щойно визначив опис клієнта, і розгортають
+        // його перший підхід — інакше сусідні вкладки радять різне.
+        language: job.language || prospect.clientProfile?.openerLanguage,
+        approachIndex: 0
+      });
+      prospect.status = statusAfterOutreachPlan(prospect.outreach);
+      return isNamedPersonProspect(prospect)
+        ? outreachStageDetail(prospect.outreach)
+        : "Повідомлення чекають, поки буде обрано конкретну людину.";
+    }],
+    ["crm", "Фіксуємо дослідження і персоналізацію в CRM.", async () => {
+      const crmStatus = prospect.outreach?.crmActivity?.syncStatus || "not_synced";
+      return crmStatus === "synced" ? "Активність записано в CRM." : "Збережено локально; запис у CRM можна повторити.";
+    }]
+  ];
+}
+
 async function runResearchJob(job) {
   const prospect = findProspect(job.prospectId);
-  if (!prospect) return;
+  if (!prospect) {
+    // Ліда прибрали з черги, поки сервер лежав. Доробляти нема що, і сказати
+    // це чесно краще, ніж лишити роботу вічно в «очікує».
+    job.status = "failed";
+    job.error = "Ліда, якого досліджували, уже немає в черзі.";
+    job.completedAt = new Date().toISOString();
+    job.updatedAt = job.completedAt;
+    await writePersistentWorkspaceState();
+    return;
+  }
   const product = productById(job.productId);
   job.status = "running";
-  job.startedAt = new Date().toISOString();
+  if (!job.startedAt) job.startedAt = new Date().toISOString();
   try {
-    await updateResearchJobStage(job, "company", "running", "Шукаємо сайт, продукти, релізи, гео і модель монетизації.");
-    const companyDetail = await researchCompanyForProspect(prospect, { force: job.force });
-    prospect.companyProfile = buildCompanyProfile(prospect, product);
-    await updateResearchJobStage(job, "company", "complete", companyDetail);
-
-    await updateResearchJobStage(job, "people", "running", "Дивимось, хто працює в компанії і хто з них ухвалює рішення.");
-    prospect.contactDiscovery = await enrichProspectContacts(prospect, { phase: "people" });
-    await updateResearchJobStage(job, "people", "complete", `${prospect.companyPeople?.length || 0} релевантних людей у компанії.`);
-
-    await updateResearchJobStage(job, "contacts", "running", "Перевіряємо робочу пошту і прямий телефон.");
-    prospect.contactDiscovery = await enrichProspectContacts(prospect, { phase: "contacts" });
-    await updateResearchJobStage(job, "contacts", "complete", `${prospect.contactDiscovery?.candidates?.length || 0} кандидатів у контакти перевірено.`);
-
-    await updateResearchJobStage(job, "scoring", "running", "Рахуємо відповідність, доступність і момент.");
-    await ensureLeadIntelligenceSnapshot(prospect, { force: true, useAi: true, refreshReason: "background_research", product });
-    prospect.companyProfile = buildCompanyProfile(prospect, product);
-    const analysis = analyzeLead(prospect, product);
-    await updateResearchJobStage(job, "scoring", "complete", `Бал ${analysis.score}; відповідність продукту — ${analysis.productFit}.`);
-
-    await updateResearchJobStage(job, "profile", "running", "Пишемо опис клієнта і підходи до розмови.");
-    prospect.clientProfile = await buildClientProfile(prospect, product, job.profile);
-    await updateResearchJobStage(job, "profile", "complete", `${prospect.clientProfile.approaches.length} ${uaPlural(prospect.clientProfile.approaches.length, "підхід", "підходи", "підходів")} до розмови · ${prospect.clientProfile.modelUsed}.`);
-
-    await updateResearchJobStage(job, "writing", "running", "Готуємо три різні кути першого повідомлення.");
-    prospect.outreach = await prepareAndLogOutreach(prospect, job.profile, "SEQUENCE_GENERATION", {
-      source: "background-research",
-      actor: job.actor,
-      researchJobId: job.id,
-      product,
-      // Тексти пишуться мовою, яку щойно визначив опис клієнта, і розгортають
-      // його перший підхід — інакше сусідні вкладки радять різне.
-      language: job.language || prospect.clientProfile?.openerLanguage,
-      approachIndex: 0
-    });
-    prospect.status = statusAfterOutreachPlan(prospect.outreach);
-    await updateResearchJobStage(job, "writing", "complete", isNamedPersonProspect(prospect)
-      ? outreachStageDetail(prospect.outreach)
-      : "Повідомлення чекають, поки буде обрано конкретну людину.");
-
-    await updateResearchJobStage(job, "crm", "running", "Фіксуємо дослідження і персоналізацію в CRM.");
-    const crmStatus = prospect.outreach?.crmActivity?.syncStatus || "not_synced";
-    await updateResearchJobStage(job, "crm", "complete", crmStatus === "synced" ? "Активність записано в CRM." : "Збережено локально; запис у CRM можна повторити.");
+    for (const [id, note, work] of researchSteps(job, prospect, product)) {
+      // Стадія, яка встигла завершитися до перезапуску, не переробляється:
+      // вона коштувала запитів до моделі й до платних джерел, а її результат
+      // уже лежить на проспекті.
+      if (job.stages?.find((stage) => stage.id === id)?.status === "complete") continue;
+      await updateResearchJobStage(job, id, "running", note);
+      await updateResearchJobStage(job, id, "complete", await work());
+    }
 
     recordLeadResearch(prospect, {
       stage: "background_research_complete",
@@ -6102,6 +6219,29 @@ async function runResearchJob(job) {
     addEvent("research", `${prospect.name} research stopped: ${message}`);
   }
   await writePersistentWorkspaceState();
+}
+
+/**
+ * Доробити те, що перервав перезапуск.
+ *
+ * Викликається, коли сервер уже слухає порт: сторінка тоді одразу бачить
+ * роботу в стані «виконується» і показує, на якій вона стадії, замість
+ * повідомлення про збій із проханням натиснути кнопку.
+ */
+async function resumeInterruptedResearch() {
+  const waiting = state.researchJobs.filter((job) => job.status === "queued");
+  if (!waiting.length) return;
+  addEvent("research", `Resuming ${waiting.length} research job(s) interrupted by a restart.`);
+  // По одній. Кожна стадія ходить до моделі й до платних джерел, і старт
+  // сервера — найгірший момент, щоб підняти їх усі водночас.
+  for (const job of waiting) {
+    if (job.status !== "queued") continue;
+    try {
+      await runResearchJob(job);
+    } catch (error) {
+      addEvent("research", `Resume failed for ${job.prospectName}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
 }
 
 async function researchAppPortfolio(prospect, options = {}) {
