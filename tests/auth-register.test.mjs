@@ -93,11 +93,16 @@ function startFakeSupabase() {
   });
 }
 
+// Порт на кожен тест свій, а не випадковий: випадкові з одного діапазону
+// зрідка збігалися, і тоді один тест падав через сервер сусіднього. Тест, який
+// падає раз на десять прогонів, гірший за відсутній — йому перестають вірити.
+let nextPort = 4900;
+
 async function startWorkspace(supabasePort, savedState = null) {
   const dir = await mkdtemp(join(tmpdir(), "outbound-register-"));
   const statePath = join(dir, "state.json");
   if (savedState) await writeFile(statePath, JSON.stringify(savedState), "utf8");
-  const port = 4900 + Math.floor(Math.random() * 200);
+  const port = nextPort += 1;
   const child = spawn(process.execPath, ["server.mjs"], {
     cwd: new URL("..", import.meta.url),
     env: {
@@ -131,7 +136,17 @@ async function startWorkspace(supabasePort, savedState = null) {
     });
     return { status: response.status, body: await response.json().catch(() => ({})) };
   };
-  return { post, stop: async () => { child.kill(); await rm(dir, { recursive: true, force: true }); } };
+  const exited = new Promise((resolve) => child.once("exit", resolve));
+  // Чекаємо, поки процес справді помре, а не лише поки йому надіслано сигнал:
+  // сервер, що пережив свій тест, тримає порт і пише у теку, яку вже прибрали.
+  return {
+    post,
+    stop: async () => {
+      child.kill();
+      await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 2000))]);
+      await rm(dir, { recursive: true, force: true });
+    }
+  };
 }
 
 async function withWorkspace(t) {
@@ -223,4 +238,21 @@ test("an address that is not one is refused, and leaves nothing behind either", 
 
   assert.equal(status, 400);
   assert.equal(signedUp.size, 0);
+});
+
+test("somebody who just registered is never told their account does not exist", async (t) => {
+  const workspace = await withWorkspace(t);
+
+  // No CRM profile: the account is made here and the base has not given it a
+  // `profiles` row. That is the ordinary state one second after registering.
+  const registered = await workspace.post("/api/auth/register", { email: "fresh@example.com", password: "correct-horse-battery" });
+  assert.equal(registered.status, 202);
+
+  // And now the most likely next thing they do: fumble the password they chose
+  // thirty seconds ago.
+  const { status, body } = await workspace.post("/api/auth/login", { email: "fresh@example.com", password: "wrong-password-entirely" });
+
+  assert.equal(status, 401);
+  assert.doesNotMatch(body.error, /тут немає/, "our own form made this account a moment ago — denying it exists is the worst lie available");
+  assert.match(body.error, /[Пп]ароль/, "the true half: the address is known, the password is not");
 });

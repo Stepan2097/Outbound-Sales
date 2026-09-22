@@ -2332,6 +2332,16 @@ async function credentialFailure(email) {
       // their account does not exist would be the worst possible lie at that
       // moment, and it costs one request to avoid.
       if (!known) known = (await crmProfilesByEmail({ maxAgeMs: 0 })).has(email);
+      // A fresh read can still miss somebody who plainly has an account.
+      // `profiles` is the CRM's table and the registration form here creates an
+      // Auth account, not that row — so whether the base writes one is the
+      // CRM's business, and the answer to "does this address exist" must not
+      // depend on it. Existence is Auth's question, so Auth is asked before the
+      // answer becomes "you are not here". Somebody with an account and no
+      // profile row is then told the truth — the password is wrong — and the
+      // right password gives them the honest 403 that names what to ask an
+      // admin for.
+      if (!known) known = Boolean(await findSupabaseUserByEmail(email));
     } catch {
       return apiError("Пошта або пароль не підходять.", 401);
     }
