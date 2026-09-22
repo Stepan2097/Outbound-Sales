@@ -4486,8 +4486,6 @@ const warmupState = {
   pendingAccountIds: null,
   // Per account: what is claimed to it now, or the server's sentence saying why
   // nothing is. An empty box is never the answer here.
-  queues: {},
-  queueBusy: {},
   leads: [],
   leadsTotal: null,
   leadsTargeting: null,
@@ -5257,133 +5255,6 @@ document.getElementById("warmupStrategyBody")?.addEventListener("click", (event)
   }
 });
 
-/* ── The queue ─────────────────────────────────────────────────────────────
- *
- * What is claimed to each account of the selected campaign right now. An
- * account whose connection quota has not opened yet — which this week is every
- * account — gets an empty list and a sentence saying why. The sentence is the
- * server's own; an empty box here would be the screen refusing to answer the
- * one question somebody opened it with.
- */
-
-function warmupQueueState(accountId) {
-  return warmupState.queues[accountId] || null;
-}
-
-function warmupQueueRowHtml(row, accountId, campaignId) {
-  const link = warmupLeadLink(row.linkedin);
-  const where = [row.position, row.company].filter(Boolean).join(" · ");
-  const name = row.name || "Контакт без імені";
-  // A queue belongs to an account, not to a campaign: an account that works two
-  // campaigns holds both their claims in one list. Saying which campaign a
-  // person came from is the difference between a list and a claim about where
-  // these people are from.
-  const elsewhere = row.campaignId && campaignId && row.campaignId !== campaignId
-    ? `<span class="warmup-queue-elsewhere" title="Закріплено іншою кампанією, яку цей акаунт теж веде">${escapeHtml(row.campaignName || "інша кампанія")}</span>`
-    : "";
-  return `<li>
-    <div class="warmup-lead-who">
-      <strong>${escapeHtml(name)}</strong>
-      ${where ? `<span class="warmup-subtle">${escapeHtml(where)}</span>` : ""}
-      ${elsewhere}
-    </div>
-    ${link ? `<a href="${escapeAttr(link)}" target="_blank" rel="noreferrer">профіль</a>` : '<span class="warmup-subtle">без посилання на профіль</span>'}
-    <button class="text-button warmup-queue-send" type="button"
-      data-warmup-take="${escapeAttr(row.crmContactId || "")}"
-      data-warmup-take-account="${escapeAttr(accountId)}"
-      data-warmup-take-name="${escapeAttr(name)}"
-      ${row.crmContactId ? "" : "disabled"}
-      title="Фіксує запит до цієї людини. Одна людина — один захід, назавжди.">Надіслав запит</button>
-  </li>`;
-}
-
-function warmupQueueAccountHtml(accountId, campaignId) {
-  const profile = warmupState.profiles.find((item) => item.account?.id === accountId) || null;
-  const identity = profile?.identity || profile?.account?.identity || null;
-  const queue = warmupQueueState(accountId);
-  const busy = Boolean(warmupState.queueBusy[accountId]);
-
-  const day = profile?.day ? `день ${profile.day}` : null;
-  const connections = profile?.connections || {};
-  const quotaLine = connections.quota > 0
-    ? `${connections.today || 0}/${connections.quota} сьогодні`
-    : (connections.startsDay ? `запити з ${connections.startsDay}-го дня` : "сьогодні квоти на запити немає");
-  const meta = [day, quotaLine].filter(Boolean).join(" · ");
-
-  let body;
-  if (!queue) {
-    body = '<div class="empty-state">Завантажуємо...</div>';
-  } else if (queue.unavailable) {
-    body = `<p class="warmup-queue-reason is-muted">${escapeHtml(queue.unavailable)}</p>`;
-  } else if (queue.error) {
-    body = `<p class="warmup-queue-reason is-bad">${escapeHtml(queue.error)}</p>`;
-  } else if (queue.rows?.length) {
-    body = `<ul class="warmup-leads warmup-queue-list">${queue.rows.map((row) => warmupQueueRowHtml(row, accountId, campaignId)).join("")}</ul>`;
-  } else if (queue.reason) {
-    // The server's sentence, verbatim. "Day 2 of 14 — connection requests start
-    // on day 4" is the answer; an empty box is not.
-    body = `<p class="warmup-queue-reason">${escapeHtml(queue.reason)}</p>`;
-  } else {
-    body = '<p class="warmup-queue-reason is-muted">За цим акаунтом нічого не закріплено, і сервер не сказав чому.</p>';
-  }
-
-  const released = Number(queue?.released) || 0;
-  const releasedNote = released
-    ? `<p class="warmup-queue-released">${warmupCount(released)} ${uaPlural(released, "закріплення протухло, і його відпущено", "закріплення протухли, і їх відпущено", "закріплень протухло, і їх відпущено")} — ці люди знову в пулі.</p>`
-    : "";
-
-  return `<article class="warmup-queue-account" data-warmup-queue-account="${escapeAttr(accountId)}">
-    <header>
-      <div class="warmup-queue-who">
-        <strong>${escapeHtml(profile?.name || "Акаунт, якого цей список не показує")}</strong>
-        ${identity?.name ? `<span class="warmup-identity"><i data-lucide="badge-check"></i><span>${escapeHtml(identity.name)}</span></span>` : ""}
-        ${meta ? `<span class="warmup-subtle">${escapeHtml(meta)}</span>` : ""}
-      </div>
-      <button class="text-button" type="button" data-warmup-claim="${escapeAttr(accountId)}" ${busy ? "disabled" : ""}>
-        <i data-lucide="hand"></i><span>${busy ? "Закріплюємо..." : "Закріпити зараз"}</span>
-      </button>
-    </header>
-    ${releasedNote}
-    ${body}
-  </article>`;
-}
-
-function renderWarmupQueue() {
-  const title = document.getElementById("warmupQueueTitle");
-  const subtitle = document.getElementById("warmupQueueSubtitle");
-  const body = document.getElementById("warmupQueueBody");
-  if (!title || !subtitle || !body) return;
-
-  const campaign = warmupSelectedCampaign();
-  title.textContent = campaign ? `Черга · ${campaign.name || "Кампанія без назви"}` : "Черга";
-
-  if (!campaign) {
-    subtitle.textContent = "Кампанію не вибрано";
-    body.innerHTML = '<div class="empty-state">Обери кампанію вгорі, щоб побачити, що тримають її акаунти.</div>';
-    return;
-  }
-
-  const accountIds = campaign.accountIds || [];
-  if (!accountIds.length) {
-    subtitle.textContent = "Цю кампанію поки ніхто не веде";
-    body.innerHTML = `<div class="warmup-leads-prompt"><strong>До цієї кампанії не позначено жодного акаунта.</strong>
-      <span>Познач акаунт нижче, у Профілях, — акаунт може закріплювати людей лише з тієї кампанії, яку веде.</span></div>`;
-    refreshIcons();
-    return;
-  }
-
-  // A queue is an account's, so what is counted here is everything these
-  // accounts hold — this campaign's claims and any other campaign's.
-  const claimed = accountIds.reduce((total, id) => total + (warmupQueueState(id)?.rows?.length || 0), 0);
-  const held = `${warmupCount(claimed)} на руках у ${accountIds.length} ${uaPlural(accountIds.length, "акаунта", "акаунтів", "акаунтів")}`;
-  subtitle.textContent = campaign.state === "running"
-    ? `${held} · закріплення тримає людину, воно нічого не надсилає`
-    : `Ця кампанія — ${WARMUP_CAMPAIGN_STATE_LABEL[campaign.state] || campaign.state}, тож нічого нового з неї не закріплюється. ${held}.`;
-
-  body.innerHTML = `<div class="warmup-queue-accounts">${accountIds.map((id) => warmupQueueAccountHtml(id, campaign.id)).join("")}</div>`;
-  refreshIcons();
-}
-
 function warmupLeadLink(url) {
   const value = String(url || "");
   return /^https?:\/\//i.test(value) ? value : null;
@@ -5681,7 +5552,6 @@ function openWarmupCampaignForm(campaignId = null) {
   if (campaignId) warmupState.selectedCampaignId = campaignId;
   renderWarmupCampaigns({ resetForm: true });
   renderWarmupProfiles();
-  renderWarmupQueue();
   document.getElementById("warmupCampaignName")?.focus();
 }
 
@@ -5744,7 +5614,6 @@ async function saveWarmupCampaignForm() {
   renderWarmupCampaigns({ resetForm: true });
   renderWarmupProfiles();
   if (saved) await loadWarmupCampaigns({ resetForm: false });
-  await loadWarmupQueues();
   if (saved) await loadWarmupLeads();
 }
 
@@ -5764,7 +5633,6 @@ async function setWarmupCampaignState(campaignId, nextState) {
   }
   // The order ranks are relative, so one campaign starting renumbers the rest.
   await loadWarmupCampaigns({ resetForm: false });
-  await loadWarmupQueues();
   await loadWarmupLeads();
 }
 
@@ -5802,7 +5670,6 @@ async function moveWarmupCampaign(campaignId, direction) {
   }
 
   await loadWarmupCampaigns({ resetForm: false });
-  await loadWarmupQueues();
   await loadWarmupLeads();
 }
 
@@ -5842,7 +5709,6 @@ async function deleteWarmupCampaign(campaignId) {
   renderWarmupCampaigns();
   renderWarmupProfiles();
   await loadWarmupCampaigns({ resetForm: false });
-  await loadWarmupQueues();
   await loadWarmupLeads();
 }
 
@@ -5858,7 +5724,6 @@ function selectWarmupCampaign(campaignId) {
   }
   renderWarmupCampaigns();
   renderWarmupProfiles();
-  loadWarmupQueues();
   loadWarmupLeads();
 }
 
@@ -5925,116 +5790,6 @@ async function saveWarmupCampaignAccounts(campaignId, accountIds) {
   // An account joining a campaign can make another campaign's count
   // approximate, so the whole list is re-read once the ticks have settled.
   await loadWarmupCampaigns({ resetForm: false });
-  await loadWarmupQueues();
-}
-
-/* ── Claiming ──────────────────────────────────────────────────────────────
- *
- * A claim allocates a person to an account; it spends no quota, and it is not
- * a send. What comes back when nothing can be claimed is a sentence, and that
- * sentence is the answer — it gets rendered where the list would have been.
- */
-
-async function loadWarmupQueue(accountId) {
-  try {
-    const payload = await warmupApi(`/queue?accountId=${encodeURIComponent(accountId)}`);
-    warmupState.queues[accountId] = {
-      rows: payload.queue || payload.claimed || [],
-      reason: payload.reason || "",
-      error: "",
-      unavailable: ""
-    };
-  } catch (error) {
-    warmupState.queues[accountId] = {
-      rows: [],
-      reason: "",
-      // A 409 is the server refusing this account outright — excluded, not
-      // warming, paused. That is an answer too, and it carries only `error`.
-      error: error.status === 404 ? "" : error.message,
-      unavailable: error.status === 404
-        ? "Цей сервер ще не тримає черги закріплень, тож звідси нічого не закріпити."
-        : ""
-    };
-  }
-}
-
-async function loadWarmupQueues() {
-  const campaign = warmupSelectedCampaign();
-  const accountIds = campaign?.accountIds || [];
-  if (!accountIds.length) {
-    renderWarmupQueue();
-    return;
-  }
-  await Promise.all(accountIds.map((id) => loadWarmupQueue(id)));
-  renderWarmupQueue();
-}
-
-async function claimWarmupQueue(accountId) {
-  if (warmupState.queueBusy[accountId]) return;
-  warmupState.queueBusy[accountId] = true;
-  renderWarmupQueue();
-
-  try {
-    const payload = await warmupApi("/campaigns/claim", {
-      method: "POST",
-      body: JSON.stringify({ accountId })
-    });
-    const claimed = payload.claimed || [];
-    const existing = warmupState.queues[accountId]?.rows || [];
-    warmupState.queues[accountId] = {
-      // Oldest first, as the queue itself is ordered.
-      rows: existing.concat(claimed),
-      reason: payload.reason || "",
-      // Every claim first releases what expired. If that moved anything, the
-      // queue just shrank under somebody's feet and they should hear why.
-      released: Number(payload.released) || 0,
-      error: "",
-      unavailable: ""
-    };
-  } catch (error) {
-    warmupState.queues[accountId] = {
-      rows: warmupState.queues[accountId]?.rows || [],
-      reason: "",
-      error: error.status === 404
-        ? "Цей сервер ще не вміє закріплювати."
-        : error.message,
-      unavailable: ""
-    };
-  } finally {
-    warmupState.queueBusy[accountId] = false;
-  }
-
-  renderWarmupQueue();
-  // Claiming changes what is left and what is held, so the row above has to
-  // follow it.
-  await loadWarmupCampaigns({ resetForm: false });
-  renderWarmupQueue();
-}
-
-/**
- * The one place a request is recorded. It marks a real person as approached,
- * once and for good, so it asks first and says who.
- */
-async function takeWarmupQueueLead(accountId, crmContactId, name) {
-  if (!accountId || !crmContactId) return;
-  if (!window.confirm(`Записати запит на контакт до ${name || "цього контакту"}?\n\nЦе назавжди позначає, що до цієї людини вже зверталися — для кожного акаунта й кожної кампанії.`)) return;
-
-  try {
-    await warmupApi("/leads/take", {
-      method: "POST",
-      body: JSON.stringify({ accountId, crmContactId })
-    });
-    const queue = warmupState.queues[accountId];
-    if (queue) {
-      queue.rows = (queue.rows || []).filter((row) => row.crmContactId !== crmContactId);
-    }
-  } catch (error) {
-    if (warmupState.queues[accountId]) warmupState.queues[accountId].error = error.message;
-    else warmupState.queues[accountId] = { rows: [], reason: "", error: error.message, unavailable: "" };
-  }
-
-  renderWarmupQueue();
-  await loadWarmup({ full: false });
 }
 
 async function loadWarmupLeads() {
@@ -6119,7 +5874,6 @@ async function loadWarmup({ full = true } = {}) {
       renderWarmupProfiles();
       renderWarmupStats();
       renderWarmupCampaigns();
-      renderWarmupQueue();
       return;
     }
 
@@ -6137,7 +5891,6 @@ async function loadWarmup({ full = true } = {}) {
     // selected one, and the queue below is drawn from its accounts.
     await loadWarmupCampaigns({ resetForm: full });
     await loadWarmupProfiles();
-    await loadWarmupQueues();
     await loadWarmupLeads();
     if (warmupState.selectedAccountId) await loadWarmupAccountDetail(warmupState.selectedAccountId);
   } catch (error) {
@@ -6297,20 +6050,6 @@ document.getElementById("warmupCampaignList")?.addEventListener("click", (event)
   }
   selectWarmupCampaign(campaignId);
 });
-
-document.getElementById("warmupQueueBody")?.addEventListener("click", (event) => {
-  const claim = event.target.closest("[data-warmup-claim]");
-  if (claim) {
-    claimWarmupQueue(claim.dataset.warmupClaim);
-    return;
-  }
-  const take = event.target.closest("[data-warmup-take]");
-  if (take) {
-    takeWarmupQueueLead(take.dataset.warmupTakeAccount, take.dataset.warmupTake, take.dataset.warmupTakeName);
-  }
-});
-
-document.getElementById("warmupQueueRefreshBtn")?.addEventListener("click", () => loadWarmupQueues());
 
 document.getElementById("warmupLeadsRefreshBtn")?.addEventListener("click", () => loadWarmupLeads());
 
