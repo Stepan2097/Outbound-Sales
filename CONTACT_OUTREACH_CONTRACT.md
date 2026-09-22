@@ -39,6 +39,14 @@ purpose — `agent/run-account.mjs:393-403` logs `agent.deferred` and says
 agent". So "add automatically" is new work in the agent, and the portal half is
 a queue the agent drains, not a send button.
 
+**Since then that route lost its screen.** The Queue panel was removed from the
+warm-up tab, and with it the last callers of `POST /leads/take`,
+`POST /campaigns/claim`, `POST /campaigns/release` and `GET /queue`. All four
+are still served and still work; nothing on any screen reaches them. **The one
+manual path that exists today is `POST /invites/sent-by-hand`**, and it is the
+only one with a button. Read anything below that names `/leads/take` as a live
+route with that in mind.
+
 **2. A waiting invite cannot be a claim.** `releaseExpiredClaims()`
 (`api.mjs:177`) **deletes** every row with `status = "queued"` older than
 `CLAIM_TTL_HOURS` (default 20), workspace-wide, on any account's next Claim or
@@ -47,6 +55,22 @@ older than that cutoff. An invite queued at 10:00 today is invisible from 06:00
 tomorrow and deleted by the first click after that — three hours before the
 09:00 session window opens. Twenty is less than twenty-four: "waits for
 tomorrow" as a `queued` row is not merely fragile, it is impossible.
+
+**That sweeper no longer runs at all**, and this changes nothing about the
+design above. `releaseExpiredClaims()` is called from exactly two places —
+inside `/campaigns/claim` and `/campaigns/release` — and both lost their screen
+with the Queue panel, so nothing triggers it any more. Harmless today:
+`wl_outreach` is empty on production, and `waiting` was never swept anyway
+because every DELETE here is guarded `.eq("status", CLAIM_STATUS)`.
+
+It is written down because the reasoning is easy to misread twice over. The
+reason `waiting` is not `queued` is **not** that a sweeper would eat it — it is
+that a `queued` row is a claim, and a claim is a thing somebody holds and
+releases. The sweeper was the consequence, not the cause. So if campaign claims
+ever come back, the sweeper comes back with them and this paragraph is live
+again; and a `queued` row that nothing sweeps is a worse bug than one that gets
+swept, because a claim nobody releases holds a person out of every pool for
+good.
 
 **3. `connected` already means something else.** `OUTREACH_STATUSES` is
 `["pending", "connected", "declined", "withdrawn"]`, and the only automatic
@@ -244,8 +268,16 @@ shows a pending invitation.
 The bridge that makes this useful before the agent can do anything: the seller
 sent the request themselves, in their own browser. Writes the row straight to
 `pending`, spends the quota through `checkQuota` + `commitAction`, logs
-`invite.sent` with `by: "seller"`. This is exactly what `POST /leads/take` does
-today and it delegates to the same code path rather than copying it.
+`invite.sent` with `by: "seller"`.
+
+**It was planned as a delegation to `POST /leads/take`; it was not built as
+one, and it should not become one.** The two differ where it matters: over the
+allowance, `/leads/take` refuses, and this one writes the row anyway, flags it
+and logs at warn. That is deliberate — the request already exists on LinkedIn,
+and refusing to record it does not un-send it, it only makes our own record
+false. It also promotes an existing `waiting` row through `moveStatus` instead
+of inserting beside it. `/leads/take` now has no screen at all, so this is the
+only manual path in the product.
 
 ### The lead workspace
 
@@ -707,9 +739,11 @@ place to resolve it is here, before the first `email.*` row is written.
 - `POST /leads/take` — its claim lookup is `.eq("crm_contact_id").eq("status",
   CLAIM_STATUS)` with **no account filter**, and the patch it applies sets
   `account_id`. Sending from account B silently re-points a claim account A
-  holds, with no event recording it. Harmless while only campaigns claimed;
-  reachable the day the panel offers an account picker. **Fix it in Phase 1** —
-  scope the lookup, or refuse with the holder's name.
+  holds, with no event recording it. **Still unfixed, and now dormant rather
+  than fixed:** the route is served but no screen calls it, so nothing can
+  reach the bug today. If it is ever wired to a button again, scope the lookup
+  or refuse with the holder's name *before* wiring it — the route coming back
+  is what makes this reachable, and by then nobody will be reading this page.
 
 ## Not in this phase
 
