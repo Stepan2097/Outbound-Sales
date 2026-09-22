@@ -2174,14 +2174,60 @@ async function createWorkspaceUser(input = {}, options = {}) {
   return { user, profile, session: null, existingAccount };
 }
 
+/** Supabase answers both halves with one sentence; this is that sentence. */
+function isInvalidCredentials(error) {
+  const message = String(error?.message || "").toLowerCase();
+  return message.includes("invalid login credentials") || message.includes("invalid_grant");
+}
+
+/**
+ * Which half was wrong.
+ *
+ * Supabase refuses to say, and for a public sign-up that is right: telling a
+ * stranger which addresses exist is telling them who works here. This is a
+ * workspace of a few people whose door the CRM already guards, and a seller who
+ * cannot tell a typo in their address from a typo in their password has nothing
+ * to try next.
+ *
+ * The answer is not a guess about Supabase's user table — it is read from the
+ * only authority that decides anything here: whether this workspace would admit
+ * that address at all. Somebody in neither this workspace's own people nor the
+ * CRM's is refused by `admitWorkspaceUser` even with a correct password, so
+ * naming the address says nothing that a correct password would not have said
+ * one line later.
+ *
+ * With the CRM unreachable we cannot tell the two apart, and the old sentence
+ * is then the honest one.
+ */
+async function credentialFailure(email) {
+  let known = state.users.some((user) => user.email === email);
+  if (!known) {
+    try {
+      known = (await crmProfilesByEmail()).has(email);
+    } catch {
+      return apiError("Пошта або пароль не підходять.", 401);
+    }
+  }
+  return known
+    ? apiError("Пароль не підходить. Якщо не згадаєш — тисни «Забув пароль?» під формою.", 401)
+    : apiError(`Акаунта з поштою ${email} тут немає. Заходити можна лише робочою поштою компанії.`, 401);
+}
+
 async function loginWorkspaceUser(emailValue, passwordValue, options = {}) {
   const email = cleanText(emailValue || "").toLowerCase();
   const password = String(passwordValue || "");
-  if (!email || !password) throw apiError("Введи email і пароль.");
-  const session = await supabaseAuthRequest("token?grant_type=password", {
-    method: "POST",
-    body: { email, password }
-  });
+  if (!email) throw apiError("Введи робочу пошту.");
+  if (!password) throw apiError("Введи пароль.");
+  let session;
+  try {
+    session = await supabaseAuthRequest("token?grant_type=password", {
+      method: "POST",
+      body: { email, password }
+    });
+  } catch (error) {
+    if (isInvalidCredentials(error)) throw await credentialFailure(email);
+    throw error;
+  }
   const user = session.user || await verifySupabaseAccessToken(session.access_token);
   // Bootstrap is the one path that predates the CRM having anything to say.
   const profile = options.allowUnregistered
