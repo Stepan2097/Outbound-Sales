@@ -917,6 +917,18 @@ async function handleApi(request, response, url) {
     return;
   }
 
+  if (request.method === "POST" && url.pathname === "/api/account/users/remove") {
+    if (request.auth.profile.role !== "admin") {
+      sendJson(response, 403, { error: "Прибирати акаунти може лише адміністратор робочого простору." });
+      return;
+    }
+    const body = await readJson(request);
+    const result = await removeWorkspaceUser(request.auth.profile, body);
+    await writePersistentWorkspaceState();
+    sendJson(response, 200, result);
+    return;
+  }
+
   if (request.method === "POST" && url.pathname === "/api/openrouter/key") {
     const body = await readJson(request);
     if (typeof body.apiKey !== "string" || body.apiKey.trim().length < 8) {
@@ -2319,6 +2331,59 @@ async function registerWorkspaceUser(input = {}) {
     }
     throw error;
   }
+}
+
+/**
+ * Прибрати акаунт назовсім.
+ *
+ * Єдина незворотна дія в цій вкладці, і тому вона поводиться інакше за сусідні.
+ * Натискає її людина: сервер нічого не прибирає сам і ніколи не прибирає за
+ * підозрою — лише той акаунт, який назвали ідентифікатором.
+ *
+ * Чого вона свідомо **не** робить: не чіпає рядок у `profiles`. Це таблиця
+ * CRM, чужа система обліку, і цей застосунок її лише читає. Якщо там щось
+ * лишиться, відповідь про це скаже — мовчазне піввидалення гірше за чесне.
+ *
+ * Помилковий акаунт тут — не рідкість, а наслідок: реєстрація відкрита, пошта
+ * підтверджує себе сама, тож описка в адресі стає акаунтом, до якого ніхто
+ * ніколи не дістанеться. Доти, доки прибрати його можна було лише в дашборді
+ * Supabase, кожна описка лишалася назавжди.
+ */
+async function removeWorkspaceUser(actor, input = {}) {
+  const userId = cleanText(input.userId || "");
+  if (!userId) throw apiError("Кого прибирати? Потрібен ідентифікатор акаунта.");
+  // Адміністратор, який прибрав сам себе, замикає двері зсередини: ролі
+  // роздає лише адміністратор, і повернути собі доступ буде нікому.
+  if (cleanText(actor?.id || "") === userId) {
+    throw apiError("Свій власний акаунт прибрати не можна — попроси про це іншого адміністратора.", 409);
+  }
+
+  // Ключ без адмінських прав відмовить уже в Supabase, але скаже це чужими
+  // словами («User not allowed»), і на екрані це виглядатиме як поломка
+  // застосунку. Краще сказати своїми і назвати, що робити.
+  if (authKeyKind() !== "service_role") {
+    throw apiError(
+      "Ключ Supabase у налаштуваннях не має адміністраторських прав, тож акаунт звідси не прибрати. Постав службовий ключ у Налаштуваннях або видали акаунт у дашборді Supabase.",
+      409
+    );
+  }
+
+  const profile = state.users.find((user) => user.id === userId) || null;
+  const email = cleanText(input.email || profile?.email || "").toLowerCase();
+
+  await supabaseAuthRequest(`admin/users/${encodeURIComponent(userId)}`, { method: "DELETE" });
+  state.users = state.users.filter((user) => user.id !== userId);
+  addEvent("auth", `${cleanText(actor?.email || "admin")} removed account ${email || userId}.`);
+  // Читається наживо, а не з хвилинного кешу: відповідь про те, що лишилося в
+  // CRM, має описувати зараз, а не хвилину тому.
+  const crmRow = (await crmProfilesByEmail({ maxAgeMs: 0 })).get(email) || null;
+  return {
+    removed: true,
+    userId,
+    email,
+    hadWorkspaceProfile: Boolean(profile),
+    crmProfileRemains: Boolean(crmRow)
+  };
 }
 
 /** Supabase answers both halves with one sentence; this is that sentence. */

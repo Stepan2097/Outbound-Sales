@@ -331,7 +331,11 @@ function teamRowHtml(person, selfEmail, { canSetRole = false } = {}) {
     (person.aliases || []).length ? `та сама скринька, що ${person.aliases.join(", ")}` : "",
     person.crmRole ? `у CRM ${person.crmRole}` : "",
     person.signedInHere ? "" : "тут ще не заходив",
-    person.lastSignInAt ? `вхід ${warmupAgo(person.lastSignInAt)}` : "жодного входу"
+    // `warmupAgo` поїхала разом із блоком прогріву в d210867, а цей рядок її
+    // кликати не перестав — відтоді вкладка «Користувачі» не могла показати
+    // команду взагалі, бо весь список падав на першому ж рядку. Та сама
+    // відповідь уже є в `relativeTime`, і вона не належить прогріву.
+    person.lastSignInAt ? `вхід ${relativeTime(person.lastSignInAt)}` : "жодного входу"
   ].filter(Boolean).join(" · ");
   const options = ["admin", "seller"].map((value) =>
     `<option value="${value}"${value === person.role ? " selected" : ""}>${ROLE_LABEL[value]}</option>`
@@ -360,6 +364,9 @@ function teamRowHtml(person, selfEmail, { canSetRole = false } = {}) {
     ${canSetRole
       ? `<select class="team-access" data-email="${escapeAttr(person.email)}"${self ? " disabled title=\"Свою роль змінює інший адміністратор\"" : ""}>${options}</select>`
       : `<span class="team-model">${escapeHtml(ROLE_LABEL[person.role] || person.role || "")}</span>`}
+    ${canSetRole && !self
+      ? `<button class="icon-button danger-button" type="button" data-remove-user="${escapeAttr(person.id || "")}" data-remove-email="${escapeAttr(person.email)}" title="Прибрати акаунт назовсім" aria-label="Прибрати акаунт ${escapeAttr(person.email)}"><i data-lucide="trash-2"></i></button>`
+      : ""}
   </article>`;
 }
 
@@ -428,10 +435,41 @@ function modelChoiceLabelFromView(view) {
 
 document.getElementById("teamUserList")?.addEventListener("click", (event) => {
   if (event.target.closest("select")) return;
+  // Єдина незворотна кнопка в цьому списку, тож вона питає — і питає адресою,
+  // а не «ви впевнені?»: підтверджувати треба те, що саме зникне.
+  const remove = event.target.closest("[data-remove-user]");
+  if (remove) {
+    event.stopPropagation();
+    const email = remove.dataset.removeEmail || "цей акаунт";
+    if (!window.confirm(`Прибрати акаунт ${email} назовсім? Це не відкотити.`)) return;
+    void removeTeamUser(remove);
+    return;
+  }
   const row = event.target.closest("[data-team-user]");
   if (!row) return;
   void loadProfileFor(row.dataset.teamUser);
 });
+
+async function removeTeamUser(button) {
+  button.disabled = true;
+  try {
+    const result = await api("/api/account/users/remove", {
+      method: "POST",
+      body: JSON.stringify({ userId: button.dataset.removeUser, email: button.dataset.removeEmail })
+    });
+    // Рядок у CRM цей застосунок не чіпає: то чужа система обліку. Якщо він
+    // лишився — про це сказано прямо, бо піввидалення, про яке мовчать, потім
+    // виглядає як «воно не спрацювало».
+    setText("teamUserNote", result.crmProfileRemains
+      ? `Акаунт ${result.email || ""} прибрано. Рядок у CRM лишився — прибери його там, якщо він більше не потрібен.`
+      : `Акаунт ${result.email || ""} прибрано.`);
+    await loadTeamDirectory();
+  } catch (error) {
+    setText("teamUserNote", error.message || "Не вдалося прибрати акаунт.");
+    button.disabled = false;
+  }
+  refreshIcons();
+}
 
 document.getElementById("teamUserList")?.addEventListener("keydown", (event) => {
   if (event.key !== "Enter" && event.key !== " ") return;
