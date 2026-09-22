@@ -5338,6 +5338,36 @@ dialog {
  * phase opens gets a line above it and carries the phase's name, while the
  * days inside it are quiet. */
 
+/* Inside the campaigns panel, not beside it: who a campaign works and how fast
+   its accounts may work are two halves of one decision, and two panels made
+   them read as two subjects. The rule above is the seam. */
+.warmup-strategy-section {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.warmup-strategy-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 14px;
+}
+
+.warmup-strategy-head h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.warmup-strategy-head p {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
 .warmup-strategy-controls {
   display: flex;
   align-items: center;

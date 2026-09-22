@@ -5075,10 +5075,10 @@ function renderWarmupStrategy() {
 
   if (warmupState.strategyError && !strategy) {
     pill.className = "pill tone-bad";
-    pill.textContent = "не прочиталася";
+    pill.textContent = "недоступно";
     body.hidden = false;
     body.innerHTML = `<div class="warmup-leads-prompt is-bad"><strong>${escapeHtml(warmupState.strategyError)}</strong>
-      <span>Поки сервер не відповідає, розклад тут не змінити. Акаунти працюють за тим, з яким почали.</span></div>`;
+      <span>Доки так, розклад звідси не змінити. Акаунти, які вже прогріваються, працюють за тим, з яким почали.</span></div>`;
     refreshIcons();
     return;
   }
@@ -5871,9 +5871,16 @@ async function loadWarmup({ full = true } = {}) {
       warmupState.foldersReady = false;
       warmupState.campaignsReady = false;
       warmupState.campaignsError = "Прогрів на цьому сервері не налаштований, тож немає папок, на яких будувати кампанію.";
+      // The schedule lives in the Anty database too, so it is unreachable for
+      // the same reason — and has to say so. Left alone it sat on its loading
+      // text for good, which reads as a panel that is still trying.
+      warmupState.strategy = null;
+      warmupState.strategyDraft = null;
+      warmupState.strategyError = "Розклад лежить у базі Anty, а цей сервер до неї не підключений — тож і днів тут показати нізвідки.";
       renderWarmupProfiles();
       renderWarmupStats();
       renderWarmupCampaigns();
+      renderWarmupStrategy();
       return;
     }
 
