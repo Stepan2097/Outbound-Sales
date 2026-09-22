@@ -119,6 +119,48 @@ async function api(path, options = {}) {
 async function refresh() {
   state = await api("/api/state");
   render();
+  // Роботу, яку сервер доробляє сам після перезапуску, сторінка підхоплює і
+  // веде далі. Без цього «продовжується автоматично» виглядало б як застигла
+  // смужка: панель уміє показати збережену роботу, але оновлює її лише той,
+  // хто сам її запустив.
+  void followResearchJob((state.researchJobs || []).find((job) => ["queued", "running"].includes(job.status)));
+}
+
+// Чи стежимо вже за якоюсь роботою. Одна на сторінку: другий такий цикл лише
+// опитував би той самий маршрут удвічі частіше.
+let followingJob = false;
+
+async function followResearchJob(job) {
+  // Коли людина щойно натиснула «Збагатити», за роботою вже стежить той виклик
+  // — зі своїм написом у шапці. Два спостерігачі писали б одне поверх одного.
+  if (!job || followingJob || busyAction) return;
+  followingJob = true;
+  let current = job;
+  // Панель показує роботу тієї людини, яка відкрита. Робота по комусь іншому
+  // все одно ведеться до кінця — просто мовчки, без чужої картки на екрані.
+  const show = () => {
+    if (current.prospectId !== selectedProspectId) return;
+    activeResearchJob = current;
+    renderResearchProgress();
+    refreshIcons();
+  };
+  show();
+  const deadline = Date.now() + 15 * 60 * 1000;
+  try {
+    while (["queued", "running"].includes(current.status) && Date.now() < deadline) {
+      await new Promise((resolve) => window.setTimeout(resolve, 1500));
+      const update = await api(`/api/research/jobs/${encodeURIComponent(current.id)}`);
+      current = update.job;
+      show();
+    }
+  } catch {
+    // Сервер міг піти на перезбірку саме зараз. Наступне завантаження сторінки
+    // побачить роботу знову — вона й на сервері відновлюється сама.
+    return;
+  } finally {
+    followingJob = false;
+  }
+  if (current.status === "complete") await refresh();
 }
 
 function render() {
