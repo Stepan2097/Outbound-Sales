@@ -496,6 +496,21 @@ async function handleApi(request, response, url) {
     return;
   }
 
+  if (request.method === "POST" && url.pathname === "/api/auth/register") {
+    const body = await readJson(request);
+    const result = await registerWorkspaceUser(body);
+    if (!result.session) {
+      // 202: прийнято і зроблено рівно половину — акаунт є, доступу ще немає.
+      sendJson(response, 202, { pending: true, message: result.message });
+      return;
+    }
+    setAuthSessionCookies(request, response, result.session);
+    result.profile.lastLoginAt = new Date().toISOString();
+    await writePersistentWorkspaceState();
+    sendJson(response, 201, { auth: publicAuthStatus({ user: result.user, profile: result.profile }) });
+    return;
+  }
+
   if (request.method === "POST" && url.pathname === "/api/auth/login") {
     const body = await readJson(request);
     const result = await loginWorkspaceUser(body.email, body.password);
@@ -2213,6 +2228,71 @@ async function createWorkspaceUser(input = {}, options = {}) {
   }
   const profile = ensureWorkspaceUserProfile(user, { name, title, role });
   return { user, profile, session: null, existingAccount };
+}
+
+/**
+ * Somebody signing themselves up, rather than being created by an admin.
+ *
+ * Two things are deliberately separate here: **having an account** and **being
+ * let in**. This makes the first one and never the second. Access is the CRM's
+ * decision — a `profiles` row marked `approved` — exactly as it is for a person
+ * who signed up in the CRM's own app, and nothing on this screen can grant it.
+ * That is the whole reason registration is safe to offer at a public URL: it
+ * hands out no access, so an open door here is not an open door anywhere.
+ *
+ * It goes through the public `signup` endpoint rather than `admin/users`, for
+ * the same reason: that is the door the CRM's own app uses, so whatever the
+ * base does on a new account — defaults, triggers, a `profiles` row — happens
+ * identically. Creating people through the admin API would quietly make a
+ * second kind of account, confirmed by us rather than by the base.
+ *
+ * An address that already exists is not treated as a failure. A person who
+ * forgot they had an account should end up signed in, not told off, so the
+ * sign-in below is what decides — and it is the same sign-in the login form
+ * runs, with the same admission check.
+ */
+async function registerWorkspaceUser(input = {}) {
+  const email = cleanText(input.email || "").toLowerCase();
+  const password = String(input.password || "");
+  const name = cleanText(input.name || email.split("@")[0] || "").slice(0, 120);
+  const title = cleanText(input.title || "").slice(0, 120);
+  if (!/^\S+@\S+\.\S+$/.test(email)) throw apiError("Введи коректну робочу email-адресу.");
+  if (password.length < 10) throw apiError("Пароль має містити щонайменше 10 символів.");
+
+  try {
+    await supabaseAuthRequest("signup", {
+      method: "POST",
+      body: { email, password, data: { name, title } }
+    });
+  } catch (error) {
+    // "Вже зареєстрований" — це не збій реєстрації, це відповідь «акаунт уже
+    // є». Вирішує вхід нижче: правильний пароль пустить, неправильний скаже
+    // те саме, що сказала б форма входу.
+    if (!/already registered|already exists|user_repeated_signup/i.test(String(error?.message || ""))) throw error;
+  }
+
+  try {
+    return await loginWorkspaceUser(email, password, { defaults: { name, title } });
+  } catch (error) {
+    // 403 тут означає «акаунт створено, але доступу ще немає»: немає рядка в
+    // CRM або він не підтверджений. Це не помилка реєстрації, і казати про це
+    // треба словами, а не червоним написом — інакше людина повторює реєстрацію
+    // знову і знову, бо екран каже «не вдалося».
+    //
+    // Перше речення — про реєстрацію, і воно тут головне: сама лише причина
+    // відмови («цього акаунта немає в базі користувачів CRM») читається як
+    // «нічого не сталося», хоча акаунт щойно створено. Друге — причина як є,
+    // бо продавцеві вона однаково означає «попроси адміністратора», а
+    // адміністраторові каже, де саме дивитися: додати рядок чи зняти «pending».
+    if (Number(error?.statusCode || 0) === 403) {
+      return {
+        session: null,
+        pending: true,
+        message: `Акаунт створено — тепер доступ має відкрити адміністратор. ${error.message}`
+      };
+    }
+    throw error;
+  }
 }
 
 /** Supabase answers both halves with one sentence; this is that sentence. */

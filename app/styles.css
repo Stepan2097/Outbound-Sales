@@ -1431,6 +1431,15 @@ output {
   box-shadow: 0 28px 80px rgba(0, 0, 0, 0.32);
 }
 
+/* Два переходи з форми входу — створити акаунт і відновити пароль. В один
+   рядок, бо в сітці картки кожен окремим рядком розсуває форму на 16px. */
+.auth-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  justify-content: space-between;
+}
+
 .auth-card h1 {
   margin: 5px 0 6px;
   font-size: 28px;

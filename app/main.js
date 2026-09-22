@@ -235,23 +235,37 @@ function renderAuthForm() {
   const bootstrap = authMode === "bootstrap";
   const recover = authMode === "recover";
   const reset = authMode === "reset";
-  setText("authEyebrow", bootstrap ? "Створення власника робочого простору" : recover || reset ? "Відновлення доступу" : "Захищений робочий простір");
-  setText("authTitle", bootstrap ? "Налаштувати Outbound OS" : recover ? "Відновити пароль" : reset ? "Вибери новий пароль" : "Вхід");
-  setText("authDescription", bootstrap ? "Створи перший адміністраторський акаунт для своєї команди." : recover ? "Запитаємо в Supabase захищене посилання для скидання пароля." : reset ? "Задай новий пароль для свого акаунта." : "Заходь робочим акаунтом компанії.");
-  document.querySelector(".auth-name-field").hidden = !bootstrap;
+  // Реєстрація просить те саме, що й створення власника, але дає інше: акаунт,
+  // а не доступ. Пускає підтвердження в CRM, і форма каже це до того, як
+  // людина натисне, а не після.
+  const register = authMode === "register";
+  const named = bootstrap || register;
+  setText("authEyebrow", bootstrap ? "Створення власника робочого простору" : register ? "Новий акаунт" : recover || reset ? "Відновлення доступу" : "Захищений робочий простір");
+  setText("authTitle", bootstrap ? "Налаштувати Outbound OS" : register ? "Реєстрація" : recover ? "Відновити пароль" : reset ? "Вибери новий пароль" : "Вхід");
+  setText("authDescription", bootstrap
+    ? "Створи перший адміністраторський акаунт для своєї команди."
+    : register
+      ? "Створи робочий акаунт. Вхід відкриється, коли акаунт підтвердять — якщо його вже підтверджено, ти зайдеш одразу."
+      : recover ? "Запитаємо в Supabase захищене посилання для скидання пароля."
+        : reset ? "Задай новий пароль для свого акаунта." : "Заходь робочим акаунтом компанії.");
+  document.querySelector(".auth-name-field").hidden = !named;
   document.querySelector(".auth-email-field").hidden = reset;
   document.querySelector(".auth-password-field").hidden = recover;
-  document.querySelector(".auth-confirm-field").hidden = !bootstrap && !reset;
+  document.querySelector(".auth-confirm-field").hidden = !named && !reset;
   document.getElementById("authEmailInput").required = !reset;
   document.getElementById("authPasswordInput").required = !recover;
-  document.getElementById("authConfirmInput").required = bootstrap || reset;
+  document.getElementById("authConfirmInput").required = named || reset;
   document.getElementById("authNameInput").required = bootstrap;
-  document.getElementById("authPasswordInput").autocomplete = bootstrap || reset ? "new-password" : "current-password";
+  document.getElementById("authPasswordInput").autocomplete = named || reset ? "new-password" : "current-password";
   setText("authSubmitBtn", "");
-  document.getElementById("authSubmitBtn").innerHTML = `<i data-lucide="${recover ? "mail" : reset ? "key-round" : bootstrap ? "shield-check" : "log-in"}"></i><span>${recover ? "Надіслати посилання" : reset ? "Зберегти новий пароль" : bootstrap ? "Створити робочий простір" : "Увійти"}</span>`;
+  document.getElementById("authSubmitBtn").innerHTML = `<i data-lucide="${recover ? "mail" : reset ? "key-round" : bootstrap ? "shield-check" : register ? "user-plus" : "log-in"}"></i><span>${recover ? "Надіслати посилання" : reset ? "Зберегти новий пароль" : bootstrap ? "Створити робочий простір" : register ? "Створити акаунт" : "Увійти"}</span>`;
   const modeButton = document.getElementById("authModeBtn");
   modeButton.hidden = bootstrap || reset;
-  modeButton.textContent = recover ? "Назад до входу" : "Забув пароль?";
+  modeButton.textContent = recover || register ? "Назад до входу" : "Забув пароль?";
+  // Під час створення власника реєстрація не пропонується: перший акаунт має
+  // бути адміністраторським, і другий вхід у ту саму мить лише заплутав би.
+  const registerButton = document.getElementById("authRegisterBtn");
+  registerButton.hidden = bootstrap || reset || register || recover;
 }
 
 function renderAccount() {
@@ -2910,7 +2924,16 @@ document.getElementById("mobileLeadSectionSelect").addEventListener("change", (e
 });
 
 document.getElementById("authModeBtn").addEventListener("click", () => {
-  authMode = authMode === "recover" ? "login" : "recover";
+  // З входу веде до відновлення, звідусіль інде — назад до входу. Напис на
+  // кнопці каже саме це, і раніше з реєстрації вона повела б у відновлення.
+  authMode = authMode === "login" ? "recover" : "login";
+  setText("authMessage", "");
+  renderAuthForm();
+  refreshIcons();
+});
+
+document.getElementById("authRegisterBtn").addEventListener("click", () => {
+  authMode = "register";
   setText("authMessage", "");
   renderAuthForm();
   refreshIcons();
@@ -2922,7 +2945,26 @@ document.getElementById("authForm").addEventListener("submit", async (event) => 
   const password = document.getElementById("authPasswordInput").value;
   const confirmation = document.getElementById("authConfirmInput").value;
   try {
-    if ((authMode === "bootstrap" || authMode === "reset") && password !== confirmation) throw new Error("Паролі не збігаються.");
+    if (["bootstrap", "register", "reset"].includes(authMode) && password !== confirmation) throw new Error("Паролі не збігаються.");
+    if (authMode === "register") {
+      const result = await api("/api/auth/register", {
+        method: "POST",
+        body: JSON.stringify({ name: document.getElementById("authNameInput").value, email, password })
+      });
+      // Акаунт створено, доступу ще немає — це половина справи, а не збій.
+      // Повертаємо на вхід, щоб людина не реєструвалася вдруге, і лишаємо
+      // пояснення на екрані.
+      if (result.pending) {
+        authMode = "login";
+        renderAuthForm();
+        refreshIcons();
+        setText("authMessage", result.message || "Акаунт створено. Вхід відкриється після підтвердження.");
+        return;
+      }
+      authState = result.auth;
+      await enterWorkspace();
+      return;
+    }
     if (authMode === "recover") {
       const result = await api("/api/auth/recover", { method: "POST", body: JSON.stringify({ email }) });
       setText("authMessage", result.message || "Посилання для скидання запитано.");
