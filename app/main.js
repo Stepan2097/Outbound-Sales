@@ -129,7 +129,6 @@ function render() {
   renderProductWorkspace();
   renderPanelSource();
   renderProspects();
-  renderLeadsPage();
   renderAssistant();
   renderAgents();
   renderOverview();
@@ -413,22 +412,9 @@ function renderProductContext() {
 function renderAssistant() {
   const runtime = state.aiRuntime?.mode === "openrouter" ? "OpenRouter активний" : "Мок-AI";
   document.getElementById("aiRuntimePill").textContent = runtime;
-  document.getElementById("crmImportStatus").innerHTML = crmImportStatusRows();
   document.getElementById("assistantActionList").innerHTML = (state.aiActions || []).length
     ? state.aiActions.map(assistantActionRow).join("")
     : `<div class="empty-state">Жодної AI-дії ще не виконано</div>`;
-}
-
-function crmImportStatusRows() {
-  const supabase = state.integrations?.supabase;
-  const crm = state.integrations?.crm;
-  return `
-    <div class="connector-status-grid">
-      <div><span>Supabase</span><strong>${escapeHtml(supabase?.status || "not_configured")}</strong></div>
-      <div><span>CRM API</span><strong>${escapeHtml(crm?.status || "not_configured")}</strong></div>
-      <div><span>Завантажено лідів</span><strong>${state.prospects?.length || 0}</strong></div>
-    </div>
-  `;
 }
 
 function assistantActionRow(action) {
@@ -846,11 +832,17 @@ function movePanel(direction) {
 }
 
 function renderProspects() {
-  if (!state.prospects?.length) {
-    selectedProspectId = null;
-  } else if (!selectedProspectId || !state.prospects.some((prospect) => prospect.id === selectedProspectId)) {
-    selectedProspectId = state.prospects[0].id;
-  }
+  // Ніхто не відкривається сам.
+  //
+  // Раніше тут бралася перша людина зі списку, щойно нічого не було вибрано, і
+  // Панель зустрічала «Лід 1 з 126» над першим-ліпшим записом — при тому, що
+  // папку ще не вибрано і черги, по якій це був би «перший», не існує. Кого
+  // відкрито — вирішує або папка (`openPanelPosition` ставить вибір сам), або
+  // клік по рядку. Порожня Панель чесніша за чужу людину на весь екран: у неї
+  // є свій текст, а «Збагатити» на ній вимкнене, тож запустити дослідження на
+  // тому, кого не обирали, більше нема як.
+  const stillThere = selectedProspectId && state.prospects?.some((prospect) => prospect.id === selectedProspectId);
+  if (!stillThere) selectedProspectId = null;
 
   const search = document.getElementById("prospectSearch").value.trim().toLowerCase();
   const status = document.getElementById("prospectStatusFilter").value;
@@ -945,9 +937,15 @@ function renderLeadWorkspaceExtras(prospect) {
   // «Лід 3 з 4» під час проходу дванадцяти тисяч контактів — це не той рахунок,
   // який людині потрібен.
   const folderName = contactFolders.find((folder) => folder.id === panelFolderId)?.name;
+  // `index + 1 || 1` перетворювало «не знайдено» (-1) на «1», тож коли ніхто не
+  // відкритий, заголовок однаково заявляв «Лід 1 з 126» — рахунок по людині,
+  // якої на екрані немає. Нуль записів і нуль вибраних — різні стани, і обидва
+  // тепер називаються своїм ім'ям.
   setText("leadWorkspaceQueue", panelFolderId && panelTotal
     ? `${folderName || "Папка"} · ${Math.min(panelIndex + 1, panelTotal)} з ${panelTotal}`
-    : prospects.length ? `Лід ${index + 1 || 1} з ${prospects.length}` : "Лідів не завантажено");
+    : index >= 0
+      ? `Лід ${index + 1} з ${prospects.length}`
+      : panelFolderId ? "Папка ще читається" : "Папку не вибрано");
   setText("selectedLeadAvatar", prospect ? initials(prospect.name) : "OS");
   setText("leadWorkspaceCompany", prospect ? prospect.company || "Акаунт невідомий" : "Відкрий ліда, щоб почати");
   setText("leadWorkspacePosition", prospect ? [prospect.title, prospect.location, prospect.website].filter(Boolean).join(" · ") || "Деталей профілю ще немає" : "Додай посилання на LinkedIn, завантаж лідів або витягни їх із CRM. Система підготує бриф, контакти, повідомлення, записи в CRM і наступні дії — нічого не надсилаючи самостійно.");
@@ -1006,41 +1004,6 @@ function renderLeadSectionTabs() {
   });
   const mobileSelect = document.getElementById("mobileLeadSectionSelect");
   if (mobileSelect) mobileSelect.value = activeLeadSectionId;
-}
-
-function renderLeadsPage() {
-  const prospects = state.prospects || [];
-  const ready = prospects.filter((prospect) => ["intelligence_ready", "outreach_ready", "linkedin_ready"].includes(prospect.status)).length;
-  const active = prospects.filter((prospect) => ["contacted", "engaged", "follow_up_due", "meeting_booked"].includes(prospect.status)).length;
-  const due = state.followUpTasks?.filter((task) => task.status !== "done").length || 0;
-  setHtml("leadStatsStrip", `
-    <div><span>Усього лідів</span><strong>${prospects.length}</strong></div>
-    <div><span>Готові до контакту</span><strong>${ready}</strong></div>
-    <div><span>Активні розмови</span><strong>${active}</strong></div>
-    <div><span>Фолоу-апи</span><strong>${due}</strong></div>
-  `);
-  setHtml("leadTableBody", prospects.length
-    ? prospects.map(leadTableRow).join("")
-    : `<tr><td colspan="6"><div class="empty-state">Лідів ще немає. Витягни їх із CRM або додай ціль з LinkedIn на Панелі.</div></td></tr>`);
-}
-
-function leadTableRow(prospect) {
-  const analysis = prospect.analysis || {};
-  return `
-    <tr>
-      <td><strong>${escapeHtml(prospect.name)}</strong><span>${escapeHtml([prospect.title, prospect.company].filter(Boolean).join(" · "))}</span></td>
-      <td><span class="pill">${escapeHtml(titleCase(prospect.status || "new"))}</span></td>
-      <td><strong>${prospect.score || 0}</strong></td>
-      <td><strong>${analysis.reachProbability || 0}%</strong></td>
-      <td><span>${escapeHtml(analysis.recommendedAction || "Запусти дослідження")}</span></td>
-      <td>
-        <div class="table-action-row">
-          <button type="button" data-open-prospect-id="${escapeAttr(prospect.id)}"><i data-lucide="arrow-up-right"></i><span>Відкрити</span></button>
-          <button class="icon-button danger-button" type="button" data-remove-prospect-id="${escapeAttr(prospect.id)}" title="Видалити ліда" aria-label="Видалити ліда"><i data-lucide="trash-2"></i></button>
-        </div>
-      </td>
-    </tr>
-  `;
 }
 
 /* ── Запрошення в друзі ────────────────────────────────────────────────────
@@ -2515,8 +2478,24 @@ function renderBusyState() {
   setBusyButton("enrichProspectBtn", "enrich", "Оновлюємо...");
   setBusyButton("removeLeadQuick", "remove", "Видаляємо...");
   setBusyButton("addLinkedinTargetBtn", "linkedin-import", "Додаємо...");
-  setBusyButton("crmImportBtn", "crm-import", "Тягнемо...");
   setBusyButton("productTeachBtn", "product", "Вивчаємо...");
+
+  // Дія над людиною, якої не відкрито, — це кнопка, що мовчки нічого не робить:
+  // `researchAndPrepareSelected` та її сусідки виходять на першому ж рядку, а
+  // на екрані це виглядає як збій. Тому поки ліда немає, їх видно вимкненими.
+  // Останнє слово тут, бо `renderBusyState` малюється після `renderProspects`
+  // і інакше просто ввімкнув би їх назад.
+  if (!selectedProspectId) {
+    for (const id of [
+      "quickPrepareBtn", "runResearchTopBtn", "enrichLeadBtn", "writeMessagesBtn", "refreshCompanyBtn",
+      "prepareOutreachBtn", "analyzeIntelligenceBtn", "refreshIntelligenceBtn", "analyzeIntelligenceQuick",
+      "enrichProspectBtn", "removeLeadQuick"
+    ]) {
+      const button = document.getElementById(id);
+      if (button) button.disabled = true;
+    }
+  }
+
   document.querySelectorAll("[data-interaction-type], [data-task-complete-id], [data-remove-prospect-id]").forEach((button) => {
     button.disabled = anyBusy;
   });
@@ -2556,7 +2535,7 @@ function setBusyButton(id, actionName, activeText) {
   if (!button) return;
   if (!button.dataset.defaultHtml) button.dataset.defaultHtml = button.innerHTML;
   const active = busyAction === actionName;
-  button.disabled = active || (Boolean(busyAction) && ["research", "intelligence", "enrich", "messages", "remove", "linkedin-import", "crm-import", "product"].includes(actionName));
+  button.disabled = active || (Boolean(busyAction) && ["research", "intelligence", "enrich", "messages", "remove", "linkedin-import", "product"].includes(actionName));
   button.classList.toggle("is-loading", active);
   if (active) {
     const icon = actionName === "remove" ? "loader-circle" : "loader-circle";
@@ -2581,11 +2560,10 @@ async function runUiAction(actionName, message, work) {
       research: "Збагачено. Опис клієнта і підходи до розмови — у першому блоці; компанію записано в базу, вдруге її вже не шукатимемо.",
       enrich: "Контактні дані оновлено. Перевір впевненість, перш ніж брати телефон чи соцмережу в роботу.",
       "linkedin-import": "Ліда додано в чергу. Запусти Дослідження, коли будеш готовий збагатити його й підготувати аутріч.",
-      "crm-import": "Лідів із CRM підтягнуто в чергу.",
       product: "Пам'ять продукту збережено. Система використає оновлений контекст для скорингу й аутрічу.",
       remove: "Ліда прибрано з черги.",
       "contact-drafts": "Чернетки готові. Перечитай їх перед відправкою — надсилає людина, не система.",
-      "contact-import": "Контакт у черзі лідів. Дослідження і фолоу-апи для нього тепер доступні на вкладці «Ліди»."
+      "contact-import": "Контакт у черзі лідів. Дослідження і фолоу-апи для нього тепер доступні на Панелі."
     }[actionName] || "Готово.";
   } catch (error) {
     uiNotice = error?.message || "Не вдалося. Спробуй ще раз.";
@@ -2624,7 +2602,6 @@ function setView(viewName) {
   document.getElementById("pageTitle").textContent =
     {
       prospects: "Панель",
-      leads: "Ліди",
       contacts: "Контакти з CRM",
       warmup: "Прогрів LinkedIn",
       ai: "AI-оператор",
@@ -3393,23 +3370,6 @@ document.getElementById("assistantTaskForm").addEventListener("submit", async (e
     selectedProspectId
   });
   input.value = "";
-});
-
-document.getElementById("crmLeadPullForm").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const payload = {
-    source: document.getElementById("crmPullSourceInput").value,
-    resource: document.getElementById("crmPullResourceInput").value,
-    limit: Number(document.getElementById("crmPullLimitInput").value),
-    linkedinField: document.getElementById("crmPullLinkedInFieldInput").value
-  };
-  await runUiAction("crm-import", "Тягнемо лідів із CRM...", async () => {
-    state = await api("/api/crm/import-leads", {
-      method: "POST",
-      body: JSON.stringify(payload)
-    });
-    selectedProspectId = state.prospects[0]?.id || selectedProspectId;
-  });
 });
 
 document.getElementById("agentRunForm").addEventListener("submit", async (event) => {

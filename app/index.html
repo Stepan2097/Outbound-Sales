@@ -42,7 +42,6 @@
         </div>
         <nav class="nav-list" aria-label="Робочий простір">
           <button class="nav-item active" data-view="prospects"><i data-lucide="layout-dashboard"></i><span>Панель</span></button>
-          <button class="nav-item" data-view="leads"><i data-lucide="users"></i><span>Ліди</span></button>
           <button class="nav-item" data-view="contacts"><i data-lucide="contact"></i><span>Контакти</span></button>
           <button class="nav-item" data-view="ai"><i data-lucide="bot"></i><span>AI-оператор</span></button>
           <button class="nav-item" data-view="warmup"><i data-lucide="flame"></i><span>Прогрів</span><span class="nav-badge" id="warmupNavBadge" hidden></span></button>
@@ -577,67 +576,6 @@
           </div>
         </section>
 
-        <section class="view" id="view-leads">
-          <div class="leads-layout">
-            <section class="panel span-2">
-              <div class="panel-heading">
-                <div>
-                  <h2>Центр керування лідами</h2>
-                  <p>Імпортуй, переглядай, сортуй і відкривай наступний найкращий лід</p>
-                </div>
-                <button class="primary-button" type="button" data-view-link="prospects"><i data-lucide="layout-dashboard"></i><span>Відкрити панель</span></button>
-              </div>
-              <div class="lead-stats-strip" id="leadStatsStrip"></div>
-            </section>
-
-            <section class="panel crm-pull-panel">
-              <div class="panel-heading">
-                <div>
-                  <h2>Витягування лідів із CRM</h2>
-                  <p>Перенеси в систему ліди, у яких є LinkedIn</p>
-                </div>
-              </div>
-              <form class="crm-pull-form" id="crmLeadPullForm">
-                <select id="crmPullSourceInput" aria-label="Джерело CRM">
-                  <option value="supabase">Supabase REST</option>
-                  <option value="custom_crm">Власний API CRM</option>
-                </select>
-                <input id="crmPullResourceInput" type="text" value="contacts?folder_id=eq.d4ff3e4f-b188-4aa0-8cb7-2db843064984&amp;order=created_at.desc" placeholder="contacts?folder_id=eq.folder-id&amp;order=created_at.desc" />
-                <div class="split-fields">
-                  <input id="crmPullLimitInput" type="number" min="1" max="500" value="50" />
-                  <input id="crmPullLinkedInFieldInput" type="text" value="linkedin" placeholder="Поле LinkedIn, напр. linkedin_url" />
-                </div>
-                <button class="primary-button" id="crmImportBtn" type="submit"><i data-lucide="database-zap"></i><span>Витягнути ліди</span></button>
-              </form>
-              <div class="crm-import-status" id="crmImportStatus"></div>
-            </section>
-
-            <section class="panel leads-table-panel">
-              <div class="panel-heading">
-                <div>
-                  <h2>Список лідів</h2>
-                  <p>Відкрий лід, запусти дослідження і рухайся чергою далі</p>
-                </div>
-              </div>
-              <div class="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Лід</th>
-                      <th>Статус</th>
-                      <th>Бал</th>
-                      <th>Досяжність</th>
-                      <th>Наступна дія</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody id="leadTableBody"></tbody>
-                </table>
-              </div>
-            </section>
-          </div>
-        </section>
-
         <section class="view" id="view-ai">
           <div class="ai-layout">
             <section class="panel ai-command-panel">
@@ -677,11 +615,11 @@
               <div class="panel-heading">
                 <div>
                   <h2>Команди продавця</h2>
-                  <p>Масові оновлення і дії в CRM живуть на вкладці «Ліди»</p>
+                  <p>Масові оновлення і дії в CRM — звідси, по всій черзі лідів</p>
                 </div>
               </div>
               <div class="connector-status-grid">
-                <div><span>Видимий шлях</span><strong>Панель + Ліди</strong></div>
+                <div><span>Видимий шлях</span><strong>Панель</strong></div>
                 <div><span>AI-дії</span><strong>Записуються з перевіркою</strong></div>
                 <div><span>Безпека CRM</span><strong>Без автонадсилання</strong></div>
               </div>

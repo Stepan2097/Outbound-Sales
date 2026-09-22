@@ -2460,7 +2460,6 @@ button:disabled {
 }
 
 .assistant-task-form,
-.crm-pull-form,
 .agent-run-form {
   display: grid;
   gap: 10px;
@@ -3635,8 +3634,7 @@ dialog {
 .buying-committee-list,
 .score-breakdown-grid,
 .source-audit-list,
-.sales-cycle-list,
-.leads-layout {
+.sales-cycle-list {
   display: grid;
   gap: 16px;
 }
@@ -3662,21 +3660,14 @@ dialog {
   width: 100%;
 }
 
-.followup-grid,
-.leads-layout {
+.followup-grid {
   grid-template-columns: minmax(0, 1fr) minmax(320px, 0.85fr);
 }
 
-.leads-layout .span-2 {
-  grid-column: 1 / -1;
-}
-
-.lead-stats-strip,
 .score-breakdown-grid {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
-.lead-stats-strip div,
 .score-breakdown-grid div {
   min-height: 82px;
   border: 1px solid var(--line);
@@ -3685,14 +3676,12 @@ dialog {
   padding: 12px;
 }
 
-.lead-stats-strip span,
 .score-breakdown-grid span {
   display: block;
   color: var(--muted);
   font-size: 12px;
 }
 
-.lead-stats-strip strong,
 .score-breakdown-grid strong {
   display: block;
   margin: 6px 0;
@@ -4629,7 +4618,6 @@ dialog {
   .agent-grid,
   .lead-workbench-grid,
   .followup-grid,
-  .leads-layout,
   .intelligence-hero,
   .intelligence-grid,
   .strategy-decision-grid,
@@ -4703,7 +4691,6 @@ dialog {
   .lead-command-bar,
   .lead-source-bar,
   .lead-hero,
-  .lead-stats-strip,
   .score-breakdown-grid,
   .screenshot-preview,
   .agent-run-form {
