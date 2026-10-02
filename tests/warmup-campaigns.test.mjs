@@ -249,6 +249,18 @@ test("every way of having nothing to claim says which it is, in words", () => {
     allowanceReason({ day: 11, totalDays: 14, quota: 5, spent: 0, queued: 5 }),
     "5 already claimed and today allows 5 — work through the queue first"
   );
+  // Past the last phase an account is in working mode and still sending, so
+  // a spent day says so rather than calling the account finished.
+  assert.equal(
+    allowanceReason({ day: 17, totalDays: 14, quota: 12, spent: 12, queued: 0, working: true }),
+    "Working mode, day 17 — today's 12 connection requests are already spent"
+  );
+  assert.equal(
+    allowanceReason({ day: 17, totalDays: 14, quota: 12, spent: 0, queued: 12, working: true }),
+    "12 already claimed and today allows 12 — work through the queue first"
+  );
+  assert.equal(allowanceReason({ day: 17, totalDays: 14, quota: 12, spent: 3, queued: 2, working: true }), null);
+  // Only a run with nothing after its last phase is really over.
   assert.equal(
     allowanceReason({ day: 15, totalDays: 14, quota: 0, spent: 0, queued: 0, startsDay: null }),
     "The warm-up is finished — day 15 of 14"

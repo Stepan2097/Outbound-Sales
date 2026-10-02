@@ -27,11 +27,48 @@ export class RestError extends Error {
  * dot after the column separates the operator from the value, so spaces,
  * commas, dots and parentheses inside a value need nothing done to them.
  *
- * The one place a comma still cuts is inside `in.(a,b)`, where it separates the
- * list — every caller of `in` passes uuids, which cannot contain one.
+ * The one place that is not so is a list — `in.(a,b)` — which PostgREST parses
+ * itself; see `listValue`.
  */
 function filterValue(value) {
   return value === null || value === undefined ? "null" : String(value);
+}
+
+/**
+ * One value inside `in.(…)`, quoted when it has to be.
+ *
+ * PostgREST reads a list by its own grammar, not Postgres's: an unquoted
+ * element runs to the next `,` or `)`, and a double-quoted one runs to its
+ * closing quote, with a backslash escaping the next character. Unlike the
+ * single values above, those quotes are the parser's and never reach Postgres.
+ * Every value used to go in bare on the belief that callers only ever passed
+ * uuids — and then a LinkedIn message URN, `urn:li:msg_message:(urn:li:
+ * fsd_profile:ACoAA…,2-MTY5…)`, went into the inbox's duplicate check, was cut
+ * at its comma, matched nothing, and the whole thread was stored and copied to
+ * the CRM again on every read.
+ *
+ * Quoted only when the bare form would be misread, so a uuid, a date or a type
+ * name reaches the server exactly as it always has.
+ */
+export function listValue(value) {
+  const text = filterValue(value);
+  if (text !== "" && !/[,()"\\]/.test(text) && text.trim() === text) return text;
+  return `"${text.replace(/[\\"]/g, "\\$&")}"`;
+}
+
+/**
+ * Text made literal inside an `ilike` pattern.
+ *
+ * Postgres reads `%` and `_` in a LIKE pattern as wildcards and `\` as the
+ * escape, so each is escaped. PostgREST turns every `*` into `%` before
+ * Postgres sees it, which leaves no way to ask for a literal `*` — it becomes
+ * `_`, any one character, and whoever compares the rows afterwards decides.
+ * A percent-encoded Cyrillic slug is the case this is for: unescaped, every
+ * `%D0` in it was a wildcard, the pattern matched page after page of other
+ * people's encoded links, and the real contact fell off the end of the page.
+ */
+export function likeLiteral(value) {
+  return String(value ?? "").replace(/[\\%_]/g, "\\$&").replace(/\*/g, "_");
 }
 
 class Query {
@@ -62,17 +99,20 @@ class Query {
   }
 
   in(column, values) {
-    this.params.append(column, `in.(${(values || []).map(filterValue).join(",")})`);
+    this.params.append(column, `in.(${(values || []).map(listValue).join(",")})`);
     return this;
   }
 
-  /** Everything except these. Same comma caveat as `in`. */
+  /** Everything except these. Quoted the way `in` is. */
   notIn(column, values) {
-    this.params.append(column, `not.in.(${(values || []).map(filterValue).join(",")})`);
+    this.params.append(column, `not.in.(${(values || []).map(listValue).join(",")})`);
     return this;
   }
 
-  /** Case-insensitive match. `*` is the wildcard, so a bare value is an exact one. */
+  /**
+   * Case-insensitive match. `*` is the wildcard, and so are `%` and `_`: a
+   * value built from data goes through `likeLiteral` first.
+   */
   ilike(column, value) {
     this.params.append(column, `ilike.${filterValue(value)}`);
     return this;
@@ -104,10 +144,20 @@ class Query {
     return this;
   }
 
+  /**
+   * A second `order` call is a tie-break, as it is in supabase-js: the terms
+   * join into one `order=a.desc,b.asc`. Two separate `order` parameters are not
+   * that — PostgREST reads one of them — and paging with OFFSET over a column
+   * full of ties (a folder imported in one statement shares one `created_at`)
+   * then hands the same row to two pages and skips another.
+   */
   order(column, { ascending = true, nullsFirst = null, foreignTable = null } = {}) {
     const direction = ascending ? "asc" : "desc";
     const nulls = nullsFirst === null ? "" : nullsFirst ? ".nullsfirst" : ".nullslast";
-    this.params.append(foreignTable ? `${foreignTable}.order` : "order", `${column}.${direction}${nulls}`);
+    const key = foreignTable ? `${foreignTable}.order` : "order";
+    const term = `${column}.${direction}${nulls}`;
+    const existing = this.params.get(key);
+    this.params.set(key, existing ? `${existing},${term}` : term);
     return this;
   }
 

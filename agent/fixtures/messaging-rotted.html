@@ -1,0 +1,45 @@
+<!-- The day the anchors go. Constructed, not saved — see README.md.
+
+     This is the failure this whole folder exists for: a full inbox rendered
+     without a single link to /messaging/thread/, because the list became
+     buttons that call the router in JavaScript and keep the id in a data
+     attribute. Everything still looks right to a person and the reader sees
+     nothing.
+
+     A run against this page must report zero threads AND say why — the note it
+     produces is the only thing standing between "nobody wrote to us this week"
+     and "the agent stopped reading in March". -->
+<title>(9) Messaging | LinkedIn</title>
+<style>
+  /* LinkedIn's rows are block-level flex containers. Without saying so, an
+     anchor wrapping block children lays out as overlapping inline boxes and a
+     click at the centre of one row lands on its neighbour — an artefact of a
+     fixture with no stylesheet, not of the messenger. */
+  ul { list-style: none; margin: 0; padding: 0; }
+  li { display: block; }
+  li > a, li > div > a, li > button { display: block; padding: 8px; border-bottom: 1px solid #eee; }
+</style>
+<div class="_1f9c3b2a">
+  <header class="_b7d21e04">
+    <h2 class="_9a4c11bd">Messaging</h2>
+    <input placeholder="Search messages" class="_22f0ab19" />
+  </header>
+  <ul class="_0d4e7c33">
+    <li class="_77ab90cd">
+      <button type="button" data-thread-urn="urn:li:msg_conversation:(2-ZjE4ZmQ1NzQtYjE1NC00ZjQ4LThm,1)" class="_51ade9c0">
+        <img alt="Marta Kowalczyk" src="https://media.licdn.com/dms/image/v2/aaa/x?e=1" />
+        <h3 class="_9a4c11bd">Marta Kowalczyk</h3>
+        <time class="_2b7e01aa">2h</time>
+        <p class="_6d3f22bc">Thanks for reaching out — happy to chat next week 😊</p>
+      </button>
+    </li>
+    <li class="_77ab90cd">
+      <button type="button" data-thread-urn="urn:li:msg_conversation:(2-NTRhYjIxMDAtOGUwNy00,1)" class="_51ade9c0">
+        <img alt="Dmytro Herasymenko" src="https://media.licdn.com/dms/image/v2/bbb/x?e=1" />
+        <h3 class="_9a4c11bd">Dmytro Herasymenko</h3>
+        <time class="_2b7e01aa">Yesterday</time>
+        <p class="_6d3f22bc">You: Sent a connection note</p>
+      </button>
+    </li>
+  </ul>
+</div>

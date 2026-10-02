@@ -1,8 +1,11 @@
 import { createHash } from "node:crypto";
 
-import { anty, crm } from "./db.mjs";
-import { logEvent } from "./store.mjs";
-import { moveStatus } from "./invites.mjs";
+import { anty, CONTACT_ID_BATCH, leadsByLinkedin } from "./db.mjs";
+import { linkedinSlug } from "./outreach.mjs";
+import { REQUEST_EVENT_TYPES, moveStatus, requestLine } from "./invites.mjs";
+import {
+  CRM_COPIED, CRM_FAILED, accountName, clampContent, copyToCrm, crmStamp, oneCopyAtATime, outstandingCopies, sourceEvents
+} from "./activities.mjs";
 
 /**
  * The inbox: threads, messages, what has been read, and when an account was
@@ -44,13 +47,15 @@ export const READ_TYPE = "inbox.read";
  * log is the reader with something to lose. A message row carries somebody's
  * private reply in `meta.body`, and eight "Reply from Jane" lines would push
  * the day's actual history off a panel that only shows eight. `inbox.read` is
- * pure screen state with nothing to audit.
+ * pure screen state with nothing to audit, and `crm.copied` is bookkeeping —
+ * one per synced thread, every morning. Its failure, `inbox.crm_failed`, stays
+ * visible: that one somebody may need to act on.
  *
  * `inbox.synced` deliberately stays visible: a run of zeros is the one signal
  * that the agent's selectors have rotted, and hiding it would hide exactly the
  * failure this phase is most likely to have.
  */
-export const AUDIT_HIDDEN_TYPES = [MESSAGE_IN, MESSAGE_OUT, READ_TYPE];
+export const AUDIT_HIDDEN_TYPES = [MESSAGE_IN, MESSAGE_OUT, READ_TYPE, CRM_COPIED];
 
 /**
  * Which of these accounts has already been read today.
@@ -120,41 +125,9 @@ export function clampBody(value) {
   return { body: body.slice(0, BODY_LIMIT - TRUNCATION_MARKER.length) + TRUNCATION_MARKER, truncated: true };
 }
 
-function segment(value) {
-  try {
-    return decodeURIComponent(value).trim().toLowerCase();
-  } catch {
-    // A stray percent in a pasted URL is not worth losing the match over.
-    return value.trim().toLowerCase();
-  }
-}
-
-/**
- * A comparable key out of whatever form a LinkedIn link takes: a full URL, an
- * `/in/` path, or the slug on its own. Lower-cased and stripped of the query
- * and the trailing slash, because the same person arrives spelled three ways —
- * the agent reads a href, the CRM holds whatever a seller once pasted.
- *
- * A company, school or showcase page keeps its kind in the key. Plenty of the
- * CRM's contacts carry `/company/...` in the column meant for the person, and
- * without the prefix `linkedin.com/company/acme` and `linkedin.com/in/acme`
- * reduce to the same string — which would file somebody's reply against a row
- * belonging to a different person entirely.
- *
- * A bare slug with no path is read as a person: that is what the agent hands
- * us, because what it reads is an `/in/` href.
- */
-export function linkedinSlug(value) {
-  const raw = text(value, 300);
-  if (!raw) return "";
-  const person = /\/in\/([^/?#]+)/i.exec(raw);
-  if (person) return segment(person[1]);
-
-  const page = /\/(company|school|showcase)\/([^/?#]+)/i.exec(raw);
-  if (page) return `${page[1].toLowerCase()}:${segment(page[2])}`;
-
-  return segment(raw.split(/[/?#]/).filter(Boolean).pop() || "");
-}
+// The slug key lives with the outreach row it is compared against, so the
+// folder walk and the invitations can use it without importing the inbox.
+export { linkedinSlug };
 
 /**
  * What LinkedIn prints where a name should be when it will not tell you the
@@ -198,14 +171,28 @@ function cleanName(value, max = 200) {
  * The name and the headline are stored collapsed. A body is not — newlines are
  * the message there, whereas in a name they are only ever an artefact of how
  * the page was built.
+ *
+ * `memberProfile` keeps what the slug alone forgets: whether the link was a
+ * member's `/in/` profile — or a bare slug, which is how the agent hands one
+ * over. `/pub/jane-doe/1a/2b/3c` becomes the slug "3c", and only this says it
+ * never named anybody (`matchOutreachRow`). A participant stored before the
+ * flag has only its slug, and reads as it did then.
  */
 export function normalizeParticipant(raw) {
   const name = cleanName(raw?.name);
+  const slug = linkedinSlug(raw?.slug) || null;
   return {
     name: !name || NON_NAMES.has(name.toLowerCase()) ? UNNAMED : name,
-    slug: linkedinSlug(raw?.slug) || null,
-    headline: cleanName(raw?.headline, 300) || null
+    slug,
+    headline: cleanName(raw?.headline, 300) || null,
+    memberProfile: Boolean(slug) && raw?.memberProfile !== false && memberLink(raw.slug)
   };
+}
+
+/** An `/in/` link, or a bare slug: the shapes that name a member's profile. */
+function memberLink(value) {
+  const raw = typeof value === "string" ? value.trim() : "";
+  return Boolean(raw) && (!raw.includes("/") || /(?:^|\/)in\//i.test(raw));
 }
 
 /**
@@ -220,6 +207,27 @@ export function externalIdFor({ threadKey, direction, body, sentAt }) {
   return createHash("sha1")
     .update(`${threadKey}|${direction}|${sentAt || ""}|${String(body || "").slice(0, 200)}`)
     .digest("hex");
+}
+
+/** No LinkedIn message is older than LinkedIn. */
+const LINKEDIN_LAUNCH_MS = Date.parse("2003-05-01T00:00:00.000Z");
+
+/**
+ * Whether a parsed time is a reading of a clock rather than an accident of
+ * the parser.
+ *
+ * `Date.parse` accepts LinkedIn's "Sep 20" and answers the year 2001. Taken as
+ * given, that put a message from last week twenty-five years back — first in
+ * its thread, and on the contact's CRM timeline with a date nobody could
+ * explain. A label with no year is a label, so it is treated like "2h": the
+ * time we learned of it, with the label kept. A day ahead of the moment it
+ * arrived is allowed for clocks and zones; more than that is the same accident
+ * the other way round.
+ */
+export function plausibleSentAt(parsedMs, receivedAt) {
+  if (!Number.isFinite(parsedMs) || parsedMs < LINKEDIN_LAUNCH_MS) return false;
+  const received = Date.parse(receivedAt || "");
+  return !Number.isFinite(received) || parsedMs <= received + 86_400_000;
 }
 
 /**
@@ -240,7 +248,7 @@ export function normalizeMessage(raw, { threadKey, receivedAt }) {
 
   const sentAtRaw = text(raw?.sentAt, 80);
   const parsed = sentAtRaw ? Date.parse(sentAtRaw) : NaN;
-  const dated = Number.isFinite(parsed);
+  const dated = plausibleSentAt(parsed, receivedAt);
   const sentAt = dated ? new Date(parsed).toISOString() : receivedAt;
 
   const externalId = text(raw?.externalId, 200) || externalIdFor({ threadKey, direction, body, sentAt: sentAtRaw });
@@ -255,9 +263,21 @@ export function normalizeMessage(raw, { threadKey, receivedAt }) {
     // like the sync: a screen showing "sent 14:02" when nobody read a clock is
     // lying, and the raw label is what a person would have to check against.
     sentAtGiven: dated,
-    sentAtRaw: dated ? null : sentAtRaw || null
+    sentAtRaw: dated ? null : sentAtRaw || null,
+    // Whether this time may put the thread in order (`conversationOrder`):
+    // only an ISO datetime, as `<time datetime>` carries it.
+    sentAtIso: dated && ISO_DATETIME.test(sentAtRaw)
   };
 }
+
+/**
+ * An ISO-8601 datetime — a date and a time of day — which is what a real
+ * reading of LinkedIn's clock looks like on the wire. Anything else the parser
+ * takes is a label, a year in it or not: "12/9/2025" is 12 September in a
+ * day-first locale and 9 December to `Date.parse`, and "Sep 20, 2025" is
+ * whatever the agent's page happened to print.
+ */
+const ISO_DATETIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
 
 /**
  * The whole `inbox.thread` payload, checked once so the route does not have to.
@@ -290,14 +310,59 @@ export function normalizeThreadInput(body) {
   return {
     threadKey,
     participant: normalizeParticipant(body?.participant),
-    messages,
+    messages: conversationOrder(messages),
     invalid,
     undated,
     receivedAt
   };
 }
 
+/**
+ * The messages of one thread in the order they were posted, each with its
+ * place in it.
+ *
+ * The CRM keeps the conversation in the order its lines arrive, so the order
+ * they are written in is the only order it has — and most messages carry only
+ * a label, which is stored as the time we read them: every one of them the
+ * same moment. The agent is asked to post a thread as LinkedIn shows it,
+ * oldest first, and the order it posts is taken as the truth.
+ *
+ * Only real times can overrule it — ISO datetimes (`sentAtIso`), nothing
+ * else: a payload whose ISO times run backwards more often than forwards was
+ * posted newest first and is turned round, and when every message has one
+ * they are sorted by it. A label never turns a thread, a year in it or not.
+ * "3:00 PM" then "10:00 AM" is yesterday afternoon and this morning as often
+ * as it is the wrong way round, "12/9/2025" then "3/10/2025" is September then
+ * October to one locale and December then March to `Date.parse`, and nothing
+ * in a label says which — guessing reversed threads the agent had posted
+ * correctly.
+ *
+ * `position` is kept on the stored row: a later copy of an older line has to
+ * know where it stood among the rows stored with it.
+ */
+export function conversationOrder(messages) {
+  let forwards = 0;
+  let backwards = 0;
+  let previous = NaN;
+  for (const message of messages) {
+    if (!message.sentAtIso) continue;
+    const at = Date.parse(message.sentAt);
+    if (!Number.isFinite(at)) continue;
+    if (Number.isFinite(previous) && at > previous) forwards += 1;
+    if (Number.isFinite(previous) && at < previous) backwards += 1;
+    previous = at;
+  }
+  const ordered = backwards > forwards ? messages.slice().reverse() : messages.slice();
+  if (ordered.length && ordered.every((message) => message.sentAtIso)) {
+    ordered.sort((left, right) => Date.parse(left.sentAt) - Date.parse(right.sentAt));
+  }
+  return ordered.map((message, position) => ({ ...message, position }));
+}
+
 // -- duplicate suppression --------------------------------------------------
+
+/** How many external ids one duplicate check asks about: each can be a 200-character URN. */
+const EXTERNAL_ID_BATCH = 40;
 
 /**
  * Which of these external ids this account has already stored.
@@ -315,16 +380,18 @@ export function normalizeThreadInput(body) {
  */
 export async function storedExternalIds(accountId, externalIds) {
   const wanted = [...new Set(externalIds)];
-  if (!wanted.length) return new Set();
-
-  const rows = await anty.from("wl_events").select("meta")
-    .eq("account_id", accountId).in("type", MESSAGE_TYPES)
-    // The ids are hex hashes or LinkedIn's own ids; neither can hold the comma
-    // that separates an `in.(...)` list, so they go in as they are.
-    .in("meta->>externalId", wanted)
-    .rows();
-
-  return new Set(rows.map((row) => row.meta?.externalId).filter(Boolean));
+  const found = new Set();
+  // LinkedIn's own ids are URNs — `urn:li:msg_message:(urn:li:fsd_profile:…,2-…)`
+  // — with a comma and brackets in them; `in` quotes them (`listValue`). They
+  // are long, too, so a thread's worth goes in batches rather than one URL.
+  for (let start = 0; start < wanted.length; start += EXTERNAL_ID_BATCH) {
+    const rows = await anty.from("wl_events").select("meta")
+      .eq("account_id", accountId).in("type", MESSAGE_TYPES)
+      .in("meta->>externalId", wanted.slice(start, start + EXTERNAL_ID_BATCH))
+      .rows();
+    for (const row of rows) if (row.meta?.externalId) found.add(row.meta.externalId);
+  }
+  return found;
 }
 
 /** Split what arrived into what is new and what has been seen before. */
@@ -341,6 +408,66 @@ export function splitStored(messages, seen) {
     fresh.push(message);
   }
   return { fresh, skipped };
+}
+
+/**
+ * What this account has stored in one thread, oldest first: the rows a repeat
+ * is looked for among, and the ones still waiting to learn who they were to.
+ */
+export async function storedInThread(accountId, threadKey) {
+  const rows = await anty.from("wl_events").select("id,type,meta,created_at")
+    .eq("account_id", accountId).in("type", MESSAGE_TYPES).eq("meta->>threadKey", threadKey)
+    .order("created_at", { ascending: true }).limit(LISTING_LIMIT).rows();
+  return rows.filter((row) => row.meta);
+}
+
+/**
+ * The same message, come back under a new id.
+ *
+ * The suppression above is only as stable as the id, and an id the DOM does
+ * not give has to be made from what is on screen — where the time is a label
+ * that ages: "10:42" today, "Sep 25" tomorrow. A thread is read again whenever
+ * somebody writes in it, and every older message in it then arrives with a new
+ * hash: stored twice and, now that every message goes onto the person's CRM
+ * contact, written there twice — the whole conversation again each time they
+ * answer.
+ *
+ * So a message is also a repeat of a row this thread already holds when it
+ * went the same way with the same words and the two times cannot tell them
+ * apart: equal, or at least one of them a label rather than a clock reading.
+ * One for one: a stored row answers for one arriving message only, and a row
+ * whose own id was found among what arrived (`answered`, the ids the check by
+ * id matched) has answered already. Two "Дякую" in one thread stay two as long
+ * as both are in what the agent read.
+ *
+ * A stored time is a label when it says so, and also when it cannot be a
+ * reading of a clock (`plausibleSentAt` against when the row was stored,
+ * `storedAt`): rows stored before that check existed took "Sep 20" as given
+ * and hold the year 2001, and the same message read again as "Sep 20, 2026"
+ * would otherwise be a new one — stored twice and copied to the CRM twice.
+ *
+ * What this cannot tell apart it keeps once: an agent that posts only the
+ * newest messages, with no times, and a word-for-word repeat among them. That
+ * second "ok" is the price; the alternative was a duplicate of every message
+ * every time a thread was read again.
+ */
+export function splitRepeats(messages, stored = [], answered = new Set()) {
+  const available = stored.filter((meta) => meta && !answered.has(meta.externalId));
+  const label = (meta) => meta.sentAtGiven === false || !plausibleSentAt(Date.parse(meta.sentAt || ""), meta.storedAt);
+  const fresh = [];
+  const repeats = [];
+  for (const message of messages) {
+    const index = available.findIndex((meta) => meta.direction === message.direction
+      && meta.body === message.body
+      && (label(meta) || !message.sentAtGiven || meta.sentAt === message.sentAt));
+    if (index === -1) {
+      fresh.push(message);
+      continue;
+    }
+    available.splice(index, 1);
+    repeats.push(message);
+  }
+  return { fresh, repeats };
 }
 
 // -- matching a reply to an approach ----------------------------------------
@@ -376,28 +503,155 @@ export function matchOutreachRow(rows, participant) {
   // whichever row happens to carry the same string. Checked against the same
   // set the normalizer uses, so a participant that skipped it is still safe.
   if (!name || NON_NAMES.has(name)) return null;
+  // Normalized, the slug no longer says what shape of link it came from; the
+  // participant's `memberProfile` does.
+  const profile = participant?.memberProfile === false ? "" : profileSlug(participant?.slug);
   return ordered.find((row) => {
     const person = cleanName(row.person_name).toLowerCase();
     // And a CRM row carrying the placeholder as its name matches nobody either.
-    return person === name && !NON_NAMES.has(person);
+    if (person !== name || NON_NAMES.has(person)) return false;
+    // Two profiles that are both known and differ are two people, however alike
+    // their names: a namesake writing in would otherwise have their whole
+    // conversation copied onto the approached person's CRM contact.
+    const theirs = profileSlug(row.person_linkedin);
+    return !(profile && theirs && profile !== theirs);
   }) || null;
 }
 
 /**
- * The line the CRM gets. It names the account the reply arrived on, because the
- * sales team reading it there has no other way to know which of five logins the
- * person answered.
+ * The member profile a LinkedIn link or slug names, as a comparable slug, or
+ * "" when it cannot be compared with another person's.
+ *
+ * Only an `/in/` link — or a bare slug, which is what the agent hands over —
+ * names a member. A company, school or showcase page in the CRM's LinkedIn
+ * column (plenty of contacts carry one) is not the person, and neither is a
+ * link of any other shape: nothing in it says who somebody is not, so it never
+ * rules a name match out. Nor does a member id — `/in/ACoAAB…` in messaging —
+ * which is not the vanity slug the CRM row holds: the same person, spelled
+ * differently.
  */
-export function crmContent(accountName, body) {
-  return `LinkedIn reply to ${accountName}: ${body}`.slice(0, 2000);
+function profileSlug(value) {
+  const raw = typeof value === "string" ? value.trim() : "";
+  if (!memberLink(raw)) return "";
+  const slug = linkedinSlug(raw);
+  return !slug || slug.includes(":") || /^ac[ow]aa/.test(slug) ? "" : slug;
+}
+
+/**
+ * The CRM contact this participant is, when no approach of this account's is.
+ *
+ * A person in a campaign's folder can write to a login that never approached
+ * them, or answer one that did from before this portal kept rows. Their
+ * contact still carries their LinkedIn link, and the slug in it is the same
+ * string the agent read off the conversation — so the conversation still
+ * lands on them. Slug only, never the name: a name is a guess, and a wrong
+ * guess here files somebody's private message against a stranger in a
+ * system the whole sales team reads.
+ *
+ * Two contacts with one profile are one person entered twice, and the line
+ * goes to the record this workspace is working: the one an approach of any
+ * account's names (`wl_outreach`), else the one sitting in a running
+ * campaign's folder (`folderIds`), else the oldest. Oldest alone split one
+ * person in two — a login that approached the newer record had their answers
+ * there, and any other login they wrote to sent theirs to the older one, off
+ * the card the seller was looking at.
+ * A company or school page is not a person and matches nobody.
+ *
+ * Asked for the link that ends where the slug does first, and only then for
+ * any link that merely starts with it: the second is a prefix search, and a
+ * short slug ("anna") can be the start of more contacts than one page of
+ * candidates holds, with the real one behind them.
+ */
+export async function contactBySlug(slug, { folderIds = [] } = {}) {
+  const wanted = linkedinSlug(slug);
+  if (!wanted || wanted.includes(":")) return null;
+  const same = (rows) => rows.filter((row) => linkedinSlug(row.linkedin) === wanted);
+  let found = same(await leadsByLinkedin(wanted));
+  if (!found.length) found = same(await leadsByLinkedin(wanted, { prefix: true }));
+  if (found.length < 2) return found[0]?.id ?? null;
+
+  const approached = new Set((await anty.from("wl_outreach").select("crm_contact_id")
+    .in("crm_contact_id", found.map((row) => row.id).slice(0, CONTACT_ID_BATCH)).rows())
+    .map((row) => String(row.crm_contact_id)));
+  const working = new Set(folderIds.filter(Boolean).map(String));
+  // `found` is oldest first, so each preference keeps the oldest of its kind.
+  return (found.find((row) => approached.has(String(row.id)))
+    ?? found.find((row) => row.folder_id && working.has(String(row.folder_id)))
+    ?? found[0]).id;
+}
+
+/**
+ * The line one message becomes on the contact's CRM timeline: which way it
+ * went, on which login, when, and the words.
+ *
+ * The time is in the text because the CRM has no column known to hold it
+ * (`activities.mjs`); the row's own timestamp is the moment we copied it. A
+ * time LinkedIn only gave as "2h" is said to be one — with the label and when
+ * it was read — rather than dressed up as a reading of a clock.
+ */
+export function messageLine(message, name) {
+  const when = message?.sentAtGiven === false
+    ? `${message.sentAtRaw ? `у LinkedIn «${message.sentAtRaw}», ` : ""}прочитано ${crmStamp(message.sentAt)}`
+    : crmStamp(message?.sentAt);
+  const head = message?.direction === "in"
+    ? `LinkedIn · Відповідь на акаунт ${name} · ${when}`
+    : `LinkedIn · Ми написали з акаунта ${name} · ${when}`;
+  return clampContent(`${head}\n${message?.body || ""}`);
+}
+
+/** The line any copied row becomes: a message, or a request that went out. */
+function activityLineOf(row, name) {
+  if (MESSAGE_TYPES.includes(row?.type)) return messageLine(row.meta, name);
+  if (REQUEST_EVENT_TYPES.includes(row?.type)) return requestLine(row, name);
+  return null;
+}
+
+/**
+ * One stored row as a line owed to the CRM, or null when it makes none.
+ *
+ * Carries what orders it (`byConversation`) and when its row was written,
+ * which bounds the look for a copy already made (`copyToCrm`).
+ */
+function lineEntry(row, name, since = undefined) {
+  const content = row ? activityLineOf(row, name) : null;
+  if (!content) return null;
+  return { eventId: String(row.id), content, since, storedAt: row.created_at, position: Number(row.meta?.position) || 0 };
+}
+
+/**
+ * The order a contact's lines are written in, which is the only order the CRM
+ * shows them in: the order their rows were stored, and inside one store the
+ * place each message had in its thread (`conversationOrder`).
+ *
+ * Not the message's own time. Most messages carry only a label, stored as the
+ * moment it was read, so every one of a thread's first read was the same
+ * moment; and a label next to a real time would sort after it even when it was
+ * sent before. What was stored earlier was sent earlier — that is what
+ * "stored" means for a thread read oldest first — so a line owed since
+ * yesterday goes before today's new one, not after it.
+ */
+function byConversation(left, right) {
+  return String(left.storedAt || "").localeCompare(String(right.storedAt || ""))
+    || left.position - right.position
+    || left.eventId.localeCompare(right.eventId);
+}
+
+/** Each row once; the first entry for a row wins, so pass the owed ones first — they know since when. */
+function oncePerRow(entries) {
+  const found = new Map();
+  for (const entry of entries) if (entry && !found.has(entry.eventId)) found.set(entry.eventId, entry);
+  return [...found.values()];
 }
 
 // -- writing ----------------------------------------------------------------
 
-/** The only place a message becomes a row. */
+/**
+ * The only place a message becomes a row. Hands the rows back: each one's id
+ * is the key its CRM copy is made under.
+ */
 async function insertMessages(accountId, threadKey, participant, messages, crmContactId = null) {
-  if (!messages.length) return;
-  await anty.from("wl_events").insert(messages.map((message) => ({
+  if (!messages.length) return [];
+  return anty.from("wl_events").insert(messages.map((message) => ({
     account_id: accountId,
     level: "info",
     type: message.direction === "in" ? MESSAGE_IN : MESSAGE_OUT,
@@ -409,18 +663,31 @@ async function insertMessages(accountId, threadKey, participant, messages, crmCo
       // Who this is, written down rather than worked out again on every read.
       // Without it a person's history is a name match repeated at read time,
       // and somebody who renames their LinkedIn profile drops out of their own
-      // history. Null when the thread matched nobody we approached.
+      // history. Null when the thread matched nobody we approached and no CRM
+      // contact carries this profile.
       crmContactId,
+      // Stored before anybody knew who this is: its CRM copy waits for the
+      // thread to be matched (`earlierLines`). Said on the row because rows
+      // from before the copy existed hold a null too, and those are not
+      // copied — their newest replies went out under the old rule already.
+      awaitsContact: !crmContactId,
+      // Its place in the thread as read, oldest first (`conversationOrder`):
+      // rows stored together share one timestamp.
+      position: Number.isInteger(message.position) ? message.position : null,
       externalId: message.externalId,
       direction: message.direction,
       body: message.body,
       sentAt: message.sentAt,
       sentAtGiven: message.sentAtGiven,
       sentAtRaw: message.sentAtRaw,
+      // A real reading of LinkedIn's clock, which is all that may reorder
+      // what was stored (`threadOrder`): "12/9/2025" is stored as a time as
+      // well, and is still only a label.
+      sentAtIso: message.sentAtIso === true,
       truncated: message.truncated,
       participant
     }
-  }))).rows();
+  }))).select("id,type,meta,created_at").rows();
 }
 
 /**
@@ -445,109 +712,295 @@ async function markReplied(row, sentAt) {
   return outcome.moved;
 }
 
+/** The columns a reply is matched to an approach by. */
+const OUTREACH_MATCH_COLUMNS = "id,account_id,crm_contact_id,person_name,person_linkedin,status,created_at";
+
+/** One page of outreach rows. Supabase answers at most a thousand rows to a request, whatever is asked. */
+const OUTREACH_PAGE = 1000;
+
 /**
- * The CRM copy, best-effort on purpose.
+ * Every approach these accounts made, newest first, read page by page.
  *
- * A CRM that is down must never lose a message: the reply is already stored by
- * the time this runs, so a failure costs a copy, not the fact. It is logged at
- * warn rather than swallowed, because a CRM that has been failing silently for
- * a week is the thing nobody notices.
+ * Read whole because the match is made here (`matchOutreachRow`), on slugs and
+ * names the database cannot compare the way that does. It used to be one
+ * request, which the server cuts at a thousand rows — out of reach while
+ * sending stopped at day 14, a few months away once working mode sends every
+ * day — and a reply from anybody past the cut matched nothing: no status
+ * moved, no `responded_at`, no reply in the campaign's count. Paged until a
+ * page comes back empty rather than short, so a server that cuts lower than
+ * this asks is still read to the end.
  */
-async function writeCrmActivity({ accountId, contactId, accountName, body }) {
-  try {
-    await crm.from("activities").insert({
-      contact_id: contactId,
-      type: "linkedin",
-      content: crmContent(accountName, body)
-      // `user_id` is left to the column's own default, which a service-role
-      // insert resolves to null. That is right: nobody on the sales team wrote
-      // this, and attributing it to whoever holds the key would be a lie in a
-      // column people filter by.
-    }).rows();
-    return "written";
-  } catch (error) {
-    await logEvent({
-      accountId, level: "warn", type: "inbox.crm_failed",
-      message: `Reply stored, but the CRM did not take it: ${error.message}`,
-      meta: { contactId }
-    });
-    return "failed";
+async function outreachRowsOf(accountIds) {
+  const found = [];
+  if (!accountIds.length) return found;
+  for (let offset = 0; ;) {
+    const page = await anty.from("wl_outreach").select(OUTREACH_MATCH_COLUMNS).in("account_id", accountIds)
+      .order("created_at", { ascending: false }).order("id", { ascending: false })
+      .offset(offset).limit(OUTREACH_PAGE).rows();
+    if (!page.length) return found;
+    found.push(...page);
+    offset += page.length;
   }
 }
 
 /**
- * One conversation as the agent found it: store what is new, then — for inbound
- * messages only — match it to an approach, move the status, and copy it to the
- * CRM. Each of the three is skipped silently when it does not apply.
+ * What else this contact is owed on this account, now that the thread is
+ * known to be theirs: every line an earlier copy failed on — so it goes before
+ * what just arrived, not after it — and the messages of this thread stored
+ * while nobody knew who it was with.
+ *
+ * The second are the rows marked `awaitsContact` stored after the thread was
+ * last tied to anybody: the ones before that were copied (or owed) when it
+ * was. A row owed to another contact is left to the copy that owes it.
  */
-export async function storeThread({ account, input }) {
+async function earlierLines({ accountId, contactId, threadKey, threadRows, name, now }) {
+  const lines = [];
+  const elsewhere = new Set();
+  let owed = [];
+  let sources = new Map();
+  try {
+    owed = await outstandingCopies(accountId, now);
+    sources = new Map((owed.length ? await sourceEvents(owed.map((item) => item.eventId)) : [])
+      .map((row) => [String(row.id), row]));
+  } catch (error) {
+    // What is owed stays owed, for `inbox.done` to retry; the new lines go.
+    console.error("[warmup] could not read what the CRM is owed:", error.message);
+    owed = [];
+  }
+  for (const item of owed) {
+    const row = sources.get(item.eventId);
+    if (!row) continue;
+    const to = item.contactId || row.meta?.crmContactId || null;
+    const here = to
+      ? String(to) === String(contactId)
+      // Owed with nobody to go to: the lookup failed. In this thread, it is them.
+      : MESSAGE_TYPES.includes(row.type) && row.meta?.threadKey === threadKey;
+    if (here) lines.push(lineEntry(row, name, item.since));
+    else elsewhere.add(item.eventId);
+  }
+
+  const lastTied = threadRows.filter((row) => row.meta?.crmContactId).map((row) => String(row.created_at)).sort().pop() || "";
+  for (const row of threadRows) {
+    if (!row.meta?.awaitsContact || row.meta.crmContactId || elsewhere.has(String(row.id))) continue;
+    if (String(row.created_at) <= lastTied) continue;
+    lines.push(lineEntry(row, name));
+  }
+  return lines;
+}
+
+/**
+ * One conversation as the agent found it: store what is new, move the approach
+ * on if they answered, and copy every new message — ours and theirs — to the
+ * person's CRM contact. Each step is skipped silently when it does not apply.
+ *
+ * `folderIds` are the running campaigns' folders, which settle a person the
+ * CRM holds twice (`contactBySlug`).
+ */
+export async function storeThread({ account, input, folderIds = [], now = new Date() }) {
   const { threadKey, participant, messages, invalid, undated } = input;
 
   const seen = await storedExternalIds(account.id, messages.map((message) => message.externalId));
-  const { fresh, skipped } = splitStored(messages, seen);
+  const byId = splitStored(messages, seen);
+  // New ids are not always new messages: see `splitRepeats`. Asked only when
+  // something is new by id, which on an ordinary re-read is nothing.
+  const threadRows = byId.fresh.length ? await storedInThread(account.id, threadKey) : [];
+  const { fresh, repeats } = byId.fresh.length
+    ? splitRepeats(byId.fresh, threadRows.map((row) => ({ ...row.meta, storedAt: row.created_at })), seen)
+    : { fresh: [], repeats: [] };
+  const skipped = [...byId.skipped, ...repeats];
 
   // Who this thread is, resolved before anything is written rather than after.
   // It used to be worked out only when something inbound arrived, which meant
   // a thread of our own messages was stored with nothing saying who they were
   // to. Done for every thread that has anything new in it, so the person key
   // goes onto outbound messages as well.
-  const rows = fresh.length
-    ? await anty.from("wl_outreach")
-      .select("id,account_id,crm_contact_id,person_name,person_linkedin,status,created_at")
-      .eq("account_id", account.id).rows()
-    : [];
+  const rows = fresh.length ? await outreachRowsOf([account.id]) : [];
   const match = fresh.length ? matchOutreachRow(rows, participant) : null;
 
-  await insertMessages(account.id, threadKey, participant, fresh, match?.crm_contact_id ?? null);
+  // Nobody this account approached: the CRM contact whose LinkedIn is this
+  // profile, if there is one. A CRM that cannot be asked right now is not a
+  // reason to lose the messages — they are stored unlinked, and their copy is
+  // owed to the next sync, which asks again.
+  let contactId = match?.crm_contact_id ?? null;
+  let lookupError = null;
+  if (fresh.length && !contactId && participant.slug) {
+    try {
+      contactId = await contactBySlug(participant.slug, { folderIds });
+    } catch (error) {
+      lookupError = error;
+    }
+  }
+
+  const stored = await insertMessages(account.id, threadKey, participant, fresh, contactId);
 
   const inbound = fresh.filter((message) => message.direction === "in");
-  const outcome = { matchedOutreachId: match?.id ?? null, statusMoved: false, crm: "skipped" };
+  const outcome = {
+    matchedOutreachId: match?.id ?? null,
+    crmContactId: contactId,
+    // How the person was found: their approach on this account, or only their
+    // LinkedIn link in the CRM — which moves no status, because there is no
+    // approach of this account's to move.
+    matchedBy: match ? "outreach" : contactId ? "linkedin" : null,
+    statusMoved: false,
+    crm: "skipped",
+    crmWritten: 0
+  };
 
   if (inbound.length && match) {
     // The newest inbound message is the one that proves they answered.
     const newest = inbound.reduce((latest, message) => (message.sentAt > latest.sentAt ? message : latest));
     outcome.statusMoved = await markReplied(match, newest.sentAt);
-    if (match.crm_contact_id) {
-      outcome.crm = await writeCrmActivity({
-        accountId: account.id,
-        contactId: match.crm_contact_id,
-        accountName: account.login?.trim() || account.label,
-        body: newest.body
-      });
-    }
   }
 
-  return { stored: fresh.length, skipped: skipped.length, invalid, undated, threadKey, ...outcome };
+  // Every new message, both ways, in the conversation's order — after
+  // whatever this contact was already owed. What we wrote is half the
+  // conversation; a CRM that only ever showed their answers showed nobody
+  // what they were answering.
+  if (stored.length && (contactId || lookupError)) {
+    const copy = await oneCopyAtATime(account.id, async () => {
+      const name = accountName(account);
+      const earlier = contactId
+        ? await earlierLines({ accountId: account.id, contactId, threadKey, threadRows, name, now })
+        : [];
+      const entries = oncePerRow([...earlier, ...stored.map((row) => lineEntry(row, name))]).sort(byConversation);
+      return copyToCrm({ accountId: account.id, contactId, entries, error: lookupError, now });
+    });
+    outcome.crm = copy.failed ? "failed" : "written";
+    outcome.crmWritten = copy.written;
+  }
+
+  // `repeated` is the part of `skipped` that came back under a new id. Zero on
+  // an agent whose ids are stable; a count every morning says they are not.
+  return { stored: fresh.length, skipped: skipped.length, repeated: repeats.length, invalid, undated, threadKey, ...outcome };
+}
+
+/**
+ * Give the CRM what it was owed: every copy that failed on an earlier sync of
+ * this account, made again from the stored row and sent to its contact.
+ *
+ * Run once a sync, when the agent says it is done (`inbox.done`), rather than
+ * per thread: a thread nobody wrote in since is not read again, and the copy it
+ * owes would otherwise wait for a message that may never come. A request's
+ * copy is owed here too — the account's daily sync is the next time anything
+ * talks to the CRM on its behalf.
+ *
+ * One at a time per account (`oneCopyAtATime`): a second `inbox.done` sent
+ * while this one is still writing waits, and then finds nothing owed.
+ *
+ * Never throws. What still cannot be written is owed again, from its first
+ * failure, until `CRM_RETRY_DAYS` have passed.
+ */
+export async function retryCrmCopies(account, { now = new Date(), folderIds = [] } = {}) {
+  const result = { owed: 0, written: 0, failed: 0 };
+  try {
+    await oneCopyAtATime(account.id, async () => {
+      const owed = await outstandingCopies(account.id, now);
+      result.owed = owed.length;
+      if (!owed.length) return;
+
+      const byId = new Map((await sourceEvents(owed.map((item) => item.eventId))).map((row) => [String(row.id), row]));
+      const name = accountName(account);
+      const groups = new Map();
+      for (const item of owed) {
+        const row = byId.get(item.eventId);
+        // A source row that is gone has nothing left to copy.
+        const entry = lineEntry(row, name, item.since);
+        if (!entry) continue;
+
+        let contactId = item.contactId || row.meta?.crmContactId || null;
+        let error = null;
+        if (!contactId && row.meta?.participant?.slug) {
+          try {
+            contactId = await contactBySlug(row.meta.participant.slug, { folderIds });
+          } catch (caught) {
+            error = caught;
+          }
+        }
+        // Asked and answered "nobody": there is no contact to owe it to.
+        if (!contactId && !error) continue;
+
+        const key = contactId ? `contact:${contactId}` : "unresolved";
+        const group = groups.get(key) ?? { contactId, error, entries: [] };
+        group.entries.push(entry);
+        groups.set(key, group);
+      }
+
+      for (const group of groups.values()) {
+        const copy = await copyToCrm({
+          accountId: account.id, contactId: group.contactId, entries: group.entries.sort(byConversation), error: group.error, now
+        });
+        result.written += copy.written;
+        result.failed += copy.failed;
+      }
+    });
+  } catch (error) {
+    console.error("[warmup] CRM retry failed:", error.message);
+  }
+  return result;
 }
 
 /**
  * Every message stored for one person, newest first.
  *
  * Two ways of belonging, and both are needed for a while. Messages stored from
- * this phase on carry `meta.crmContactId` and are simply filtered. Everything
- * stored before it has no person key at all, so those are matched the old way —
- * on the LinkedIn slug, then the name — which is the matching that breaks when
+ * this phase on carry `meta.crmContactId` and are simply filtered — on every
+ * account, because a person can write to any login: the one that approached
+ * them, or one that found them only by the LinkedIn link on their contact.
+ * Everything stored before the key existed has no person key at all, so those
+ * are matched the old way, on the one account that approached them — on the
+ * LinkedIn slug, then the name — which is the matching that breaks when
  * somebody renames their profile. **Older messages are not backfilled**, so a
  * person's history is exact from here on and best-effort behind.
+ *
+ * And a third: a message stored before anybody knew who it was with carries
+ * no key, and never will — rows are not rewritten here. When it is later
+ * copied to this contact, or owed to them, the `crm.copied` or
+ * `inbox.crm_failed` marker names the contact and the row, and that is how it
+ * is found (`rowIdsNamedFor`). Without it the CRM showed a line the person's own
+ * card in the portal did not.
  */
 export async function messagesForContact({ accountId, crmContactId, personName, personLinkedin }, limit = 200) {
-  if (!accountId) return [];
-  const rows = await anty.from("wl_events").select("id,account_id,type,meta,created_at")
-    .eq("account_id", accountId).in("type", MESSAGE_TYPES)
-    .order("created_at", { ascending: false }).limit(LISTING_LIMIT).rows();
+  if (!accountId && !crmContactId) return [];
+  const columns = "id,account_id,type,meta,created_at";
+  const [keyed, legacy, markedIds] = await Promise.all([
+    crmContactId
+      ? anty.from("wl_events").select(columns).in("type", MESSAGE_TYPES)
+        .eq("meta->>crmContactId", String(crmContactId))
+        .order("created_at", { ascending: false }).limit(LISTING_LIMIT).rows()
+      : [],
+    accountId
+      ? anty.from("wl_events").select(columns).eq("account_id", accountId).in("type", MESSAGE_TYPES)
+        .order("created_at", { ascending: false }).limit(LISTING_LIMIT).rows()
+      : [],
+    crmContactId ? rowIdsNamedFor(crmContactId) : []
+  ]);
+  // Rows the key already found are not read a second time.
+  const keyedIds = new Set(keyed.map((row) => String(row.id)));
+  const unread = markedIds.filter((id) => !keyedIds.has(id));
+  const named = (unread.length ? await sourceEvents(unread) : [])
+    .filter((row) => MESSAGE_TYPES.includes(row.type) && !row.meta?.crmContactId);
+  const namedIds = new Set(named.map((row) => String(row.id)));
 
   const wantedSlug = linkedinSlug(personLinkedin);
   const wantedName = cleanName(personName).toLowerCase();
+  const theirs = (row) => {
+    const meta = row.meta || {};
+    if (namedIds.has(String(row.id))) return true;
+    if (meta.crmContactId) return String(meta.crmContactId) === String(crmContactId);
+    const participant = meta.participant || {};
+    if (wantedSlug && linkedinSlug(participant.slug) === wantedSlug) return true;
+    const name = cleanName(participant.name).toLowerCase();
+    return Boolean(wantedName) && !NON_NAMES.has(wantedName) && name === wantedName;
+  };
 
-  return rows
+  const seen = new Set();
+  return [...keyed, ...named, ...legacy]
     .filter((row) => {
-      const meta = row.meta || {};
-      if (meta.crmContactId) return String(meta.crmContactId) === String(crmContactId);
-      const participant = meta.participant || {};
-      if (wantedSlug && linkedinSlug(participant.slug) === wantedSlug) return true;
-      const name = cleanName(participant.name).toLowerCase();
-      return Boolean(wantedName) && !NON_NAMES.has(wantedName) && name === wantedName;
+      if (seen.has(row.id) || !theirs(row)) return false;
+      seen.add(row.id);
+      return true;
     })
+    .sort((left, right) => String(right.created_at || "").localeCompare(String(left.created_at || "")))
     .slice(0, limit)
     .map((row) => ({
       id: row.id,
@@ -557,11 +1010,31 @@ export async function messagesForContact({ accountId, crmContactId, personName, 
       storedAt: row.created_at,
       body: row.meta?.body || "",
       threadKey: row.meta?.threadKey || "",
+      // Which login the conversation is on — with more than one possible, the
+      // screen has to be able to say.
+      accountId: row.account_id ?? null,
       truncated: Boolean(row.meta?.truncated),
       // How this message was recognised as theirs — worth showing, because the
-      // second way is a guess that a rename can break.
-      matchedBy: row.meta?.crmContactId ? "contact_id" : "name_or_slug"
+      // name-or-slug way is a guess that a rename can break.
+      matchedBy: row.meta?.crmContactId || namedIds.has(String(row.id)) ? "contact_id" : "name_or_slug"
     }));
+}
+
+/**
+ * The rows a CRM marker ties to this contact: copied to them (`crm.copied`)
+ * or owed to them (`inbox.crm_failed`), on any account. Messages among them
+ * with no person key of their own are the ones only this can find.
+ */
+async function rowIdsNamedFor(crmContactId) {
+  const markers = await anty.from("wl_events").select("meta").in("type", [CRM_COPIED, CRM_FAILED])
+    .eq("meta->>contactId", String(crmContactId))
+    .order("created_at", { ascending: false }).limit(LISTING_LIMIT).rows();
+  const ids = new Set();
+  for (const { meta } of markers) {
+    for (const id of Array.isArray(meta?.eventIds) ? meta.eventIds : []) ids.add(String(id));
+    for (const entry of Array.isArray(meta?.owed) ? meta.owed : []) if (entry?.eventId) ids.add(String(entry.eventId));
+  }
+  return [...ids];
 }
 
 /**
@@ -604,8 +1077,44 @@ function toMessage(event) {
     sentAt: event.meta?.sentAt || event.created_at,
     // When we learned of it, which is not when it was sent, and is the value
     // unread is derived from — see `deriveThreads`.
-    storedAt: event.created_at
+    storedAt: event.created_at,
+    // Its place in the thread as read, and whether its time is a real one —
+    // what the thread is ordered by (`threadOrder`). Rows stored before
+    // either was written carry neither.
+    position: Number.isInteger(event.meta?.position) ? event.meta.position : null,
+    sentAtIso: event.meta?.sentAtIso === true
   };
+}
+
+/**
+ * One thread's messages oldest first: the order the thread screen shows them
+ * in and the one its last message is picked by — the order the CRM writes
+ * them in (`byConversation`). When each was stored, then its place in the
+ * store it came in (`position`).
+ *
+ * A message's own time reorders only messages that both carry a real one
+ * (`sentAtIso`): those are sorted by it among the places the stored order
+ * gives them, and every other message keeps its place — a later read that
+ * found an older message further up puts it where it was sent. A label never
+ * moves anything, a year in it or not: "12/9/2025" then "3/10/2025", posted
+ * oldest first, is September then October on the page it came from and
+ * December then March to `Date.parse`. Ordered by the parsed times, the
+ * screen showed the answer before the message it answered, while the CRM had
+ * them the right way round.
+ *
+ * Rows stored before `sentAtIso` and `position` were written keep the order
+ * they were stored in, and inside one store their times — what the screen
+ * ordered them by before.
+ */
+function threadOrder(messages) {
+  const stored = messages.slice().sort((left, right) =>
+    String(left.storedAt || "").localeCompare(String(right.storedAt || ""))
+    || (left.position ?? 0) - (right.position ?? 0)
+    || String(left.sentAt || "").localeCompare(String(right.sentAt || "")));
+  const timed = stored.filter((message) => message.sentAtIso)
+    .sort((left, right) => Date.parse(left.sentAt) - Date.parse(right.sentAt));
+  let next = 0;
+  return stored.map((message) => (message.sentAtIso ? timed[next++] : message));
 }
 
 /**
@@ -635,24 +1144,18 @@ export function deriveThreads(events, { readMarks = new Map(), syncedAt = new Ma
         accountId: event.account_id,
         participant: normalizeParticipant(event.meta?.participant),
         participantSeenAt: event.created_at,
-        lastMessage: null,
-        messageCount: 0,
+        messages: [],
         newestInboundStoredAt: null
       };
       threads.set(key, thread);
     }
 
-    thread.messageCount += 1;
+    thread.messages.push(message);
     // The newest event carrying a participant wins: a headline that changed, or
     // a name the agent could only resolve on the second run, should be current.
     if (event.meta?.participant && event.created_at >= thread.participantSeenAt) {
       thread.participant = normalizeParticipant(event.meta.participant);
       thread.participantSeenAt = event.created_at;
-    }
-    if (!thread.lastMessage
-      || message.sentAt > thread.lastMessage.sentAt
-      || (message.sentAt === thread.lastMessage.sentAt && message.storedAt > thread.lastMessage.storedAt)) {
-      thread.lastMessage = message;
     }
     if (message.direction === "in" && (!thread.newestInboundStoredAt || message.storedAt > thread.newestInboundStoredAt)) {
       thread.newestInboundStoredAt = message.storedAt;
@@ -661,16 +1164,19 @@ export function deriveThreads(events, { readMarks = new Map(), syncedAt = new Ma
 
   return [...threads.values()].map((thread) => {
     const readAt = readMarks.get(threadId(thread.accountId, thread.threadKey)) || null;
+    // The last in the order the thread screen shows (`threadOrder`), so the
+    // list's preview is the message the thread ends on there.
+    const lastMessage = threadOrder(thread.messages).at(-1) ?? null;
     return {
       threadKey: thread.threadKey,
       accountId: thread.accountId,
       participant: thread.participant,
-      lastMessage: thread.lastMessage && {
-        direction: thread.lastMessage.direction,
-        body: thread.lastMessage.body,
-        sentAt: thread.lastMessage.sentAt
+      lastMessage: lastMessage && {
+        direction: lastMessage.direction,
+        body: lastMessage.body,
+        sentAt: lastMessage.sentAt
       },
-      messageCount: thread.messageCount,
+      messageCount: thread.messages.length,
       unread: Boolean(thread.newestInboundStoredAt) && (!readAt || thread.newestInboundStoredAt > readAt),
       readAt,
       lastSyncedAt: syncedAt.get(thread.accountId) || null
@@ -755,8 +1261,7 @@ export async function readThread({ accountId, threadKey }) {
   const [thread] = deriveThreads(events, { readMarks: read, syncedAt: synced });
   if (!thread) return null;
 
-  const messages = events.map(toMessage)
-    .sort((left, right) => left.sentAt.localeCompare(right.sentAt) || left.storedAt.localeCompare(right.storedAt))
+  const messages = threadOrder(events.map(toMessage))
     .map((message) => ({
       direction: message.direction,
       body: message.body,
@@ -790,9 +1295,8 @@ export async function outreachFor(threads) {
   const found = new Map();
   if (!accountIds.length) return found;
 
-  const rows = await anty.from("wl_outreach")
-    .select("id,account_id,crm_contact_id,person_name,person_linkedin,status,created_at")
-    .in("account_id", accountIds).rows();
+  // Paged, like the write path's read, for the same thousand-row cut.
+  const rows = await outreachRowsOf(accountIds);
 
   const byAccount = new Map(accountIds.map((id) => [id, []]));
   for (const row of rows) byAccount.get(row.account_id)?.push(row);

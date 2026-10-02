@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { DEFAULT_STRATEGY } from "../warmup/strategy.mjs";
+import { DEFAULT_STRATEGY, dailyQuota } from "../warmup/strategy.mjs";
 import { queueQuery } from "../warmup/db.mjs";
 import {
   DEFAULT_LEAD_STATUS, buildForecast, describeTargeting, normalizeFilters, normalizeTargeting, peakConnect
@@ -60,21 +60,40 @@ test("more people approached than the filters now match leaves nothing remaining
   assert.equal(forecast.reachedThisMonth, 0);
 });
 
-test("an account's peak is the most it will ever be dealt in a day, not the top of the range", () => {
+test("an account's forecast respects both working-mode rate and the weekly ceiling", () => {
+  // The warm-up's own peak is 5–6 a day and lasts four days; working mode is
+  // 10–15 a day and lasts the rest of the account's life. The forecast used to
+  // be the first, which made every "days to finish" twice what it will be.
   for (let index = 0; index < 20; index += 1) {
     const peak = peakConnect(DEFAULT_STRATEGY, `account-${index}`);
-    assert.ok(peak >= 5 && peak <= 6, `drew ${peak}, outside the strategy's own 5–6 ceiling`);
+    assert.equal(peak, 8, "a sustained rate is bounded by 60 requests in 7 days");
+
+    // An ordinary day, not the lucky one: the month's draws averaged and rounded down.
+    let sum = 0;
+    for (let day = 15; day < 45; day += 1) sum += dailyQuota(DEFAULT_STRATEGY, `account-${index}`, day, "connect");
+    assert.equal(peak, Math.min(Math.floor(sum / 30), Math.floor(60 / 7)));
   }
   assert.equal(
     peakConnect(DEFAULT_STRATEGY, "account-a"),
     peakConnect(DEFAULT_STRATEGY, "account-a"),
-    "a figure that moved on refresh would leave nobody knowing the ceiling"
+    "a figure that moved on refresh would leave nobody knowing the pace"
   );
+
+  // A run frozen before working mode existed forecasts the same pace: it gets
+  // the working mode in code, and so does its forecast.
+  const legacy = { phases: DEFAULT_STRATEGY.phases };
+  assert.equal(peakConnect(legacy, "account-a"), peakConnect(DEFAULT_STRATEGY, "account-a"));
 });
 
 test("a strategy that never allows a request has a peak of zero, which is not a ceiling of unlimited", () => {
-  const lookOnly = { phases: [{ fromDay: 1, toDay: 14, quotas: { profile_view: [3, 5] } }] };
+  // Its own working mode, without requests: with none at all it would fall
+  // back to the one in code, which sends.
+  const lookOnly = {
+    phases: [{ fromDay: 1, toDay: 14, quotas: { profile_view: [3, 5] } }],
+    workingMode: { quotas: { profile_view: [3, 5] } }
+  };
   assert.equal(peakConnect(lookOnly, "account-a"), 0);
+  assert.equal(peakConnect({ phases: [] }, "account-a"), 0, "and no phases at all is no strategy");
   assert.equal(buildForecast({ matching: 100, alreadyApproached: 0, perDayNow: 0, perDayAtPeak: 0, accountsChosen: 2 }).daysToFinish, null);
 });
 
@@ -124,11 +143,15 @@ test("the four filters are always four strings, whatever arrived", () => {
 test("a blank filter narrows nothing and a position filter is a contains", () => {
   const params = (filters) => queueQuery("id", { folderId: "folder-1", filters: normalizeFilters(filters) }).params.toString();
 
-  assert.equal(params({}), "select=id&folder_id=eq.folder-1", "an empty box must not become a filter for the empty string");
+  // The profile link is always there: it is not one of the four boxes, it is
+  // what a LinkedIn queue is made of — a contact with none is nowhere the agent
+  // can click Connect.
+  const profileLink = "linkedin=ilike.*linkedin.com%2Fin%2F*";
+  assert.equal(params({}), `select=id&folder_id=eq.folder-1&${profileLink}`, "an empty box must not become a filter for the empty string");
   // Values go through unquoted and a space arrives as `+`, which is what
   // PostgREST reads it as — quoting the value is what breaks the match.
   assert.equal(
     params({ country: "United States", position: "head of growth", leadStatus: "new", ownerId: "owner-1" }),
-    "select=id&folder_id=eq.folder-1&lead_status=eq.new&owner_id=eq.owner-1&country=ilike.United+States&position=ilike.*head+of+growth*"
+    `select=id&folder_id=eq.folder-1&${profileLink}&lead_status=eq.new&owner_id=eq.owner-1&country=ilike.United+States&position=ilike.*head+of+growth*`
   );
 });

@@ -1,6 +1,28 @@
 import { anty, today } from "./db.mjs";
-import { ACTION_KINDS, ACTION_LABEL, DEFAULT_STRATEGY, currentDay, dailyQuota, planForDay, totalDays } from "./strategy.mjs";
+import {
+  ACTION_KINDS, ACTION_LABEL, DEFAULT_STRATEGY, dailyQuota, dayOfRun, pausedDaysOn, pausedOn, planForDay, runDay, totalDays,
+  warningPause
+} from "./strategy.mjs";
 import { nextSession } from "./schedule.mjs";
+import { connectCeiling, weeklyConnectAllowance } from "./weekly.mjs";
+
+/**
+ * When the scheduler is holding an account back (resting between two sessions
+ * of one morning, or cooling off after a failed one), as epoch ms, or 0.
+ *
+ * The scheduler keeps those holds in memory and already imports this module,
+ * so it hands the reader in (`readHoldsFrom`) rather than this module importing
+ * it back: an import cycle between the two would evaluate one of them half-done.
+ */
+let holdReader = () => 0;
+
+export function readHoldsFrom(reader) {
+  holdReader = typeof reader === "function" ? reader : () => 0;
+}
+
+export function heldUntil(accountId) {
+  return Number(holdReader(accountId)) || 0;
+}
 
 /**
  * Reading and writing the warm-up's own tables.
@@ -12,22 +34,45 @@ import { nextSession } from "./schedule.mjs";
  */
 
 /**
+ * What a warm-up in progress can look like in the table, and what its account
+ * can.
+ *
+ * `paused` and `restricted` are here because a warning writes them and the end
+ * of the pause writes nothing: the day after `paused_until` the run is running
+ * whatever its row still says (`pausedOn`). A reader that filtered on
+ * `running` and `warming` alone lost every account that was ever warned — for
+ * good, because only a person pressing Resume ever wrote them back, and the
+ * button disappeared the day the pause ran out.
+ */
+export const LIVE_RUN_STATES = ["running", "paused"];
+export const LIVE_ACCOUNT_STATUSES = ["warming", "restricted"];
+
+/**
  * The log, written on the same path as the change it describes and never as an
  * afterthought: an account that gets restricted is investigated through this
  * table, and a gap in it is the moment you needed.
+ *
+ * `returning` hands back the row's id and time, for the one kind of caller
+ * that needs to point at the event later: a copy to the CRM is keyed by the
+ * event it was made from (`activities.mjs`). Null when the write failed, which
+ * that caller has to be ready for anyway — this never throws.
  */
-export async function logEvent(input) {
+export async function logEvent(input, { returning = false } = {}) {
   try {
-    await anty.from("wl_events").insert({
+    let query = anty.from("wl_events").insert({
       account_id: input.accountId ?? null,
       run_id: input.runId ?? null,
       level: input.level || "info",
       type: input.type,
       message: input.message,
       meta: input.meta ?? null
-    }).rows();
+    });
+    if (returning) query = query.select("id,type,meta,created_at");
+    const rows = await query.rows();
+    return returning ? rows[0] ?? null : undefined;
   } catch (error) {
     console.error("[warmup] could not write event:", error.message);
+    return returning ? null : undefined;
   }
 }
 
@@ -118,12 +163,14 @@ function errorText(error) {
  * refused by cannot disagree.
  */
 export function connectQuotaToday(account, run, todayIso) {
-  if (!account || !run || run.state !== "running") return 0;
-  if (run.paused_until && run.paused_until >= todayIso) return 0;
+  // `paused` is a live run too once its pause has run out — see `pausedOn`.
+  if (!account || !run || !LIVE_RUN_STATES.includes(run.state)) return 0;
+  if (pausedOn(run, todayIso)) return 0;
   const snapshot = run.strategy_snapshot;
   if (!snapshot?.phases) return 0;
-  const day = currentDay(new Date(run.started_at), run.paused_days ?? 0);
-  if (day > totalDays(snapshot)) return 0;
+  const day = dayOfRun(run);
+  // Past the last phase is working mode, which `dailyQuota` already answers
+  // for; there is no "finished" to return 0 for any more.
   return dailyQuota(snapshot, account.id, day, "connect");
 }
 
@@ -201,10 +248,109 @@ export async function loginIdentities() {
 export async function activeRun(accountId) {
   return anty.from("wl_runs").select("*")
     .eq("account_id", accountId)
-    .in("state", ["running", "paused"])
+    .in("state", LIVE_RUN_STATES)
     .order("started_at", { ascending: false })
     .limit(1)
     .maybeSingle();
+}
+
+/**
+ * A LinkedIn warning, from whoever saw it: the operator's button, the agent
+ * reporting one, or an invitation LinkedIn answered with a block page.
+ *
+ * One path for all three, so they cannot disagree about how long "stop
+ * everything" is or how many days it costs. The row is written as absolutes
+ * computed from the row that was read, so two reports arriving together — the
+ * agent's warning and the `blocked` on the invitation it was sending — land on
+ * the same pause rather than on two stacked ones.
+ *
+ * The `run.warning` says whether it started the pause (`extended: false`) or
+ * came while one held, and a block page names the report it came from
+ * (`report`: `outreachId`, `leaseId`). That is how a retry of the report that
+ * paused the account tells its own pause from an earlier one
+ * (`pausedByThisReport` in `warmup/api.mjs`) — so it is written straight
+ * after the run: a failure on the account row below it still leaves the
+ * pause saying whose it is.
+ */
+export async function pauseForWarning({ account, run, source, note = null, report = null, todayIso = today() }) {
+  const pauseDays = run.strategy_snapshot?.pauseDays ?? DEFAULT_STRATEGY.pauseDays;
+  const pause = warningPause(run, todayIso, pauseDays);
+  const now = new Date().toISOString();
+
+  await anty.from("wl_runs").update({
+    paused_until: pause.pausedUntil,
+    // Taken out of the count now rather than when the pause ends, so the end
+    // needs no write for the count to be right — see `pausedOn`.
+    paused_days: pause.pausedDays,
+    state: "paused"
+  }).eq("id", run.id).rows();
+
+  await logEvent({
+    accountId: account.id, runId: run.id, level: "warn", type: "run.warning",
+    message: !pause.extended
+      ? `LinkedIn warning — all actions stopped for ${pauseDays} days`
+      : pause.added
+        ? `LinkedIn warning again — the pause now runs to ${pause.pausedUntil}`
+        : `LinkedIn warning again — already paused until ${pause.pausedUntil}`,
+    meta: {
+      until: pause.pausedUntil, added: pause.added, extended: pause.extended, source, note,
+      ...(report ? { outreachId: report.outreachId ?? null, leaseId: report.leaseId ?? null } : {})
+    }
+  });
+  await anty.from("wl_accounts").update({ status: "restricted", updated_at: now }).eq("id", account.id).rows();
+  return pause;
+}
+
+/**
+ * A pause that has run out, written down as over.
+ *
+ * Not what puts the account back to work — every reader already treats a run
+ * past its `paused_until` as running — but what makes the table say so, and
+ * the log line that says when it came back. Conditional on the row still
+ * reading exactly what this was computed from — `paused`, the same last date
+ * and the same `paused_days` — so whichever caller gets here first writes it
+ * and logs it, every other one finds nothing to do, and a warning that landed
+ * in between is not overwritten.
+ *
+ * `paused_days` becomes `pausedDaysOn` today: the dates the warning took out,
+ * plus the stall — the dates after the pause on which nobody took the
+ * account. Every reader already counts those as paused, so writing the same
+ * number is what keeps the day from moving at the moment the row changes.
+ * On the first morning after the pause the stall is none, and nothing moves.
+ */
+export async function settlePause(account, run, todayIso = today()) {
+  if (!account || !run || pausedOn(run, todayIso)) return false;
+  let resumed = [];
+  const pausedDays = pausedDaysOn(run, todayIso);
+  const stalled = pausedDays - Math.max(0, Number(run.paused_days) || 0);
+  // Bookkeeping, so a failure here is a log line and not a lost session: the
+  // account is already due on the pause's dates alone.
+  try {
+    if (run.state === "paused" && run.paused_until) {
+      let write = anty.from("wl_runs").update({ state: "running", paused_until: null, paused_days: pausedDays })
+        .eq("id", run.id).eq("state", "paused").eq("paused_until", run.paused_until);
+      write = Number.isInteger(run.paused_days) ? write.eq("paused_days", run.paused_days) : write.isNull("paused_days");
+      resumed = await write.select("id").rows();
+    }
+    // Not when the run write found a different row: a warning that landed in
+    // between left the account restricted on purpose.
+    if (account.status === "restricted" && (resumed.length || run.state !== "paused")) {
+      await anty.from("wl_accounts").update({ status: "warming", updated_at: new Date().toISOString() })
+        .eq("id", account.id).eq("status", "restricted").rows();
+    }
+  } catch (error) {
+    console.error("[warmup] could not write the end of a pause:", error.message);
+    return false;
+  }
+  if (!resumed.length) return false;
+
+  await logEvent({
+    accountId: account.id, runId: run.id, type: "run.resumed",
+    message: `The pause after the warning is over — back to work on day ${runDay(run, new Date(`${todayIso}T12:00:00.000Z`))}`
+      + (stalled > 0 ? ` (${stalled} more day(s) nobody took the account on are counted as paused too)` : ""),
+    meta: { auto: true, pausedUntil: run.paused_until, pausedDays, stalled }
+  });
+  return true;
 }
 
 export async function newestRun(accountId) {
@@ -248,10 +394,15 @@ export async function checkQuota(account, run, kind, step = 1) {
     return { ok: false, status: 409, error: "Account is paused after a warning" };
   }
 
-  const day = currentDay(new Date(run.started_at), run.paused_days ?? 0);
-  if (day > totalDays(snapshot)) return { ok: false, status: 409, error: "Warm-up is finished" };
+  const day = dayOfRun(run);
+  // Past the last phase is working mode, and counts like any other day. Only
+  // a snapshot with nothing to fall back on is really over.
+  if (planForDay(snapshot, account.id, day).finished) return { ok: false, status: 409, error: "Warm-up is finished" };
 
-  const quota = dailyQuota(snapshot, account.id, day, kind);
+  // Clamped to CONNECT_HARD_MAX inside `dailyQuota`, so a request past the
+  // twentieth is refused here as "quota reached" whatever the snapshot says.
+  const daily = dailyQuota(snapshot, account.id, day, kind);
+  let quota = daily;
   // No quota in this phase means forbidden, not unlimited.
   if (quota === 0) return { ok: false, status: 409, error: `${ACTION_LABEL[kind]} are not allowed on day ${day}` };
 
@@ -265,13 +416,18 @@ export async function checkQuota(account, run, kind, step = 1) {
     .order("created_at", { ascending: true }).rows();
   const already = existing.reduce((total, row) => total + (Number(row.done) || 0), 0);
 
+  const weekly = kind === "connect" ? await weeklyConnectAllowance(account.id) : null;
+  if (weekly) quota = connectCeiling(daily, already, weekly.done);
+  if (weekly && step > weekly.remaining) {
+    return { ok: false, status: 409, error: "Weekly connection limit reached (60 in 7 days)", quota, done: already, weekly };
+  }
   const done = already + step;
   if (done > quota) {
     return { ok: false, status: 409, error: `Daily quota reached (${quota})`, quota, done: already };
   }
 
   return {
-    ok: true, day, quota, done, step,
+    ok: true, day, quota, dailyQuota: daily, weekly, done, step,
     existingRowId: existing[0]?.id ?? null,
     // That row's own number, which is what the write is guarded on. It is not
     // the day's total when a duplicate row exists, and conflating the two is
@@ -288,6 +444,13 @@ export async function checkQuota(account, run, kind, step = 1) {
  */
 export async function commitAction(account, run, kind, allowance, detail = null) {
   const { day, quota, done, step, existingRowId, rowDone = 0, duplicateRows = 0 } = allowance;
+
+  // An action on a run whose pause ran out is the account working today, so
+  // the pause is written down as over now. Left to the next lease, a day
+  // worked by hand with the scheduler off would be counted as stalled
+  // tomorrow — see `pausedDaysOn`. Nothing to do, and no write, on a run
+  // that is simply running.
+  await settlePause(account, run);
 
   if (duplicateRows) {
     // Not repaired here: merging rows under a writer that may be racing is how
@@ -356,10 +519,23 @@ export async function commitAction(account, run, kind, allowance, detail = null)
 }
 
 /** Check and commit in one go — the warm-up panel's "I did one of these". */
+const actionWriters = new Map();
+
+export function withAccountQuota(accountId, write) {
+  const previous = actionWriters.get(accountId) ?? Promise.resolve();
+  const current = previous.catch(() => {}).then(write);
+  actionWriters.set(accountId, current);
+  const clear = () => { if (actionWriters.get(accountId) === current) actionWriters.delete(accountId); };
+  current.then(clear, clear);
+  return current;
+}
+
 export async function recordAction(account, run, kind, step = 1, detail = null) {
-  const outcome = await checkQuota(account, run, kind, step);
-  if (outcome.ok) await commitAction(account, run, kind, outcome, detail);
-  return outcome;
+  return withAccountQuota(account.id, async () => {
+    const outcome = await checkQuota(account, run, kind, step);
+    if (outcome.ok) await commitAction(account, run, kind, outcome, detail);
+    return outcome;
+  });
 }
 
 /**
@@ -399,10 +575,15 @@ export async function describeAccount(account) {
   if (!run || run.state === "stopped") return { ...base, warmup: null, nextSession: null };
 
   const snapshot = run.strategy_snapshot;
-  const day = currentDay(new Date(run.started_at), run.paused_days ?? 0);
-  const isPaused = Boolean(run.paused_until && run.paused_until >= today());
-  const finished = day > totalDays(snapshot) || run.state === "completed";
+  // Stands still through a pause rather than showing the paused dates already
+  // taken out of it — see `runDay`.
+  const day = runDay(run);
+  const isPaused = pausedOn(run, today());
   const plan = planForDay(snapshot, account.id, day);
+  // Working mode is not finished: past the last phase the account keeps a
+  // plan, a next session and a quota, and the screen shows all three.
+  const finished = plan.finished || run.state === "completed";
+  const working = plan.working && !finished;
 
   const counters = await anty.from("wl_day_actions").select("kind,quota,done")
     .eq("run_id", run.id).eq("on_date", today()).rows();
@@ -410,9 +591,13 @@ export async function describeAccount(account) {
   const done = {};
   for (const kind of ACTION_KINDS) done[kind] = 0;
   for (const row of counters) {
-    if (ACTION_KINDS.includes(row.kind)) done[row.kind] = row.done ?? 0;
+    // Summed, like `checkQuota`: a duplicate row carries its own writer's
+    // count, and the last one read alone showed half the day.
+    if (ACTION_KINDS.includes(row.kind)) done[row.kind] += Number(row.done) || 0;
   }
 
+  const weekly = await weeklyConnectAllowance(account.id);
+  plan.quotas.connect = connectCeiling(plan.quotas.connect, done.connect, weekly.done);
   const idle = {};
   for (const kind of ACTION_KINDS) idle[kind] = 0;
 
@@ -423,22 +608,36 @@ export async function describeAccount(account) {
     // it to tomorrow.
     nextSession: finished || isPaused
       ? null
-      : nextSession(account.id, { outstanding: ACTION_KINDS.some((kind) => (done[kind] ?? 0) < plan.quotas[kind]) }),
+      : nextSession(account.id, {
+          outstanding: ACTION_KINDS.some((kind) => (done[kind] ?? 0) < plan.quotas[kind]),
+          notBefore: heldUntil(account.id)
+        }),
     warmup: {
       runId: run.id,
       strategyName: snapshot.name,
       startedAt: run.started_at,
-      day: Math.min(day, totalDays(snapshot) + 1),
+      // The real day in working mode — "day 15 of 14" forever would hide how
+      // long an account has been sending.
+      day: working ? day : Math.min(day, totalDays(snapshot) + 1),
       totalDays: totalDays(snapshot),
       state: isPaused ? "paused" : finished ? "completed" : "running",
-      pausedUntil: run.paused_until,
-      pausedDays: run.paused_days ?? 0,
+      // "warmup" or "working": which of the two a running account is in.
+      mode: working ? "working" : "warmup",
+      working,
+      // Only while it holds. A date that has passed is not a pause, and a
+      // screen that printed "paused until" it would be showing a stall that
+      // is not there.
+      pausedUntil: isPaused ? run.paused_until : null,
+      // The stall included, the number the day is counted with — see
+      // `pausedDaysOn`.
+      pausedDays: pausedDaysOn(run, today()),
       phase: plan.phase?.label ?? null,
       rules: plan.rules,
       connectionNote: plan.connectionNote,
       // A paused or finished account has no plan for today, and saying "0 of 5"
       // would read as "behind" rather than "stopped".
       quotas: finished || isPaused ? idle : plan.quotas,
+      weeklyConnections: weekly,
       done,
       finished
     }

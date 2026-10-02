@@ -7,7 +7,7 @@ import { connect as connectTcp } from "node:net";
 import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CHANNEL_RULES, LANGUAGES, buildFallbackDrafts, draftsPromptPayload, normalizeDrafts, normalizeLanguage } from "./contacts/drafts.mjs";
-import { contactAsProspect, contactsConfigured, contactsMissingConfig, crmKeyKind, folderContactAt, listContactFolders, listFolderContacts, readContact } from "./contacts/store.mjs";
+import { contactAsProspect, contactsConfigured, contactsMissingConfig, crmKeyKind, folderContactAt, listContactFolders, listFolderContacts, searchFolderContacts, readContact } from "./contacts/store.mjs";
 import { handleKnowledgeLibraryApi } from "./knowledge/api.mjs";
 import { knowledgeExcerptsForPrompt, knowledgeFilesForProduct, loadKnowledgeLibrary } from "./knowledge/library.mjs";
 import { handleWarmupApi } from "./warmup/api.mjs";
@@ -606,12 +606,21 @@ async function handleApi(request, response, url) {
         return;
       }
 
+      if (request.method === "GET" && url.pathname === "/api/contacts/search") {
+        sendJson(response, 200, await searchFolderContacts({
+          folderId: cleanText(url.searchParams.get("folderId") || ""),
+          search: cleanText(url.searchParams.get("search") || "").slice(0, 120)
+        }));
+        return;
+      }
+
       if (request.method === "GET" && url.pathname === "/api/contacts") {
         sendJson(response, 200, await listFolderContacts({
           folderId: cleanText(url.searchParams.get("folderId") || ""),
           search: cleanText(url.searchParams.get("search") || ""),
           limit: clampNumber(url.searchParams.get("limit"), 1, 100, 25),
-          offset: clampNumber(url.searchParams.get("offset"), 0, 100000, 0)
+          offset: clampNumber(url.searchParams.get("offset"), 0, 100000, 0),
+          queueOrder: url.searchParams.get("order") === "queue"
         }));
         return;
       }
@@ -630,7 +639,7 @@ async function handleApi(request, response, url) {
         const body = await readJson(request);
         const folderId = cleanText(body.folderId || "");
         const index = clampNumber(body.index, 0, 1000000, 0);
-        const { contact, total } = await folderContactAt({ folderId, index });
+        const { contact, total, index: actualIndex } = await folderContactAt({ folderId, index, search: cleanText(body.search || ""), contactId: cleanText(body.contactId || "") });
         if (!contact) {
           sendJson(response, 200, {
             ...publicState(),
@@ -644,7 +653,7 @@ async function handleApi(request, response, url) {
           ...publicState(),
           queue: {
             folderId,
-            index,
+            index: actualIndex,
             total,
             contact,
             prospectId: taken.prospect?.id || "",
@@ -671,7 +680,7 @@ async function handleApi(request, response, url) {
        * the one fact that separates "the client sent the wrong thing" from
        * "something between the client and here changed it".
        */
-      const OWN_ENDPOINTS = { queue: "POST", folders: "GET" };
+      const OWN_ENDPOINTS = { queue: "POST", folders: "GET", search: "GET" };
       const lastSegment = url.pathname.slice("/api/contacts/".length);
       if (Object.hasOwn(OWN_ENDPOINTS, lastSegment)) {
         const expected = OWN_ENDPOINTS[lastSegment];

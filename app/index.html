@@ -87,12 +87,15 @@
                   <option value="">Папку не вибрано</option>
                 </select>
               </label>
-              <div class="lead-source-progress">
-                <span id="panelQueuePosition">Вибери папку — далі люди йдуть по черзі</span>
-                <div class="meter"><span id="panelQueueMeter" style="width:0%"></span></div>
+              <div class="panel-contact-picker" id="panelContactPicker">
+                <label class="lead-source-field" for="panelContactSearch"><span>Пошук контакту</span></label>
+                <input id="panelContactSearch" type="search" placeholder="Ім’я, компанія або email" aria-label="Пошук контактів у папці" aria-controls="panelContactResults" aria-expanded="false" autocomplete="off">
+                <div id="panelContactResults" hidden aria-live="polite"></div>
               </div>
               <button class="icon-button lead-source-refresh" id="panelFoldersRefreshBtn" type="button" title="Перечитати папки CRM" aria-label="Перечитати папки CRM"><i data-lucide="refresh-cw"></i></button>
             </section>
+
+            <p id="panelQueueNotice" class="muted" role="status" hidden></p>
 
             <section class="panel lead-command-bar">
               <button id="prevLeadBtn" type="button"><i data-lucide="chevron-left"></i><span>Назад</span></button>
@@ -394,6 +397,7 @@
                   <div class="sales-cycle-list" id="salesCycleList"></div>
                 </section>
 
+                <div id="leadQueueLeftSlot" class="lead-queue-slot"></div>
               </main>
 
               <aside class="lead-side-rail" aria-label="Дії по ліду і черга">
@@ -438,6 +442,8 @@
                   </form>
                 </section>
 
+                <div id="leadQueueRightSlot" class="lead-queue-slot">
+                  <div id="leadQueueTools" class="lead-queue-tools">
                 <section class="panel prospect-list-panel">
                   <div class="panel-heading compact">
                     <div>
@@ -489,6 +495,8 @@
                     </div>
                   </details>
                 </section>
+                  </div>
+                </div>
               </aside>
             </div>
           </div>
@@ -496,30 +504,6 @@
 
         <section class="view" id="view-account">
           <div class="account-layout">
-            <section class="panel users-panel span-2">
-              <div class="panel-heading">
-                <div>
-                  <h2>Команда</h2>
-                  <p id="teamUserNote">База користувачів одна — та, що в CRM.</p>
-                </div>
-                <button class="danger-button" id="logoutBtn" type="button"><i data-lucide="log-out"></i><span>Вийти</span></button>
-              </div>
-              <div class="team-list" id="teamUserList"></div>
-              <details class="profile-details" id="teamCreatePanel" hidden>
-                <summary><span>Створити новий акаунт</span><i data-lucide="chevron-down"></i></summary>
-                <div class="profile-details-body">
-                  <p class="profile-chart-note">Потрібно лише тому, кого ще немає в CRM — решта входить своїм акаунтом CRM.</p>
-                  <form class="integration-form" id="teamUserForm">
-                    <input id="teamUserNameInput" type="text" placeholder="Ім'я продавця" required />
-                    <input id="teamUserEmailInput" type="email" placeholder="Робоча пошта" required />
-                    <input id="teamUserPasswordInput" type="password" minlength="10" placeholder="Тимчасовий пароль" required />
-                    <select id="teamUserRoleInput"><option value="seller">Продавець</option><option value="admin">Адміністратор</option></select>
-                    <button type="submit"><i data-lucide="user-plus"></i><span>Створити користувача</span></button>
-                  </form>
-                </div>
-              </details>
-            </section>
-
             <section class="panel profile-identity span-2">
               <div class="panel-heading">
                 <div>
@@ -561,6 +545,30 @@
               <p class="profile-chart-note" id="profileTimeNote">—</p>
             </section>
 
+            <section class="panel users-panel span-2">
+              <div class="panel-heading">
+                <div>
+                  <h2>Команда</h2>
+                  <p id="teamUserNote">База користувачів одна — та, що в CRM.</p>
+                </div>
+                <button class="danger-button" id="logoutBtn" type="button"><i data-lucide="log-out"></i><span>Вийти</span></button>
+              </div>
+              <div class="team-list" id="teamUserList"></div>
+              <details class="profile-details" id="teamCreatePanel" hidden>
+                <summary><span>Створити новий акаунт</span><i data-lucide="chevron-down"></i></summary>
+                <div class="profile-details-body">
+                  <p class="profile-chart-note">Потрібно лише тому, кого ще немає в CRM — решта входить своїм акаунтом CRM.</p>
+                  <form class="integration-form" id="teamUserForm">
+                    <input id="teamUserNameInput" type="text" placeholder="Ім'я продавця" required />
+                    <input id="teamUserEmailInput" type="email" placeholder="Робоча пошта" required />
+                    <input id="teamUserPasswordInput" type="password" minlength="10" placeholder="Тимчасовий пароль" required />
+                    <select id="teamUserRoleInput"><option value="seller">Продавець</option><option value="admin">Адміністратор</option></select>
+                    <button type="submit"><i data-lucide="user-plus"></i><span>Створити користувача</span></button>
+                  </form>
+                </div>
+              </details>
+            </section>
+
             <section class="panel profile-admin span-2" id="accountSelfPanel">
               <details class="profile-details">
                 <summary><span>Свій пароль</span><i data-lucide="chevron-down"></i></summary>
@@ -581,13 +589,13 @@
             <section class="panel ai-command-panel">
               <div class="panel-heading">
                 <div>
-                  <h2>AI-оператор</h2>
-                  <p>Масові дії по лідах і активності в CRM</p>
+                  <h2>Команда</h2>
+                  <p>Дії по лідах і активності в CRM</p>
                 </div>
                 <span class="pill" id="aiRuntimePill">готово</span>
               </div>
               <form class="assistant-task-form" id="assistantTaskForm">
-                <textarea id="assistantTaskInput" rows="6" placeholder="Приклади (команди розпізнаються англійською):&#10;Import 50 LinkedIn leads from CRM&#10;Sort leads by close chance and prepare outreach for the top 10&#10;Log LinkedIn connection sent for all outreach-ready leads&#10;Move all no-reply leads to follow-up due"></textarea>
+                <textarea id="assistantTaskInput" rows="3" aria-label="Команда для AI" placeholder="Команда англійською, наприклад: Prepare outreach for the top 10 leads"></textarea>
                 <div class="assistant-controls">
                   <select id="assistantScopeSelect" aria-label="Обсяг дії">
                     <option value="selected">Вибраний лід</option>
@@ -611,25 +619,11 @@
               </div>
             </section>
 
-            <section class="panel crm-pull-panel">
+            <section class="panel agent-panel">
               <div class="panel-heading">
                 <div>
-                  <h2>Команди продавця</h2>
-                  <p>Масові оновлення і дії в CRM — звідси, по всій черзі лідів</p>
-                </div>
-              </div>
-              <div class="connector-status-grid">
-                <div><span>Видимий шлях</span><strong>Панель</strong></div>
-                <div><span>AI-дії</span><strong>Записуються з перевіркою</strong></div>
-                <div><span>Безпека CRM</span><strong>Без автонадсилання</strong></div>
-              </div>
-            </section>
-
-            <section class="panel agent-panel span-2">
-              <div class="panel-heading">
-                <div>
-                  <h2>Агенти аутрічу</h2>
-                  <p>Вузькі навички, якими керує оркестратор аутрічу</p>
+                  <h2>Запуск агента</h2>
+                  <p>Вибери агента, лідів і додай інструкцію</p>
                 </div>
                 <button class="primary-button" id="runPipelineBtn" type="button"><i data-lucide="workflow"></i><span>Запустити пайплайн</span></button>
               </div>
@@ -645,9 +639,15 @@
                 <input id="agentLimitInput" type="number" min="1" max="100" value="10" aria-label="Ліміт лідів для агента" />
                 <button type="submit"><i data-lucide="play"></i><span>Запустити агента</span></button>
               </form>
-              <textarea id="agentInstructionInput" rows="3" placeholder="Необов'язкова інструкція агенту, напр. фокус на SaaS зі США, де продажами керує засновник"></textarea>
-              <div class="agent-grid" id="agentGrid"></div>
+              <label class="agent-instruction-label" for="agentInstructionInput">Інструкція <span>необов’язково</span></label>
+              <textarea id="agentInstructionInput" rows="3" placeholder="Наприклад: фокус на SaaS зі США"></textarea>
+              <p class="ai-mode-note">Результати запуску з’являться в журналі нижче.</p>
             </section>
+
+            <details class="panel ai-agent-directory span-2">
+              <summary>Доступні агенти</summary>
+              <div class="agent-grid" id="agentGrid"></div>
+            </details>
 
             <section class="panel ai-log-panel span-2">
               <div class="panel-heading">
@@ -667,7 +667,6 @@
               <div class="panel-heading">
                 <div>
                   <h2>Прогрів LinkedIn</h2>
-                  <p>Профілі Anty, розклад, за яким вони працюють, і що вже сталося сьогодні</p>
                 </div>
                 <div class="warmup-header-actions">
                   <button class="text-button" id="warmupProbeBtn" type="button" title="Перевірити, чи ключ цього середовища може писати, оновлювати і прибирати рядок у wl_events"><i data-lucide="database-zap"></i><span>Перевірити права на запис</span></button>
@@ -686,7 +685,7 @@
               <div class="panel-heading">
                 <div>
                   <h2 id="warmupInboxTitle">Вхідні</h2>
-                  <p id="warmupInboxSubtitle">Що прийшло у відповідь — згруповано за акаунтом, на який надійшло, спочатку нові й непрочитані</p>
+                  <p id="warmupInboxSubtitle"></p>
                 </div>
                 <div class="warmup-inbox-controls" id="warmupInboxControls">
                   <span class="pill tone-muted" id="warmupInboxPill">завантаження</span>
@@ -704,7 +703,6 @@
               <div class="panel-heading">
                 <div>
                   <h2>Кампанії</h2>
-                  <p>Кожна кампанія — це папка, акаунти, які її ведуть, і продукт. І те, у що це виллється на практиці при швидкості, дозволеній цим акаунтам.</p>
                 </div>
                 <div class="warmup-campaigns-controls">
                   <span class="pill tone-muted" id="warmupCampaignsPill">завантаження</span>
@@ -749,6 +747,10 @@
                     <span>Власник</span>
                     <input id="warmupFilterOwner" type="text" placeholder="Будь-який власник (id користувача CRM)" autocomplete="off" />
                   </label>
+                  <label class="warmup-field warmup-field-filter" title="Дні 4–6 — лише ті, кого ставлять вручну">
+                    <span>Автопідбір з дня прогріву</span>
+                    <input id="warmupCampaignFromDay" type="number" min="1" max="365" step="1" value="7" inputmode="numeric" aria-label="З якого дня прогріву кампанія сама бере людей із папки" />
+                  </label>
                 </div>
                 <div class="warmup-campaign-form-footer">
                   <button class="primary-button" id="warmupCampaignSaveBtn" type="submit"><i data-lucide="crosshair"></i><span>Зберегти кампанію</span></button>
@@ -766,7 +768,7 @@
               <div class="panel-heading">
                 <div>
                   <h2 id="warmupQueueTitle">Черга</h2>
-                  <p id="warmupQueueSubtitle">Хто зараз закріплений за кожним акаунтом вибраної кампанії. Закріплення — це розподіл, а не надсилання.</p>
+                  <p id="warmupQueueSubtitle"></p>
                 </div>
                 <button class="text-button" id="warmupQueueRefreshBtn" type="button"><i data-lucide="refresh-cw"></i><span>Оновити чергу</span></button>
               </div>
@@ -777,7 +779,6 @@
               <div class="panel-heading">
                 <div>
                   <h2>Профілі</h2>
-                  <p>Список будується з профілів Anty, до яких підтягнуто прогрів: акаунт, якого немає в Anty, був би браузером, що його нікому відкрити</p>
                 </div>
                 <div class="warmup-list-controls">
                   <input id="warmupSearchInput" type="search" placeholder="Пошук за назвою профілю" aria-label="Пошук профілів" />
@@ -811,8 +812,8 @@
             <section class="panel warmup-detail-panel">
               <div class="panel-heading">
                 <div>
-                  <h2 id="warmupDetailTitle">Профіль не вибрано</h2>
-                  <p id="warmupDetailSubtitle">Вибери профіль, щоб побачити його день, сьогоднішню квоту і власний журнал</p>
+                  <h2 id="warmupDetailTitle">Профіль</h2>
+                  <p id="warmupDetailSubtitle"></p>
                 </div>
               </div>
               <div id="warmupDetailBody">
@@ -835,26 +836,16 @@
 
         <section class="view" id="view-contacts">
           <div class="contacts-layout">
+            <div class="contacts-sidebar">
             <section class="panel contact-folders-panel">
               <div class="panel-heading">
                 <div>
                   <h2>Папки CRM</h2>
-                  <p id="contactFoldersSubtitle">Контакти читаються з CRM напряму</p>
+                  <p id="contactFoldersSubtitle"></p>
                 </div>
                 <button class="text-button" id="contactFoldersRefreshBtn" type="button"><i data-lucide="refresh-cw"></i><span>Оновити</span></button>
               </div>
               <div class="contact-folder-list" id="contactFolderList"></div>
-            </section>
-
-            <section class="panel contact-card-panel">
-              <div class="panel-heading">
-                <div>
-                  <h2 id="contactCardTitle">Контакт не вибрано</h2>
-                  <p id="contactCardSubtitle">Вибери папку зліва, потім людину — і побачиш усе, що про неї знає CRM</p>
-                </div>
-                <span class="pill" id="contactCardPill">—</span>
-              </div>
-              <div id="contactCardBody"><div class="empty-state">Контакт не вибрано.</div></div>
             </section>
 
             <section class="panel contact-list-panel">
@@ -871,12 +862,23 @@
               <div class="contact-list" id="crmContactList"></div>
               <div class="contact-pager" id="contactPager"></div>
             </section>
+            </div>
+            <div class="contacts-detail">
+            <section class="panel contact-card-panel">
+              <div class="panel-heading">
+                <div>
+                  <h2 id="contactCardTitle">Контакт не вибрано</h2>
+                  <p id="contactCardSubtitle"></p>
+                </div>
+                <span class="pill" id="contactCardPill">—</span>
+              </div>
+              <div id="contactCardBody"><div class="empty-state">Контакт не вибрано.</div></div>
+            </section>
 
             <section class="panel contact-drafts-panel">
               <div class="panel-heading">
                 <div>
                   <h2>Повідомлення</h2>
-                  <p>AI читає картку контакту, опис продукту й файли бази знань — і пише три чернетки під три канали</p>
                 </div>
                 <span class="pill" id="contactDraftsPill">немає</span>
               </div>
@@ -906,6 +908,7 @@
               </form>
               <div class="contact-draft-list" id="contactDraftList"></div>
             </section>
+            </div>
           </div>
         </section>
 
@@ -915,7 +918,7 @@
               <div class="panel-heading">
                 <div>
                   <h2>Продукти</h2>
-                  <p>Вибір тут змінює продукт для всього робочого простору</p>
+
                 </div>
               </div>
               <div class="product-picker-list" id="productPickerList"></div>
@@ -925,54 +928,54 @@
               <div class="panel-heading">
                 <div>
                   <h2 id="productBriefTitle">Продукт</h2>
-                  <p>Вісім відповідей, з яких AI складає всю картину продукту. Краще три речення правди, ніж сторінка гасел.</p>
+                  <p>Опис продукту для підготовки аутрічу</p>
                 </div>
                 <span class="pill" id="productBriefPill">0/8</span>
               </div>
               <form class="product-brief-form" id="productBriefForm">
-                <label class="brief-field">
+                <label class="brief-field brief-name-field">
                   <span>Назва продукту</span>
-                  <small>Як його називає команда</small>
+                  <small>Назва для команди</small>
                   <input id="productNameInput" type="text" placeholder="AdAction" />
                 </label>
                 <label class="brief-field">
-                  <span>Що ми продаємо і що людина з цього має</span>
-                  <small>Два-три речення без гасел: що це, як працює, який результат отримує клієнт</small>
+                  <span>Продукт і результат для клієнта</span>
+                  <small>Що продаємо і який результат отримує клієнт</small>
                   <textarea id="brief-offer" rows="4" placeholder="Наприклад: рекламна мережа value-exchange для мобільних застосунків. Рекламодавець платить за конкретну подію в застосунку, а не за покази."></textarea>
                 </label>
                 <label class="brief-field">
                   <span>Кому це підходить</span>
-                  <small>Тип компанії або людини, розмір, гео, стадія. По одному рядку — за цими ознаками система впізнає ліда</small>
+                  <small>Тип клієнта, розмір, географія і стадія</small>
                   <textarea id="brief-icp" rows="4" placeholder="Студії мобільних ігор, 20+ людей&#10;Ринки: US, UK, DACH&#10;Уже купують трафік і мають MMP"></textarea>
                 </label>
                 <label class="brief-field">
-                  <span>Хто ухвалює рішення і що для нього важливо</span>
-                  <small>Посада плюс те, за що цю людину оцінюють. По одному рядку</small>
+                  <span>Хто ухвалює рішення</span>
+                  <small>Посада і критерії, за якими оцінюють людину</small>
                   <textarea id="brief-buyers" rows="4" placeholder="Head of UA — вартість інсталу і якість когорти&#10;CMO — передбачуваність бюджету"></textarea>
                 </label>
                 <label class="brief-field">
-                  <span>Який біль розв'язуємо і коли він загострюється</span>
-                  <small>Проблема і момент, у який вона стає нагальною. Саме звідси береться причина написати саме зараз</small>
+                  <span>Проблема і привід написати</span>
+                  <small>Біль клієнта і момент, коли він стає нагальним</small>
                   <textarea id="brief-pain" rows="4" placeholder="Канали вигоряють, CPI росте, а план по інсталах не змінюють&#10;Загострюється після релізу або після підняття бюджету"></textarea>
                 </label>
                 <label class="brief-field">
                   <span>Чим доводимо</span>
-                  <small>Цифри, кейси й факти, які можна називати вголос. Якщо цифра приблизна — пиши точну або не пиши зовсім</small>
+                  <small>Підтверджені цифри, кейси й факти</small>
                   <textarea id="brief-proof" rows="4" placeholder="Студія на 60 людей: 40% інсталів із value-exchange за два квартали&#10;12 активних рекламодавців у категорії"></textarea>
                 </label>
                 <label class="brief-field">
                   <span>З чого починаємо</span>
-                  <small>Маленький перший крок замість дзвінка на пів години. Те, що має цінність, навіть якщо далі нічого не буде</small>
+                  <small>Перший крок із конкретною цінністю для клієнта</small>
                   <textarea id="brief-firstStep" rows="3" placeholder="Тестова кампанія на одну країну і одну подію, зі стоп-правилами на папері"></textarea>
                 </label>
                 <label class="brief-field">
-                  <span>Що зазвичай відповідають і наша чесна відповідь</span>
-                  <small>Заперечення та відповідь без суперечки. По одному на рядок</small>
+                  <span>Заперечення і відповіді</span>
+                  <small>Типові заперечення і чесні відповіді</small>
                   <textarea id="brief-objections" rows="4" placeholder="«У нас уже є партнер» — питаємо, що з роадмапу лишається за бортом&#10;«Rewarded-трафік гірший» — розділяємо платіжну подію і показник якості"></textarea>
                 </label>
                 <label class="brief-field">
-                  <span>Кому не продаємо і чого не обіцяємо</span>
-                  <small>Стоп-лист: непідхожі клієнти і твердження, які заборонені</small>
+                  <span>Обмеження</span>
+                  <small>Кому не продаємо і чого не обіцяємо</small>
                   <textarea id="brief-limits" rows="3" placeholder="Не працюємо з дитячими застосунками&#10;Не обіцяємо ROAS і retention без погодженого кейсу"></textarea>
                 </label>
                 <div class="button-row brief-actions">
@@ -982,6 +985,7 @@
               </form>
             </section>
 
+            <div class="product-files-workspace">
             <section class="panel knowledge-files-panel">
               <div class="panel-heading">
                 <div>
@@ -1024,6 +1028,7 @@
               </form>
               <div class="empty-state" id="knowledgeEditorEmpty">Вибери файл, щоб редагувати його вміст.</div>
             </section>
+            </div>
           </div>
         </section>
 

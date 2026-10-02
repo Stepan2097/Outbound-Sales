@@ -1,22 +1,27 @@
-import { anty, crm, CONTACT_ID_BATCH, antyTeamId, crmError, leadById, leadQueue, queueTotal, today } from "./db.mjs";
+import { withAccountQuota } from "./store.mjs";
+import { connectCeiling, weeklyAllowance, weeklyConnectAllowance, weeklyConnectCounts } from "./weekly.mjs";
+import { anty, crm, CONTACT_ID_BATCH, antyTeamId, crmError, leadById, queueTotal, today } from "./db.mjs";
 import { RestError } from "./rest.mjs";
-import { ACTION_KINDS, ACTION_LABEL, currentDay, planForDay, totalDays, validateStrategy } from "./strategy.mjs";
+import {
+  ACTION_KINDS, ACTION_LABEL, DEFAULT_STRATEGY, dayOfRun, hasPlanOn, inWorkingMode, noteRuleOn, noteUnderRule,
+  pausedDaysOn, pausedOn, planForDay, resumeCredit, runDay, totalDays, validateStrategy, workingModeOf
+} from "./strategy.mjs";
 import { SESSION_WINDOW, insideWindow, nextSession, windowLabel } from "./schedule.mjs";
 import { HEALTH_LABEL, HEALTH_VALUES, deriveStatus, isHealth } from "./status.mjs";
 import { PLATFORMS, parseProxy, platformOf, proxyString, retag } from "./platform.mjs";
 import { CLAIM_STATUS, OUTREACH_COLUMNS, OUTREACH_STATUSES, describeClaim, describeOutreach, personSnapshot, sentBy } from "./outreach.mjs";
 import {
   ACCEPTED_STATUS, INVITE_HELD_OUTCOMES, INVITE_OUTCOMES, MAX_INVITES_PER_RUN, MAX_INVITE_CHECKS_PER_RUN,
-  WAITING_STATUS, cancelInvite,
-  describeInvite, inviteEvents, invitesToCheck, invitesToSend, lastCheckedAt as invitesLastCheckedAt,
+  OUTREACH_SENT, WAITING_STATUS, cancelInvite, copyRequestToCrm, fedInvites, folderAddedToday,
+  heldCounts, heldRetryAnswer, describeInvite, inviteEvents, invitesToCheck, invitesToSend, lastCheckedAt as invitesLastCheckedAt,
   checkedTodayAccounts, moveStatus, openConversationCounts, outreachForContact, pendingCounts,
-  reassignInvite, recordCheck, recordFailed, recordSent, requestInvite
+  reassignInvite, recordCheck, recordFailed, recordSent, releaseFedInvite, requestInvite, waitingFacts
 } from "./invites.mjs";
 import { antyTimestampToIso, describeSession, durationMin } from "./sessions.mjs";
 import { encryptSecret, secretsConfigured } from "./secretbox.mjs";
 import {
-  activeRun, checkQuota, commitAction, connectQuotaToday, describeAccount, ensureDefaultStrategy,
-  logEvent, loadAccount, loginIdentities, newestRun, openSession, probeEventWriteAccess, recordAction,
+  activeRun, checkQuota, commitAction, connectQuotaToday, describeAccount, ensureDefaultStrategy, heldUntil,
+  logEvent, loadAccount, loginIdentities, newestRun, openSession, pauseForWarning, probeEventWriteAccess, recordAction,
   toStrategy
 } from "./store.mjs";
 import {
@@ -24,15 +29,16 @@ import {
 } from "./targeting.mjs";
 import {
   AUDIT_HIDDEN_TYPES, MAX_THREADS_PER_RUN, lastSyncedAt, listThreads, markRead, markSynced, normalizeThreadInput,
-  messagesForContact, outreachFor, readThread, storeThread, summarizeAccounts, syncSummary,
+  messagesForContact, outreachFor, readThread, retryCrmCopies, storeThread, summarizeAccounts, syncSummary,
   syncedTodayAccounts, threadKeyOf, unreadCount
 } from "./inbox.mjs";
-import { decideNext, finishRun, leaseAccount, upkeepFor } from "./scheduler.mjs";
+import { activeLease, decideNext, finishRun, leaseAccount, upkeepFor, viewsHeldBackFor } from "./scheduler.mjs";
 import {
-  allowanceReason, claimCapacity, claimCutoff, defaultFilters, describeCampaign, isCampaignState,
-  migrateCampaigns, moveTo, nextOrder, normalizeCampaign, progressApproximate, progressFrom, renumber,
-  runningFor, targetingOf
+  DEFAULT_FROM_DAY, allowanceReason, claimCapacity, claimCutoff, defaultFilters, describeCampaign, feedingFor,
+  folderRoom, fromDayLookup, isCampaignState, migrateCampaigns, moveTo, nextOrder, normalizeCampaign, parseFromDay,
+  progressApproximate, progressFrom, renumber, runningFor, targetingOf
 } from "./campaigns.mjs";
+import { nextCandidates, takeFromCampaigns } from "./feed.mjs";
 
 /**
  * The warm-up's HTTP surface, mounted under /api/warmup.
@@ -79,7 +85,7 @@ function connectStartsDay(run) {
   if (!run || !phases?.length) return null;
   const first = phases.find((phase) => Array.isArray(phase.quotas?.connect) && phase.quotas.connect[1] > 0);
   if (!first) return null;
-  const day = currentDay(new Date(run.started_at), run.paused_days ?? 0);
+  const day = dayOfRun(run);
   return day < first.fromDay ? first.fromDay : null;
 }
 
@@ -160,19 +166,68 @@ async function connectAllowance(account) {
 
   const run = await activeRun(account.id);
   if (!run) return { blocked: "No warm-up in progress" };
-  if (run.paused_until && run.paused_until >= today()) return { blocked: `Paused until ${run.paused_until}` };
+  // `paused` so a caller can tell "stop everything" from "no requests today":
+  // the first one also holds back the checks, which cost no allowance.
+  if (pausedOn(run, today())) return { blocked: `Paused until ${run.paused_until}`, paused: true };
 
   const allowance = await checkQuota(account, run, "connect", 1);
+  const day = dayOfRun(run);
   return {
     run,
-    day: currentDay(new Date(run.started_at), run.paused_days ?? 0),
+    day,
     totalDays: totalDays(run.strategy_snapshot),
+    // Past the last phase: still sending, at the working-mode rate.
+    working: inWorkingMode(run.strategy_snapshot, day),
     // A refusal for a day with no requests planned carries no quota, because
     // there is none: zero is the whole answer, not a missing one.
     quota: allowance.quota ?? 0,
     spent: allowance.ok ? allowance.done - allowance.step : allowance.done ?? 0,
-    startsDay: connectStartsDay(run)
+    startsDay: connectStartsDay(run),
+    weekly: allowance.weekly ?? null
   };
+}
+
+/**
+ * What this run has done today, per kind.
+ *
+ * Summed per kind, the way `checkQuota` counts the day: two writers that both
+ * found no row each insert one with their own count. Read last-row-wins, the
+ * plan offered connects the quota had already spent.
+ */
+async function doneToday(run) {
+  const rows = await anty.from("wl_day_actions").select("kind,done").eq("run_id", run.id).eq("on_date", today()).rows();
+  const doneByKind = new Map();
+  for (const row of rows) doneByKind.set(row.kind, (doneByKind.get(row.kind) ?? 0) + (Number(row.done) || 0));
+  return doneByKind;
+}
+
+/**
+ * The views `GET /agent`'s plan keeps back from this run today, asked with
+ * the plan's own quotas and today's counters — the one rule the scheduler
+ * counts by (`viewsHeldBackFor`). `viewsDone` is passed in: the plan counts
+ * what was done before the session, a recorded view what was done before it.
+ */
+async function heldBackViews(account, run, campaigns, { day, viewsDone, doneByKind }) {
+  const { quotas } = planForDay(run.strategy_snapshot, account.id, day);
+  const weekly = await weeklyConnectAllowance(account.id);
+  quotas.connect = connectCeiling(quotas.connect, doneByKind.get("connect") ?? 0, weekly.done);
+  return viewsHeldBackFor({
+    account, run, campaigns,
+    viewQuota: quotas.profile_view,
+    viewsDone,
+    connectQuota: quotas.connect,
+    connectsDone: doneByKind.get("connect") ?? 0
+  });
+}
+
+/**
+ * The note rule for the day an allowance is about: the phase's
+ * `connectionNote`, or `false` when nothing may be sent at all. Read from the
+ * same allowance the send list is cut by, so the list and its notes are
+ * decided by one day, not two.
+ */
+function noteRuleFor(allowance) {
+  return allowance.blocked || !allowance.run ? false : noteRuleOn(allowance.run.strategy_snapshot, allowance.day);
 }
 
 /**
@@ -182,23 +237,29 @@ async function connectAllowance(account) {
  * pass over the whole board and its event names no contact. Looked for among
  * the person's own events it was null forever, and the line that says when we
  * last looked never appeared.
+ *
+ * Whether it is parked is asked the way the hand-off asks it (`waitingFacts`),
+ * so the card and the agent cannot disagree about it.
  */
 async function inviteView(row, events = []) {
   if (!row) return null;
-  return describeInvite(row, events, { checkedAt: await invitesLastCheckedAt(row.account_id) });
+  const parked = row.status === WAITING_STATUS && (await waitingFacts([row])).parked.has(String(row.id));
+  return describeInvite(row, events, { checkedAt: await invitesLastCheckedAt(row.account_id), parked });
 }
 
 /**
  * What this account owes that is not the day's quota.
  *
  * The same rule the scheduler decides by, asked per account: invitations are
- * checked on any day once a day, and the inbox becomes a reason of its own only
- * past the last day of the plan — inside it, tomorrow's quota opens the browser
- * anyway and the inbox is read while it is there.
+ * checked on any day once a day, and the inbox is read once a day on every day
+ * the account has a plan — warming or working — see `upkeepFor`.
  */
 async function upkeepWorkFor(account, run, { now = new Date() } = {}) {
-  if (!run) return { checks: 0, inbox: false, any: false };
   const todayIso = today();
+  // Asked exactly as `dueFrom` asks it: a pause is nothing at all, upkeep
+  // included, so the account the scheduler would not wake is not handed
+  // anything to do if it arrives anyway.
+  if (!run || pausedOn(run, todayIso)) return { checks: 0, inbox: false, any: false };
   const [pendingInvites, openConversations, checkedToday, inboxSyncedToday] = await Promise.all([
     pendingCounts([account.id]),
     openConversationCounts([account.id]),
@@ -209,10 +270,11 @@ async function upkeepWorkFor(account, run, { now = new Date() } = {}) {
   // now, but this is the shape that already rotted once in the scheduler, and
   // a second copy of it living where nothing tests it against a pinned time is
   // how it comes back.
-  const day = currentDay(new Date(run.started_at), run.paused_days ?? 0, now);
+  const day = dayOfRun(run, now);
   return upkeepFor({
     accountId: account.id,
-    inPlan: day <= totalDays(run.strategy_snapshot),
+    // Asked exactly as `dueFrom` asks it: working mode is inside the plan.
+    inPlan: hasPlanOn(run.strategy_snapshot, day),
     pendingInvites,
     openConversations,
     checkedToday,
@@ -225,17 +287,314 @@ async function upkeepWorkFor(account, run, { now = new Date() } = {}) {
  *
  * `toSend` is cut to today's remaining allowance before it leaves the portal.
  * The refusal on `invite.sent` is a real answer and stays, but it should be the
- * rare case rather than the way the agent finds out.
+ * rare case rather than the way the agent finds out. Its notes are cut the same
+ * way, to today's phase rule: an empty note is a request to send bare. What
+ * is not today's to send at all — held today, parked, or from a folder whose
+ * campaign starts later — is left out by the same rule the scheduler counts
+ * by (`sendableToday`), which is why the campaigns come in.
  */
-async function inviteWorkFor(account) {
+async function inviteWorkFor(account, campaigns = []) {
   const allowance = await connectAllowance(account);
   const left = allowance.blocked ? 0 : Math.max(0, (allowance.quota || 0) - (allowance.spent || 0));
   return {
-    toSend: await invitesToSend(account.id, Math.min(left, MAX_INVITES_PER_RUN)),
-    toCheck: await invitesToCheck(account.id, MAX_INVITE_CHECKS_PER_RUN),
+    toSend: await invitesToSend(account.id, Math.min(left, MAX_INVITES_PER_RUN), {
+      noteRule: noteRuleFor(allowance),
+      todayIso: today(),
+      day: allowance.day ?? null,
+      fromDayOf: fromDayLookup(campaigns)
+    }),
+    // Not even the checks while a pause holds: reading the sent list is still
+    // the browser on LinkedIn, and a warning stops all of it.
+    toCheck: allowance.paused ? [] : await invitesToCheck(account.id, MAX_INVITE_CHECKS_PER_RUN),
     lastCheckedAt: await invitesLastCheckedAt(account.id),
-    connectsLeft: left
+    connectsLeft: left,
+    weekly: allowance.weekly
   };
+}
+
+/**
+ * Top an account's waiting invitations up from its campaigns' folders, to
+ * today's remaining allowance and not one more.
+ *
+ * This is what makes a running campaign send. Without it a campaign only
+ * proposed: its people reached the agent one at a time, through a seller
+ * queueing each of them from the lead workspace. Now every account ticked on
+ * a running campaign, from the campaign's `fromDay` on — working mode
+ * included — is filled from the folder when the agent asks for its work
+ * (`GET /agent`, straight after it takes the account). The poll and the lease
+ * only count; see `folderFeeds`.
+ *
+ * - **The same path as a seller's invitation.** `requestInvite` — a `waiting`
+ *   row and an `invite.requested` event — so the person's history shows it,
+ *   the phase's note rule applies to it, and cancel and move work on it. It
+ *   carries no note: nobody wrote one.
+ * - **Picked by hand first.** What is already held — waiting invitations and
+ *   live claims — comes off the room before the folder adds anybody, and
+ *   `invitesToSend` sends the picked ones ahead of the folder's.
+ * - **Idempotent.** The room is today's allowance minus what is held now, so a
+ *   second call finds zero. One call per account at a time, so two of the
+ *   agent's questions arriving together cannot both fill it.
+ * - **Nobody twice.** `nextCandidates` steps over everyone with any
+ *   `wl_outreach` row, from any account, anyone the folder let go, and a
+ *   second contact for a profile already approached; the unique index
+ *   catches the rest.
+ * - **Twice the quota a day, at most.** A person the browser could not reach
+ *   is let go and the folder fills their place, which is right once and a
+ *   drain when every attempt fails — see `FOLDER_DAILY_FACTOR`.
+ */
+const fillsInFlight = new Map();
+
+function topUpFromFolder(account, campaigns) {
+  const previous = fillsInFlight.get(account.id) ?? Promise.resolve();
+  const current = previous.then(() => fillFromFolder(account, campaigns), () => fillFromFolder(account, campaigns));
+  fillsInFlight.set(account.id, current);
+  const settle = () => {
+    if (fillsInFlight.get(account.id) === current) fillsInFlight.delete(account.id);
+  };
+  current.then(settle, settle);
+  return current;
+}
+
+async function fillFromFolder(account, campaigns) {
+  const nothing = { added: 0, collided: 0 };
+  // Asked before anything is read: most accounts on most calls are on no
+  // running campaign at all, and that answer costs no query.
+  if (!crm.configured() || !runningFor(campaigns, account.id).length) return nothing;
+  const allowance = await connectAllowance(account);
+  if (allowance.blocked || !allowance.run) return nothing;
+  const feeding = feedingFor(campaigns, account.id, allowance.day);
+  if (!feeding.length) return nothing;
+
+  const left = Math.max(0, (allowance.quota || 0) - (allowance.spent || 0));
+  const todayIso = today();
+  const { waiting, claimed } = await heldCounts([account.id], {
+    claimsSince: claimCutoff(), todayIso, dayOf: new Map([[account.id, allowance.day]]), fromDayOf: fromDayLookup(campaigns)
+  });
+  const held = { waiting: waiting.get(account.id) ?? 0, claimed: claimed.get(account.id) ?? 0 };
+  // The day's cap: what the folder already added to this account today, let
+  // go or not, comes off twice the day's quota — see `FOLDER_DAILY_FACTOR`.
+  const fedToday = (await folderAddedToday([account.id], todayIso)).get(account.id) ?? 0;
+  const need = folderRoom({ left, ...held, quota: allowance.quota || 0, fedToday });
+  if (need <= 0) return nothing;
+
+  const outcome = await takeFromCampaigns({
+    campaigns: feeding,
+    need,
+    take: (lead, campaign) => requestInvite({ account, lead, campaign: { id: campaign.id, name: campaign.name } })
+  });
+
+  const added = outcome.taken.length;
+  if (added) {
+    const names = [...new Set(feeding.map((campaign) => `"${campaign.folderName || campaign.name}"`))].slice(0, 3).join(", ");
+    await logEvent({
+      accountId: account.id,
+      runId: allowance.run.id,
+      type: "campaign.fed",
+      message: `Queued ${added} from ${names} — today allows ${left} more, ${held.waiting + held.claimed} already held`,
+      meta: {
+        added, collided: outcome.collided, left, ...held, fedToday: fedToday + added, day: allowance.day,
+        campaignIds: feeding.map((campaign) => campaign.id)
+      }
+    });
+  }
+  if (outcome.error) {
+    await logEvent({
+      accountId: account.id,
+      runId: allowance.run.id,
+      level: "warn",
+      type: "campaign.feed_failed",
+      message: `Could not read the folder of "${outcome.campaign?.name ?? "a campaign"}": ${crmError(outcome.error)}`,
+      meta: { campaignId: outcome.campaign?.id ?? null, added }
+    });
+  }
+  return { added, collided: outcome.collided };
+}
+
+/**
+ * The top-up where it rides along on something else — the agent asking for
+ * its work. A folder that could not be read must not cost the run it was
+ * riding on: the run still has its views, its likes and whatever was already
+ * waiting.
+ */
+async function topUpQuietly(account, campaigns) {
+  try {
+    return await topUpFromFolder(account, campaigns);
+  } catch (error) {
+    console.error(`[warmup] folder top-up for ${account.label} failed:`, error.message);
+    return { added: 0, collided: 0 };
+  }
+}
+
+/**
+ * One held report per invitation at a time.
+ *
+ * The agent retries a report three seconds after a socket it did not get an
+ * answer on, and the first may still be running then. Both would find no
+ * earlier report and both would act — two failures on the record, the person
+ * let go twice. Taking them in turn makes the second one the retry it is
+ * (`heldRetryAnswer`). In memory, like the folder's top-up: one process
+ * serves the agent.
+ */
+const heldReportsInFlight = new Map();
+
+function oneHeldReportAtATime(outreachId, work) {
+  const previous = heldReportsInFlight.get(outreachId) ?? Promise.resolve();
+  const current = previous.then(work, work);
+  heldReportsInFlight.set(outreachId, current);
+  const settle = () => {
+    if (heldReportsInFlight.get(outreachId) === current) heldReportsInFlight.delete(outreachId);
+  };
+  current.then(settle, settle);
+  return current;
+}
+
+/**
+ * Whether the pause this run is under was started by this same `blocked`
+ * report: the newest `run.warning` that started a pause (`extended: false`)
+ * came from a block page on this invitation, in the same session when both
+ * say which (`pauseForWarning` writes both down).
+ *
+ * That is the report asked again after its first attempt paused the account
+ * and then failed before its answer was written — the `invite.failed` insert,
+ * or the account row. There is no stored answer to give it, so it is handled
+ * again, and read as "paused already" it parked nobody: the person whose block
+ * page paused the account was handed out again after the pause, first in the
+ * queue, and paused it a second time. The pause is its own; it is the first
+ * report still.
+ */
+async function pausedByThisReport(run, { outreachId, leaseId }) {
+  const started = await anty.from("wl_events").select("meta")
+    .eq("run_id", run.id).eq("type", "run.warning").eq("meta->>extended", "false")
+    .order("created_at", { ascending: false }).order("id", { ascending: false })
+    .limit(1).maybeSingle();
+  const meta = started?.meta;
+  return meta?.source === "invite.blocked"
+    && String(meta.outreachId ?? "") === String(outreachId)
+    && (!meta.leaseId || !leaseId || meta.leaseId === leaseId);
+}
+
+/**
+ * The browser could not send this invitation — `no_button`, `no_note`,
+ * `profile_gone` or `blocked` — and what that does. Answers what the route
+ * sends back, or `{ refused, error }` — an HTTP status and why — for a refusal.
+ *
+ * - **A seller's row** stays `waiting` for that seller: it rests until
+ *   tomorrow (`waitingFacts`), and a `blocked` one is parked at once.
+ * - **A folder's row** is let go (`releaseFedInvite`), and skipped by the
+ *   folder from then on unless the report is about the agent rather than the
+ *   person — see `INVITE_HELD_OUTCOMES`.
+ * - **`blocked`** also pauses the account for two days, whoever picked the
+ *   row: a block page on Connect is LinkedIn's warning arriving mid-send.
+ *   Its answer says `overQuota` beside `stopSending`, which is what an agent
+ *   built before `blocked` paused anything stops on.
+ * - **A report while the pause already holds** — the agent carried on after
+ *   an earlier block page or warning — is about the account, not the person:
+ *   every page is a block page then. Nobody is parked or skipped for it: a
+ *   folder's row goes back to the pool unmarked, a seller's stays waiting.
+ *   Otherwise an agent that does not stop on `blocked` parked or skipped
+ *   every person left in its `toSend`, one block page each. A pause this
+ *   same report started, on an attempt that failed before its answer was
+ *   written, is not "already" (`pausedByThisReport`).
+ *
+ * A report given before is answered as it was the first time and changes
+ * nothing (`heldRetryAnswer`) — the agent retries what it got no answer to.
+ * That is why the `invite.failed` holding the answer is written before the
+ * row is let go: once it is gone, that event is all a retry can find. A retry
+ * that finds the row still there after an answer that let it go is the first
+ * report's release failing half-way (the skip marker or the delete), and it is
+ * finished before the answer goes back.
+ */
+async function reportHeld({ account, outreachId, outcome, leaseId }) {
+  const outreach = await anty.from("wl_outreach").select(OUTREACH_COLUMNS).eq("id", outreachId).maybeSingle();
+  if (!outreach) {
+    // Let go by this same report a moment ago, and asked about again.
+    const earlier = await heldRetryAnswer({ accountId: account.id, outreachId, outcome, gone: true });
+    if (earlier) return earlier;
+    // A seller cancelled between the agent being handed this row and the
+    // browser clicking Connect. The person is back in the pool, but the
+    // invitation may be on their LinkedIn — so the orphan goes on the record
+    // rather than vanishing with the row.
+    await logEvent({
+      accountId: account.id, level: "warn", type: "invite.failed",
+      message: "Agent reported a request for an invitation that no longer exists — it was cancelled mid-send",
+      meta: { outreachId, outcome: "row_gone", reported: outcome }
+    });
+    return { refused: 404, error: "That invitation is gone" };
+  }
+  if (outreach.account_id !== account.id) return { refused: 409, error: "That invitation belongs to another account" };
+
+  const again = await heldRetryAnswer({ accountId: account.id, outreachId: outreach.id, outcome, leaseId });
+  if (again) {
+    // Said let go, and still here: the first report wrote its answer and then
+    // failed to let the row go. Left like that, a folder's person stayed in
+    // the account's queue — a blocked one as «Потребує уваги» for good.
+    if (again.released === true && outreach.status === WAITING_STATUS) {
+      const fed = (await fedInvites([outreach.id])).get(String(outreach.id)) ?? null;
+      if (fed) await releaseFedInvite({ account, outreach, fed, outcome, skip: again.skipped === true });
+    }
+    return again;
+  }
+
+  const run = await activeRun(account.id);
+  const fed = (await fedInvites([outreach.id])).get(String(outreach.id)) ?? null;
+  const waiting = outreach.status === WAITING_STATUS;
+  // Paused before this report came: by an earlier block page in this pause,
+  // or a warning. What LinkedIn shows a paused account says nothing about the
+  // person it was showing. Not a pause this report's own first attempt
+  // started: that page is the one this report is about.
+  const duringPause = Boolean(run) && pausedOn(run, today())
+    && !(outcome === "blocked" && await pausedByThisReport(run, { outreachId: outreach.id, leaseId }));
+
+  // A note the portal handed over as "none" cannot be missing. An agent that
+  // says it is was built before bare requests were the plan, and it will say
+  // the same about every request it is handed: worth an error on the log, not
+  // only a warning per person. With no queued note the hand-off was bare
+  // whatever the day's rule; with one, only the run's rule can say.
+  const rule = run ? noteRuleOn(run.strategy_snapshot, runDay(run)) : null;
+  const handedBare = !String(outreach.note || "").trim() || (rule !== null && !noteUnderRule(outreach.note, rule).note);
+  const mismatch = outcome === "no_note" && handedBare;
+  if (mismatch) {
+    await logEvent({
+      accountId: account.id, runId: run?.id ?? null, level: "error", type: "invite.agent_mismatch",
+      message: `Agent reported no_note for ${outreach.person_name || "a contact"}, whose request was handed over bare — the agent is out of date`,
+      meta: { outreachId: outreach.id, crmContactId: outreach.crm_contact_id, outcome }
+    });
+  }
+
+  // Only a row still waiting: one a seller already sent by hand or moved on
+  // is theirs now, whatever the folder once did. The mismatch goes back to
+  // the pool unmarked: it says nothing about the person, and a skip would let
+  // an out-of-date agent empty the folder for good.
+  // So does a report that came while the account was already paused.
+  // `released` is what was decided here, before the delete, because the
+  // answer is stored before it: a seller's click in the same instant can
+  // still take the row first, and the delete then finds nothing to do.
+  const release = Boolean(fed) && waiting;
+  const skip = release && !mismatch && !duringPause;
+  const answer = { status: outreach.status, moved: false, recorded: outcome, released: release, skipped: skip };
+
+  if (outcome === "blocked") {
+    const note = `Block page on the request to ${outreach.person_name || "a contact"}`;
+    const pause = run
+      ? await pauseForWarning({ account, run, source: "invite.blocked", note, report: { outreachId: outreach.id, leaseId } })
+      : null;
+    Object.assign(answer, {
+      // A seller's row is parked by the failure written below; a folder's
+      // row is let go and skipped instead (see `INVITE_HELD_OUTCOMES`) —
+      // neither when the account was already paused.
+      parked: waiting && !fed && !duringPause,
+      paused: Boolean(pause), pausedUntil: pause?.pausedUntil ?? null,
+      // `overQuota` too, like a `sent` during a pause: an agent built before
+      // a block page paused anything stops on that flag, and without it went
+      // on to the next person — and the next block page.
+      overQuota: true, stopSending: true
+    });
+  }
+  if (duringPause) Object.assign(answer, { duringPause: true, overQuota: true, stopSending: true });
+
+  await recordFailed({ account, run, outreach, outcome, leaseId, answer, duringPause });
+  if (release) await releaseFedInvite({ account, outreach, fed, outcome, skip });
+  return answer;
 }
 
 /**
@@ -479,6 +838,15 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
   // is in, and a gap left by a delete would make the next move land oddly.
   const saveCampaigns = (list) => campaignStore.write(renumber(list));
 
+  // The same list for the agent's routes, without the write-through: the poll
+  // takes nothing and writes nothing, and a migration is the panel's to save.
+  const readCampaigns = () => migrateCampaigns(campaignStore.read(), campaignStore.readTargeting()).campaigns;
+
+  // The folders being worked right now: a person the CRM holds twice is copied
+  // to the record sitting in one of these (`contactBySlug`).
+  const runningFolderIds = () => readCampaigns()
+    .filter((campaign) => campaign.state === "running" && campaign.folderId).map((campaign) => campaign.folderId);
+
   try {
     // ── configuration ──────────────────────────────────────────────────────
     if (method === "GET" && path === "/config") {
@@ -518,7 +886,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       const rows = await anty.from("wl_accounts").select("*").rows();
       const accounts = await Promise.all(rows.map(describeAccount));
 
-      const totals = { total: accounts.length, warming: 0, paused: 0, completed: 0, idle: 0 };
+      const totals = { total: accounts.length, warming: 0, working: 0, paused: 0, completed: 0, idle: 0 };
       let plannedToday = 0;
       let doneToday = 0;
       const attention = [];
@@ -533,10 +901,13 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         }
         if (warmup.finished) {
           totals.completed += 1;
-          attention.push({ id: account.id, label: account.label, reason: "Warm-up finished — ready for working mode" });
+          attention.push({ id: account.id, label: account.label, reason: "Warm-up finished — nothing planned after the last phase" });
           continue;
         }
-        totals.warming += 1;
+        // Working mode is counted apart from warming but planned the same way:
+        // its views, likes and requests are today's work like anybody's.
+        if (warmup.working) totals.working += 1;
+        else totals.warming += 1;
         for (const kind of Object.keys(warmup.quotas)) {
           plannedToday += warmup.quotas[kind];
           doneToday += Math.min(warmup.done[kind], warmup.quotas[kind]);
@@ -599,6 +970,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
 
       const todayIso = today();
       const dayRows = await anty.from("wl_day_actions").select("account_id,on_date,kind,quota,done").rows();
+      const weeklyByAccount = await weeklyConnectCounts(linked.map((account) => account.id), todayIso);
       const connectionsByAccount = new Map();
       const outstandingByAccount = new Map();
       const hasDayRow = new Set();
@@ -636,7 +1008,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         // put there. Read from the run's own snapshot, which is what the detail
         // panel reads too — two ways of counting the day is two answers.
         const day = run && run.state !== "stopped"
-          ? { day: currentDay(new Date(run.started_at), run.paused_days ?? 0), totalDays: totalDays(run.strategy_snapshot) }
+          ? { day: runDay(run), totalDays: totalDays(run.strategy_snapshot) }
           : null;
         return {
           id: row.id,
@@ -651,14 +1023,18 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           // The profile's label is what somebody typed in Anty; this is the
           // person LinkedIn thinks is signed in. They are rarely the same string.
           identity: account ? identityByAccount.get(account.id) ?? null : null,
-          day: day && day.day <= day.totalDays ? `${day.day}/${day.totalDays}` : null,
+          // Past the last phase the day keeps counting, with no "of 14" to
+          // count towards: working mode says itself in the status column.
+          day: day ? (day.day <= day.totalDays ? `${day.day}/${day.totalDays}` : String(day.day)) : null,
           health: account?.health ?? "ok",
           healthNote: account?.health_note ?? null,
           status,
           isRunningNow: row.status === "running",
           connections: {
             ...(connectionsByAccount.get(account?.id ?? "") || { today: 0, total: 0 }),
-            quota: connectQuotaToday(account, run, todayIso),
+            quota: connectCeiling(connectQuotaToday(account, run, todayIso),
+              connectionsByAccount.get(account?.id)?.today ?? 0, weeklyByAccount.get(account?.id) ?? 0),
+            weekly: weeklyAllowance(weeklyByAccount.get(account?.id) ?? 0, todayIso),
             startsDay: connectStartsDay(run)
           },
           outreachTotal: outreachByAccount.get(account?.id ?? "") ?? 0,
@@ -668,11 +1044,12 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           // Only an account that is warming and not already open has a next
           // session: promising "next at 14:20" for one that is off or blocked
           // would be a commitment nobody is going to keep.
-          nextSession: account && status === "warming" && row.status !== "running"
+          nextSession: account && (status === "warming" || status === "working") && row.status !== "running"
             ? nextSession(account.id, {
                 // No day row yet means today has not been started at all, which
                 // is the most outstanding a day can be.
-                outstanding: outstandingByAccount.get(account.id) ?? !hasDayRow.has(account.id)
+                outstanding: outstandingByAccount.get(account.id) ?? !hasDayRow.has(account.id),
+                notBefore: heldUntil(account.id)
               })
             : null
         };
@@ -987,8 +1364,13 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           account_id: account.id,
           strategy_id: strategy.id,
           // Snapshot: editing a strategy later must not rewrite what an account
-          // part-way through was working to.
-          strategy_snapshot: { name: strategy.name, phases: strategy.phases, pauseDays: strategy.pauseDays }
+          // part-way through was working to. Working mode goes in with it — the
+          // strategy row has no column for one, so it is the code default,
+          // frozen here like everything else.
+          strategy_snapshot: {
+            name: strategy.name, phases: strategy.phases, pauseDays: strategy.pauseDays,
+            workingMode: workingModeOf(strategy)
+          }
         }).select("*").single();
 
         await setAccountStatus(account.id, "warming");
@@ -1003,32 +1385,36 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       const run = await activeRun(account.id);
       if (!run) return fail(response, sendJson, 409, "No warm-up in progress");
 
+      // The same pause the agent starts when it reports one — see
+      // `pauseForWarning`. It ends by itself; Resume is for ending it early.
       if (action === "warning") {
-        const pauseDays = run.strategy_snapshot?.pauseDays ?? 2;
-        const until = new Date();
-        until.setUTCDate(until.getUTCDate() + pauseDays);
-
-        await anty.from("wl_runs").update({
-          paused_until: until.toISOString().slice(0, 10),
-          // Added to paused_days so the schedule does not advance through the pause.
-          paused_days: (run.paused_days ?? 0) + pauseDays,
-          state: "paused"
-        }).eq("id", run.id).rows();
-        await setAccountStatus(account.id, "restricted");
-
-        await logEvent({
-          accountId: account.id, runId: run.id, level: "warn", type: "run.warning",
-          message: `LinkedIn warning — all actions stopped for ${pauseDays} days`,
-          meta: { until: until.toISOString().slice(0, 10), note: body.note ?? null }
-        });
+        const note = typeof body.note === "string" ? body.note.slice(0, 300) : null;
+        await pauseForWarning({ account, run, source: "operator", note });
         sendJson(response, 200, { success: true, account: await describeAccount(await loadAccount(account.id)) });
         return true;
       }
 
+      // Early, the paused dates not yet reached go back into the count: they
+      // were taken when the warning came in, and the account is working them
+      // now. Late — after the pause ran out, which already put the account
+      // back to work — it only tidies the row, and the count stays as it is.
       if (action === "resume") {
-        await anty.from("wl_runs").update({ paused_until: null, state: "running" }).eq("id", run.id).rows();
+        const todayIso = today();
+        const credit = resumeCredit(run, todayIso, run.strategy_snapshot?.pauseDays ?? DEFAULT_STRATEGY.pauseDays);
+        await anty.from("wl_runs").update({
+          paused_until: null,
+          state: "running",
+          // From the dates the count is taken with now, stall included — the
+          // same number `settlePause` would write — so a late resume leaves
+          // the day where every screen already showed it.
+          paused_days: Math.max(0, pausedDaysOn(run, todayIso) - credit)
+        }).eq("id", run.id).rows();
         await setAccountStatus(account.id, "warming");
-        await logEvent({ accountId: account.id, runId: run.id, type: "run.resumed", message: "Warm-up resumed" });
+        await logEvent({
+          accountId: account.id, runId: run.id, type: "run.resumed",
+          message: credit ? `Warm-up resumed early — ${credit} paused day(s) given back to the count` : "Warm-up resumed",
+          meta: { auto: false, givenBack: credit }
+        });
         sendJson(response, 200, { success: true, account: await describeAccount(await loadAccount(account.id)) });
         return true;
       }
@@ -1299,6 +1685,8 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       const accountIds = [...new Set((Array.isArray(body.accountIds) ? body.accountIds : [])
         .map((id) => String(id).trim()).filter(Boolean))];
       const productId = body.productId === undefined || body.productId === null ? null : String(body.productId).trim() || null;
+      const fromDay = body.fromDay === undefined || body.fromDay === null ? { value: DEFAULT_FROM_DAY } : parseFromDay(body.fromDay);
+      if (fromDay.error) return fail(response, sendJson, 400, fromDay.error);
 
       const checked = await checkCampaignInput({ folderId, accountIds, productId, products: campaignStore.products() });
       if (checked.error) return fail(response, sendJson, checked.status, checked.error);
@@ -1314,6 +1702,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         filters: body.filters === undefined ? defaultFilters() : normalizeFilters(body.filters),
         accountIds,
         productId,
+        fromDay: fromDay.value,
         state: "draft",
         order: nextOrder(campaigns)
       });
@@ -1323,7 +1712,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       await logEvent({
         type: "campaign.created",
         message: `Campaign "${created.name}" on "${checked.folderName}"${accountIds.length ? ` worked by ${accountIds.length} account${accountIds.length > 1 ? "s" : ""}` : " with no account chosen"}`,
-        meta: { campaignId: created.id, folderId, accountIds, productId }
+        meta: { campaignId: created.id, folderId, accountIds, productId, fromDay: created.fromDay }
       });
 
       sendJson(response, 201, {
@@ -1358,6 +1747,8 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         return fail(response, sendJson, 400, `Невідомий стан: ${String(body.state)}`);
       }
       const state = body.state === undefined ? current.state : body.state;
+      const fromDay = body.fromDay === undefined ? { value: current.fromDay } : parseFromDay(body.fromDay);
+      if (fromDay.error) return fail(response, sendJson, 400, fromDay.error);
 
       const checked = await checkCampaignInput({ folderId, accountIds, productId, products: campaignStore.products() });
       if (checked.error) return fail(response, sendJson, checked.status, checked.error);
@@ -1370,6 +1761,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         filters: body.filters === undefined ? current.filters : normalizeFilters(body.filters),
         accountIds,
         productId,
+        fromDay: fromDay.value,
         state,
         order: current.order,
         updatedAt: new Date().toISOString()
@@ -1449,55 +1841,43 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       const allowance = await connectAllowance(account);
       if (allowance.blocked) return fail(response, sendJson, 409, allowance.blocked);
 
-      const queued = await anty.from("wl_outreach").select(CLAIM_COLUMNS)
-        .eq("account_id", account.id).eq("status", CLAIM_STATUS)
-        .order("created_at", { ascending: true }).rows();
+      // Everything this account already holds counts against today: its claims,
+      // and its waiting invitations — the folder's top-up among them. Without
+      // the second, a claim on a day the folder had already filled allocated
+      // people the day could never send. Counted as the hand-off counts them,
+      // so a row it will not send today does not hold the day's room either.
+      const campaigns = await loadCampaigns();
+      const { waiting, claimed: held } = await heldCounts([account.id], {
+        todayIso: today(), dayOf: new Map([[account.id, allowance.day]]), fromDayOf: fromDayLookup(campaigns)
+      });
+      const holding = (held.get(account.id) ?? 0) + (waiting.get(account.id) ?? 0);
 
       const remainingQuota = Math.max(0, allowance.quota - allowance.spent);
-      const capacity = claimCapacity({ ...allowance, queued: queued.length, limit });
+      const capacity = claimCapacity({ ...allowance, queued: holding, limit });
       const empty = (reason) => {
         sendJson(response, 200, { success: true, claimed: [], remainingQuota, reason, released });
         return true;
       };
 
-      if (capacity === 0) return empty(allowanceReason({ ...allowance, queued: queued.length }));
+      if (capacity === 0) return empty(allowanceReason({ ...allowance, queued: holding }));
 
-      const campaigns = await loadCampaigns();
       const working = runningFor(campaigns, account.id);
       if (!working.length) return empty("No running campaign works this account");
 
-      const claimed = [];
-      let taken = 0;
-      for (const campaign of working) {
-        if (claimed.length >= capacity) break;
-        let candidates;
-        try {
-          candidates = await nextCandidates(capacity - claimed.length, targetingOf(campaign));
-        } catch (error) {
-          return fail(response, sendJson, 502, crmError(error));
-        }
-
-        for (const lead of candidates) {
-          if (claimed.length >= capacity) break;
-          try {
-            const row = await anty.from("wl_outreach").insert({
-              account_id: account.id,
-              ...personSnapshot(lead),
-              sent_by: sentBy(account),
-              status: CLAIM_STATUS
-            }).select(CLAIM_COLUMNS).single();
-            claimed.push(describeClaim(row, campaign));
-          } catch (error) {
-            // wl_outreach_person_once: somebody else claimed this person a
-            // moment ago. That is the index doing its job, not a failed batch.
-            if (error instanceof RestError && error.code === "23505") {
-              taken += 1;
-              continue;
-            }
-            throw error;
-          }
-        }
-      }
+      // wl_outreach_person_once turning an insert down is somebody else
+      // claiming this person a moment ago — `takeFromCampaigns` counts it and
+      // moves on. That is the index doing its job, not a failed batch.
+      const { taken: claimed, collided: taken, error } = await takeFromCampaigns({
+        campaigns: working,
+        need: capacity,
+        take: async (lead, campaign) => describeClaim(await anty.from("wl_outreach").insert({
+          account_id: account.id,
+          ...personSnapshot(lead),
+          sent_by: sentBy(account),
+          status: CLAIM_STATUS
+        }).select(CLAIM_COLUMNS).single(), campaign)
+      });
+      if (error) return fail(response, sendJson, 502, crmError(error));
 
       if (!claimed.length) {
         const first = working[0];
@@ -1561,22 +1941,69 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         .gte("created_at", claimCutoff())
         .order("created_at", { ascending: true }).rows();
 
-      const campaigns = runningFor(await loadCampaigns(), account.id);
+      const all = await loadCampaigns();
+      const campaigns = runningFor(all, account.id);
       const byFolder = await claimOwners(campaigns, rows);
+      const allowance = await connectAllowance(account);
 
       let reason = null;
       if (!rows.length) {
-        const allowance = await connectAllowance(account);
         reason = allowance.blocked
           ?? allowanceReason({ ...allowance, queued: 0 })
           ?? (campaigns.length ? "Nothing is claimed to this account right now" : "No running campaign works this account");
       }
 
+      // What the agent will send from this account, and which of it the folder
+      // added. The claims above are a person's list; these are the agent's.
+      const waitingRows = await anty.from("wl_outreach").select(CLAIM_COLUMNS)
+        .eq("account_id", account.id).eq("status", WAITING_STATUS)
+        .order("created_at", { ascending: true }).limit(100).rows();
+      // What decides whether each goes: the same facts the hand-off reads, so a
+      // row the agent will never be handed is shown as needing a person.
+      const facts = await waitingFacts(waitingRows, today());
+      const fed = facts.fed;
+
+      // Whether the campaign on screen fills this account by itself today, and
+      // from which day it will. Said as facts — the panel words them — because
+      // "not yet" and "not at all" need different sentences.
+      const wanted = url.searchParams.get("campaignId");
+      const shown = (wanted && all.find((campaign) => campaign.id === wanted)) || campaigns[0] || null;
+      const day = allowance.blocked ? null : allowance.day;
+      // The running campaigns ranked above the shown one that feed this
+      // account today. The top-up fills the room first campaign first, so
+      // while any of these has people the shown one's folder never moves, and
+      // `on` alone read as "this folder is being worked".
+      const feeding = day === null ? [] : feedingFor(all, account.id, day);
+      const shownAt = shown ? feeding.findIndex((campaign) => campaign.id === shown.id) : -1;
+      const ahead = feeding.slice(0, Math.max(0, shownAt)).map((campaign) => ({ id: campaign.id, name: campaign.name }));
+      const autoFeed = shown ? {
+        campaignId: shown.id,
+        campaignName: shown.name,
+        fromDay: shown.fromDay,
+        day,
+        working: Boolean(allowance.working),
+        running: shown.state === "running",
+        ticked: shown.accountIds.includes(account.id),
+        blocked: allowance.blocked ?? null,
+        on: !allowance.blocked && shown.state === "running" && shown.accountIds.includes(account.id) && day >= shown.fromDay,
+        ahead,
+        connectsLeft: allowance.blocked ? 0 : Math.max(0, (allowance.quota || 0) - (allowance.spent || 0))
+      } : null;
+
       sendJson(response, 200, {
         success: true,
         accountId: account.id,
         queue: rows.map((row) => describeClaim(row, byFolder.get(row.id) ?? null)),
-        reason
+        reason,
+        waiting: waitingRows.map((row) => ({
+          ...describeClaim(row),
+          fromFolder: fed.has(String(row.id)),
+          campaignName: fed.get(String(row.id))?.campaignName ?? null,
+          // A block page on this request: parked — the agent is not handed it
+          // again until a person moves it to another account or cancels it.
+          parked: facts.parked.has(String(row.id))
+        })),
+        autoFeed
       });
       return true;
     }
@@ -1684,6 +2111,12 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           connectsDone: allowance.blocked ? 0 : allowance.spent || 0,
           connectsLeft: left,
           waiting,
+          // Today's note rule on this account — `false` for none, or
+          // `{ maxWords, allowLinks }`; `null` when the account cannot send at
+          // all, which says nothing about notes. The form uses it to say, while
+          // the note is typed, whether it will go; the hand-off decides for
+          // real, by the rule of the day the request actually leaves.
+          noteRule: allowance.blocked ? null : noteRuleFor(allowance),
           // An account that cannot carry an invitation is still listed, with
           // the reason. Hiding it leaves a seller wondering where their login
           // went; saying "on a captcha" tells them what to go and fix.
@@ -1715,14 +2148,20 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
 
       const outreach = await outreachForContact(crmContactId);
       const events = await inviteEvents(crmContactId);
-      const messages = outreach
-        ? await messagesForContact({
-          accountId: outreach.account_id,
-          crmContactId,
-          personName: outreach.person_name,
-          personLinkedin: outreach.person_linkedin
-        })
-        : [];
+      // Asked even with no approach on record: a person found by the LinkedIn
+      // link on their contact has messages under their key and no row here.
+      const found = await messagesForContact({
+        accountId: outreach?.account_id ?? null,
+        crmContactId,
+        personName: outreach?.person_name,
+        personLinkedin: outreach?.person_linkedin
+      });
+      // Which login each message is on, by the name the screens already use.
+      const accountIds = [...new Set(found.map((message) => message.accountId).filter(Boolean))];
+      const labels = new Map((accountIds.length
+        ? await anty.from("wl_accounts").select("id,label,login").in("id", accountIds).rows()
+        : []).map((row) => [row.id, row.login?.trim() || row.label || ""]));
+      const messages = found.map((message) => ({ ...message, accountLabel: labels.get(message.accountId) || null }));
 
       const invite = await inviteView(outreach, events);
       const entries = [
@@ -1829,7 +2268,8 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         cancelledBy: request.auth?.profile?.email || ""
       });
       if (!gone) return fail(response, sendJson, 409, "Скасувати можна лише те, що ще не надіслано");
-      sendJson(response, 200, { success: true, released: gone.crm_contact_id });
+      // `skipped`: the folder had added this person, and will not again.
+      sendJson(response, 200, { success: true, released: gone.crm_contact_id, skipped: gone.skipped });
       return true;
     }
 
@@ -1865,6 +2305,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
 
       const account = body.accountId ? await loadAccount(String(body.accountId)) : null;
       if (!account) return fail(response, sendJson, 404, "Акаунт не знайдено");
+      return await withAccountQuota(account.id, async () => {
 
       let lead;
       try {
@@ -1916,6 +2357,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         overQuota
       });
       return true;
+      });
     }
 
     if (method === "POST" && path === "/leads/take") {
@@ -1925,6 +2367,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
 
       const account = body.accountId ? await loadAccount(String(body.accountId)) : null;
       if (!account) return fail(response, sendJson, 404, "Акаунт не знайдено");
+      return await withAccountQuota(account.id, async () => {
 
       const run = await activeRun(account.id);
       if (!run) return fail(response, sendJson, 409, "No warm-up in progress");
@@ -1994,14 +2437,16 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
 
       await commitAction(account, run, "connect", allowance);
 
-      await logEvent({
-        accountId: account.id, runId: run.id, type: "outreach.sent",
+      const sentEvent = await logEvent({
+        accountId: account.id, runId: run.id, type: OUTREACH_SENT,
         message: `Connection request to ${lead.name ?? "a contact"}${lead.company ? ` (${lead.company})` : ""}`,
         meta: {
           outreachId: outreach.id, crmContactId: lead.id, claimed: Boolean(claim),
           day: allowance.day, done: allowance.done, quota: allowance.quota
         }
-      });
+      }, { returning: true });
+      // A request sent by hand is still a request on the person's CRM timeline.
+      await copyRequestToCrm({ account, outreach, event: sentEvent });
 
       sendJson(response, 200, {
         success: true,
@@ -2009,6 +2454,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         account: await describeAccount(await loadAccount(account.id))
       });
       return true;
+      });
     }
 
     /**
@@ -2142,7 +2588,9 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
     // a real account its session, with a quiet morning as the only symptom.
     // Taking the account is the POST below.
     if (method === "GET" && path === "/agent/due") {
-      sendJson(response, 200, await decideNext());
+      // The campaigns go in so a folder with people left counts as work. They
+      // are only read here — nothing is taken until the account is.
+      sendJson(response, 200, await decideNext({ campaigns: readCampaigns() }));
       return true;
     }
 
@@ -2154,7 +2602,8 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       const account = body.accountId ? await loadAccount(String(body.accountId)) : null;
       if (!account) return fail(response, sendJson, 404, "Account not found");
 
-      const outcome = await leaseAccount({ accountId: account.id });
+      const campaigns = readCampaigns();
+      const outcome = await leaseAccount({ accountId: account.id, campaigns });
       if (!outcome.ok) {
         // 409 rather than an error the worker has to interpret: somebody else
         // got there first is an ordinary state, and the answer carries both the
@@ -2167,6 +2616,12 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         });
         return true;
       }
+      // Answered at once, with nothing written for the folder here. The
+      // top-up happens on `GET /agent`, which the agent asks straight after
+      // taking the account and which fills the same room idempotently; doing
+      // it here as well only doubled the work and held back the one answer
+      // whose loss strands a lease — a worker that times out on this reply
+      // never learns the `leaseId` the server already granted.
       sendJson(response, 200, { success: true, lease: outcome.lease });
       return true;
     }
@@ -2185,6 +2640,17 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
 
       const run = await activeRun(account.id);
       const session = await openSession(account.id);
+      // After a warning nothing is handed out, whatever the agent asks for:
+      // no plan, no invitations to send or to check, no claims, no inbox.
+      // Every list below is empty rather than missing, so an agent that reads
+      // them without looking at `runnable` still finds nothing to do.
+      const paused = pausedOn(run, today());
+      // The folder's share, written down here and only here: the people the
+      // poll counted become waiting invitations, and so does the place of a
+      // person the agent could not reach earlier today. Idempotent: what is
+      // held already comes off the room, so asking twice adds nothing the
+      // second time. Before `invites` below, which is cut from what waits.
+      if (run && !paused && account.status !== "excluded") await topUpQuietly(account, readCampaigns());
       // Warming ends; looking after what it sent does not. Computed here, where
       // the run is already in hand, so the "finished" answer below can say
       // "nothing to warm, but something to check" instead of a flat no.
@@ -2193,7 +2659,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       // What is already claimed to this account, so a run does not need a
       // second call to find its work. Expired claims are left out: they belong
       // to the pool again, whether or not anything has deleted them yet.
-      const claims = await anty.from("wl_outreach").select(CLAIM_COLUMNS)
+      const claims = paused ? [] : await anty.from("wl_outreach").select(CLAIM_COLUMNS)
         .eq("account_id", account.id).eq("status", CLAIM_STATUS)
         .gte("created_at", claimCutoff())
         .order("created_at", { ascending: true }).rows();
@@ -2206,7 +2672,10 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           label: account.label,
           login: account.login,
           profileRemoteId: account.profile_remote_id,
-          status: account.status,
+          // `restricted` is what the warning wrote; once the pause is over the
+          // account is warming again, whether or not a lease has written that
+          // back yet, and an agent that gates on this must not see a stall.
+          status: account.status === "restricted" && run && !paused ? "warming" : account.status,
           health: account.health
         },
         queue: claims.map((row) => describeClaim(row, owners.get(row.id) ?? null)),
@@ -2215,13 +2684,22 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         // kept in a file beside the agent, because a Mac that gets replaced or
         // a portal that gets re-pointed would otherwise re-read a year of
         // history — slow, and a pattern somebody notices.
-        inbox: { lastSyncedAt: await lastSyncedAt(account.id), maxThreads: MAX_THREADS_PER_RUN },
+        //
+        // `due` is whether to read it at all this session: once a day, every
+        // day the account has a plan, and never while a pause holds. True
+        // until `inbox.done` writes today's mark — the same rule the scheduler
+        // wakes the account by, so a session opened for the read is told to do it.
+        inbox: {
+          lastSyncedAt: await lastSyncedAt(account.id),
+          maxThreads: paused ? 0 : MAX_THREADS_PER_RUN,
+          due: upkeep.inbox
+        },
         // The invitation work, ready to act on. `toSend` is already cut to what
         // today's allowance permits, so the agent is not handed a request the
         // server would refuse a moment later; `toCheck` is bounded because a
         // check costs no quota and would otherwise grow into a crawl of every
         // person this account ever wrote to.
-        invites: await inviteWorkFor(account),
+        invites: await inviteWorkFor(account, readCampaigns()),
         // What is owed that is not the day's quota. A run may be handed an
         // account with an empty plan and one of these set.
         upkeep,
@@ -2238,14 +2716,20 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         sendJson(response, 200, { ...base, runnable: false, reason: "No warm-up in progress", plan: [] });
         return true;
       }
-      if (run.paused_until && run.paused_until >= today()) {
-        sendJson(response, 200, { ...base, runnable: false, reason: `Paused until ${run.paused_until}`, plan: [] });
+      if (paused) {
+        sendJson(response, 200, {
+          ...base, runnable: false, reason: `Paused until ${run.paused_until}`, plan: [], pausedUntil: run.paused_until
+        });
         return true;
       }
 
       const snapshot = run.strategy_snapshot;
-      const day = currentDay(new Date(run.started_at), run.paused_days ?? 0);
-      if (day > totalDays(snapshot)) {
+      const day = dayOfRun(run);
+      const dayPlan = planForDay(snapshot, account.id, day);
+      // Past the last phase is working mode and falls through to the plan
+      // below like any other day. Only a snapshot with nothing to fall back on
+      // is finished.
+      if (dayPlan.finished) {
         // `runnable` answers "is it worth opening the browser", not "is there
         // warming left". An account past its last day still holds invitations
         // nobody has looked at and replies nobody has read, and a flat `false`
@@ -2261,15 +2745,24 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         return true;
       }
 
-      const dayPlan = planForDay(snapshot, account.id, day);
-      const doneRows = await anty.from("wl_day_actions").select("kind,done").eq("run_id", run.id).eq("on_date", today()).rows();
-      const doneByKind = new Map(doneRows.map((row) => [row.kind, Number(row.done) || 0]));
+      const doneByKind = await doneToday(run);
+      const weekly = await weeklyConnectAllowance(account.id);
+      dayPlan.quotas.connect = connectCeiling(dayPlan.quotas.connect, doneByKind.get("connect") ?? 0, weekly.done);
 
+      // On a day with more requests than one run carries, and people for
+      // them, the first session leaves two views for the session that sends
+      // the rest, so that one does not open on a Connect. The scheduler counts
+      // the same way (`viewsHeldBack`), so an account is never woken for views
+      // this plan would not hand out.
+      const heldBack = await heldBackViews(account, run, readCampaigns(), {
+        day, viewsDone: doneByKind.get("profile_view") ?? 0, doneByKind
+      });
       const plan = ACTION_KINDS
         .map((kind) => {
           const quota = dayPlan.quotas[kind];
           const done = doneByKind.get(kind) ?? 0;
-          return { kind, label: ACTION_LABEL[kind], quota, done, remaining: Math.max(0, quota - done) };
+          const held = kind === "profile_view" ? heldBack : 0;
+          return { kind, label: ACTION_LABEL[kind], quota, done, remaining: Math.max(0, quota - held - done), heldBack: held };
         })
         // A kind with no quota today is forbidden, not merely finished — the
         // agent never sees it, so it cannot decide to do "just one".
@@ -2280,9 +2773,13 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         runnable: true,
         runId: run.id,
         day,
+        // "working" past the last phase: the same plan shape, at the
+        // working-mode rate, with no end day.
+        mode: dayPlan.working ? "working" : "warmup",
         phase: dayPlan.phase?.label ?? null,
         rules: dayPlan.rules,
         connectionNote: dayPlan.connectionNote,
+        weeklyConnections: weekly,
         plan
       });
       return true;
@@ -2380,6 +2877,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       // Checked here rather than trusted from the agent, so the strategy on
       // screen is the strategy that runs even when the agent is an older build.
       if (action === "record") {
+        return await withAccountQuota(account.id, async () => {
         const run = await activeRun(account.id);
         if (!run) return fail(response, sendJson, 409, "No warm-up in progress");
 
@@ -2390,9 +2888,31 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
 
         const outcome = await checkQuota(account, run, kind, step);
         if (!outcome.ok) return refusal(response, sendJson, outcome);
+        // A view is never refused for the two kept back — they are the day's
+        // own — but `remaining` says what the plan does: the session handed
+        // quota − 2 is told it is done after its last one, not that two are
+        // left. Decided on the views before this one, as `GET /agent` would
+        // have answered just before it: decided on the views after it, the
+        // session's last view released the two and answered "2 left".
+        //
+        // Read before the view is counted, not after: these are reads of the
+        // queue and the folder, and one that failed after the commit answered
+        // an error for a view already on the day's counter — counted twice by
+        // an agent that retried it, and the session's views cut short by one
+        // that stopped. Nothing the commit writes moves the answer: it is the
+        // views before this one and the day's connects.
+        const heldBack = kind === "profile_view"
+          ? await heldBackViews(account, run, readCampaigns(), {
+            day: outcome.day, viewsDone: outcome.done - outcome.step, doneByKind: await doneToday(run)
+          })
+          : 0;
         await commitAction(account, run, kind, outcome, detail);
-        sendJson(response, 200, { success: true, done: outcome.done, quota: outcome.quota, remaining: outcome.quota - outcome.done });
+        sendJson(response, 200, {
+          success: true, done: outcome.done, quota: outcome.quota,
+          remaining: Math.max(0, outcome.quota - heldBack - outcome.done), heldBack
+        });
         return true;
+        });
       }
 
       // Anything that is not a quota action but still belongs in the account's
@@ -2429,6 +2949,31 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         return true;
       }
 
+      // LinkedIn said this account is being watched: a warning banner, a
+      // restriction notice, a "you have been sending too many". The same
+      // two-day pause the operator's button starts, from the only thing that
+      // is looking at the screen when it appears.
+      //
+      // Deliberately not `health`. A captcha or a sign-out needs a person
+      // before anything can run, and says nothing about how long to leave the
+      // account alone; a warning needs nobody, and says exactly that. Health
+      // keeps meaning what it meant.
+      if (action === "warning") {
+        const run = await activeRun(account.id);
+        if (!run) return fail(response, sendJson, 409, "No warm-up in progress");
+        const note = typeof body.note === "string" ? body.note.slice(0, 300) : null;
+        const pause = await pauseForWarning({ account, run, source: "agent", note });
+        sendJson(response, 200, {
+          success: true,
+          paused: true,
+          pausedUntil: pause.pausedUntil,
+          // Everything, not only the sending: close the session and report
+          // `run.finished`. Nothing is handed out again until the pause ends.
+          stopSending: true
+        });
+        return true;
+      }
+
       // ── the inbox, as the agent found it ──────────────────────────────
       //
       // Upserting, not appending: a message already stored for this account is
@@ -2437,17 +2982,24 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       if (action === "inbox.thread") {
         const input = normalizeThreadInput(body);
         if (input.error) return fail(response, sendJson, 400, input.error);
-        sendJson(response, 200, { success: true, ...await storeThread({ account, input }) });
+        sendJson(response, 200, { success: true, ...await storeThread({ account, input, folderIds: runningFolderIds() }) });
         return true;
       }
 
       // The sync finished. Written even when it saw nothing, which is the point
       // of it: without this mark an empty inbox cannot tell "no new messages"
-      // from "the agent never looked".
+      // from "the agent never looked". It is also what `inbox.due` is read
+      // from, so today's read is done once this is written.
+      //
+      // Then whatever an earlier sync could not copy to the CRM is copied now —
+      // after the mark, so a CRM that is down cannot cost the account the one
+      // row that says it was read today.
       if (action === "inbox.done") {
         const seen = Number(body.threadsSeen);
         const threadsSeen = Number.isFinite(seen) ? Math.max(0, Math.trunc(seen)) : 0;
-        sendJson(response, 200, { success: true, threadsSeen, syncedAt: await markSynced(account.id, threadsSeen) });
+        const syncedAt = await markSynced(account.id, threadsSeen);
+        const crmRetried = await retryCrmCopies(account, { folderIds: runningFolderIds() });
+        sendJson(response, 200, { success: true, threadsSeen, syncedAt, crmRetried });
         return true;
       }
 
@@ -2461,7 +3013,24 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
        * before clicking is what makes that outcome reachable at all, and it is
        * the reconciliation itself rather than an optimisation.
        */
+      if (action === "invite.prepare") {
+        const outreachId = String(body.outreachId || "");
+        if (!outreachId) return fail(response, sendJson, 400, "Which invitation?");
+        const work = await inviteWorkFor(account, readCampaigns());
+        const invite = work.toSend.find((row) => row.outreachId === outreachId);
+        const run = await activeRun(account.id);
+        const paused = pausedOn(run, today());
+        sendJson(response, 200, {
+          success: true, allowed: Boolean(invite), invite: invite ?? null,
+          connectsLeft: work.connectsLeft, weekly: work.weekly,
+          stopSending: !invite, duringPause: paused,
+          stopAll: paused || account.health !== "ok" || account.status === "excluded" || !run
+        });
+        return true;
+      }
+
       if (action === "invite.sent") {
+        return await withAccountQuota(account.id, async () => {
         const outreachId = String(body.outreachId || "");
         if (!outreachId) return fail(response, sendJson, 400, "Which invitation?");
         // A vocabulary, checked the way `record` checks its kind. Unvalidated,
@@ -2473,6 +3042,19 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         const outcome = String(body.outcome || "");
         if (!INVITE_OUTCOMES.includes(outcome)) {
           return fail(response, sendJson, 400, `Unknown outcome. One of: ${INVITE_OUTCOMES.join(", ")}`);
+        }
+
+        // Nothing went out. The session a report came from is what tells its
+        // retry from a new attempt: the agent's `leaseId` when it sends one,
+        // else the lease this account holds here.
+        if (INVITE_HELD_OUTCOMES.includes(outcome)) {
+          const lease = activeLease();
+          const leaseId = (typeof body.leaseId === "string" && body.leaseId)
+            || (lease?.accountId === account.id ? lease.leaseId : null);
+          const held = await oneHeldReportAtATime(outreachId, () => reportHeld({ account, outreachId, outcome, leaseId }));
+          if (held.refused) return fail(response, sendJson, held.refused, held.error);
+          sendJson(response, 200, { success: true, ...held });
+          return true;
         }
 
         const outreach = await anty.from("wl_outreach").select(OUTREACH_COLUMNS).eq("id", outreachId).maybeSingle();
@@ -2489,14 +3071,6 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           return fail(response, sendJson, 404, "That invitation is gone");
         }
         if (outreach.account_id !== account.id) return fail(response, sendJson, 409, "That invitation belongs to another account");
-
-        if (INVITE_HELD_OUTCOMES.includes(outcome)) {
-          // The row stays waiting: the person is still held, the reason is on
-          // the record, and a human decides whether to cancel or move it.
-          await recordFailed({ account, outreach, outcome });
-          sendJson(response, 200, { success: true, status: outreach.status, moved: false, recorded: outcome });
-          return true;
-        }
 
         const run = await activeRun(account.id);
         if (!run) return fail(response, sendJson, 409, "No warm-up in progress");
@@ -2515,9 +3089,15 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         // cause, not what we observe.
         let allowance = null;
         let overQuota = false;
+        // A request that went out after a warning had paused the account —
+        // an agent that carried on after the `blocked` answer, or a pause
+        // pressed mid-run. It is on LinkedIn, so it is recorded; it is not
+        // counted, because a paused account's day allows nothing; and it is
+        // not called an overshoot, which is a different thing to go and fix.
+        const duringPause = spends && pausedOn(run, today());
         if (spends) {
           allowance = await checkQuota(account, run, "connect");
-          overQuota = !allowance.ok;
+          overQuota = !allowance.ok && !duringPause;
         }
 
         const moved = await moveStatus({ outreachId, to: target });
@@ -2526,20 +3106,39 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           return true;
         }
 
-        if (spends && !overQuota) await commitAction(account, run, "connect", allowance, `invite to ${outreach.person_name || "a contact"}`);
-        await recordSent({ account, run, outreach: moved.row, by: "agent", overQuota, allowance: overQuota ? null : allowance });
+        // What the request carried: the note the hand-off let through today,
+        // decided by the same rule — the agent was told to send exactly that.
+        // Only for `sent`; an `already_pending` went out on an earlier run.
+        // The day is the one the account was on when it was handed out:
+        // `runDay` holds still through a pause, whereas the count behind
+        // `currentDay` drops by the paused dates the moment a warning lands,
+        // and a day-12 note recorded under the day-10 rule read as "sent bare".
+        const sentNote = spends
+          ? noteUnderRule(moved.row.note, noteRuleOn(run.strategy_snapshot, runDay(run)))
+          : null;
+
+        const counts = spends && allowance.ok;
+        if (counts) await commitAction(account, run, "connect", allowance, `invite to ${outreach.person_name || "a contact"}`);
+        await recordSent({
+          account, run, outreach: moved.row, by: "agent", overQuota, duringPause, allowance: counts ? allowance : null, sentNote
+        });
 
         sendJson(response, 200, {
           success: true,
           status: moved.row.status,
           moved: true,
-          overQuota,
+          // Kept true after a pause as well: an agent built before
+          // `duringPause` stops on `overQuota`, and a paused account's day
+          // allows nothing — so for that agent it is the true answer.
+          overQuota: overQuota || duringPause,
+          duringPause,
           // The agent stops sending for the day on this, rather than on a 409
           // it would have to interpret. What it already sent is recorded.
-          stopSending: overQuota,
-          connectsLeft: spends && !overQuota ? Math.max(0, allowance.quota - allowance.done) : 0
+          stopSending: overQuota || duringPause,
+          connectsLeft: counts ? Math.max(0, allowance.quota - allowance.done) : 0
         });
         return true;
+        });
       }
 
       /** What the sent-invitations page said today. Written even when nothing changed. */
@@ -2565,50 +3164,6 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
     }
     return fail(response, sendJson, 500, error instanceof Error ? error.message : String(error));
   }
-}
-
-/**
- * How much of the queue to read per round trip, as a multiple of what is asked
- * for. People already approached are filtered out after the CRM has answered,
- * so a page the size of `limit` would come back short as soon as anyone had
- * been taken. MAX_PAGES is the hard stop: the exclusion list only grows, and a
- * queue whose head is entirely spoken for would otherwise walk thousands of
- * rows a page at a time while somebody waits for a panel to paint.
- */
-const OVERFETCH = 4;
-const MAX_PAGES = 5;
-
-/**
- * The next people to approach. The account asking does not narrow it:
- * wl_outreach_person_once means one person is approached once across every
- * account, so the candidate list is the same whoever is asking.
- */
-async function nextCandidates(limit, targeting) {
-  const pageSize = Math.max(limit * OVERFETCH, 40);
-  const candidates = [];
-  let offset = 0;
-
-  for (let page = 0; page < MAX_PAGES && candidates.length < limit; page += 1) {
-    const batch = await leadQueue({ limit: pageSize + offset, offset, targeting });
-    if (batch.length === 0) break;
-    offset += batch.length;
-
-    // Asked per page rather than "every contact ever approached": the list only
-    // has to be long enough to answer this page.
-    const taken = await anty.from("wl_outreach").select("crm_contact_id")
-      .in("crm_contact_id", batch.map((lead) => lead.id)).rows();
-    const approached = new Set(taken.map((row) => row.crm_contact_id));
-
-    for (const lead of batch) {
-      if (candidates.length >= limit) break;
-      if (!approached.has(lead.id)) candidates.push(lead);
-    }
-
-    // A short page is the end of the queue, not a reason to ask again.
-    if (batch.length < pageSize) break;
-  }
-
-  return candidates;
 }
 
 /**

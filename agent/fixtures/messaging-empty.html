@@ -1,0 +1,27 @@
+<!-- An inbox with nothing in it. Constructed, not saved — see README.md.
+     Zero threads here is the truth. The reader has to be able to say that
+     without saying it the same way it says "I could not find the list", which
+     is the difference between an account nobody has written to and an agent
+     that has quietly stopped working. -->
+<title>Messaging | LinkedIn</title>
+<style>
+  /* LinkedIn's rows are block-level flex containers. Without saying so, an
+     anchor wrapping block children lays out as overlapping inline boxes and a
+     click at the centre of one row lands on its neighbour — an artefact of a
+     fixture with no stylesheet, not of the messenger. */
+  ul { list-style: none; margin: 0; padding: 0; }
+  li { display: block; }
+  li > a, li > div > a, li > button { display: block; padding: 8px; border-bottom: 1px solid #eee; }
+</style>
+<div class="msg-overlay-list-bubble _1f9c3b2a">
+  <header class="msg-conversations-container__title-row">
+    <h2 class="t-16">Messaging</h2>
+    <a href="/messaging/thread/new/?recipient=" class="msg-conversations-container__compose-btn">Compose</a>
+    <input placeholder="Search messages" class="msg-conversations-container__search-input" />
+  </header>
+  <ul class="msg-conversations-container__conversations-list _0d4e7c33"></ul>
+  <section class="msg-conversations-container__empty-state _9a4c11bd">
+    <h3 class="t-16">No messages yet</h3>
+    <p class="t-14">When you start a conversation, it will show up here.</p>
+  </section>
+</div>

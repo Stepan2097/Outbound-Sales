@@ -88,7 +88,7 @@ export function crmKeyKind() {
  * column: `fts` is built by the CRM for its own screens, and a search that
  * behaves differently here than there is worse than a simpler one.
  */
-export async function listFolderContacts({ folderId = "", search = "", limit = 25, offset = 0 } = {}) {
+export async function listFolderContacts({ folderId = "", search = "", limit = 25, offset = 0, queueOrder = false } = {}) {
   // A folder is required, and not out of tidiness: without one this is a page
   // of every contact in the CRM plus an exact count of the whole table, and on
   // a real base that query comes back as a statement timeout.
@@ -111,7 +111,7 @@ export async function listFolderContacts({ folderId = "", search = "", limit = 2
   };
 
   const [contacts, total] = await Promise.all([
-    build(LIST_COLUMNS).order("created_at", { ascending: false }).limit(size).offset(from).rows(),
+    build(LIST_COLUMNS).order("created_at", { ascending: queueOrder }).order("id", { ascending: queueOrder }).limit(size).offset(from).rows(),
     build("id").count()
   ]);
 
@@ -165,22 +165,98 @@ export function contactAsProspect(contact = {}) {
  * the same millisecond can swap places between two requests, and then the
  * position a seller stopped at points at a different person tomorrow.
  */
-export async function folderContactAt({ folderId = "", index = 0 } = {}) {
+export async function folderContactAt({ folderId = "", index = 0, search = "", contactId = "" } = {}) {
   if (!folderId) {
     const error = new Error("Спочатку обери папку — без неї запит іде по всій базі CRM.");
     error.statusCode = 400;
     throw error;
   }
   if (!UUID.test(folderId)) throw badUuid("Папка", folderId);
+  if (contactId) {
+    const contact = await readContact(contactId);
+    if (!contact || contact.folder_id !== folderId) {
+      const error = new Error("Контакт більше не знаходиться в цій папці.");
+      error.statusCode = 404;
+      throw error;
+    }
+    const [total, position] = await Promise.all([
+      crm.from("contacts").select("id").eq("folder_id", folderId).count(),
+      crm.from("contacts").select("id").eq("folder_id", folderId)
+        .or(`created_at.lt.${contact.created_at},and(created_at.eq.${contact.created_at},id.lt.${contact.id})`).count()
+    ]);
+    return { contact, total, index: position };
+  }
   const position = Math.max(Math.trunc(Number(index) || 0), 0);
+  const term = String(search || "").trim().replace(/[(),*]/g, " ").trim();
+  const build = (columns) => {
+    const query = crm.from("contacts").select(columns).eq("folder_id", folderId);
+    return term ? query.or(`name.ilike.*${term}*,company.ilike.*${term}*,position.ilike.*${term}*,email.ilike.*${term}*`) : query;
+  };
   const [rows, total] = await Promise.all([
-    crm.from("contacts").select(CONTACT_COLUMNS).eq("folder_id", folderId)
+    build(CONTACT_COLUMNS)
       .order("created_at", { ascending: true })
       .order("id", { ascending: true })
       .limit(1)
       .offset(position)
       .rows(),
-    crm.from("contacts").select("id").eq("folder_id", folderId).count()
+    build("id").count()
   ]);
   return { contact: rows[0] || null, total, index: position };
+}
+
+// Cache the lightweight folder index so typing does not reread thousands of rows.
+const searchIndexes = new Map();
+async function folderSearchIndex(folderId) {
+  const cached = searchIndexes.get(folderId);
+  if (cached && cached.expires > Date.now()) return cached.promise;
+  const entry = { expires: Date.now() + 60000 };
+  entry.promise = (async () => {
+    const rows = [];
+    for (let offset = 0; ; offset += 1000) {
+      const page = await crm.from("contacts").select(LIST_COLUMNS).eq("folder_id", folderId)
+        .order("id").limit(1000).offset(offset).rows();
+      rows.push(...page);
+      if (page.length < 1000) break;
+    }
+    return rows;
+  })();
+  searchIndexes.set(folderId, entry);
+  if (searchIndexes.size > 4) searchIndexes.delete(searchIndexes.keys().next().value);
+  try { return await entry.promise; }
+  catch (error) { if (searchIndexes.get(folderId) === entry) searchIndexes.delete(folderId); throw error; }
+}
+
+const searchText = (value) => String(value || "").normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().trim();
+function wordSimilarity(left, right) {
+  if (left === right) return 1;
+  if (left.length < 3 || right.length < 3) return 0;
+  const grams = (word) => { const set = new Set(); for (let i = 0; i < word.length - 1; i++) set.add(word.slice(i, i + 2)); return set; };
+  const a = grams(left), b = grams(right);
+  let common = 0;
+  for (const gram of a) if (b.has(gram)) common++;
+  return 2 * common / (a.size + b.size);
+}
+export function rankContactMatches(contacts, search) {
+  const term = searchText(search).slice(0, 120);
+  if (!term) return [];
+  const tokens = term.split(/\s+/);
+  return contacts.map((contact) => {
+    const fields = [contact.name, contact.company, contact.email, contact.position].map(searchText);
+    const scores = fields.map((field) => {
+      if (field === term) return 100;
+      if (field.startsWith(term)) return 90;
+      if (field.includes(term)) return 80;
+      const words = field.split(/[\s@._-]+/);
+      const matches = tokens.map((token) => Math.max(0, ...words.map((word) => word.includes(token) ? 1 : wordSimilarity(token, word))));
+      if (matches.some((score) => score < 0.5)) return 0;
+      return 60 * matches.reduce((sum, score) => sum + score, 0) / tokens.length;
+    });
+    return { contact, score: Math.max(...scores) };
+  }).filter((item) => item.score > 0).sort((a, b) => b.score - a.score || String(a.contact.id).localeCompare(String(b.contact.id))).slice(0, 5).map((item) => item.contact);
+}
+
+export async function searchFolderContacts({ folderId = "", search = "" } = {}) {
+  if (!UUID.test(folderId)) throw badUuid("Папка", folderId);
+  if (!String(search).trim()) return { contacts: [] };
+  return { contacts: rankContactMatches(await folderSearchIndex(folderId), search) };
 }

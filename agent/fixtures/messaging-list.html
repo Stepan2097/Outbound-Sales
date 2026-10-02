@@ -1,0 +1,115 @@
+<!-- The conversation list at https://www.linkedin.com/messaging/ .
+     Constructed, not saved — see README.md in this folder. Hashed utility
+     classes are mixed in with the semantic msg-* ones the way LinkedIn ships
+     them, so that a reader leaning on either one is caught here. -->
+<title>(5) Messaging | LinkedIn</title>
+<style>
+  /* LinkedIn's rows are block-level flex containers. Without saying so, an
+     anchor wrapping block children lays out as overlapping inline boxes and a
+     click at the centre of one row lands on its neighbour — an artefact of a
+     fixture with no stylesheet, not of the messenger. */
+  ul { list-style: none; margin: 0; padding: 0; }
+  li { display: block; }
+  li > a, li > div > a, li > button { display: block; padding: 8px; border-bottom: 1px solid #eee; }
+</style>
+<div class="msg-overlay-list-bubble _1f9c3b2a">
+  <header class="msg-conversations-container__title-row _b7d21e04">
+    <h2 class="t-16 _9a4c11bd">Messaging</h2>
+    <a href="/messaging/thread/new/?recipient=" class="msg-conversations-container__compose-btn">Compose</a>
+    <input placeholder="Search messages" class="msg-conversations-container__search-input _22f0ab19" />
+  </header>
+
+  <ul class="msg-conversations-container__conversations-list _0d4e7c33">
+
+    <li class="msg-conversation-listitem msg-conversation-card--unread _77ab90cd">
+      <div class="msg-conversation-card__content--selectable">
+        <a class="msg-conversation-listitem__link" data-view-name="conversation-item"
+           href="/messaging/thread/2-ZjE4ZmQ1NzQtYjE1NC00ZjQ4LThm/">
+          <span class="msg-selectable-entity__entity">
+            <img alt="Marta Kowalczyk" class="presence-entity__image EntityPhoto-circle-3"
+                 src="https://media.licdn.com/dms/image/v2/aaa/profile-displayphoto-shrink_100_100/0/1?e=1" />
+          </span>
+          <div class="msg-conversation-card__row _4c1b8e7f">
+            <h3 class="msg-conversation-listitem__participant-names t-14">Marta Kowalczyk</h3>
+            <time class="msg-conversation-listitem__time-stamp">2h</time>
+          </div>
+          <p class="msg-conversation-card__message-snippet">Thanks for reaching out — happy to chat next week 😊</p>
+        </a>
+      </div>
+    </li>
+
+    <li class="msg-conversation-listitem _77ab90cd">
+      <div class="msg-conversation-card__content--selectable">
+        <a class="msg-conversation-listitem__link" data-view-name="conversation-item"
+           href="/messaging/thread/2-NTRhYjIxMDAtOGUwNy00/">
+          <span class="msg-selectable-entity__entity">
+            <img alt="Dmytro Herasymenko" class="presence-entity__image" src="https://media.licdn.com/dms/image/v2/bbb/x?e=1" />
+          </span>
+          <div class="msg-conversation-card__row _4c1b8e7f">
+            <h3 class="msg-conversation-listitem__participant-names t-14">Dmytro Herasymenko</h3>
+            <time class="msg-conversation-listitem__time-stamp">Yesterday</time>
+          </div>
+          <p class="msg-conversation-card__message-snippet">You: Sent a connection note</p>
+        </a>
+      </div>
+    </li>
+
+    <!-- A group conversation: several avatars, no single participant, and no
+         /in/ link anywhere on the row. participant.slug is null here and the
+         portal has to take it that way. -->
+    <li class="msg-conversation-listitem _77ab90cd">
+      <div class="msg-conversation-card__content--selectable">
+        <a class="msg-conversation-listitem__link" data-view-name="conversation-item"
+           href="/messaging/thread/2-R3JvdXBDaGF0MDAx/">
+          <span class="msg-selectable-entity__entity">
+            <img alt="Anna Bauer" class="presence-entity__image" src="https://media.licdn.com/dms/image/v2/ccc/x?e=1" />
+            <img alt="Tomás Ruiz" class="presence-entity__image" src="https://media.licdn.com/dms/image/v2/ddd/x?e=1" />
+          </span>
+          <div class="msg-conversation-card__row _4c1b8e7f">
+            <h3 class="msg-conversation-listitem__participant-names t-14">Anna Bauer, Tomás Ruiz</h3>
+            <time class="msg-conversation-listitem__time-stamp">3d</time>
+          </div>
+          <p class="msg-conversation-card__message-snippet">Anna: we should compare notes on the Q4 pipeline</p>
+        </a>
+      </div>
+    </li>
+
+    <!-- Older than a week, so LinkedIn writes a date instead of an age. The
+         year is missing because it is this year. -->
+    <li class="msg-conversation-listitem _77ab90cd">
+      <div class="msg-conversation-card__content--selectable">
+        <a class="msg-conversation-listitem__link" data-view-name="conversation-item"
+           href="/messaging/thread/2-T2xkZXJUaHJlYWQwMDI%3D/">
+          <span class="msg-selectable-entity__entity">
+            <img alt="Priya Nair" class="presence-entity__image" src="https://media.licdn.com/dms/image/v2/eee/x?e=1" />
+          </span>
+          <div class="msg-conversation-card__row _4c1b8e7f">
+            <h3 class="msg-conversation-listitem__participant-names t-14">Priya Nair</h3>
+            <time class="msg-conversation-listitem__time-stamp">Sep 12</time>
+          </div>
+          <p class="msg-conversation-card__message-snippet">Priya: congratulations on the new role!</p>
+        </a>
+      </div>
+    </li>
+
+    <!-- An InMail from a recruiter, sitting in the same list, with the same
+         shape. Nothing here distinguishes it and nothing should. -->
+    <li class="msg-conversation-listitem _77ab90cd">
+      <div class="msg-conversation-card__content--selectable">
+        <a class="msg-conversation-listitem__link" data-view-name="conversation-item"
+           href="/messaging/thread/2-SW5NYWlsUmVjcnVpdGVy/">
+          <span class="msg-selectable-entity__entity">
+            <img alt="LinkedIn" class="presence-entity__image" src="https://static.licdn.com/logo.png" />
+            <img alt="Sarah Whitfield" class="presence-entity__image" src="https://media.licdn.com/dms/image/v2/fff/x?e=1" />
+          </span>
+          <div class="msg-conversation-card__row _4c1b8e7f">
+            <h3 class="msg-conversation-listitem__participant-names t-14">Sarah Whitfield</h3>
+            <time class="msg-conversation-listitem__time-stamp">2w</time>
+          </div>
+          <p class="msg-conversation-card__message-snippet">Sarah: I have a role that might interest you</p>
+        </a>
+      </div>
+    </li>
+
+  </ul>
+</div>

@@ -59,6 +59,32 @@ export function isCampaignState(value) {
   return typeof value === "string" && CAMPAIGN_STATES.includes(value);
 }
 
+/**
+ * The warm-up day from which a campaign feeds its accounts on its own.
+ *
+ * Seven, because days 4–6 allow one or two requests and the strategy spends
+ * them on the account's own team and on people who already know it — contacts
+ * a seller picks one at a time from the lead workspace. A folder of strangers
+ * is day 7 on, working mode included. A campaign that *is* the team folder can
+ * say 4.
+ */
+export const DEFAULT_FROM_DAY = 7;
+export const MAX_FROM_DAY = 365;
+
+function isFromDay(value) {
+  return Number.isInteger(value) && value >= 1 && value <= MAX_FROM_DAY;
+}
+
+/**
+ * A `fromDay` from a request: the day, or the sentence saying why not.
+ * Refused rather than quietly defaulted — "from day 0" or "from day 7.5" is a
+ * typo, and saving 7 in its place would hide it until the day it mattered.
+ */
+export function parseFromDay(value) {
+  const day = typeof value === "string" && value.trim() ? Number(value) : value;
+  return isFromDay(day) ? { value: day } : { error: `«З якого дня» — ціле число від 1 до ${MAX_FROM_DAY}` };
+}
+
 export function normalizeCampaign(raw, index = 0) {
   const now = new Date().toISOString();
   return {
@@ -69,6 +95,8 @@ export function normalizeCampaign(raw, index = 0) {
     filters: normalizeFilters(raw?.filters),
     accountIds: accountIds(raw?.accountIds),
     productId: text(raw?.productId, 80) || null,
+    // A campaign saved before this setting existed feeds from the default day.
+    fromDay: isFromDay(raw?.fromDay) ? raw.fromDay : DEFAULT_FROM_DAY,
     state: isCampaignState(raw?.state) ? raw.state : "draft",
     order: Number.isFinite(raw?.order) ? Number(raw.order) : index,
     createdAt: typeof raw?.createdAt === "string" ? raw.createdAt : now,
@@ -187,6 +215,7 @@ export function describeCampaign(campaign, folderName = null) {
     filters: { ...campaign.filters },
     accountIds: [...campaign.accountIds],
     productId: campaign.productId,
+    fromDay: campaign.fromDay ?? DEFAULT_FROM_DAY,
     state: campaign.state,
     order: campaign.order,
     createdAt: campaign.createdAt,
@@ -208,6 +237,82 @@ export function runningFor(campaigns, accountId) {
 }
 
 /**
+ * The campaigns that feed this account on its own on this warm-up day: the
+ * running ones it is ticked on whose `fromDay` has come, in the same order.
+ * Before that day a campaign still lets a person claim from it by hand; it
+ * just does not fill anybody's allowance by itself.
+ */
+export function feedingFor(campaigns, accountId, day) {
+  return runningFor(campaigns, accountId).filter((campaign) => day >= (campaign.fromDay ?? DEFAULT_FROM_DAY));
+}
+
+/**
+ * The most people a campaign's folder may add to one account in one day, as a
+ * multiple of that day's connect quota.
+ *
+ * `folderRoom` alone is a sum over what is held *now*, and a person the
+ * browser could not reach stops being held the moment it is reported: a
+ * folder-fed row that comes back `no_button` is let go (see `releaseFedInvite`),
+ * so its place is free again and the folder fills it. Once, that is the point —
+ * a broken link should not cost the day. Without a bound it is a drain: selector
+ * rot on the agent reports every profile as `no_button`, and every session
+ * of the morning walks another allowance's worth of the folder into "skipped"
+ * and visits that many profiles on top of the day's views. Twice the quota is
+ * one full replacement of everybody and no more.
+ */
+export const FOLDER_DAILY_FACTOR = 2;
+
+/**
+ * How many people the folder may add to an account right now.
+ *
+ * What is already held for it comes first — the invitations a seller picked by
+ * hand, and claims somebody took to send themselves — and the folder fills the
+ * rest of today's allowance and not one more. Counting from what is held, not
+ * from what was added earlier today, is what makes a second top-up a no-op:
+ * the same question asked twice gets zero the second time.
+ *
+ * `quota` and `fedToday` are the day's cap on top of that: the day's connect
+ * quota, and how many the folder already added to this account today. Both
+ * callers — the top-up and the scheduler — pass them; a caller that leaves
+ * `quota` out gets no daily cap, which is only ever the arithmetic tests.
+ */
+export function folderRoom({ left, waiting = 0, claimed = 0, quota = null, fedToday = 0 }) {
+  const room = left - waiting - claimed;
+  const capped = Number.isFinite(quota) ? Math.min(room, FOLDER_DAILY_FACTOR * quota - Math.max(0, fedToday)) : room;
+  return Math.max(0, capped);
+}
+
+/**
+ * How many invitations the folder would add to this account today, from what
+ * the feeds found — the scheduler's half of `folderRoom`.
+ *
+ * `feeds` is what each campaign ticked on the account could still offer, with
+ * the day it starts on. The scheduler wakes an account on this and the top-up
+ * then adds exactly `folderRoom`; the two are one sum on purpose, because a
+ * wake the top-up does not follow up on is a browser opened for nothing, every
+ * few minutes, all morning. The daily cap is part of that sum: an account the
+ * folder has already fed twice its quota today is not woken for its folder.
+ */
+export function folderWork({ feeds = [], day, left, waiting = 0, claimed = 0, quota = null, fedToday = 0 }) {
+  const available = feeds
+    .filter((feed) => day >= feed.fromDay)
+    .reduce((total, feed) => total + Math.max(0, feed.available || 0), 0);
+  return Math.min(available, folderRoom({ left, waiting, claimed, quota, fedToday }));
+}
+
+/**
+ * The `fromDay` of the campaign that fed a row, by id — the day before which
+ * its people are not sent even when they are already waiting (a run restarted
+ * on day 1, a `fromDay` raised after they were queued). A campaign that has
+ * since been deleted answers the default: the rule it was fed under is gone,
+ * and the default is the rule nobody changed.
+ */
+export function fromDayLookup(campaigns = []) {
+  const byId = new Map(campaigns.map((campaign) => [campaign.id, campaign.fromDay ?? DEFAULT_FROM_DAY]));
+  return (campaignId) => byId.get(campaignId) ?? DEFAULT_FROM_DAY;
+}
+
+/**
  * How many people may be claimed right now.
  *
  * What is already queued counts against the allowance even though it has spent
@@ -225,15 +330,21 @@ export function claimCapacity({ quota, spent, queued, limit = 0 }) {
  * Every account is on day 1–3 for its first three days and the standard
  * strategy forbids requests until day 4 — so "nothing today" is the ordinary
  * answer for a new account, not a fault, and it has to read like one.
+ *
+ * Past the last phase is working mode, not the end: the account is still
+ * sending, so "the warm-up is finished" would read as "this account is done"
+ * when its day is merely spent. `working` is what `connectAllowance` says; an
+ * older caller that does not pass it gets the old sentence past the last day.
  */
-export function allowanceReason({ day, totalDays, quota, spent, queued, startsDay = null }) {
-  if (day > totalDays) return `The warm-up is finished — day ${day} of ${totalDays}`;
+export function allowanceReason({ day, totalDays, quota, spent, queued, startsDay = null, working = false }) {
+  if (day > totalDays && !working) return `The warm-up is finished — day ${day} of ${totalDays}`;
+  const where = day > totalDays ? `Working mode, day ${day}` : `Day ${day} of ${totalDays}`;
   if (quota <= 0) {
     return startsDay
-      ? `Day ${day} of ${totalDays} — connection requests start on day ${startsDay}`
-      : `Day ${day} of ${totalDays} — no connection requests are planned for today`;
+      ? `${where} — connection requests start on day ${startsDay}`
+      : `${where} — no connection requests are planned for today`;
   }
-  if (spent >= quota) return `Day ${day} of ${totalDays} — today's ${quota} connection requests are already spent`;
+  if (spent >= quota) return `${where} — today's ${quota} connection requests are already spent`;
   if (queued >= quota - spent) return `${queued} already claimed and today allows ${quota} — work through the queue first`;
   return null;
 }

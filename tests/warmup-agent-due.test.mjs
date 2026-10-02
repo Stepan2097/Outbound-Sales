@@ -4,7 +4,8 @@ import test from "node:test";
 
 import { handleWarmupApi } from "../warmup/api.mjs";
 import { activeLease, coolOffUntil, decideNext, leaseAccount, resetScheduler } from "../warmup/scheduler.mjs";
-import { DEFAULT_STRATEGY } from "../warmup/strategy.mjs";
+import { DEFAULT_STRATEGY, dailyQuota } from "../warmup/strategy.mjs";
+import { MAX_INVITES_PER_RUN } from "../warmup/invites.mjs";
 
 /**
  * The route and the decision over a real query path.
@@ -14,7 +15,7 @@ import { DEFAULT_STRATEGY } from "../warmup/strategy.mjs";
  * lease are, and a test that needs a database password is a test nobody runs.
  */
 
-const rows = { wl_accounts: [], wl_runs: [], wl_day_actions: [], anty_browser_profiles: [] };
+const rows = { wl_accounts: [], wl_runs: [], wl_day_actions: [], wl_events: [], anty_browser_profiles: [] };
 const written = [];
 let stub;
 let previousEnv;
@@ -29,6 +30,18 @@ function startedForDay(day) {
 
 function account(id, label) {
   return { id, label, login: `${id}@example.com`, profile_remote_id: `profile-${id}`, status: "warming", health: "ok" };
+}
+
+/**
+ * Today's inbox read, done. The read is owed once a day on every day of a
+ * plan, so "nothing left today" has to include it. The stub hands every
+ * `wl_events` row to every read of the table, which is fine here: nothing
+ * else these tests ask of it is about events.
+ */
+function inboxReadToday(...accountIds) {
+  rows.wl_events = accountIds.map((accountId) => ({
+    account_id: accountId, type: "inbox.synced", created_at: new Date().toISOString(), meta: { threadsSeen: 0 }
+  }));
 }
 
 function run(accountId, day) {
@@ -93,6 +106,7 @@ test.beforeEach(() => {
   rows.wl_accounts = [account("acc-1", "Chloe Stewart"), account("acc-2", "Dan Moreau")];
   rows.wl_runs = [run("acc-1", 3), run("acc-2", 2)];
   rows.wl_day_actions = [];
+  rows.wl_events = [];
   // Nothing open in Anty unless a test says so.
   rows.anty_browser_profiles = [
     { id: "profile-acc-1", status: "stopped", is_deleted: false },
@@ -105,7 +119,7 @@ test.beforeEach(() => {
 const insideTheWindow = () => { const at = new Date(); at.setHours(10, 0, 0, 0); return at; };
 
 /**
- * The two tests that go through the route cannot pass a time in — the route
+ * The tests that go through the route cannot pass a time in — the route
  * reads the clock itself, which is the whole point of it. So they pin the
  * clock instead. Without this the suite is green before 13:00 and red after,
  * which is worse than having no test: it teaches people that a red run is the
@@ -140,25 +154,83 @@ test("two workers racing: one takes it, the loser is told who and when", async (
   const now = insideTheWindow();
   const shown = await decideNext({ now });
 
-  const winner = await leaseAccount({ accountId: shown.next.accountId, now });
-  assert.equal(winner.ok, true);
+  // At the same moment, for two different accounts — both told something
+  // true a moment ago. Each lease reads a dozen rows before it grants, so
+  // both are past the first "is anybody running" before either grants; only
+  // the check made again right before the grant keeps it to one.
+  const answers = await Promise.all([
+    leaseAccount({ accountId: "acc-1", now }),
+    leaseAccount({ accountId: "acc-2", now })
+  ]);
+  const winners = answers.filter((answer) => answer.ok);
+  assert.equal(winners.length, 1, "one account at a time, across every worker");
+  const [winner] = winners;
+  const loser = answers.find((answer) => !answer.ok);
   assert.ok(winner.lease.leaseId);
   assert.ok(Date.parse(winner.lease.leaseExpiresAt) > now.getTime());
-  assert.equal(winner.lease.accountId, "acc-1");
-  assert.deepEqual(winner.lease.kinds, shown.next.kinds);
+  assert.equal(activeLease(now.getTime()).leaseId, winner.lease.leaseId);
+  if (winner.lease.accountId === "acc-1") assert.deepEqual(winner.lease.kinds, shown.next.kinds);
 
-  const loser = await leaseAccount({ accountId: "acc-1", now });
-  assert.equal(loser.ok, false);
   assert.equal(loser.status, 409);
-  assert.equal(loser.error, "Chloe Stewart is already running");
+  assert.equal(loser.error, `${winner.lease.label} is already running`);
   assert.ok(loser.retryAfterSeconds >= 1 && loser.retryAfterSeconds <= 900);
 
-  // And the other account is refused too — one account runs at a time.
-  const other = await leaseAccount({ accountId: "acc-2", now });
-  assert.equal(other.error, "Chloe Stewart is already running");
+  // And the same account asked for again is refused the same way.
+  const again = await leaseAccount({ accountId: winner.lease.accountId, now });
+  assert.equal(again.error, `${winner.lease.label} is already running`);
 
   assert.equal(written.filter((row) => row.table === "wl_events" && row.body.type === "scheduler.started").length, 1,
     "exactly one start, written when the account was taken rather than when it was named");
+
+  // Two workers after the same account at once: one of them, too.
+  resetScheduler();
+  written.length = 0;
+  const same = await Promise.all([leaseAccount({ accountId: "acc-1", now }), leaseAccount({ accountId: "acc-1", now })]);
+  assert.equal(same.filter((answer) => answer.ok).length, 1);
+  assert.equal(same.find((answer) => !answer.ok).error, "Chloe Stewart is already running");
+});
+
+test("an account whose session just ended rests before it is handed out again", async (t) => {
+  freezeInsideTheWindow(t);
+  rows.wl_accounts = [account("acc-1", "Chloe Stewart")];
+  rows.wl_runs = [run("acc-1", 3)];
+
+  const handed = await leaseAccount({ accountId: "acc-1", now: insideTheWindow() });
+  await call({
+    method: "POST", path: "/api/warmup/agent",
+    body: { action: "run.finished", accountId: "acc-1", leaseId: handed.lease.leaseId, ok: true }
+  });
+
+  // Views still owed, and nobody else to go instead: the answer is a wait,
+  // in words that do not move, not the same profile two minutes later.
+  const answer = await decideNext({ now: insideTheWindow() });
+  assert.equal(answer.next, null);
+  assert.equal(answer.reason, "Chloe Stewart is resting between sessions");
+  assert.ok(answer.retryAfterSeconds >= 300 && answer.retryAfterSeconds <= 540);
+  const refused = await leaseAccount({ accountId: "acc-1", now: insideTheWindow() });
+  assert.equal(refused.ok, false);
+  assert.equal(refused.error, "Chloe Stewart is resting between sessions");
+
+  const later = new Date(insideTheWindow().getTime() + 61 * 60_000);
+  t.mock.timers.setTime(later.getTime());
+  assert.equal((await decideNext({ now: later })).next?.accountId, "acc-1");
+});
+
+test("the agent's plan counts every counter row of the day, not the last one read", async (t) => {
+  freezeInsideTheWindow(t);
+  rows.wl_accounts = [account("acc-1", "Chloe Stewart")];
+  rows.wl_runs = [run("acc-1", 3)];
+  const quota = dailyQuota(DEFAULT_STRATEGY, "acc-1", 3, "profile_view");
+  assert.ok(quota >= 3);
+  // Two writers that both found no row, each with its own count.
+  rows.wl_day_actions = [
+    { run_id: "run-acc-1", account_id: "acc-1", kind: "profile_view", done: 2 },
+    { run_id: "run-acc-1", account_id: "acc-1", kind: "profile_view", done: 1 }
+  ];
+  const agent = await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" });
+  const views = agent.payload.plan.find((row) => row.kind === "profile_view");
+  assert.equal(views.done, 3);
+  assert.equal(views.remaining, quota - 3);
 });
 
 test("an account that stopped being due between the poll and the lease is a 409, not a retry", async () => {
@@ -167,6 +239,7 @@ test("an account that stopped being due between the poll and the lease is a 409,
     { account_id: "acc-1", kind: "profile_view", done: 99 },
     { account_id: "acc-1", kind: "like", done: 99 }
   ];
+  inboxReadToday("acc-1");
 
   const outcome = await leaseAccount({ accountId: "acc-1", now });
   assert.equal(outcome.ok, false);
@@ -207,7 +280,8 @@ test("a finished run gives the lease back and is told when to come again", async
   assert.equal(event.level, "info");
 });
 
-test("a failed run costs that account 45 minutes and nobody else anything", async () => {
+test("a failed run costs that account 45 minutes and nobody else anything", async (t) => {
+  freezeInsideTheWindow(t);
   const handed = await leaseAccount({ accountId: "acc-1", now: insideTheWindow() });
   const answer = await call({
     method: "POST", path: "/api/warmup/agent",
@@ -247,7 +321,8 @@ test("a run.finished for an account nobody knows is the one real refusal", async
   assert.equal(answer.status, 404);
 });
 
-test("an account in cool-off is named, and the answer is still a normal idle wait", async () => {
+test("an account in cool-off is named, and the answer is still a normal idle wait", async (t) => {
+  freezeInsideTheWindow(t);
   rows.wl_accounts = [account("acc-1", "Chloe Stewart")];
   rows.wl_runs = [run("acc-1", 3)];
 
@@ -270,10 +345,44 @@ test("nothing left in today's quota reads as nothing owing, not as a fault", asy
     { account_id: "acc-2", kind: "profile_view", done: 99 },
     { account_id: "acc-2", kind: "like", done: 99 }
   ];
+  // And both inboxes read today — the one thing a finished quota still owes.
+  inboxReadToday("acc-1", "acc-2");
   const answer = await decideNext({ now: insideTheWindow() });
   assert.equal(answer.next, null);
   assert.equal(answer.reason, "nothing owes work today");
   assert.ok(answer.retryAfterSeconds >= 300 && answer.retryAfterSeconds <= 540);
+});
+
+test("an agent that never reads the inbox is woken for it once a day, not all morning", async (t) => {
+  freezeInsideTheWindow(t);
+  rows.wl_accounts = [account("acc-1", "Chloe Stewart")];
+  rows.wl_runs = [run("acc-1", 3)];
+  rows.wl_day_actions = [
+    { account_id: "acc-1", kind: "profile_view", done: 99 },
+    { account_id: "acc-1", kind: "like", done: 99 }
+  ];
+
+  // Views done, inbox not read: today's read is the reason to open it.
+  const shown = await decideNext({ now: insideTheWindow() });
+  assert.equal(shown.next?.accountId, "acc-1");
+  assert.equal(shown.next.remaining, 0, "the read spends no quota");
+  assert.equal(shown.next.upkeep.inbox, true);
+
+  // An older build, or broken selectors: the session finishes and never posts
+  // `inbox.done`. Without a bound this account would be handed out every few
+  // minutes until 13:00 to do nothing.
+  const handed = await leaseAccount({ accountId: "acc-1", now: insideTheWindow() });
+  await call({
+    method: "POST", path: "/api/warmup/agent",
+    body: { action: "run.finished", accountId: "acc-1", leaseId: handed.lease.leaseId, ok: true }
+  });
+  const after = await decideNext({ now: insideTheWindow() });
+  assert.equal(after.next, null, "it had its chance at today's read");
+  assert.equal(after.reason, "nothing owes work today");
+
+  // The read is still owed, and said so whenever the account is opened.
+  const agent = await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" });
+  assert.equal(agent.payload.inbox.due, true);
 });
 
 test("the route takes the account only on the POST", async (t) => {
@@ -355,4 +464,148 @@ test("a deleted profile carries a stale status and is not open anywhere", async 
     { id: "profile-acc-2", status: "stopped", is_deleted: false }
   ];
   assert.equal((await decideNext({ now })).next.accountId, "acc-1");
+});
+
+test("in working mode an account that sent one run's worth is handed out again the same day", async (t) => {
+  freezeInsideTheWindow(t);
+  // A day on which acc-1 is dealt more requests than one run can carry.
+  let day = 15;
+  while (dailyQuota(DEFAULT_STRATEGY, "acc-1", day, "connect") <= MAX_INVITES_PER_RUN) day += 1;
+  const quota = dailyQuota(DEFAULT_STRATEGY, "acc-1", day, "connect");
+
+  rows.wl_accounts = [account("acc-1", "Chloe Stewart")];
+  rows.wl_runs = [run("acc-1", day)];
+  // This morning's run did its views and likes and sent the ten it was handed.
+  rows.wl_day_actions = [
+    { account_id: "acc-1", kind: "profile_view", done: 99 },
+    { account_id: "acc-1", kind: "like", done: 99 },
+    { account_id: "acc-1", kind: "connect", done: MAX_INVITES_PER_RUN }
+  ];
+  rows.wl_outreach = Array.from({ length: 8 }, (_, index) => ({ id: `o-${index}`, account_id: "acc-1", status: "waiting" }));
+  t.after(() => { delete rows.wl_outreach; });
+
+  const answer = await call({ method: "GET", path: "/api/warmup/agent/due" });
+  assert.equal(answer.payload.next.accountId, "acc-1", "the rest of today's allowance is a reason to open it again");
+  assert.equal(answer.payload.next.mode, "working");
+  assert.deepEqual(answer.payload.next.kinds, ["connect"]);
+  assert.equal(answer.payload.next.invites, quota - MAX_INVITES_PER_RUN, "the rest, and no more");
+  assert.equal(answer.payload.next.day, day);
+
+  const taken = await call({ method: "POST", path: "/api/warmup/agent/lease", body: { accountId: "acc-1" } });
+  assert.equal(taken.payload.lease.mode, "working");
+  const started = written.findLast((row) => row.table === "wl_events").body;
+  assert.match(started.message, /working mode, day/);
+});
+
+test("the agent's plan keeps two views for the second session, exactly as the poll counts them", async (t) => {
+  freezeInsideTheWindow(t);
+  // A working-mode day on which acc-1 is dealt more requests than one run carries.
+  let day = 15;
+  while (dailyQuota(DEFAULT_STRATEGY, "acc-1", day, "connect") <= MAX_INVITES_PER_RUN) day += 1;
+  const views = dailyQuota(DEFAULT_STRATEGY, "acc-1", day, "profile_view");
+  const likes = dailyQuota(DEFAULT_STRATEGY, "acc-1", day, "like");
+  const quota = dailyQuota(DEFAULT_STRATEGY, "acc-1", day, "connect");
+  assert.ok(views >= 4);
+  rows.wl_accounts = [account("acc-1", "Chloe Stewart")];
+  rows.wl_runs = [run("acc-1", day)];
+  inboxReadToday("acc-1");
+  // People for the whole day's allowance: more than one run, so a second session is coming.
+  rows.wl_outreach = Array.from({ length: quota }, (_, index) => ({ id: `o-${index}`, account_id: "acc-1", status: "waiting" }));
+  t.after(() => { delete rows.wl_outreach; });
+  const viewsRow = async () => (await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" }))
+    .payload.plan.find((row) => row.kind === "profile_view");
+
+  // The first session: two views wait, and the poll does not count them either.
+  const first = await viewsRow();
+  assert.equal(first.quota, views, "the day's figure is still the day's figure");
+  assert.equal(first.heldBack, 2);
+  assert.equal(first.remaining, views - 2);
+  const shown = await call({ method: "GET", path: "/api/warmup/agent/due" });
+  assert.equal(shown.payload.next.remaining, views - 2 + likes + quota);
+
+  // Its views and likes done and nothing sent yet: the two are the next
+  // session's now, whatever is still to send — it starts on them.
+  rows.wl_day_actions = [
+    { run_id: "run-acc-1", account_id: "acc-1", kind: "profile_view", done: views - 2 },
+    { run_id: "run-acc-1", account_id: "acc-1", kind: "like", done: likes }
+  ];
+  const second = await viewsRow();
+  assert.equal(second.heldBack, 0);
+  assert.equal(second.remaining, 2);
+  const again = await call({ method: "GET", path: "/api/warmup/agent/due" });
+  assert.deepEqual(again.payload.next?.kinds, ["profile_view", "connect"]);
+  assert.equal(again.payload.next.remaining, 2 + quota);
+
+  // People for one run only: one session sends them all, so nothing is kept
+  // back and nothing wakes the account again for two views.
+  rows.wl_outreach = rows.wl_outreach.slice(0, 7);
+  rows.wl_day_actions = [];
+  const alone = await viewsRow();
+  assert.equal(alone.heldBack, 0);
+  assert.equal(alone.remaining, views);
+  const once = await call({ method: "GET", path: "/api/warmup/agent/due" });
+  assert.equal(once.payload.next.remaining, views + likes + 7);
+});
+
+test("people beyond the connects left today keep no views back: one session sends all the day has left", async (t) => {
+  freezeInsideTheWindow(t);
+  // Fourteen requests allowed today, five of them already sent by a seller by
+  // hand, and fifteen people waiting: nine can still go, one run's worth.
+  let day = 15;
+  while (dailyQuota(DEFAULT_STRATEGY, "acc-1", day, "connect") !== 14) day += 1;
+  const views = dailyQuota(DEFAULT_STRATEGY, "acc-1", day, "profile_view");
+  const likes = dailyQuota(DEFAULT_STRATEGY, "acc-1", day, "like");
+  assert.ok(views >= 4);
+  rows.wl_accounts = [account("acc-1", "Chloe Stewart")];
+  rows.wl_runs = [run("acc-1", day)];
+  inboxReadToday("acc-1");
+  rows.wl_day_actions = [{ run_id: "run-acc-1", account_id: "acc-1", kind: "connect", done: 5 }];
+  rows.wl_outreach = Array.from({ length: 15 }, (_, index) => ({ id: `o-${index}`, account_id: "acc-1", status: "waiting" }));
+  t.after(() => { delete rows.wl_outreach; });
+
+  const plan = (await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" })).payload.plan;
+  const viewsRow = plan.find((row) => row.kind === "profile_view");
+  assert.equal(viewsRow.heldBack, 0, "no second session is coming for requests");
+  assert.equal(viewsRow.remaining, views);
+  const first = await call({ method: "GET", path: "/api/warmup/agent/due" });
+  assert.deepEqual(first.payload.next.kinds, ["profile_view", "like", "connect"]);
+  assert.equal(first.payload.next.invites, 14 - 5);
+  assert.equal(first.payload.next.remaining, views + likes + 14 - 5, "the poll counts every view too");
+
+  // The session does what its plan said and sends the nine: nothing wakes
+  // the account again today for two views.
+  rows.wl_day_actions = [
+    { run_id: "run-acc-1", account_id: "acc-1", kind: "profile_view", done: viewsRow.remaining },
+    { run_id: "run-acc-1", account_id: "acc-1", kind: "like", done: likes },
+    { run_id: "run-acc-1", account_id: "acc-1", kind: "connect", done: 14 }
+  ];
+  rows.wl_outreach = rows.wl_outreach.slice(0, 6);
+  const after = await call({ method: "GET", path: "/api/warmup/agent/due" });
+  assert.equal(after.payload.next?.kinds.includes("profile_view") ?? false, false);
+  assert.equal(after.payload.next?.remaining ?? 0, 0);
+});
+
+test("a failed run is handed out again when its cool-off ends, and its log line says that wait", async (t) => {
+  freezeInsideTheWindow(t);
+  process.env.WARMUP_COOL_OFF_MINUTES = "15";
+  t.after(() => { delete process.env.WARMUP_COOL_OFF_MINUTES; });
+  rows.wl_accounts = [account("acc-1", "Chloe Stewart")];
+  rows.wl_runs = [run("acc-1", 3)];
+
+  const handed = await leaseAccount({ accountId: "acc-1", now: insideTheWindow() });
+  await call({
+    method: "POST", path: "/api/warmup/agent",
+    body: { action: "run.finished", accountId: "acc-1", leaseId: handed.lease.leaseId, ok: false, note: "proxy down" }
+  });
+  const event = written.findLast((row) => row.table === "wl_events").body;
+  assert.equal(event.type, "scheduler.finished");
+  assert.match(event.message, /not handed out again for 15 min/);
+  assert.equal(event.meta.coolOffMinutes, 15);
+
+  const cooling = await decideNext({ now: new Date(insideTheWindow().getTime() + 14 * 60_000) });
+  assert.equal(cooling.reason, "Chloe Stewart is in cool-off");
+  const later = new Date(insideTheWindow().getTime() + 16 * 60_000);
+  t.mock.timers.setTime(later.getTime());
+  const back = await decideNext({ now: later });
+  assert.equal(back.next?.accountId, "acc-1", "the fifteen minutes the line promised, not the hour a finished session rests");
 });

@@ -67,6 +67,8 @@ Add or confirm these fields for reliable synchronization:
 
 Outbound OS will use a stable `external_id` for each copied/sent/logged action so retries cannot create duplicates.
 
+**What the warm-up writes today, before those fields are confirmed.** Every LinkedIn message the agent reads (both what we wrote and what the person replied) and every connection request that goes out is inserted as one `activities` row with only `contact_id`, `type: "linkedin"` and `content` — the columns the existing bridge already writes. The message's real time is in `content` (UTC), because no time column is confirmed; the row's own `created_at` is the time it was copied. Idempotency is kept on the Outbound OS side (`warmup/activities.mjs`): each line is keyed by the Outbound OS event it was made from, and a failed insert is retried on the next daily sync for up to seven days. Once `external_id` (and `occurred_at`) are confirmed, that key and that time move into those columns and only `warmup/activities.mjs` changes.
+
 ### Tasks
 
 Create or confirm a `tasks` object with:

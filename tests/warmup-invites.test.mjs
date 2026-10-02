@@ -4,7 +4,7 @@ import test from "node:test";
 
 import { handleWarmupApi } from "../warmup/api.mjs";
 import { ACCEPTED_STATUS, WAITING_STATUS, canMove, describeInvite } from "../warmup/invites.mjs";
-import { DEFAULT_STRATEGY } from "../warmup/strategy.mjs";
+import { DEFAULT_STRATEGY, noteHasLink, noteRuleOn, noteUnderRule, noteWordCount } from "../warmup/strategy.mjs";
 
 // ── the transition table ──────────────────────────────────────────────────
 //
@@ -63,6 +63,80 @@ test("an invitation is dated by when it was sent, not by when the person was hel
   assert.equal(invite.requestedBy, "seller@example.com");
   assert.equal(invite.sentByWhom, "agent");
   assert.equal(invite.waitingDays, 0, "only a waiting row counts days");
+});
+
+// ── the note a request may carry ──────────────────────────────────────────
+//
+// Days 4–10 allow no note; day 11 on, and working mode, allow three words and
+// no link. Decided when the request is handed to the agent, by the rule of the
+// day it goes out — and a note that does not fit is dropped, never the request.
+
+test("the phase's note rule is read by the day, working mode included", () => {
+  assert.equal(noteRuleOn(DEFAULT_STRATEGY, 1), false);
+  assert.equal(noteRuleOn(DEFAULT_STRATEGY, 5), false, "own team or verified contacts, no notes");
+  assert.equal(noteRuleOn(DEFAULT_STRATEGY, 9), false, "the niche, still no notes");
+  assert.deepEqual(noteRuleOn(DEFAULT_STRATEGY, 12), { maxWords: 3, allowLinks: false });
+  assert.deepEqual(noteRuleOn(DEFAULT_STRATEGY, 40), { maxWords: 3, allowLinks: false }, "working mode keeps the day 11–14 rule");
+  assert.equal(noteRuleOn({ phases: [] }, 5), false, "no plan, no note");
+});
+
+test("words are what stands between spaces and the punctuation that joins them", () => {
+  assert.equal(noteWordCount("  Привіт,   Марто  "), 2);
+  assert.equal(noteWordCount("Hi\nthere\tMarta"), 3);
+  assert.equal(noteWordCount(""), 0);
+  assert.equal(noteWordCount(null), 0);
+  // A person counts three words here, and so does the rule now.
+  assert.equal(noteWordCount("Привіт,радий,знайомству"), 3);
+  assert.equal(noteWordCount("раз;два/три|чотири，п'ять"), 5);
+  // A lone dash is not a word; a hyphen inside one does not split it.
+  assert.equal(noteWordCount("Радий знайомству — Олег"), 3);
+  assert.equal(noteWordCount("IT-компанія"), 1);
+});
+
+test("a link is anything that reads as one, bare domains included", () => {
+  for (const linked of [
+    "https://adaction.com", "see www.adaction", "adaction.com", "AdAction.COM", "bit.ly/3xyz", "t.me/marta",
+    "linkedin.com/in/marta", "пиши на m@adaction.io", "ftp://files", "(adaction.com.ua)",
+    // Cyrillic and full-width: what LinkedIn shows as a domain is one.
+    "Ми з adv.укр", "сайт.рф", "пошта@adv.укр", "adaction。com", "adaction．com", "ａｄａｃｔｉｏｎ.com", "adv.xn--p1ai"
+  ]) {
+    assert.equal(noteHasLink(linked), true, linked);
+  }
+  for (const plain of [
+    "Привіт, Марто!", "e.g. UA", "i.e. you", "3.5 роки", "U.S. team", "Hello.", "т.д.", "Раді знайомству",
+    // Ukrainian abbreviations typed without a space are not domains.
+    "м.Київ", "вул.Шевченка", "тис.грн", "Привіт.Дякую"
+  ]) {
+    assert.equal(noteHasLink(plain), false, plain);
+  }
+});
+
+test("a long note cannot make the link check crawl", { timeout: 2000 }, () => {
+  // The note is whatever the request body carried. A single pattern for the
+  // same rule took seconds on a hundred thousand letters.
+  assert.equal(noteHasLink("a".repeat(100_000)), false);
+  assert.equal(noteHasLink("a.".repeat(50_000)), false);
+  assert.equal(noteHasLink("a-".repeat(50_000)), false);
+  // Labels in any script are walked now, so a Cyrillic run gets the same test.
+  assert.equal(noteHasLink("а".repeat(100_000)), false);
+  assert.equal(noteHasLink("а.".repeat(50_000)), false);
+});
+
+test("a note the rule does not allow is dropped, and the reason is kept", () => {
+  const short = { maxWords: 3, allowLinks: false };
+  assert.deepEqual(noteUnderRule("Пишу без приводу — одне питання.", false), { note: null, dropped: "notes_off" });
+  assert.deepEqual(noteUnderRule("  Привіт, Марто!  ", short), { note: "Привіт, Марто!", dropped: null }, "trimmed, not rewritten");
+  assert.deepEqual(noteUnderRule("Раді знайомству з вами", short), { note: null, dropped: "too_many_words" });
+  assert.deepEqual(noteUnderRule("see adaction.com", short), { note: null, dropped: "has_link" });
+  assert.deepEqual(noteUnderRule("see adaction.com", { maxWords: 3, allowLinks: true }), { note: "see adaction.com", dropped: null });
+  assert.deepEqual(noteUnderRule("any length at all, really", true), { note: "any length at all, really", dropped: null });
+  // Nothing to drop is not a drop.
+  assert.deepEqual(noteUnderRule("", false), { note: null, dropped: null });
+  assert.deepEqual(noteUnderRule("   ", short), { note: null, dropped: null });
+  assert.deepEqual(noteUnderRule(null, short), { note: null, dropped: null });
+  // A rule nobody understood sends nothing a rule did not clear.
+  assert.deepEqual(noteUnderRule("Привіт", "short"), { note: null, dropped: "notes_off" });
+  assert.deepEqual(noteUnderRule("Привіт", undefined), { note: null, dropped: "notes_off" });
 });
 
 // ── the routes, over a PostgREST-shaped stub ──────────────────────────────
@@ -396,6 +470,107 @@ test("a note LinkedIn will not carry stops the request rather than sending it ba
   assert.equal(rows.wl_outreach[0].status, WAITING_STATUS);
 });
 
+test("on a no-notes day the request is handed out bare, not held back for its note", async () => {
+  // Day 5. Queueing stays permissive — the request may go on a later day with
+  // a later rule — so the note is stored as the seller typed it.
+  await call({
+    method: "POST", path: "/api/warmup/invites",
+    body: { accountId: "acc-1", crmContactId: "c-1", note: "Пишу без приводу — одне питання." }
+  });
+  assert.equal(rows.wl_outreach[0].note, "Пишу без приводу — одне питання.");
+
+  const agent = await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" });
+  assert.equal(agent.payload.connectionNote, false);
+  assert.equal(agent.payload.invites.toSend.length, 1, "the request still goes");
+  // An empty string, not null: the agent in the field was built when `note`
+  // was always a string, and "" is the value it already knew as "no note".
+  assert.equal(agent.payload.invites.toSend[0].note, "", "empty: send it bare");
+  assert.equal(typeof agent.payload.invites.toSend[0].note, "string");
+  assert.equal(agent.payload.invites.toSend[0].noteDropped, "notes_off");
+
+  const outreachId = rows.wl_outreach[0].id;
+  const sent = await call({
+    method: "POST", path: "/api/warmup/agent",
+    body: { action: "invite.sent", accountId: "acc-1", outreachId, outcome: "sent" }
+  });
+  assert.equal(sent.payload.moved, true);
+
+  // The record says what went, not what was queued.
+  const event = rows.wl_events.find((row) => row.type === "invite.sent");
+  assert.equal(event.meta.note, null);
+  assert.equal(event.meta.noteDropped, "notes_off");
+  const card = await call({ method: "GET", path: "/api/warmup/invites?crmContactId=c-1" });
+  assert.equal(card.payload.invite.noteDropped, "notes_off");
+  assert.equal(card.payload.invite.note, "Пишу без приводу — одне питання.", "the queued note is still there to read");
+});
+
+test("from day 11 a short note without a link goes, and anything else goes bare", async () => {
+  rows.wl_runs[0].started_at = startedForDay(12);
+  rows.contacts.push(
+    { id: "c-2", name: "Ivan Petrenko", company: "Gamely", linkedin: "https://linkedin.com/in/ivan" },
+    { id: "c-3", name: "Olena Shevchuk", company: "Playrix", linkedin: "https://linkedin.com/in/olena" },
+    { id: "c-4", name: "Taras Bondar", company: "Tapster", linkedin: "https://linkedin.com/in/taras" }
+  );
+  const queue = (crmContactId, note) => call({ method: "POST", path: "/api/warmup/invites", body: { accountId: "acc-1", crmContactId, note } });
+  await queue("c-1", "Привіт, Марто!");
+  await queue("c-2", "Раді знайомству з вами, Іване");
+  await queue("c-3", "see adaction.com");
+  await queue("c-4", "");
+  // Oldest first, and the stub stamps them in the same millisecond.
+  rows.wl_outreach.forEach((row, index) => { row.created_at = `2026-09-20T10:0${index}:00.000Z`; });
+
+  const agent = await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" });
+  assert.deepEqual(agent.payload.connectionNote, { maxWords: 3, allowLinks: false });
+  const byContact = Object.fromEntries(agent.payload.invites.toSend.map((row) => [row.crmContactId, row]));
+  assert.equal(Object.keys(byContact).length, 4, "every one of them is handed out, whatever its note");
+  assert.equal(byContact["c-1"].note, "Привіт, Марто!");
+  assert.equal(byContact["c-1"].noteDropped, null);
+  assert.equal(byContact["c-2"].note, "");
+  assert.equal(byContact["c-2"].noteDropped, "too_many_words", "never shortened to fit");
+  assert.equal(byContact["c-3"].note, "");
+  assert.equal(byContact["c-3"].noteDropped, "has_link");
+  assert.equal(byContact["c-4"].note, "");
+  assert.equal(byContact["c-4"].noteDropped, null, "no note was never a dropped one");
+  assert.ok(Object.values(byContact).every((row) => typeof row.note === "string"), "always a string on the wire");
+
+  await call({
+    method: "POST", path: "/api/warmup/agent",
+    body: { action: "invite.sent", accountId: "acc-1", outreachId: byContact["c-1"].outreachId, outcome: "sent" }
+  });
+  const event = rows.wl_events.find((row) => row.type === "invite.sent");
+  assert.equal(event.meta.note, "Привіт, Марто!", "the note that went is on the record");
+  assert.equal(event.meta.noteDropped, null);
+});
+
+test("working mode carries the day 11–14 note rule to the hand-off", async () => {
+  rows.wl_runs[0].started_at = startedForDay(30);
+  await call({ method: "POST", path: "/api/warmup/invites", body: { accountId: "acc-1", crmContactId: "c-1", note: "Glad to connect" } });
+  let agent = await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" });
+  assert.equal(agent.payload.mode, "working");
+  assert.equal(agent.payload.invites.toSend[0].note, "Glad to connect");
+
+  rows.wl_outreach[0].note = "www.adaction.com";
+  agent = await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" });
+  assert.equal(agent.payload.invites.toSend[0].note, "");
+  assert.equal(agent.payload.invites.toSend[0].noteDropped, "has_link");
+});
+
+test("the account picker says today's note rule, and nothing for an account that cannot send", async () => {
+  rows.wl_accounts.push(
+    { id: "acc-2", label: "Dan Moreau", login: "dan@example.com", profile_remote_id: "profile-2", status: "warming", health: "ok" },
+    { id: "acc-3", label: "Sam Blocked", login: "sam@example.com", profile_remote_id: "profile-3", status: "warming", health: "captcha" }
+  );
+  rows.wl_runs.push(
+    { ...rows.wl_runs[0], id: "run-2", account_id: "acc-2", started_at: startedForDay(12) },
+    { ...rows.wl_runs[0], id: "run-3", account_id: "acc-3", started_at: startedForDay(12) }
+  );
+  const answer = await call({ method: "GET", path: "/api/warmup/invites/accounts" });
+  const byId = Object.fromEntries(answer.payload.accounts.map((account) => [account.id, account]));
+  assert.equal(byId["acc-1"].noteRule, false, "day 5: no notes");
+  assert.deepEqual(byId["acc-2"].noteRule, { maxWords: 3, allowLinks: false }, "day 12: three words, no link");
+  assert.equal(byId["acc-3"].noteRule, null, "a captcha says nothing about notes");
+});
+
 test("a request past the day's allowance is still recorded, and the agent is told to stop", async () => {
   const outreachId = await queueOne();
   rows.wl_day_actions = [{
@@ -504,12 +679,13 @@ test("an account is woken for invitations only when somebody is actually waiting
       id: "run-1", account_id: "acc-1", state: "running", started_at: started.toISOString(),
       paused_days: 0, paused_until: null, strategy_snapshot: DEFAULT_STRATEGY
     }],
-    // Day 13: views and likes are done, so the only thing that could owe work
-    // is an invitation.
+    // Day 13: views and likes are done and the inbox has been read today, so
+    // the only thing that could owe work is an invitation.
     dayActions: [
       { account_id: "acc-1", kind: "profile_view", done: 99 },
       { account_id: "acc-1", kind: "like", done: 99 }
     ],
+    inboxSyncedToday: new Set(["acc-1"]),
     todayIso: "2026-09-21",
     nowMs: now.getTime()
   };
@@ -523,20 +699,36 @@ test("an account is woken for invitations only when somebody is actually waiting
   assert.equal(busy.ready[0].invites, 2);
 });
 
-test("an account that finished warming is still told to come and check what it sent", async () => {
-  // The run is past the last day of the plan.
+test("past the last phase the agent is handed a working-mode plan, and still told to check what it sent", async () => {
+  // Day 30. This used to answer an empty plan and "upkeep only".
   rows.wl_runs[0].started_at = startedForDay(30);
   rows.wl_outreach = [{
     id: "o-1", account_id: "acc-1", crm_contact_id: "c-1", person_name: "Marta Kovalenko",
     person_linkedin: "https://linkedin.com/in/marta", sent_by: "chloe@example.com",
     status: "pending", created_at: "2026-09-10T10:00:00.000Z", responded_at: null
+  }, {
+    id: "o-2", account_id: "acc-1", crm_contact_id: "c-2", person_name: "Ivan Petrenko",
+    person_linkedin: "https://linkedin.com/in/ivan", sent_by: "chloe@example.com",
+    status: WAITING_STATUS, created_at: "2026-09-11T10:00:00.000Z", responded_at: null
   }];
 
   const answer = await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" });
   assert.equal(answer.status, 200);
-  assert.equal(answer.payload.runnable, true, "a flat false here is what left sent invitations unwatched for good");
-  assert.match(answer.payload.reason, /upkeep only/);
-  assert.deepEqual(answer.payload.plan, [], "and there is genuinely no warming left to do");
+  assert.equal(answer.payload.runnable, true);
+  assert.equal(answer.payload.mode, "working");
+  assert.equal(answer.payload.day, 30);
+  assert.equal(answer.payload.phase, "Working mode");
+  assert.deepEqual(answer.payload.connectionNote, { maxWords: 3, allowLinks: false });
+
+  const byKind = Object.fromEntries(answer.payload.plan.map((row) => [row.kind, row]));
+  assert.deepEqual(Object.keys(byKind).sort(), ["connect", "like", "profile_view"], "no comments, no follows");
+  assert.ok(byKind.profile_view.quota >= 10 && byKind.profile_view.quota <= 12);
+  assert.ok(byKind.like.quota >= 2 && byKind.like.quota <= 3);
+  assert.ok(byKind.connect.quota >= 10 && byKind.connect.quota <= 15);
+  assert.equal(answer.payload.invites.connectsLeft, byKind.connect.quota, "the whole working-mode allowance is open");
+  assert.deepEqual(answer.payload.invites.toSend.map((row) => row.outreachId), ["o-2"]);
+
+  // And looking after what was sent carries on as before.
   assert.equal(answer.payload.upkeep.checks, 1);
   assert.equal(answer.payload.invites.toCheck.length, 1, "with the person to check already in hand");
 
@@ -547,18 +739,87 @@ test("an account that finished warming is still told to come and check what it s
   });
   const second = await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" });
   assert.equal(second.payload.upkeep.checks, 0);
-  // Still worth opening, though — past the last day of the plan nothing else
-  // will ever wake this account to read what people wrote back.
-  assert.equal(second.payload.runnable, true);
-  assert.equal(second.payload.upkeep.inbox, true);
+  assert.equal(second.payload.runnable, true, "the day's working-mode plan is still there");
 
-  await call({
+  // A request sent in working mode is spent against the working quota, not
+  // refused as "Warm-up is finished".
+  const sent = await call({
     method: "POST", path: "/api/warmup/agent",
-    body: { action: "inbox.done", accountId: "acc-1", threadsSeen: 0 }
+    body: { action: "invite.sent", accountId: "acc-1", outreachId: "o-2", outcome: "sent" }
   });
-  const third = await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" });
-  assert.equal(third.payload.runnable, false, "checked and read — nothing owing until tomorrow");
-  assert.equal(third.payload.reason, "Warm-up is finished");
+  assert.equal(sent.status, 200);
+  assert.equal(sent.payload.overQuota, false);
+  assert.equal(sent.payload.connectsLeft, byKind.connect.quota - 1);
+  assert.equal(rows.wl_day_actions.find((row) => row.kind === "connect")?.done, 1);
+});
+
+test("an account in working mode reads as working, with a plan and a next session", async () => {
+  const { describeAccount } = await import("../warmup/store.mjs");
+  rows.wl_runs[0].started_at = startedForDay(30);
+
+  const described = await describeAccount(rows.wl_accounts[0]);
+  assert.equal(described.warmup.mode, "working");
+  assert.equal(described.warmup.working, true);
+  assert.equal(described.warmup.finished, false, "the screen must not offer to start it again");
+  assert.equal(described.warmup.state, "running", "and the warning button stays where it was");
+  assert.equal(described.warmup.day, 30, "the real day, not 'day 15 of 14' forever");
+  assert.equal(described.warmup.phase, "Working mode");
+  assert.ok(described.warmup.quotas.connect >= 10 && described.warmup.quotas.connect <= 15);
+  assert.ok(described.nextSession, "an account still sending has a next session");
+
+  const dashboard = await call({ method: "GET", path: "/api/warmup/dashboard" });
+  assert.equal(dashboard.payload.totals.working, 1);
+  assert.equal(dashboard.payload.totals.warming, 0);
+  assert.equal(dashboard.payload.totals.completed, 0);
+  assert.ok(dashboard.payload.todayProgress.planned > 0, "its quotas are today's work like anybody's");
+  assert.equal(dashboard.payload.attention.length, 0, "working mode is not something to attend to");
+});
+
+test("a run started now freezes working mode into its snapshot", async () => {
+  rows.wl_strategies = [];
+  rows.wl_accounts.push({
+    id: "acc-2", label: "Dan Moreau", login: "dan@example.com",
+    profile_remote_id: "profile-2", status: "idle", health: "ok"
+  });
+  const answer = await call({ method: "POST", path: "/api/warmup/control", body: { accountId: "acc-2", action: "start" } });
+  assert.equal(answer.status, 200);
+
+  const started = rows.wl_runs.find((row) => row.account_id === "acc-2");
+  // The strategy row has no column for a working mode, so the one in code is
+  // frozen with the phases — an edit to it later does not reach this run.
+  assert.deepEqual(started.strategy_snapshot.workingMode, DEFAULT_STRATEGY.workingMode);
+  assert.deepEqual(started.strategy_snapshot.phases, DEFAULT_STRATEGY.phases);
+  delete rows.wl_strategies;
+});
+
+test("the twenty-first request of a day is refused, whatever the snapshot allows", async () => {
+  // A snapshot saved before the ceiling existed, asking for thirty a day.
+  rows.wl_runs[0].started_at = startedForDay(30);
+  rows.wl_runs[0].strategy_snapshot = { ...DEFAULT_STRATEGY, workingMode: { quotas: { connect: [30, 30] } } };
+  const todayIso = new Date().toISOString().slice(0, 10);
+  rows.wl_day_actions = [{
+    id: "d-1", run_id: "run-1", account_id: "acc-1", on_date: todayIso, kind: "connect", quota: 20, done: 19
+  }];
+
+  const twentieth = await call({
+    method: "POST", path: "/api/warmup/agent",
+    body: { action: "record", accountId: "acc-1", kind: "connect" }
+  });
+  assert.equal(twentieth.status, 200);
+  assert.equal(twentieth.payload.quota, 20, "the snapshot's thirty is clamped to the ceiling");
+  assert.equal(twentieth.payload.remaining, 0);
+
+  const twentyFirst = await call({
+    method: "POST", path: "/api/warmup/agent",
+    body: { action: "record", accountId: "acc-1", kind: "connect" }
+  });
+  assert.equal(twentyFirst.status, 409);
+  assert.equal(twentyFirst.payload.error, "Daily quota reached (20)");
+  assert.equal(rows.wl_day_actions[0].done, 20);
+
+  // And the agent is never handed more than the ceiling leaves.
+  const plan = await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" });
+  assert.equal(plan.payload.invites.connectsLeft, 0);
 });
 
 test("the scheduler and the semaphore answer with one upkeep, not two", async () => {

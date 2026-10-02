@@ -115,7 +115,7 @@ nothing under `warmup/` knows where the file is.
   alreadyApproached: number, // of those, already in wl_outreach (any status)
   remaining: number,
   perDayNow: number,         // today's connect quota summed over the chosen accounts
-  perDayAtPeak: number,      // each chosen account's highest connect quota, summed
+  perDayAtPeak: number,      // each chosen account's working-mode rate, summed
   daysToFinish: number | null,   // null when perDayAtPeak is 0
   reachedThisMonth: number,      // perDayAtPeak * 30, capped at remaining
   accountsChosen: number }
@@ -127,11 +127,18 @@ that is paused, unhealthy or not warming contributes 0 to `perDayNow` and still
 contributes its peak to `perDayAtPeak`, so the screen can show the difference
 between "today" and "when everything is warm".
 
-An account's peak is drawn day by day through the same `dailyQuota` helper and
-the highest figure kept, so it is a number that account actually reaches rather
-than the top corner of a range it may never be dealt. An account with no run
-yet has frozen no snapshot, so its peak comes from the strategy it is assigned,
-or the house default.
+An account's peak is its pace once warm, which is working mode — the rest of
+its life after day 14, 10–15 requests a day on the standard strategy (see
+*After day 14: working mode* in `WARMUP_SCHEDULER_CONTRACT.md`). It is drawn
+day by day through the same `dailyQuota` helper over a month of working-mode
+days, averaged and rounded down, so it is what an ordinary day deals rather than
+the top corner of the range. It used to be the warm-up's own top day (5–6),
+which made every `daysToFinish` about twice as long as it will be. A snapshot
+without a working mode of its own gets the one in code, and so does its
+forecast. An account with no run yet has frozen no snapshot, so its peak comes
+from the strategy it is assigned, or the house default. `perDayNow` for an
+account in working mode is today's draw, which can sit above or below the
+average.
 
 `perDayNow` is 0 for a fresh set of accounts and stays 0 until day 4 — the
 standard strategy forbids requests for the first three days. That gap is the
@@ -142,6 +149,11 @@ point of showing both numbers, not a fault.
 `country` matches case-insensitively and whole; `position` matches
 case-insensitively and anywhere inside; `leadStatus` and `ownerId` are exact.
 Every empty box narrows nothing.
+
+Added with the folder feed: one condition is always on and is not a box —
+`linkedin ilike *linkedin.com/in/*`. A contact with no profile link is nowhere
+the agent can click Connect, so `queueQuery` leaves it out of the queue, and
+with it out of the forecast's `matching` and `alreadyApproached`.
 
 A value is sent to PostgREST unquoted. The documented double-quoting for values
 carrying a reserved character is wrong against the build behind Supabase, which

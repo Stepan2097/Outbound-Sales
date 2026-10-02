@@ -27,7 +27,9 @@ in this feature that writes a day counter without going through it.
 
 This is what makes a campaign safe to point at a folder of twenty thousand
 people: it cannot make an account do more than its warm-up day allows, and an
-account that is paused, restricted or unhealthy simply contributes nothing.
+account that is paused after a warning or unhealthy simply contributes nothing.
+The pause ends by itself: the day after `paused_until` the account contributes
+again, `restricted` on its row or not.
 
 ## Claiming
 
@@ -76,6 +78,7 @@ Owns `warmup/**`, `server.mjs`, `tests/**`, and both contract files.
   filters: { country, position, leadStatus, ownerId },   // as Phase 1
   accountIds: string[],
   productId: string | null,        // from the workspace's own products
+  fromDay: number,                 // 1–365, default 7: the day the folder starts feeding (see below)
   state: "draft" | "running" | "paused" | "done",
   order: number,
   createdAt: string,
@@ -236,7 +239,8 @@ the list would have been. A 409 carries `error` and no `reason`.
 | no requests planned at all | `Day 2 of 14 — no connection requests are planned for today` |
 | today's allowance is spent | `Day 11 of 14 — today's 5 connection requests are already spent` |
 | enough is already claimed | `5 already claimed and today allows 5 — work through the queue first` |
-| the warm-up is over | `The warm-up is finished — day 15 of 14` |
+| working mode, today's allowance is spent | `Working mode, day 17 — today's 12 connection requests are already spent` |
+| the warm-up is over (only a snapshot with nothing after its last phase) | `The warm-up is finished — day 15 of 14` |
 | no campaign points here | `No running campaign works this account` |
 | the folder is exhausted | `Nothing left in "Media buyers" that has not been approached` |
 
@@ -403,6 +407,178 @@ all. Branch on `matching === 0` first — a filter that matches nobody must read
 as "nothing in this folder passes these filters", never as "everyone has already
 been approached", which is flatly false and sends the seller looking for work
 that was never there.
+
+## A running campaign sends: the folder feeds its accounts
+
+Added after working mode, the pause and the note rule. Before this a campaign
+only proposed: its people reached the agent one at a time, through a seller
+queueing each of them from the lead workspace, and "Закріпити зараз" made
+claims that only a human could send. A running campaign on "ліди з linkedin2"
+looked alive — forecast, rank, "#1 у черзі" — and the agent sent nobody from it.
+
+**The rule.** For every account ticked on a `running` campaign, from the
+campaign's `fromDay` on — working mode included — the server tops that
+account's `waiting` invitations up from the campaign's folder to **today's
+remaining connection allowance** (`quota - sent today`), with nobody clicking.
+No folder is hardcoded: the operator picks it in the campaign form as before.
+
+- **`fromDay`, default 7.** Days 4–6 allow one or two requests and they are for
+  the account's own team and verified contacts, which a seller still queues by
+  hand from the lead workspace. A campaign that *is* the team folder can say 4.
+  Stored on the campaign (`Campaign.fromDay`, integer 1–365); `POST` and
+  `PATCH /campaigns` accept it, absent means 7 on create and "keep" on edit,
+  anything else is a 400 `«З якого дня» — ціле число від 1 до 365`. A campaign
+  saved before this reads as 7.
+- **The same path as a seller's invitation.** Each top-up is `requestInvite`: a
+  `waiting` row plus an `invite.requested` event, now with
+  `meta.source: "campaign"`, `campaignId`, `campaignName` and `note: null`. So the
+  person's history shows it, cancel and move work on it, and the phase's note
+  rule applies (there is no note to apply it to). One `campaign.fed` event per
+  top-up says how many and why (`meta.fedToday` is the day's running total).
+- **Only from the campaign's day, sent as well as added.** A folder's waiting
+  row is handed to the agent only while the account's day is at or past the
+  `fromDay` of the campaign that fed it (a deleted campaign reads as 7), and the
+  scheduler and the top-up count it only then (`sendableToday`). Without it, a
+  run stopped and started again sent the folder's leftovers on its days 4–6.
+- **Picked by hand first.** The room is `left - waiting - live claims`
+  (`folderRoom`): what a seller queued, and claims somebody took to send
+  themselves, come off before the folder adds anybody. `invitesToSend` then
+  hands the agent the hand-picked waiting rows ahead of the folder's, each
+  oldest first — so a person picked after the folder already filled the day
+  still goes first, and the stranger they displace waits for tomorrow.
+- **Who is skipped.** Anybody with a `wl_outreach` row in any status on any
+  account (approached, claimed, waiting, connected — held by another account
+  included), and anybody whose `linkedin` is not a profile link: `queueQuery`
+  now requires `linkedin ilike *linkedin.com/in/*`, so that also narrows the
+  forecast's `matching` and the manual claim. Competitors are the folder's
+  business: curate the folder, or cancel the person's invitation from their
+  card — see the next point.
+- **Anybody the folder let go.** A `campaign.skipped` event marks a person the
+  folder must not offer again: written when a seller cancels a folder-fed
+  invitation (`reason: "cancelled"`) and when the agent reports a held outcome
+  about the person on one (`reason: "held"`, and the row is deleted — see
+  *Held outcomes* below; a `no_note` from an out-of-date agent writes none).
+  It carries the contact id and the profile slug, and the walk steps over both.
+  It binds the folder only: a seller can still queue the person by hand.
+- **One profile, one person.** The CRM holds some people twice — two contact
+  ids, one LinkedIn profile — and the unique index only knows the id. So the
+  people about to be offered are also checked by normalized `/in/` slug
+  (`linkedinSlug`): against every `wl_outreach.person_linkedin` (asked as an
+  `or=(person_linkedin.ilike.*/in/<slug>*,…)` prefix and compared exactly),
+  against the skip markers, and against each other within the walk. The same
+  member no longer gets a request from two of our logins.
+- **When.** When the agent asks for its work (`GET /agent`, before `invites`
+  is built), which it does straight after taking the account. Not on
+  `POST /agent/lease` any more: that answers at once and only counts, like the
+  poll — see `WARMUP_SCHEDULER_CONTRACT.md`. Idempotent — the room is counted
+  from what is held now, so asking again adds nobody — and one fill per
+  account at a time, so two questions arriving together fill it once.
+  `GET /agent/due` stays free of side effects: it only *counts* what the folder
+  could offer (see `WARMUP_SCHEDULER_CONTRACT.md`, *A campaign's folder is
+  work*), so an account with folder room and views already done is still woken.
+- **Never more than a day.** A top-up never goes past today's allowance, so
+  nothing piles up: whatever did not go today counts against tomorrow's room.
+- **Twice the day's quota a day, at most.** However the room frees up, the
+  folder adds at most `2 × today's connect quota` people to one account per day
+  (`FOLDER_DAILY_FACTOR`), counted from today's `invite.requested` events with
+  `meta.source: "campaign"` on that account. `folderRoom` and the scheduler's
+  `folderWork` apply the same cap, so an account at it is not woken for its
+  folder. This is what bounds an agent that fails every profile (selector rot,
+  stale links): two days' worth of the folder, not the folder.
+- **Nothing while it cannot send.** A paused, unhealthy, excluded or not-yet-
+  allowed account (days 1–3), a campaign that is not `running`, or an account
+  not ticked on it gets nothing.
+
+**The walk scales now.** `nextCandidates` moved to `warmup/feed.mjs`. It read
+five pages from the front of the folder and stopped, so once about two hundred
+people had been approached it answered "nothing left" with thousands still
+there. It now pages on the server (`offset`, with `id` breaking `created_at`
+ties — a folder imported in one statement shares one timestamp), grows the page
+as it goes, and remembers per folder query where the approached head ended
+today, so the next walk starts there. The hint is only a starting point: every
+person offered is still checked against `wl_outreach`. It resets each day, which
+is how people added to the folder or released back to it are found.
+
+**The manual button keeps working**, from the same walk (`takeFromCampaigns`).
+Its capacity now counts the account's `waiting` invitations as well as its
+claims, so a claim on a day the folder already filled answers
+`N already claimed and today allows N — work through the queue first` rather
+than allocating people the day can never send.
+
+**`GET /api/warmup/queue?accountId=&campaignId=`** gains two fields, so the
+panel can show the account is fed:
+
+```ts
+waiting: [ { outreachId, accountId, crmContactId, name, company, position, linkedin,
+             claimedAt, fromFolder: boolean, campaignName: string | null,
+             parked: boolean } ],
+autoFeed: null | {
+  campaignId, campaignName, fromDay, day: number | null, working: boolean,
+  running: boolean, ticked: boolean, blocked: string | null,
+  on: boolean,            // this campaign fills this account by itself today
+  ahead: [ { id, name } ],// running campaigns ranked above it that feed this account today
+  connectsLeft: number
+}
+```
+
+`ahead` exists because the top-up fills the room first campaign first: while a
+campaign above has people, the folder of the one on screen never moves even
+though it is `on`. The panel then says the account is filled by «…» first and
+that this folder is taken from only when theirs runs out, instead of «працює».
+It holds only campaigns that take today — running, ticking this account, with
+a `fromDay` the account has reached — and is `[]` when `on` is false. A server
+from before it sends no `ahead`, which the panel reads as nobody ahead.
+
+`campaignId` picks the campaign `autoFeed` is about (the panel's selected one);
+without it, the account's first running campaign. The panel shows the line only
+when `autoFeed.campaignId` is the campaign on screen, drops an answer that
+arrives after the selection moved, and reloads the queues when «Редагувати»
+selects another campaign — the queue cache is keyed by account alone, and two
+campaigns can tick the same account. The panel says whether the
+folder is feeding, from which day it will, and lists what waits for the agent
+with "з папки" / "вручну" beside each person. The campaign form has a
+"Автопідбір із папки з дня" field. A running campaign's row says "сам бере з
+N-го дня"; a draft or paused one "братиме з N-го дня, коли працюватиме"; a
+finished one nothing. The running campaign's note says the feed starts on each
+ticked account's own warm-up day N — not on the campaign's first day — and
+after the campaigns above it in the list that tick the same account.
+
+**Held outcomes.** A request the browser could not send (`no_button`,
+`profile_gone`, `no_note`, `blocked`) is handled by who picked the person:
+
+- **Folder-fed:** the row is deleted, and the folder fills the place today
+  within the daily cap. Left waiting, such a row was retried every morning
+  ahead of the day's new people and held a slot of the account's allowance for
+  as long as nobody looked. After `no_button`, `profile_gone` or `blocked`,
+  `campaign.skipped` is written first and the folder never offers the person
+  again — `blocked` deliberately: the page may have been about the account,
+  but a second pause of the account costs more than one lead. After a
+  `no_note` on a request handed over bare (always the case for a folder row
+  unless somebody set a note on it), the agent is out of date, not the person:
+  no marker, and the person is back in the pool to be fed again later. The
+  same for any held report that comes while the account is already paused —
+  an agent that went on after an earlier block page: about the account, no
+  marker. A retry of the `blocked` that started the pause is not one of those:
+  it is skipped like the first report would have been.
+- **Hand-picked:** the row stays `waiting` for the seller, and rests until
+  tomorrow — `invitesToSend` leaves it out and neither the scheduler nor the
+  top-up counts it. Before, one broken profile link kept its account due all
+  morning, re-opened every few minutes to fail on the same profile. A
+  `blocked` parks it at once: not handed out — not even alone in the queue
+  after the pause — not counted, and shown as «Потребує уваги» until a person
+  moves it to another account or cancels it and queues the person again. A
+  `blocked` that comes while the account is already paused parks nobody.
+
+See *A held report while the pause holds* in `CONTACT_OUTREACH_CONTRACT.md`.
+
+A held report the agent sends again (it retries what it got no answer to) is
+answered as the first was and changes nothing, except to finish letting a
+folder's row go when the first report failed part-way through that — see *A
+held report sent again* in `CONTACT_OUTREACH_CONTRACT.md`.
+
+`GET /queue`'s `waiting[]` rows carry `parked` for the panel, and the lead
+card's invite carries it too; both are read the way the hand-off reads it
+(`waitingFacts`).
 
 ## Out of scope for this phase
 

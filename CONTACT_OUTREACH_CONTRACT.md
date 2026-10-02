@@ -1,3 +1,5 @@
+> The local agent is implemented in this repository under `agent/`. See `agent/README.md` for the current installation and runtime.
+
 # Contract: connection requests, acceptance, and one history per person
 
 Phase 5. Builds on `WARMUP_CAMPAIGNS_CONTRACT.md`, `WARMUP_SCHEDULER_CONTRACT.md`
@@ -5,7 +7,7 @@ and `WARMUP_INBOX_CONTRACT.md`.
 
 Work in two repositories: the store, the API and the lead workspace here; the
 LinkedIn hands — clicking Connect, reading the sent-invitations page — in the
-agent at `/Users/Apple/Desktop/github/warm-up-linkedin`.
+agent at `agent/`.
 
 ## Why
 
@@ -120,9 +122,10 @@ changed. Three decisions follow.
 row, across every account and every campaign. So the row that holds a person
 while their invite waits and the row that records the sent invite must be the
 same row — which rules out keeping the intent purely in events and leaving the
-person unheld, because `nextCandidates` only excludes contacts that already have
-a `wl_outreach` row, and an unheld person can be claimed out from under the
-seller by a campaign the same afternoon.
+person unheld, because `nextCandidates` (now in `warmup/feed.mjs`) only
+excludes contacts that already have a `wl_outreach` row, and an unheld person
+can be claimed — or fed to another account from a campaign's folder — out from
+under the seller the same afternoon.
 
 The status column is plain text with no check constraint. `waiting` needs no
 migration, and it is **immune to the claim sweep by construction**: every DELETE
@@ -144,11 +147,13 @@ What it costs, and every one of these must be done or the status is a bug:
   `queued`, `declined` and `withdrawn`, which something does. Unknown statuses
   fall through as raw English on a Ukrainian screen. This phase rewrites that map
   to the real vocabulary and adds the two new values.
-- Nothing releases a `waiting` row. Cancelling is a seller action
-  (`POST /api/warmup/invites/cancel`), and a row nobody cancels waits until an
-  account can send it. **This is the deliberate trade and it must be visible:**
-  the panel shows how long a row has been waiting, and an invite older than seven
-  days is shown as stale with a one-click cancel.
+- Nothing releases a `waiting` row a seller picked. Cancelling is a seller
+  action (`POST /api/warmup/invites/cancel`), and a row nobody cancels waits
+  until an account can send it. **This is the deliberate trade and it must be
+  visible:** the panel shows how long a row has been waiting, and an invite older
+  than seven days is shown as stale with a one-click cancel. The one exception
+  is a row a campaign's folder added that the agent reported with a held outcome:
+  nobody picked it, so it is let go (see *Held outcomes on folder rows* below).
 
 ### `accepted`, between `pending` and `connected`
 
@@ -166,7 +171,9 @@ the only reason the seller ever needs to look at this screen twice.
 Everything about an invite that is not its status — who asked for it, with what
 note, when the agent looked and what it saw — is an event, exactly as messages
 are. Types: `invite.requested`, `invite.sent`, `invite.checked`,
-`invite.cancelled`, `invite.failed`.
+`invite.cancelled`, `invite.reassigned`, `invite.failed` — and
+`campaign.skipped`, the folder's "not this person again", which the person's
+history shows beside them.
 
 **Contain it.** Every read and write of these five types goes through
 `warmup/invites.mjs` and nothing else touches `wl_events` for this purpose. When
@@ -239,6 +246,13 @@ say which account holds this person, since when, and how it ended.
 here, and pretending otherwise would leave the person unheld while LinkedIn still
 shows a pending invitation.
 
+`200 { success: true, released: <crmContactId>, skipped: boolean }`. When a
+campaign's folder added the row, `skipped` is `true`: a `campaign.skipped` event
+(`reason: "cancelled"`, `cancelledBy`) is written first, and the folder's walk
+never offers the person again — by contact id or by profile slug. A seller can
+still queue them by hand. The card's confirmation says so before OK is pressed.
+A row a seller picked goes back to the pool as before.
+
 ### `POST /api/warmup/invites/sent-by-hand`
 
 The bridge that makes this useful before the agent can do anything: the seller
@@ -250,8 +264,11 @@ today and it delegates to the same code path rather than copying it.
 ### The lead workspace
 
 A section appears when the open lead has a LinkedIn URL. Account picker showing
-each account's remaining connects, the invitation note prefilled from
-`contacts/drafts.mjs` `linkedin.invite` and editable, one button.
+each account's remaining connects, an empty invitation note with today's note
+rule for the chosen account beside it, one button. (The note used to be
+prefilled from `contacts/drafts.mjs` `linkedin.invite`; that draft is written to
+LinkedIn's 300 characters, which is exactly the note the warm-up forbids — see
+*Notes follow the phase* below.)
 
 Then the state, in the seller's words:
 `В черзі на акаунті «Chloe» · піде завтра` → `Надіслано 21.09` →
@@ -268,19 +285,141 @@ not send it.
 
 ```
 invites: {
-  toSend:  [ { outreachId, crmContactId, name, company, position, linkedin, note } ],
+  toSend:  [ { outreachId, crmContactId, name, company, position, linkedin,
+               note: string, noteDropped: null | "notes_off" | "too_many_words" | "has_link" } ],
   toCheck: [ { outreachId, crmContactId, name, linkedin, heldAt } ],
   lastCheckedAt: "2026-09-21T09:12:04.318Z" | null,
   connectsLeft: 3
 }
 ```
 
-`toSend` is already cut to `min(connectsLeft, 10)`, oldest queued first, so the
-agent is not handed a request the server would refuse a moment later. `toCheck`
+`toSend` is already cut to `min(connectsLeft, 10)` — the ones a seller picked
+first, then the ones a campaign's folder added, each oldest queued first — so the
+agent is not handed a request the server would refuse a moment later. Left
+out altogether, by the one rule the scheduler and the folder top-up count by
+(`sendableToday`): a row the agent already tried today and reported with a
+held outcome (until tomorrow); a row parked by a block page (until a person
+moves it to another account, or cancels it and queues the person again); and
+a folder's row while the account's day is below its campaign's
+`fromDay` — a run stopped and started again does not send the folder's
+leftovers on days 4–6. `toCheck`
 is every `pending` row for this account, oldest first, capped at 20 — a check
 costs no allowance, and without the cap it grows into a crawl of everybody this
-account ever wrote to. `note` is the text the seller wrote; send it as the
-invitation note, do not compose one.
+account ever wrote to. `note` is the text the seller wrote, cut to today's
+phase rule; send it as the invitation note, do not compose one. **`""` means
+send the request bare** (an agent should read `null` the same way) — see *Notes
+follow the phase* below. It is a string on the wire, as it was before notes
+followed the phase, because the deployed agent was built against a string.
+
+### Folder invitations are ordinary invitations
+
+Added with the folder feed (*A running campaign sends* in
+`WARMUP_CAMPAIGNS_CONTRACT.md`). From a campaign's `fromDay` (default 7) the
+server tops each ticked account's `waiting` rows up from the campaign's folder
+to today's allowance, through `requestInvite` — the same row and the same
+`invite.requested` event as a seller's, with no note. What marks them:
+
+- `invite.requested` `meta.source: "campaign"`, `meta.campaignId`,
+  `meta.campaignName`, and `requestedBy: ""` — nobody picked them. The
+  person's history (`GET /history`) shows the event like any other; the card
+  adds "агент узяв із папки кампанії «…»".
+- `describeInvite` gains `fromCampaign: { id, name } | null`.
+- A `campaign.fed` event on the account says how many were added, today's room
+  and what was already held.
+
+The seller's invitation stays first: the folder only fills the room left after
+hand-picked waiting rows and live claims, and `invitesToSend` hands the
+hand-picked ones out ahead of the folder's. Contacts without a
+`linkedin.com/in/…` link are never taken from a folder, and `POST /invites`
+still refuses a contact with no LinkedIn at all.
+
+**Held outcomes on folder rows.** When the agent reports `no_button`,
+`profile_gone`, `no_note` or `blocked` for a row the folder added, the row is
+deleted (`released: true`). Whether the folder may offer the person again
+depends on what the report says about them:
+
+- `no_button`, `profile_gone` — about the profile. A `campaign.skipped` event
+  (`reason: "held"`, `outcome`, the contact id and the profile slug) is written
+  before the row goes (`skipped: true`); the walk steps over that person from
+  then on.
+- `blocked` — skipped the same way, **deliberately**. A block page may be
+  about the account (a rate limit) rather than the person, but it may be about
+  the person, and offering them again risks a second two-day pause of the
+  account. Losing one lead is cheaper.
+- `no_note` on a request handed over bare — about the agent, which is out of
+  date (`invite.agent_mismatch`), not the person. Released **without** a
+  marker (`skipped: false`): the person is back in the pool and may be fed
+  again later, so an out-of-date agent cannot empty the folder for good. A
+  `no_note` on a folder row that was handed a note (one somebody set on the
+  row) is skipped like `no_button`.
+- Any of the four reported while the account was already paused — about the
+  account, not the person: released without a marker too (see *A held report
+  while the pause holds* below).
+
+A seller can still queue a skipped person by hand. The folder fills the place
+the same day, but adds at most **twice the day's connect quota** to one
+account per day, counted from today's folder `invite.requested` events — see
+*A running campaign sends* in `WARMUP_CAMPAIGNS_CONTRACT.md`. A row a seller
+picked stays `waiting`: it rests until tomorrow, and a `blocked` one is parked
+at once (see *`blocked` starts the warning pause* below) — unless the account
+was already paused when it came.
+
+### Notes follow the phase
+
+Added after working mode. The phase's `connectionNote` — `false` on days 1–10,
+`{ maxWords: 3, allowLinks: false }` from day 11 and in working mode — is now
+enforced, **at the hand-off**: `invitesToSend` runs each queued note through
+`noteUnderRule` (`warmup/strategy.mjs`) with the rule of the day the request is
+handed out. Words are counted on whitespace and on the `,` `;` `/` `|` `，`
+people join words with («Привіт,радий,знайомству» is three); a piece with no
+letter or digit — a lone dash — is not a word, and a hyphen inside a word does
+not split it. A link is anything with `://`, `www.`, or a bare domain such as
+`example.com` (an email address counts), a Cyrillic top-level domain from a
+fixed list (`adv.укр`, `сайт.рф`; punycode reads as Latin) or a first label in
+any script (`пошта.com`). The text is NFKC-normalised and `。｡．` read as
+dots first, so a full-width domain is the domain it displays as. «м.Київ» and
+other abbreviations typed without a space are not links; a dot spelled out
+("adaction dot com") is out of scope.
+
+- A note the rule allows goes as it was queued, trimmed.
+- A note it does not allow comes out as `note: ""` with `noteDropped` saying
+  why. **The request is never held back for its note** — days 4–10 allow none
+  and every later day allows three words, so holding it would, for almost any
+  note, hold it for ever — and never shortened.
+- **Queueing stays permissive.** `POST /invites` stores whatever note was typed,
+  because the request may go on a later day under a later rule.
+- `GET /invites/accounts` gives each account `noteRule` — today's rule, or
+  `null` when the account cannot send at all — and the workspace form says,
+  while the note is typed, whether it will go. The form's check is a copy of
+  `noteUnderRule` in `app/main.js`; the server's is the one that decides.
+  `tests/warmup-note-parity.test.mjs` runs both copies over one table and a
+  few thousand generated notes, so they cannot drift apart.
+- The form reads `/invites/accounts` again whenever a lead is opened, the
+  Запрошення tab is opened, or another account is picked — never once per
+  page, because the rule it states as «сьогодні» is today's. An open form is
+  updated in place; the typed note and the picked account stay.
+- «Записка не піде» is said only when the request can go today. When the
+  account has nothing left today — used up, or no requests planned yet on
+  days 1–3, which the form tells apart — the request goes on a later day under
+  that day's rule, and the form says what today's rule would do and that the
+  later day decides.
+- A `sent` report writes `meta.note` (what was handed over, or `null`) and
+  `meta.noteDropped` on the `invite.sent` event, and `describeInvite` returns
+  `noteDropped`, so the card and the history say when a request went bare.
+  The rule is read for the day the account was on when it was handed out
+  (`runDay`), so a warning reported mid-run — which takes the paused dates out
+  of the count at once — does not record a day-12 note as sent bare.
+- `validateStrategy` refuses a `connectionNote` that is not `false`/`true` or
+  `{ maxWords: <integer ≥ 1>, allowLinks: <boolean> }`, in a phase or in
+  `workingMode`.
+
+**What the agent must do:** send `note: ""` (or `null`) as a bare request and
+report `sent`; `no_note` is only for a non-empty note LinkedIn will not attach.
+A `no_note` for a request handed over bare writes an `invite.agent_mismatch`
+event at `error`: the agent is out of date. Bare means no note was queued, or
+the run's rule for the day dropped the one that was; a folder's row is always
+handed over bare. Such a folder row goes back to the pool unmarked (see *Held
+outcomes on folder rows*); a seller's row rests until tomorrow.
 
 ### `POST /api/warmup/agent` — `invite.sent`
 
@@ -289,11 +428,18 @@ invitation note, do not compose one.
 ```
 body { action: "invite.sent", accountId, outreachId,
        outcome: "sent" | "already_pending" | "already_connected"
-              | "no_button" | "no_note" | "profile_gone" | "blocked" }
+              | "no_button" | "no_note" | "profile_gone" | "blocked",
+       leaseId?: string }   // optional; see "A held report sent again"
 
-200  { success: true, status: "pending", moved: true,  overQuota: false, stopSending: false, connectsLeft: 2 }
-200  { success: true, status: "pending", moved: true,  overQuota: true,  stopSending: true,  connectsLeft: 0 }
-200  { success: true, status: "waiting", moved: false, recorded: "no_button" }
+200  { success: true, status: "pending", moved: true,  overQuota: false, duringPause: false, stopSending: false, connectsLeft: 2 }
+200  { success: true, status: "pending", moved: true,  overQuota: true,  duringPause: false, stopSending: true,  connectsLeft: 0 }
+200  { success: true, status: "pending", moved: true,  overQuota: true,  duringPause: true,  stopSending: true,  connectsLeft: 0 }
+200  { success: true, status: "waiting", moved: false, recorded: "no_button", released: false, skipped: false }
+200  { success: true, status: "waiting", moved: false, recorded: "no_note",   released: true,  skipped: false }
+200  { success: true, status: "waiting", moved: false, recorded: "blocked", released: false, skipped: false, parked: true,
+       paused: true, pausedUntil: "2026-09-19", overQuota: true, stopSending: true }
+200  { success: true, status: "waiting", moved: false, recorded: "no_button", released: true,  skipped: false,
+       duringPause: true, overQuota: true, stopSending: true }
 200  { success: true, status: "pending", moved: false, reason: "already" | "refused" | "raced" | "gone" }
 400  { success: false, error: "Unknown outcome. One of: sent, already_pending, …" }
 404  { success: false, error: "That invitation is gone" }
@@ -306,10 +452,17 @@ body { action: "invite.sent", accountId, outreachId,
 | `sent` | `pending` | **spent** | the card read Connect, we clicked, it now reads Pending |
 | `already_pending` | `pending` | not spent | it already read Pending before we clicked — last run's crash |
 | `already_connected` | `accepted` | not spent | they are already in the contacts |
-| `no_button` | unchanged (`waiting`) | not spent | no Connect control on the profile |
-| `no_note` | unchanged (`waiting`) | not spent | Connect is there, but the note cannot be attached or will not fit |
-| `profile_gone` | unchanged (`waiting`) | not spent | 404, redirect, or a members-only wall |
-| `blocked` | unchanged (`waiting`) | not spent | an interstitial or rate-limit page |
+| `no_button` | unchanged (`waiting`)¹ | not spent | no Connect control on the profile |
+| `no_note` | unchanged (`waiting`)¹ | not spent | Connect is there, but the (non-empty) note cannot be attached or will not fit |
+| `profile_gone` | unchanged (`waiting`)¹ | not spent | 404, redirect, or a members-only wall |
+| `blocked` | unchanged (`waiting`)¹ | not spent | a block or rate-limit page — **and the account pauses** |
+
+¹ For a row a seller picked. A row the folder added is deleted instead
+(`released: true`), and `skipped` says whether the folder will offer the
+person again — never after `no_button`, `profile_gone` or `blocked`, and
+again later after a `no_note` on a bare hand-off or after any of them reported
+while the account was already paused; see *Held outcomes on folder rows*.
+`status` in the answer is the one the row had when the report arrived.
 
 **`no_note` exists because a bare request is a different object.** LinkedIn
 does not always offer a note, and caps its length when it does. Sending the
@@ -332,6 +485,89 @@ record of something that exists. So a send past the day's allowance is
 carries `overQuota: true` at `warn` — and the answer carries `stopSending:
 true`. **That flag is how the run ends its send step**, not a 409 to interpret.
 Everything already sent stays recorded; everything still queued waits.
+
+**`blocked` starts the warning pause.** A block page on Connect is LinkedIn's
+warning arriving mid-send, so it gets the same two-day pause as the operator's
+"Прилетіло попередження" button and the agent's own `warning` action (see
+*After a warning: the pause* in `WARMUP_SCHEDULER_CONTRACT.md`). `stopSending:
+true` here means the whole run, not only the send step: close the session and
+report `run.finished`. The answer carries `overQuota: true` as well, the same
+compatibility as a `sent` during a pause: the deployed agent was never told to
+stop on `blocked`, and it was told to stop sending on `overQuota`. The person
+whose send it was must not open the account's next session — if the page
+belongs to that profile, it would pause the account again the moment it came
+back, for good. So a seller's row stays held and is
+**parked on the first `blocked`** — `parked: true` in the answer, left out of
+`toSend` even when it is the only row waiting, not counted as work, and shown
+on the card and in the queue panel as «Потребує уваги» until a person moves it
+to another account (`invite.reassigned`) or cancels it and queues the person
+again (a new row). A `blocked` after the move parks it again. Parked is read
+as "the row's newest `invite.failed` with `outcome: "blocked"` is newer than
+its newest `invite.reassigned`" — leaving out a `blocked` reported during a
+pause (below). A folder's row is let go and skipped (see *Held outcomes on
+folder rows*).
+
+**A held report while the pause holds.** A held report — any of the four —
+that arrives while the account's pause is already in force (an earlier
+`blocked` in the same run, or a warning, started it) is about the account, not
+the person: after a block page every Connect lands on one. Nobody is parked or
+skipped for it. A folder's row is let go back to the pool with no
+`campaign.skipped` (`released: true`, `skipped: false`); a seller's row stays
+`waiting`, not parked (`parked: false` on a `blocked`). Its `invite.failed`
+carries `meta.duringPause: true`, which is what keeps it out of parking, and
+the answer carries `duringPause: true`, `overQuota: true` and `stopSending:
+true`. A `blocked` still goes through `pauseForWarning` (on the same day it
+moves nothing). Without this an agent that did not stop on the first `blocked`
+parked or skipped every person left in its `toSend`, one block page each.
+
+A pause this same report started is not "already in force". A `blocked`
+whose first attempt paused the account and then failed before its answer was
+written — the `invite.failed` insert or the account row did not land, and
+the agent got a `5xx` — comes back with no stored answer and is handled again.
+The `run.warning` that started the pause (`meta.extended: false`) names the
+report it came from (`meta.outreachId`, `meta.leaseId`), and when it names
+this invitation — and the same lease, when both carry one — the report is the
+first one still: a seller's row is parked, a folder's row is skipped, and no
+`duringPause` is written. Read off the pause alone, that retry parked nobody,
+and the person whose block page paused the account was handed out again first
+after the pause, to pause it a second time. The retry's own trip through
+`pauseForWarning` writes a second `run.warning` ("already paused", nothing
+moved), which is what finishes the account row when that was the write that
+failed.
+
+**A held report sent again.** The agent retries a report whose answer it did
+not get, and the first may have done everything. The answer to a held report
+is kept on its `invite.failed` event (`meta.answer`, with `meta.leaseId`),
+which is written before a folder's row is deleted. A held report is the same
+report again — answered with the stored answer, and nothing written or
+changed: no second `invite.failed`, no second pause or `run.warning`, nothing
+parked or skipped again — when it carries the same outcome for the same
+`outreachId` from the same account and either both carry a lease and it is the
+same lease, or one has none and the earlier one is at most **10 minutes** old.
+The lease is the body's `leaseId` when the agent sends one, else the lease the
+account holds on the portal at that moment. A held report on a row a held
+report already deleted gets `200` and that report's answer, whatever the
+clock — never `404` and never the "cancelled mid-send" `invite.failed`
+(`outcome: "row_gone"`), which stays for a row a seller cancelled and for a
+`sent` on a row that is gone. Two copies arriving at once are handled one
+after the other, so the second is the retry. A retry whose stored answer says
+`released: true` while the row is still there and `waiting` is the first
+report failing part-way — its answer was written, then the skip marker or the
+delete did not land — and the retry finishes letting the row go, with the
+stored `skipped`, before it answers. A retry that finds no stored answer is
+handled in full, as a first report; for a `blocked` whose first attempt got as
+far as the pause, see *A held report while the pause holds* above. When it was the delete that failed, the
+`campaign.skipped` marker is written a second time; the walk reads two the
+same as one.
+
+**A `sent` during a pause** — an agent that did not stop on the `blocked`
+answer, or a warning pressed mid-run — is recorded, because it is on LinkedIn,
+but not counted toward the day: the `invite.sent` event carries
+`meta.duringPause: true` and `meta.overQuota: false`, at `warn`, with its own
+sentence ("sent after a warning paused the account"), and `describeInvite`
+returns `duringPause`. The answer keeps `overQuota: true` beside
+`duringPause: true` and `stopSending: true`, because an agent built before
+`duringPause` stops on `overQuota`.
 
 A `moved: false` with a `reason` is ordinary — somebody else moved the row —
 and is worth one log line, not a retry. A `400` is not ordinary: it means the
@@ -452,6 +688,12 @@ nothing ever writes it back, `setAccountStatus` only ever writes `excluded`,
 `warming` with a `running` run. Every query that filters on
 `wl_accounts.status` — `candidates()` among them — is reading "was this account
 ever switched off by a human", not "is this account still warming up".
+`restricted` is the same kind of stored word: a warning writes it, and the pause
+running out writes nothing until the account is next leased. That is why
+`candidates()` now reads `warming` and `restricted` (`LIVE_ACCOUNT_STATUSES`
+in `warmup/store.mjs`) and runs `running` and `paused`, and decides on
+`paused_until` alone — filtering on `warming` is how every warned account used
+to stall for good.
 
 ### The second, cheaper road to the same answer
 
@@ -461,7 +703,7 @@ or `accepted`, they have obviously accepted. `markReplied` already does the
 acceptance is recorded even when the invitations page is unreadable. **When the
 agent's selectors rot, the history does not stop.**
 
-### For the session working in `warm-up-linkedin`
+### For the local agent in this repository
 
 The send step **replaces** `run-account.mjs:393-403` — after the views and likes,
 before the inbox. After, because an invitation is the most expensive and least
@@ -476,7 +718,9 @@ it is not what was asked for.** That is the reconciliation, not an optimisation.
 Report after LinkedIn confirms, never before. Retry the report twice, three
 seconds apart — the ordinary failure here is a dropped socket, not a dead
 process — and if it still will not go, **stop the send step for the whole run**
-rather than opening the next person.
+rather than opening the next person. A retried held report is answered as the
+first was and recorded once (see *A held report sent again* under
+`invite.sent`).
 
 **Correction to this contract, made while building it.** It said `connect` must
 join `AGENT_KINDS`. It must not. `dueFrom` computes `remaining` from quota
@@ -522,6 +766,11 @@ both ways, emails both ways once Phase 4 lands.
                direction: "out" | "in" | null,
                at, accountLabel, body, meta } ] }
 ```
+
+*Changed by the inbox-to-contact work (see "The conversation on the contact"
+below): messages carrying the person's key are now read from every account,
+each message entry carries `accountId` and `accountLabel`, and the route answers
+for a person with no `wl_outreach` row at all.*
 
 **What this read costs, and where it stops being true.** It reads the newest
 `LISTING_LIMIT` (4 000) message events for the account and then filters them to
@@ -654,6 +903,42 @@ all. Either emails carry a null account and every one of those readers is taught
 to expect it, or they live somewhere else entirely. **Unresolved**, and the
 place to resolve it is here, before the first `email.*` row is written.
 
+## The conversation on the contact
+
+Added with the daily inbox read (*Once a day, onto the contact* in
+`WARMUP_INBOX_CONTRACT.md`).
+
+- **The CRM gets the whole conversation.** Every message stored for the first
+  time, in both directions, and every request that went out
+  (`invite.sent` leaving the row `pending`, `sent-by-hand`, `POST /leads/take`),
+  becomes one `activities` line on the person's contact, once. The line carries
+  the account, the direction ("Ми написали" / "Відповідь", or "Запит на контакт
+  надіслано" with the note it actually carried), and the real time in UTC in
+  its text. The key that keeps it single is on our side (`crm.copied` /
+  `inbox.crm_failed` events naming the source `wl_events` row); a refused copy
+  is made again at the next `inbox.done`, for a week. `warmup/activities.mjs`
+  is the only writer.
+- **A thread finds its person two ways.** The account's own `wl_outreach` row,
+  as before; failing that, the CRM contact whose LinkedIn link is the same
+  profile slug (`leadsByLinkedin` + `contactBySlug`: links that end where the
+  slug ends first, a prefix search only if none of those is the person). The
+  second way writes `meta.crmContactId` on the messages and moves no status.
+- **Each message once, even under a new id.** Besides the `externalId` check, a
+  message is a repeat of a stored one in the same thread when direction and
+  body match and the times cannot tell them apart (`splitRepeats`), so a
+  thread re-read after its time labels aged adds nothing to the history or the
+  CRM. A date with no year ("Sep 20") is stored as a label, not as 2001.
+- **`GET /history` reads by key across accounts.** Messages with
+  `meta.crmContactId` are read from every account; the old slug/name matching
+  still runs on the approaching account for messages stored before the key
+  existed. Message entries gain `accountId` and `accountLabel` (login, else
+  label), which the screens show ("з акаунта …" / "на акаунт …").
+- **The Контакти card shows it.** Opening a contact also reads
+  `GET /api/warmup/history?crmContactId=` and renders the same entries with the
+  Історія tab's renderer, under "Листування в LinkedIn". The CRM card and the
+  history are read independently; a warm-up that does not answer leaves the
+  card in place with one sentence where the conversation would be.
+
 ## Shared code this touches, and must not break
 
 - `progressFrom`, `GET /api/warmup/outreach`, `GET /queue`, `GET /agent` — all
@@ -683,3 +968,9 @@ retro-dating invitations sent before it.
 
 Rate-limiting how many people one seller can queue in a day. The account quota
 bounds what goes out; nothing bounds what piles up behind it.
+
+## Weekly allowance and preparing a recipient
+
+The server additionally allows at most 60 connection requests per account across seven UTC dates including today. This is independent of the run ID and is applied to the scheduler, folder top-up, send list, action recording and account quota display. `weeklyConnections` on the agent plan and `invites.weekly` contain `{ limit, done, remaining, start, end }`; `end` is exclusive. Daily strategy quotas continue to apply.
+
+Before opening each queued recipient, post `{ action: "invite.prepare", accountId, outreachId }` to `/api/warmup/agent`. The reply carries `allowed`, the current `invite` or null, `connectsLeft`, `weekly`, `stopSending`, `duringPause`, and `stopAll`. If allowed, use the returned link and note. If `stopAll` or `duringPause`, end the visit; if no connects remain, stop sending. This is a fresh check, not a quota reservation. Every actual confirmed send is still reported through `invite.sent`, including an observed send that raced with a manual action.

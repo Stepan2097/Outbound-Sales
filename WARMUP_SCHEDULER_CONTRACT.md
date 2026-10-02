@@ -1,3 +1,5 @@
+> The local agent is implemented in this repository under `agent/`. See `agent/README.md` for the current installation and runtime.
+
 # Contract: the server decides when, the Mac only does it
 
 Phase 4. Builds on the three contracts before it.
@@ -49,19 +51,30 @@ is on another machine.
 
 Due, in the order the old scheduler used:
 
-1. The account is `warming`, `health = ok`, and has an Anty profile.
-2. Its run is live, not paused, and inside the plan.
+1. The account is `warming` — or `restricted`, which is what a warning leaves
+   behind — with `health = ok` and an Anty profile.
+2. Its run is live (`running`, or `paused` with `paused_until` behind it), the
+   pause does not hold today, and it is inside the plan. Past the last phase is
+   working mode, which is inside the plan — see *After day 14: working mode*.
+   A pause holding today takes the account out entirely, upkeep included — see
+   *After a warning: the pause*.
 3. Today's quota still has something left in it for a kind the agent can do —
    `profile_view` and `like`. Connection requests come from a campaign's queue
-   and are counted separately.
-4. It is not in cool-off and not leased to somebody else.
+   and are counted separately. Or upkeep is owed: invitations to check, or
+   today's inbox read — see *The inbox, once a day*.
+4. It is not in cool-off, not leased to somebody else, and not resting: its
+   last session that finished (`run.finished` with `ok: true`) ended at least
+   `WARMUP_SAME_DAY_GAP_MINUTES` (60) ago — see *The second session of a
+   morning*.
 5. Anty does not already have its profile open. The lease covers the workers
    that ask; this covers the ones that do not — an old portal still running, or
    a person who opened the profile by hand. Both have to go through Anty to get
    a browser, so Anty is where they are visible.
 
-Oldest run first: an account waiting since day one goes before one enabled five
-minutes ago.
+Accounts that have not had a session today first, then plan work before
+upkeep, then oldest run first: an account waiting since day one goes before one
+enabled five minutes ago, but not before an account that has had nothing yet
+this morning.
 
 ### `GET /api/warmup/agent/due`
 
@@ -73,8 +86,8 @@ the two must never be merged back together: see *What this got wrong*.
 ```ts
 { success: true,
   window: { startHour, endHour, label, open },
-  next: null | { accountId, label, profileRemoteId, day, remaining, kinds: string[],
-                 leaseId: null, leaseExpiresAt: null },
+  next: null | { accountId, label, profileRemoteId, day, mode: "warmup" | "working",
+                 remaining, kinds: string[], leaseId: null, leaseExpiresAt: null },
   reason: string | null,
   retryAfterSeconds: number }
 ```
@@ -103,8 +116,9 @@ loser of a race polls again:
 
 `error` and `reason` are the same sentence, in the stable wording the worker
 deduplicates on: "Chloe Stewart is already running", "Chloe Stewart is in
-cool-off", "Chloe Stewart already has its profile open", "that account does
-not owe work right now", "outside 09:00–13:00".
+cool-off", "Chloe Stewart is resting between sessions", "Chloe Stewart already
+has its profile open", "that account does not owe work right now", "outside
+09:00–13:00".
 404 is an account id that does not exist, and is the only answer a worker should
 treat as final.
 
@@ -125,10 +139,25 @@ in the arithmetic rather than promised in prose.
 "nothing owes work today", "Chloe Stewart is already running".
 
 A lease is granted for `LEASE_MINUTES` (default 25) and lives in memory. A
-worker that dies mid-run costs one lease period, which is shorter than the gap
-between accounts anyway. In memory rather than in the database because a lease
-is about right now, and a restarted server that has forgotten one is a server
-that correctly believes nobody is running.
+worker that dies mid-run costs one lease period and nothing more: the account
+is available again the moment the lease runs out, with no same-morning rest,
+because that rest starts only from a `run.finished` with `ok: true`. In memory
+rather than in the database because a lease is about right now, and a
+restarted server that has forgotten one is a server that correctly believes
+nobody is running.
+
+**One grant at a time, for real.** `leaseAccount` asks "is anybody running"
+before its reads and again after them, with no `await` between that second
+check and the grant. The reads take a dozen round trips and a folder walk, and
+two workers taking two different accounts in that time used to both be
+granted — two profiles opened at once. Now exactly one is, and the other gets
+the ordinary 409 naming the winner.
+
+**The lease answers at once.** It writes nothing for a campaign's folder any
+more: `GET /agent`, which the agent asks straight after the lease, does the
+same idempotent top-up, and doing it here too only delayed the one reply whose
+loss strands a lease — a worker that times out on it never learns the
+`leaseId` the server already granted.
 
 ### `POST /api/warmup/agent` — one new action
 
@@ -140,6 +169,12 @@ Releases the lease, writes a `scheduler.finished` event, and on `ok: false`
 puts the account in cool-off for `COOL_OFF_MINUTES` (default 45) — the same
 backstop the old scheduler had, for the failures health does not capture: Anty
 holding the profile open, a proxy that is down, a browser that would not start.
+The cool-off is the whole wait after a failure: no same-morning rest is added
+to it, and the event's message ("not handed out again for N min") and
+`meta.coolOffMinutes` state it. On `ok: true` there is no cool-off; the account
+rests `WARMUP_SAME_DAY_GAP_MINUTES` from the report before it is handed out
+again (see *The second session of a morning*). A report that comes after its
+lease ran out still counts from when it came.
 
 The answer carries the gap: `{ success, nextInSeconds }`, drawn 120–420 seconds
 and jittered, because two sessions a minute apart from one machine is the shape
@@ -154,7 +189,7 @@ Quota, claiming, the inbox and every existing agent action stay exactly as they
 are. This adds a way to be told when to start; it changes nothing about what
 may then happen.
 
-## Agent — owns `/Users/Apple/Desktop/github/warm-up-linkedin/agent/**`
+## Agent — owns `agent/**`
 
 ### `agent/worker.mjs` — new, and the only thing that runs continuously
 
@@ -297,3 +332,353 @@ it was meant to work. The fix is one line — `ENV TZ=Europe/Kyiv` in the
 Dockerfile, or the zone the operator actually keeps — but it is a decision about
 whose day the window means, not a bug in the scheduler, and the Dockerfile is
 not this phase's file.
+
+## After day 14: working mode
+
+Added after this phase shipped. Day 15 used to be the end: no quota for
+anything, `plan: []`, "upkeep only", and an account warmed for two weeks and
+then never used. Now the plan does not end, it settles.
+
+**The numbers.** Past the last phase every run is in working mode:
+`profile_view` 10–12, `like` 2–3, `connect` 10–15 a day, each drawn per account
+and day like every other figure (`DEFAULT_STRATEGY.workingMode` in
+`warmup/strategy.mjs`). Notes follow the day 11–14 rule — `connectionNote`
+`{ maxWords: 3, allowLinks: false }` — and the portal enforces it when it builds
+`invites.toSend`: a note that breaks it is handed over as `""`, with
+`noteDropped` saying why, and the request goes bare (*Notes follow the phase*
+in `CONTACT_OUTREACH_CONTRACT.md`).
+`post_comment` and `follow` stay forbidden.
+
+**The ceiling.** `CONNECT_HARD_MAX = 20` requests a day, in any phase and in
+working mode. `validateStrategy` refuses a `connect` range above it, and
+`dailyQuota` clamps to it, so a snapshot saved before the ceiling cannot send the
+twenty-first either: every quota check refuses it as `Daily quota reached (20)`.
+
+**Runs already under way get it without a restart.** A snapshot without a
+`workingMode` block — every run started before this, and the default row in
+`wl_strategies`, which has no column for one — falls back to the one in code.
+New runs freeze it into `strategy_snapshot` at start like the phases.
+
+**Nothing marks a run finished.** `wl_runs.state` stays `running`, so working-mode
+accounts stay in `candidates()` and are due by the same rules as any warming day.
+A run is finished only if its snapshot has no phases at all.
+
+**Two sessions a day, on purpose.** A run hands the agent at most
+`MAX_INVITES_PER_RUN` (10) invitations and working mode allows up to 15. The
+scheduler counts what was actually sent today, not sessions, so an account that
+sent ten is due again — `kinds: ["profile_view", "connect"]`: the two views the
+first session left for it, and `invites` = the rest of today's allowance — once
+it has rested and every account that has not had a session today has had its
+turn (see *The second session of a morning*).
+
+**What changed on the wire.**
+
+- `/agent/due` `next` and `/agent/lease` `lease` carry `mode: "warmup" | "working"`.
+  `day` keeps counting past 14.
+- `GET /agent?accountId` past the last phase answers like any warming day —
+  `runnable: true`, a `plan` with quota/done/remaining/heldBack, `rules`,
+  `connectionNote`, `phase: "Working mode"` — plus `mode: "working"`.
+  `"Warm-up is finished — upkeep only"` now only comes back for a snapshot with
+  no phases.
+- The scheduler's `scheduler.started` event says `working mode, day N`.
+- `deriveStatus` has a new value, `working` ("Робочий режим" on screen), and
+  `/dashboard` `totals` a new count, `working`.
+
+**What the agent must do.** Treat `mode: "working"` as an ordinary plan day — no
+special case is needed if it already reads `plan` and `invites.toSend`. Do not
+exit on day 15. Expect to be handed the same account twice in one morning when
+it has more than ten requests to send — at least an hour apart — and send only
+what `toSend` holds. Do the views the `plan` row gives as `remaining`, not
+`quota − done`: `heldBack` on that row is how many of the day's views are kept
+for the second session (below).
+
+## The second session of a morning
+
+Added after the review of working mode. Two rules in `dueFrom`, both in memory
+next to the lease and the cool-off, and one in the plan both it and
+`GET /agent` read:
+
+- **First sessions first.** `ready` is sorted by "worked today" before anything
+  else — handed out earlier this morning, or any of today's counters above
+  zero, which survives a restart. Working mode's leftover requests belong to
+  the oldest runs, so by age alone they took the morning's sessions from newer
+  accounts whose day counts by the calendar whether they got a session or not.
+- **An hour's rest.** The same account is not handed out again until
+  `WARMUP_SAME_DAY_GAP_MINUTES` (default 60, read like the other `WARMUP_*`
+  minute settings) after its last session finished: the `run.finished` with
+  `ok: true` that gave the lease back, counted from when the report came, even
+  after the lease ran out. A second session two to seven minutes after the
+  first was a second visit from an account LinkedIn had just watched leave.
+  While it rests it is `held` and, when it is the only thing owing work,
+  `reason` is "<label> is resting between sessions". A restart forgets the
+  rest (one early second session at most), not the order.
+  Only a finished session rests. After `ok: false` the cool-off
+  (`COOL_OFF_MINUTES`, 45) is the whole wait, as the `scheduler.finished` line
+  says; a lease that runs out with no report costs the lease and nothing more.
+- **Two views wait for it.** The rest alone did not change how the second
+  session opened: the first had spent every view and like, so the agent went
+  straight to Connect — the shape `AGENT_INVITES_HANDOFF.md` warns against. So
+  the first session is handed all but two of the day's views, and every
+  session after it starts with the two. 2 views are kept back
+  (`VIEWS_HELD_BACK`) while all of these hold: today's `profile_view` quota
+  is 4 or more; today's views done are fewer than that quota − 2; today's
+  `connect` quota (the day's figure, not what is left of it) is more than
+  `MAX_INVITES_PER_RUN`; and the account has more than one run's worth of
+  requests the hand-off can send today — its waiting rows the hand-off would
+  give out (`sendableToday`), up to today's connects left, plus what its
+  folders may still add today (`folderWork`), the same figure `/agent/due`
+  calls `invites` — more than `MAX_INVITES_PER_RUN`. With one run's worth or
+  fewer, one session sends them all, and nothing is kept back that would wake
+  the account again just for two views: fifteen people waiting on a day of
+  fourteen requests, five of them already sent by hand, is nine to send — one
+  session, every view in it. `GET /agent`'s `profile_view` row then reads `heldBack: 2`
+  and `remaining` = max(0, quota − 2 − done) (every `plan` row carries
+  `heldBack`, 0 on the other kinds), and `dueFrom` counts the same, so an
+  account is never woken for views the plan would not hand out. Once the
+  first session has done its views, `heldBack` is 0 however many requests it
+  sent, and the next session — after a finished first session, or after one
+  that failed part-way and waited out its cool-off — is handed the two views
+  first, then the rest of the requests (`kinds: ["profile_view",
+  "connect"]`). Both callers ask one function over the same rows
+  (`viewsHeldBack`, and `viewsHeldBackFor` for one account in
+  `warmup/scheduler.mjs`: `heldCounts`, the bounded `folderFeeds`,
+  `folderAddedToday`, today's counters), so they cannot disagree and a
+  restart changes nothing. `GET /agent` asks after its folder top-up, which
+  turns the folder's share into waiting rows and leaves the sum as it was.
+  The day's totals never pass the quotas.
+- **The record answer counts them too.** `POST /agent {action: "record"}`
+  answers `{ success, done, quota, remaining, heldBack }`. For
+  `profile_view`, `heldBack` is decided by the same function over the same
+  rows, on the views done before the one being recorded — what `GET /agent`
+  would have said just before it — and `remaining` = max(0, quota − heldBack −
+  done), so the first session's last view answers `remaining: 0`, not the
+  two kept for the next session. `heldBack` is 0 on the other kinds, whose
+  `remaining` is quota − done as before. A view is never refused for the
+  two kept back: `checkQuota` accepts every view up to the day's quota.
+  `heldBack` is read after `checkQuota` and before the view is counted
+  (`commitAction`), so a read that fails there answers an error with nothing
+  counted, and the agent's retry counts the view once.
+  One edge is left: the people are counted when the first session starts,
+  so when more than a run's worth waited then and the first session left
+  nobody behind — a seller cancelled the rest, or the browser could not reach
+  them — the two views are a session of their own.
+
+**What the agent must do:** nothing new. Keep the order it already has —
+views, likes, invitations — and do the views `plan` gives as `remaining`;
+the second session then begins with its two views. The rest is enforced by
+what the server hands out.
+
+**Today's counters are summed.** `dueFrom` and `GET /agent`'s `plan` (and the
+account screen) add up every `wl_day_actions` row for a run, day and kind, the
+way `checkQuota` refuses by. Read last-row-wins, a duplicate row — two writers
+that both found none — showed connects the quota had already spent, and the
+account was woken all morning to be handed nothing. The poll reads the rows by
+live run id, so a run stopped this morning does not count toward its
+replacement.
+
+## After a warning: the pause
+
+Added after working mode. A LinkedIn warning or restriction stops **all**
+actions for the strategy's `pauseDays` (2): the rest of the day it came in on
+and the two whole dates after it. `paused_until` is the last of them.
+
+**Three ways in, one pause.** The operator's "Прилетіло попередження" button
+(`POST /control {action:"warning"}`), the agent reporting one
+(`POST /agent {action:"warning"}`, below), and an invitation the agent reports
+as `blocked` all go through `pauseForWarning` in `warmup/store.mjs`. A second
+report while a pause holds only adds the dates it pushes the end past — on the
+same day, none — so a block page on every invitation of one morning is one
+pause, not five. `health` reports (`captcha`, `needs_login`, `blocked` health)
+keep their old meaning and start no pause: they need a person, a warning needs
+nobody.
+
+**Nothing is handed out while it holds.** `dueFrom` skips the account before
+it looks at quota or upkeep, so `/agent/due` never names it and `/agent/lease`
+refuses it. `GET /agent` answers `runnable: false`, `reason: "Paused until
+<date>"`, `pausedUntil`, an empty `plan`, and every list empty rather than
+missing: `invites.toSend: []`, `invites.toCheck: []`, `connectsLeft: 0`,
+`queue: []`, `upkeep.any: false`, `inbox.maxThreads: 0`.
+
+**It ends by itself.** Nobody has to press anything. The day after
+`paused_until` every reader treats the run as running (`pausedOn` in
+`warmup/strategy.mjs` asks the date, never the row's `state`), `candidates()`
+reads `restricted` accounts and `paused` runs as well as `warming` and
+`running`, and the account is due by the ordinary rules. The first
+`/agent/lease` after that writes it down — run back to `running`,
+`paused_until` cleared, `paused_days` set (below), account back to `warming`,
+one `run.resumed` event with `meta.auto: true` — as a write conditional on the
+row still reading what it was computed from (`paused`, the same
+`paused_until` and `paused_days`), so whichever caller gets there first writes
+it, the rest find nothing to do, and a warning that landed in between is not
+overwritten. A Resume press and any action recorded on the run
+(`commitAction`) settle it the same way. `/agent/due` still writes nothing.
+
+**Days nobody took the account on count as paused.** While the row still reads
+`paused` after `paused_until`, the dates from the day after `paused_until` up
+to yesterday are added to `paused_days` by every reader (`pausedDaysOn`,
+`dayOfRun`): the poll, the lease, `GET /agent`, `checkQuota`, the screens and
+`deriveStatus`. Settling the pause writes exactly that number, so the day does
+not move when the row changes, whichever route writes it. On the first morning
+after a pause the stall is none. This is what brings back the accounts the old
+code left stalled for good (a warning wrote `paused`/`restricted` and nothing
+ever resumed them): they come back on the day after their warning day, not
+weeks on in working mode with a full folder top-up. A warning on such a run
+starts from the stalled figure too.
+
+**The paused days are counted once.** They are added to `paused_days` when the
+warning is written, never when the pause ends, so the end needs no write for the
+day to be right. A warning on day 8 comes back on day 9: the warning day was
+worked, the two whole dates were not. On screen the day stands still at 8
+through the pause (`runDay`), rather than dropping to 6 the moment the button is
+pressed.
+
+**Resume is for ending it early.** It gives back the paused dates not yet
+reached (`resumeCredit`): the next morning, both; on the last paused date, one;
+after the pause has already run out, none — it writes the stall into
+`paused_days` like the lease would and the day stays where the screen showed
+it. So an early resume no longer puts the account behind where it stopped, and
+a late one no longer counts the idle days after the pause as progress. The
+button is shown only while the pause holds.
+
+### `POST /api/warmup/agent` — `warning`
+
+```ts
+{ action: "warning", accountId, note?: string }
+→ 200 { success: true, paused: true, pausedUntil: "YYYY-MM-DD", stopSending: true }
+→ 409 { success: false, error: "No warm-up in progress" }
+```
+
+Writes a `run.warning` event at `warn` with `meta.source: "agent"` and the note.
+Every `run.warning` also carries `meta.extended`: `false` on the one that
+started the pause, `true` on one that came while it held. One from a block
+page (`meta.source: "invite.blocked"`) names the report it came from
+(`meta.outreachId`, `meta.leaseId`) — see *A held report while the pause
+holds* in `CONTACT_OUTREACH_CONTRACT.md`.
+
+**What the agent must do.** When LinkedIn shows a warning, a restriction
+notice or a "too many invitations" page, report `warning` once and stop
+everything in the run: no more views, likes, invitations, invitation checks or
+inbox reading. Close the session and report `run.finished`. Do not report it as
+`health` — health is for a person to fix, and it does not pause the day count.
+A Connect that lands on a block page is reported as `invite.sent` with
+`outcome: "blocked"`; the answer now carries `paused: true`, `pausedUntil`,
+`stopSending: true` and `overQuota: true` (what an agent built before this
+stops on), and it means the same: stop the whole run. A held report that
+comes after that, while the pause holds, parks and skips nobody — see *A held
+report while the pause holds* in `CONTACT_OUTREACH_CONTRACT.md`. Expect nothing
+to be handed out until the day after `pausedUntil`, then carry on as normal —
+the account comes back by itself.
+
+## A campaign's folder is work
+
+Added with the folder feed (*A running campaign sends* in
+`WARMUP_CAMPAIGNS_CONTRACT.md`). An account ticked on a running campaign, on or
+after the campaign's `fromDay`, is due for `connect` when its folder still has
+people for it — not only when somebody queued one by hand.
+
+**The poll and the lease count, `GET /agent` writes.** `candidates()` asks `folderFeeds`
+(`warmup/feed.mjs`) what each running campaign's folder could still offer —
+read-only, capped at 20, and only for campaigns with an account on or past
+their day. `dueFrom` adds `folderWork` to the waiting invitations:
+`invites = min(waiting, connectLeft) + min(available, connectLeft − waiting −
+live claims, 2 × connectQuota − added by the folder today)`. That is the same
+sum the top-up fills by (`folderRoom`, daily cap included — `folderAddedToday`
+counts today's folder `invite.requested` events per account), so an account
+woken for its folder is never handed an empty list, and an account the folder
+has already fed twice its quota today is not woken for the folder again.
+`available` counts people, not contacts: the walk steps over a second contact
+for a profile already approached and anybody the folder let go
+(`campaign.skipped`), the same way the top-up does. `/agent/due` still
+writes nothing — no row, no event; the one thing the walk keeps is an
+in-memory note of where the folder's approached head ends, which only decides
+where the next read starts. `/agent/lease` writes nothing for the folder
+either; `GET /agent`, which the agent asks straight after taking the account,
+tops it up before `invites` is built, so the people are `waiting` rows in
+`invites.toSend` when it reads them.
+
+**The folder check cannot hang the poll.** `folderFeeds` is the one read in
+`candidates()` that goes to the CRM, and `fetch` has no timeout. It is raced
+against `WARMUP_FOLDER_CHECK_SECONDS` (default 5): on a timeout the folders
+count as empty for that poll (views, likes, waiting rows and upkeep are still
+counted) and the next poll asks again. A folder that fails on its own counts as
+empty as before. Either way the console says so once per outage, not on every
+poll.
+
+`decideNext` and `leaseAccount` take the campaigns as `{ campaigns }`; the
+routes pass the workspace's list, read without the migration's write-through.
+Called without them — the existing tests — nothing about the folder is counted.
+
+**Working mode needs the second session.** A working-mode account is topped up
+to its 10–15; a run carries 10, and the account is due again for the rest
+exactly as with hand-picked invitations, with `invites` = what is still waiting.
+
+**`waiting` counts only what the hand-off would give out today** — one rule,
+`sendableToday` in `warmup/invites.mjs`, for `invites` here, the top-up's room
+and `invites.toSend`:
+
+- **A held invitation rests until tomorrow.** A `waiting` row the agent already
+  tried today and reported with a held outcome (`invite.failed` today, since the
+  row was last moved) is left out. Before, one broken link kept an account due
+  all morning — handed out, failed, handed out again every few minutes,
+  spending nothing, so the allowance that would have ended it never ran out.
+  (Only a seller's row can be in this state: a folder's row with a held outcome
+  is let go instead.)
+- **A parked invitation is nobody's work.** One `blocked` outcome on a row
+  since it was last moved parks it until a person moves it to another account
+  or cancels it and queues the person again — even when it is the only row the
+  account has waiting, which used to open the next session after the pause and
+  cost a second one. Not a `blocked` reported while the account was already
+  paused (`meta.duringPause` on its `invite.failed`): that page was about the
+  account.
+
+Both are read from the rows' own events (`waitingFacts`) without ever reading
+a row's whole history: today's `invite.failed` and `invite.reassigned` for
+resting; the `invite.failed` events with `outcome: "blocked"` (those without
+`meta.duringPause`), then the moves of just the rows that have one, for
+parking. Each read is newest first and
+paged 500 at a time until a page comes back short, because Supabase answers at
+most 1000 rows and drops the rest silently — a seller's row that fails once a
+day for months must not push today's failure off the end of the answer.
+- **A folder's row waits for its campaign's `fromDay`.** `candidates()` passes
+  each account's day (read off `nowMs`, like `dueFrom`) and the campaigns'
+  `fromDay`s, so a run started again does not wake for the folder's leftovers
+  on days 4–6.
+
+**What the agent must do:** nothing new on the wire — `kinds`, `invites` and
+`toSend` keep their shapes. `invites` on `/agent/due` and `/agent/lease` now
+includes people the folder will add when the agent asks `GET /agent`, so the
+worker must go on to `GET /agent` after the lease, as it already does — that
+question is what writes them down.
+
+## The inbox, once a day
+
+Added with the inbox-to-contact work (*Once a day, onto the contact* in
+`WARMUP_INBOX_CONTRACT.md`).
+
+**`upkeep.inbox` is now true on every plan day the inbox has not been read.**
+It used to be forced false inside the plan, on the reasoning that the day's
+views open the browser anyway; that left the read to whatever sessions the
+account happened to get — several a morning, or none — while the CRM copy now
+depends on it happening once a day. The rule, in `upkeepFor`, used by both the
+scheduler and `GET /agent`:
+
+- inside the plan (days 1–14 and working mode): no `inbox.synced` today;
+- out of plan (a snapshot with no working mode): as before — an open
+  conversation, and no `inbox.synced` today;
+- while a pause holds: nothing, as for all upkeep.
+
+An account whose day is otherwise done is therefore due with `remaining: 0`,
+`kinds: []`, `upkeep.inbox: true`, sorted after accounts with plan work. On an
+ordinary day it costs no extra session: the read rides on the first one.
+
+**One wake a day for it.** `leaseAccount` remembers on the lease whether the
+read was owing; `finishRun` with `ok: true` on that lease marks the account's
+chance at today's read as spent (in memory, keyed by the UTC date, cleared by a
+restart like the cool-off). After that the inbox alone no longer makes the
+account due today, though `upkeep.inbox` and `GET /agent`'s `inbox.due` still
+say it is owed. Without this, an agent that never posts `inbox.done` would be
+handed the same account every few minutes until the window closed. A session
+that fails (`ok: false`) does not spend it; the cool-off paces the retry.
+
+**What the agent must do:** when `GET /agent` answers `inbox.due: true`, read
+the inbox in that session and post `inbox.done` before `run.finished`.

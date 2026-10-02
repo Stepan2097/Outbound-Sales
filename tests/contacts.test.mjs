@@ -247,11 +247,11 @@ test("the panel walks a folder by position and takes each person into the queue"
     stdio: "ignore"
   });
   const exitPromise = new Promise((resolve) => child.once("exit", resolve));
-  const open = async (index) => {
+  const open = async (index, search = "") => {
     const response = await fetch(`${walkOrigin}/api/contacts/queue`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ folderId: "11111111-1111-4111-8111-111111111111", index })
+      body: JSON.stringify({ folderId: "11111111-1111-4111-8111-111111111111", index, search })
     });
     assert.ok(response.ok, `position ${index} answered ${response.status}`);
     return response.json();
@@ -282,6 +282,24 @@ test("the panel walks a folder by position and takes each person into the queue"
     assert.equal(unusable.queue.contact.id, "22222222-2222-4222-8222-222222222223");
     assert.equal(unusable.queue.prospectId, "", "a row with no company is not a lead");
     assert.match(unusable.queue.warning, /компанії/, "and the panel is told why");
+
+    const searchPage = await fetch(`${walkOrigin}/api/contacts?folderId=${FOLDER}&search=Gamebridge&order=queue`).then((response) => response.json());
+    const searched = await open(0, "Gamebridge");
+    assert.equal(searched.queue.total, 1);
+    assert.equal(searched.queue.contact.id, searchPage.contacts[0].id, "choosing a search result opens the same person");
+    assert.equal(searched.queue.prospectId, second.queue.prospectId, "search reuses the existing lead");
+    assert.equal((await open(1, "Gamebridge")).queue.contact, null, "next stays within search results");
+    assert.equal((await open(0, "nobody-matches")).queue.total, 0);
+
+    const ranked = await fetch(`${walkOrigin}/api/contacts/search?folderId=${FOLDER}&search=Gamebridge`).then(r => r.json());
+    assert.equal(ranked.contacts[0].id, second.queue.contact.id);
+    assert.ok(ranked.contacts.length <= 5);
+    const exact = await fetch(`${walkOrigin}/api/contacts/queue`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({folderId: FOLDER, contactId: ranked.contacts[0].id})
+    }).then(r => r.json());
+    assert.equal(exact.queue.contact.id, ranked.contacts[0].id);
+    assert.equal(exact.queue.prospectId, second.queue.prospectId);
 
     const past = await open(3);
     assert.equal(past.queue.contact, null);

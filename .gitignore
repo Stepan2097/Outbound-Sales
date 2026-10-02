@@ -8,3 +8,7 @@ coverage/
 dist/
 tmp/
 .data/
+
+agent/runs/
+*.env
+server_access*

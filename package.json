@@ -10,6 +10,9 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env server.mjs",
     "check": "node --check server.mjs && node --check app/main.js",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "agent": "node agent/worker.mjs",
+    "agent:once": "node agent/worker.mjs --once",
+    "test:agent": "node --test agent/*.test.mjs"
   }
 }

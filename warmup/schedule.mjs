@@ -68,6 +68,21 @@ export function nextSession(accountId, options = {}) {
   const now = options.now || new Date();
   const todaySlot = sessionTimeOn(accountId, now);
 
+  // `notBefore` is the scheduler's own hold on the account — the rest between
+  // two sessions of one morning, or the cool-off after a failed one. Without it
+  // an account the scheduler will not hand out for an hour read "time has
+  // come", which is the one answer that sends an operator looking for a fault.
+  const notBefore = Number(options.notBefore) || 0;
+  if (outstanding && notBefore > now.getTime() && notBefore > todaySlot.getTime()) {
+    const held = new Date(notBefore);
+    return {
+      at: held.toISOString(),
+      today: localDateKey(held) === localDateKey(now),
+      overdue: false,
+      inMinutes: Math.round((notBefore - now.getTime()) / 60000)
+    };
+  }
+
   if (outstanding) {
     if (todaySlot.getTime() > now.getTime()) {
       return {

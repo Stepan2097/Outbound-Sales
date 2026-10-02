@@ -3316,9 +3316,13 @@ dialog {
   font-size: 14px;
 }
 
+/* A message is whatever the person wrote, and a tracking link or a pasted
+   token has no space to break at: without `anywhere` it ran past the card on
+   the Контакти page and in Історія, and the page clips sideways overflow. */
 .history-body pre {
   margin: 0;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   font-size: 13px;
   line-height: 1.5;
 }
@@ -3387,6 +3391,13 @@ dialog {
   resize: vertical;
 }
 
+/* Silent while the note would go as written; no empty row in the grid. The
+   queue line is the same: empty while some account can still send today. */
+.invite-note-hint:empty,
+.invite-queue-note:empty {
+  display: none;
+}
+
 .invite-actions {
   display: flex;
   flex-wrap: wrap;
@@ -3420,6 +3431,7 @@ dialog {
   background: var(--surface-strong);
   font-size: 13px;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .compliance-list {
@@ -3644,12 +3656,10 @@ dialog {
 }
 
 .lead-side-rail {
-  position: sticky;
-  top: 122px;
+  position: static;
   align-self: start;
-  height: calc(100vh - 134px);
-  overflow: auto;
-  padding-right: 2px;
+  height: auto;
+  overflow: visible;
   min-width: 0;
 }
 
@@ -3866,54 +3876,54 @@ dialog {
   white-space: nowrap;
 }
 
-.lead-side-rail .prospect-list {
+.lead-queue-tools .prospect-list {
   max-height: 330px;
 }
 
-.lead-side-rail .prospect-queue-row {
+.lead-queue-tools .prospect-queue-row {
   grid-template-columns: minmax(0, 1fr) 40px;
 }
 
-.lead-side-rail .prospect-card {
+.lead-queue-tools .prospect-card {
   grid-template-columns: 38px minmax(0, 1fr) 44px;
   gap: 10px;
   padding: 9px;
   overflow: hidden;
 }
 
-.lead-side-rail .prospect-card > div:not(.avatar) {
+.lead-queue-tools .prospect-card > div:not(.avatar) {
   min-width: 0;
 }
 
-.lead-side-rail .prospect-card strong,
-.lead-side-rail .prospect-card span,
-.lead-side-rail .prospect-card small {
+.lead-queue-tools .prospect-card strong,
+.lead-queue-tools .prospect-card span,
+.lead-queue-tools .prospect-card small {
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.lead-side-rail .prospect-card span,
-.lead-side-rail .prospect-card small {
+.lead-queue-tools .prospect-card span,
+.lead-queue-tools .prospect-card small {
   white-space: nowrap;
 }
 
-.lead-side-rail .prospect-card b {
+.lead-queue-tools .prospect-card b {
   width: 38px;
   height: 38px;
   font-size: 11px;
 }
 
-.lead-side-rail .queue-remove {
+.lead-queue-tools .queue-remove {
   width: 40px;
 }
 
-.lead-side-rail .filter-row {
+.lead-queue-tools .filter-row {
   display: grid;
   grid-template-columns: 1fr;
   margin-bottom: 10px;
 }
 
-.lead-side-rail .file-drop {
+.lead-queue-tools .file-drop {
   min-height: 84px;
 }
 
@@ -5755,6 +5765,42 @@ dialog {
   color: var(--violet);
 }
 
+/* Whether the campaign feeds this account by itself. Quiet when it does not
+   yet, teal when it does: the one line that says a running campaign is sending. */
+.warmup-queue-feed {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 650;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.warmup-queue-feed svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+}
+
+.warmup-queue-feed.is-live {
+  color: var(--teal);
+}
+
+/* The agent's list, not a person's: folded by default, no buttons. */
+.warmup-queue-waiting summary {
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.warmup-queue-waiting .warmup-queue-list {
+  margin-top: 8px;
+}
+
 /* The claiming rule says a seller who puts a campaign first means it, which is
    only true if putting it first is something they can do. */
 .warmup-campaign-move {
@@ -6490,3 +6536,88 @@ dialog {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Листування на картці контакту: та сама стрічка, що й «Історія» на Панелі. */
+.contact-history {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-strong);
+}
+
+.contact-history > span,
+.contact-history > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.panel-contact-picker { position: relative; min-width: 0; display: grid; gap: 6px; }
+.panel-contact-picker > input { width: 100%; min-width: 0; }
+#panelContactResults:not([hidden]) { position: absolute; z-index: 30; top: calc(100% + 8px); right: 0; width: max(100%, 380px); max-width: calc(100vw - 40px); background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 6px; box-shadow: 0 12px 28px #03100b80; }
+#panelContactResults p { padding: 8px; margin: 0; }
+.panel-contact-row { width: 100%; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); justify-content: stretch; justify-items: stretch; gap: 3px; text-align: left; white-space: normal; padding: 10px 12px; border: 0; background: transparent; line-height: 1.35; }
+.panel-contact-row + .panel-contact-row { border-top: 1px solid var(--line); border-radius: 0; }
+.panel-contact-row > * { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: left; }
+.panel-contact-row span { color: var(--muted); font-size: 12px; }
+.panel-contact-row small { color: var(--muted); font-size: 11px; }
+.panel-contact-row strong { font-size: 13px; font-weight: 600; }
+.panel-contact-row:hover, .panel-contact-row:focus-visible { background: #2dd4bf18; }
+@media (max-width: 1100px) { .panel-contact-picker { grid-column: 1 / -1; } #panelContactResults:not([hidden]) { width: 100%; } }
+
+/* Queue tools fill the unused main column, then return to the side as content grows. */
+.lead-queue-tools { display: grid; gap: 16px; min-width: 0; }
+.lead-queue-slot { min-width: 0; }
+.lead-queue-slot:empty { display: none; }
+.lead-queue-tools > .panel { min-width: 0; }
+
+/* AI workspace: two working forms above a shared execution log. */
+#view-ai .ai-layout { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: stretch; }
+#view-ai .ai-command-panel, #view-ai .agent-panel { min-width: 0; padding: 18px; }
+#view-ai .panel-heading { margin-bottom: 14px; gap: 12px; }
+#view-ai .ai-command-panel textarea, #view-ai #agentInstructionInput { min-height: 100px; height: 100px; padding: 12px; }
+#view-ai .assistant-controls { grid-template-columns: minmax(0, 1fr) 70px auto; }
+#view-ai .quick-command-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+#view-ai .quick-command-grid button { min-height: 42px; padding: 8px 10px; font-size: 12px; }
+#view-ai .quick-command-grid button:last-child { grid-column: 1 / -1; }
+#view-ai .agent-run-form { grid-template-columns: minmax(0, 1fr) 70px auto; gap: 8px; }
+#view-ai #agentSelect { grid-column: 1 / -1; }
+#view-ai .agent-instruction-label { display: flex; gap: 8px; margin: 18px 0 8px; font-weight: 600; }
+#view-ai .agent-instruction-label span, #view-ai .ai-mode-note { color: var(--muted); font-weight: 400; font-size: 12px; }
+#view-ai .ai-mode-note { margin: 12px 0 0; }
+#view-ai .ai-agent-directory { padding: 14px 18px; }
+#view-ai .ai-agent-directory summary { cursor: pointer; font-weight: 600; }
+#view-ai .agent-grid { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+#view-ai .agent-card { min-height: 0; }
+#view-ai .agent-card p { overflow-wrap: anywhere; }
+@media (max-width: 1200px) { #view-ai .assistant-controls, #view-ai .agent-run-form { grid-template-columns: minmax(0, 1fr) 70px; } #view-ai .assistant-controls button, #view-ai .agent-run-form button { grid-column: 1 / -1; } #view-ai .agent-panel .panel-heading { flex-wrap: wrap; } }
+@media (max-width: 800px) { #view-ai .ai-layout { grid-template-columns: minmax(0, 1fr); } #view-ai .ai-command-panel, #view-ai .agent-panel { padding: 14px; } #view-ai .agent-grid { grid-template-columns: minmax(0, 1fr); } }
+
+/* Products: a compact picker, a balanced brief, then the knowledge files. */
+#view-products .product-workspace-layout { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+#view-products .product-picker-panel { display: flex; align-items: center; gap: 20px; padding: 14px 18px; }
+#view-products .product-picker-panel .panel-heading { margin: 0; flex: 0 0 auto; }
+#view-products .product-picker-list { display: flex; flex-wrap: wrap; gap: 8px; }
+#view-products .product-picker-row { min-width: 190px; padding: 8px 14px; }
+#view-products .product-brief-panel { padding: 18px; }
+#view-products .product-brief-form { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 24px; }
+#view-products .brief-name-field, #view-products .brief-actions { grid-column: 1 / -1; }
+#view-products .brief-name-field { max-width: 460px; }
+#view-products .brief-field { min-width: 0; align-content: start; }
+#view-products .brief-field textarea { min-height: 88px; height: 88px; padding: 10px; }
+#view-products .brief-field > small { min-height: 17px; }
+#view-products .product-files-workspace { display: grid; grid-template-columns: minmax(260px, 0.34fr) minmax(0, 1fr); align-items: start; gap: 16px; }
+#view-products .knowledge-file-textarea { min-height: 320px; }
+@media (max-width: 900px) { #view-products .product-files-workspace { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 650px) { #view-products .product-picker-panel { display: grid; gap: 12px; } #view-products .product-brief-form { grid-template-columns: minmax(0, 1fr); } #view-products .product-picker-row { min-width: 0; flex: 1; } #view-products .brief-name-field { max-width: none; } #view-products .product-brief-panel { padding: 14px; } }
+
+#view-ai textarea, #view-products .brief-field textarea { font-family: inherit; font-size: 13px; }
+
+/* Contact details and drafts flow together, independently of the folder list. */
+.contacts-sidebar, .contacts-detail { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 14px; min-width: 0; }
+.contacts-sidebar > .panel, .contacts-detail > .panel { min-width: 0; }
+.contacts-detail .contact-draft-list, .contacts-detail .contact-draft { min-width: 0; }
+@media (max-width: 900px) { .contacts-layout { grid-template-columns: minmax(0, 1fr); } }

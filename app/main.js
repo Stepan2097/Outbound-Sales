@@ -1,3 +1,10 @@
+// The warm-up screens' pure decisions live in their own module so node can
+// test them; this file reads `window` as it loads and only a browser runs it.
+import {
+  autoFeedFor, autoFeedLine, campaignFeedStart, campaignStateNote, inviteAttentionText, inviteCancelQuestion,
+  queueAfterFailedClaim, queueAnswerIsCurrent
+} from "./warmup-view.js";
+
 let state = null;
 let selectedTaskType = "COLD_EMAIL";
 let selectedProspectId = null;
@@ -18,12 +25,17 @@ let panelQueueNotice = "";
 // користувача, якого ми не перевіряли і яке неправдиве.
 let panelQueueFailed = false;
 let panelQueueBusy = false;
+let panelActiveSearch = "";
+let panelSearchVersion = 0;
+let panelSearchTimer;
 // Чий вибір зараз стоїть у селекторах повідомлень. Порожньо — ліда змінили.
 let messageControlsLeadId = "";
 // Запрошення в друзі. Дані живуть у базі прогріву, а не в /api/state, тож
 // сторінка тримає їх окремо і перечитує, коли відкривають іншого ліда.
 let inviteAccounts = [];
 let inviteAccountsLoaded = false;
+// Which read of the accounts is the latest; an older answer arriving last is dropped.
+let inviteAccountsAsked = 0;
 let inviteState = null;
 let inviteLoadedFor = "";
 let inviteNotice = "";
@@ -57,6 +69,12 @@ let selectedContactId = null;
 let contactRecord = null;
 let contactDrafts = null;
 let contactProspectId = null;
+// Та сама стрічка, що й «Історія» на Панелі: запит, наші повідомлення і
+// відповіді. Читається з прогріву окремо від картки, бо картка — з CRM, і одна
+// не має чекати на другу.
+let contactHistory = null;
+let contactHistoryFor = "";
+let contactHistoryNotice = "";
 let contactsLoading = false;
 let contactsError = "";
 // Вкладка «Користувачі» живе нижче по файлу, а `await bootApplication()` ділить
@@ -660,7 +678,7 @@ function renderEvaluation() {
  *
  * Панель не дає гортати папку — вона веде по ній. Продавець вибирає продукт і
  * папку, а далі кожен наступний контакт відкривається на весь екран сам, по
- * порядку, і єдина навігація — «Назад» і «Далі». Позиція живе в localStorage,
+ * порядку або через пошук і вибір зі списку. Позиція живе в localStorage,
  * бо це не стан робочого простору, а те, на кому зупинився конкретний продавець
  * у конкретному браузері.
  *
@@ -691,17 +709,21 @@ function renderPanelSource() {
   }
 
   const position = panelFolderId && panelTotal
-    ? `Контакт ${Math.min(panelIndex + 1, panelTotal)} з ${panelTotal}`
+    ? `${panelActiveSearch ? "У пошуку" : "Контакт"} ${Math.min(panelIndex + 1, panelTotal)} з ${panelTotal}`
     : panelFolderId
       ? (panelQueueBusy ? "Читаємо папку..." : panelQueueFailed ? "Папку не вдалося прочитати" : "У цій папці немає контактів")
       : "Вибери папку — далі люди йдуть по черзі";
-  setText("panelQueuePosition", panelQueueNotice ? `${position} · ${panelQueueNotice}` : position);
+  const notice = document.getElementById("panelQueueNotice");
+  if (notice) { notice.textContent = panelQueueNotice; notice.hidden = !panelQueueNotice; }
 
   const meter = document.getElementById("panelQueueMeter");
   if (meter) meter.style.width = `${panelTotal ? Math.round(((Math.min(panelIndex + 1, panelTotal)) / panelTotal) * 100) : 0}%`;
 
   const refreshButton = document.getElementById("panelFoldersRefreshBtn");
   if (refreshButton) refreshButton.disabled = panelQueueBusy;
+  const searchInput = document.getElementById("panelContactSearch");
+  if (searchInput) searchInput.disabled = !panelFolderId || panelQueueBusy || Boolean(busyAction);
+
 }
 
 /**
@@ -731,7 +753,7 @@ function rememberedFolderId() {
 function rememberPanelPosition() {
   try {
     window.localStorage.setItem("outbound.panel.folder", panelFolderId);
-    window.localStorage.setItem("outbound.panel.index", String(panelIndex));
+    window.localStorage.setItem("outbound.panel.index", String(panelActiveSearch ? 0 : panelIndex));
   } catch {
     // Приватне вікно без localStorage — позиція просто не переживе перезавантаження.
   }
@@ -764,7 +786,7 @@ async function loadPanelFolders({ force = false } = {}) {
  * весь стан робочого простору — щоб між «Далі» і карткою на екрані не було
  * проміжного стану, в якому лід уже вибраний, а даних про нього ще немає.
  */
-async function openPanelPosition(index) {
+async function openPanelPosition(index, contactId = "") {
   if (!panelFolderId || panelQueueBusy) return;
   const wanted = Math.max(0, Math.trunc(index));
   panelQueueBusy = true;
@@ -774,7 +796,7 @@ async function openPanelPosition(index) {
   try {
     const payload = await api("/api/contacts/queue", {
       method: "POST",
-      body: JSON.stringify({ folderId: panelFolderId, index: wanted })
+      body: JSON.stringify({ folderId: panelFolderId, index: wanted, search: panelActiveSearch, contactId })
     });
     const queue = payload.queue || {};
     state = payload;
@@ -804,6 +826,46 @@ async function openPanelPosition(index) {
     panelQueueBusy = false;
     renderPanelSource();
     refreshIcons();
+  }
+}
+
+function closePanelContactResults() {
+  ++panelSearchVersion;
+  document.getElementById("panelContactResults").hidden = true;
+  document.getElementById("panelContactSearch").setAttribute("aria-expanded", "false");
+}
+
+async function loadPanelContactResults() {
+  const version = ++panelSearchVersion;
+  const folderId = panelFolderId;
+  const input = document.getElementById("panelContactSearch");
+  const term = input.value.trim();
+  const results = document.getElementById("panelContactResults");
+  if (!folderId || !term) { closePanelContactResults(); return; }
+  results.hidden = false;
+  input.setAttribute("aria-expanded", "true");
+  results.innerHTML = '<p class="muted">Шукаємо…</p>';
+  try {
+    const params = new URLSearchParams({ folderId, search: term });
+    const page = await api(`/api/contacts/search?${params}`);
+    if (version !== panelSearchVersion || folderId !== panelFolderId) return;
+    const contacts = (page.contacts || []).slice(0, 5);
+    results.innerHTML = contacts.length ? contacts.map((contact, index) => `
+      <button type="button" class="panel-contact-row" data-panel-result="${index}" ${busyAction || panelQueueBusy ? "disabled" : ""}>
+        <strong>${escapeHtml(contact.name || "Без імені")}</strong>
+        <span>${escapeHtml([contact.company, contact.position].filter(Boolean).join(" · "))}</span>
+        <small>${escapeHtml(contact.email || contact.country || "")}</small>
+      </button>`).join("") : '<p class="muted">Контактів не знайдено.</p>';
+    results.querySelectorAll("[data-panel-result]").forEach((button) => button.addEventListener("click", async () => {
+      if (busyAction || panelQueueBusy || version !== panelSearchVersion) return;
+      const contact = contacts[Number(button.dataset.panelResult)];
+      panelActiveSearch = "";
+      await openPanelPosition(0, contact.id);
+      if (!panelQueueFailed) { input.value = contact.name || term; closePanelContactResults(); }
+    }));
+  } catch (error) {
+    if (version !== panelSearchVersion) return;
+    results.innerHTML = `<p class="muted">${escapeHtml(error.message || "Пошук недоступний.")}</p>`;
   }
 }
 
@@ -983,6 +1045,25 @@ function renderLeadWorkspaceExtras(prospect) {
   updateQuickCopies(prospect);
 }
 
+let leadQueueLayoutFrame = 0;
+function scheduleLeadQueueLayout() {
+  if (leadQueueLayoutFrame) return;
+  leadQueueLayoutFrame = requestAnimationFrame(() => {
+    leadQueueLayoutFrame = 0;
+    positionLeadQueueTools();
+  });
+}
+
+function positionLeadQueueTools() {
+  const tools = document.getElementById("leadQueueTools");
+  const section = document.querySelector(".lead-main-stack .lead-section.active");
+  if (!tools || !section || !section.getClientRects().length) return;
+  // Short tabs leave room under their content; populated tabs reserve it for the lead.
+  const useLeft = window.matchMedia("(max-width: 1080px)").matches || section.getBoundingClientRect().height < 360;
+  const slot = document.getElementById(useLeft ? "leadQueueLeftSlot" : "leadQueueRightSlot");
+  if (slot && tools.parentElement !== slot) slot.append(tools);
+}
+
 function renderLeadSectionTabs() {
   const sections = [...document.querySelectorAll(".lead-main-stack .lead-section")];
   if (!sections.some((section) => section.id === activeLeadSectionId)) activeLeadSectionId = "dashboard-account";
@@ -1004,6 +1085,7 @@ function renderLeadSectionTabs() {
   });
   const mobileSelect = document.getElementById("mobileLeadSectionSelect");
   if (mobileSelect) mobileSelect.value = activeLeadSectionId;
+  scheduleLeadQueueLayout();
 }
 
 /* ── Запрошення в друзі ────────────────────────────────────────────────────
@@ -1048,14 +1130,13 @@ async function loadInviteContext(prospect, { force = false } = {}) {
   inviteNotice = "";
   renderInvite(prospect);
   try {
-    const [invite, accounts] = await Promise.all([
+    const [invite] = await Promise.all([
       warmupApi(`/invites?crmContactId=${encodeURIComponent(contactId)}`),
-      inviteAccountsLoaded && !force ? Promise.resolve(null) : warmupApi("/invites/accounts")
+      // Every time a lead is opened, not once a page: `noteRule`, `canSend` and
+      // what is left are today's. Read once, a tab left open overnight or
+      // across a warning stated yesterday's rule as «сьогодні».
+      readInviteAccounts()
     ]);
-    if (accounts) {
-      inviteAccounts = accounts.accounts || [];
-      inviteAccountsLoaded = true;
-    }
     // Ліда могли перемкнути, поки відповідь ішла — тоді ця відповідь уже не про
     // ту людину, і показати її означало б збрехати про те, кого запросили.
     if (inviteLoadedFor !== contactId) return;
@@ -1070,6 +1151,50 @@ async function loadInviteContext(prospect, { force = false } = {}) {
   }
   renderInvite(state.prospects?.find((item) => item.id === selectedProspectId));
   refreshIcons();
+}
+
+/**
+ * Read the accounts the form offers. The answer is kept only if no later read
+ * started meanwhile — of two overlapping answers the slower is the older — and
+ * `true` says this one is now what the form knows.
+ */
+async function readInviteAccounts() {
+  const asked = ++inviteAccountsAsked;
+  const answer = await warmupApi("/invites/accounts");
+  if (asked !== inviteAccountsAsked) return false;
+  inviteAccounts = answer.accounts || [];
+  inviteAccountsLoaded = true;
+  return true;
+}
+
+/**
+ * Re-read the accounts and re-say today's rule on whatever the invite panel
+ * shows: when the Запрошення tab is opened and when another account is picked.
+ * An open form is updated in place, so the typed note, the caret and the
+ * picked account stay where the seller left them.
+ */
+async function refreshInviteAccounts() {
+  try {
+    if (!(await readInviteAccounts())) return;
+  } catch {
+    // What is on screen stays. It is advice: the hand-off applies the real
+    // rule of the day the request leaves, whatever the form said.
+    return;
+  }
+  const select = document.getElementById("inviteAccountSelect");
+  if (!select) {
+    renderInvite(state?.prospects?.find((item) => item.id === selectedProspectId));
+    refreshIcons();
+    return;
+  }
+  const picked = select.value;
+  select.innerHTML = inviteAccounts.map(inviteAccountOptionHtml).join("");
+  if (inviteAccounts.some((account) => account.id === picked)) select.value = picked;
+  const usable = inviteAccounts.filter((account) => account.canSend);
+  setHtml("inviteQueueNote", inviteQueueNoteHtml(usable));
+  const send = document.getElementById("inviteSendBtn");
+  if (send) send.disabled = !usable.length;
+  refreshInviteNoteHint();
 }
 
 function renderInvite(prospect) {
@@ -1111,13 +1236,17 @@ function renderInvite(prospect) {
   content.innerHTML = `${notice}${inviteStateHtml(invite, prospect)}`;
 }
 
+function inviteAccountOptionHtml(account) {
+  const left = account.canSend ? `${account.connectsLeft} з ${account.connectQuota} на сьогодні` : account.reason;
+  return `<option value="${escapeAttr(account.id)}" ${account.canSend ? "" : "disabled"}>${escapeHtml(account.label)} · ${escapeHtml(left)}</option>`;
+}
+
 function inviteFormHtml(prospect) {
-  const options = inviteAccounts.map((account) => {
-    const left = account.canSend ? `${account.connectsLeft} з ${account.connectQuota} на сьогодні` : account.reason;
-    return `<option value="${escapeAttr(account.id)}" ${account.canSend ? "" : "disabled"}>${escapeHtml(account.label)} · ${escapeHtml(left)}</option>`;
-  }).join("");
+  const options = inviteAccounts.map(inviteAccountOptionHtml).join("");
   const usable = inviteAccounts.filter((account) => account.canSend);
-  const note = suggestedInviteNote(prospect);
+  // The select opens on the first account that can send — the list is sorted
+  // that way — so that is the account whose note rule the form starts with.
+  const chosen = usable[0] || inviteAccounts[0] || null;
 
   // Читання впало — причина вже стоїть повідомленням вище, і дублювати її
   // формою, яка вдає, що досі вантажиться, гірше за порожнє місце.
@@ -1136,14 +1265,11 @@ function inviteFormHtml(prospect) {
         <select id="inviteAccountSelect" aria-label="Акаунт LinkedIn">${options}</select>
       </label>
       <label class="lead-source-field">
-        <span>Записка до запиту · до 300 символів, без продажу</span>
-        <textarea id="inviteNoteInput" rows="3" maxlength="300">${escapeHtml(note)}</textarea>
+        <span>Записка до запиту · <span id="inviteNoteRule">${escapeHtml(inviteNoteRuleText(chosen?.noteRule))}</span></span>
+        <textarea id="inviteNoteInput" rows="2" maxlength="300" placeholder="Можна лишити порожнім — запит піде без записки"></textarea>
       </label>
-      ${usable.length === 0
-        ? `<p class="is-muted">Жоден акаунт зараз не може нести запит — подивись причини в списку вище. Поставити в чергу нема на кого.</p>`
-        : usable.some((account) => account.connectsLeft > 0)
-          ? ""
-          : `<p class="is-muted">Сьогоднішню квоту вибрано на всіх акаунтах — запит стане в чергу і піде завтра.</p>`}
+      <div class="invite-note-hint" id="inviteNoteHint">${inviteNoteHintHtml(chosen, "")}</div>
+      <div class="invite-queue-note" id="inviteQueueNote">${inviteQueueNoteHtml(usable)}</div>
       <div class="invite-actions">
         <button class="primary-button" id="inviteSendBtn" type="button" ${usable.length ? "" : "disabled"}><i data-lucide="user-plus"></i><span>Додати в друзі</span></button>
         <button id="inviteByHandBtn" type="button" title="Запит уже надіслано вручну зі свого браузера"><i data-lucide="check"></i><span>Я надіслав сам</span></button>
@@ -1152,18 +1278,144 @@ function inviteFormHtml(prospect) {
   `;
 }
 
-/**
- * Текст записки, узятий із того, що модель уже написала для LinkedIn.
+/* ── The note on a request ─────────────────────────────────────────────────
  *
- * Не вигадується тут заново: правила каналу (до 300 символів, без пропозиції)
- * живуть в одному місці, і другий автор із власним уявленням про них — це те,
- * через що два екрани починають слати різні речі.
+ * The note is no longer pre-filled from the AI draft. That draft is written to
+ * LinkedIn's 300-character limit, and the warm-up allows no note at all on days
+ * 4–10 and at most three words, without a link, from day 11 on — so the
+ * pre-filled text was exactly the note the plan forbids.
+ *
+ * The functions below mirror `noteWordCount`, `noteHasLink` and
+ * `noteUnderRule` in warmup/strategy.mjs. The server decides, when it hands
+ * the request to the agent, by the rule of the day it actually goes out; this
+ * copy only lets the form say so while the note is typed. Change one, change
+ * the other: tests/warmup-note-parity.test.mjs reads these functions out of
+ * this file and runs both copies over the same cases, so a copy that drifts
+ * fails there. Keep each one a top-level declaration ending in a `}` or `};`
+ * at the start of a line — that is how the test finds it.
  */
-function suggestedInviteNote(prospect) {
-  const invite = (prospect?.outreach?.messages || []).find((message) => message.channel === "linkedin_invite" && !message.hold);
-  if (invite?.body) return String(invite.body).slice(0, 300);
-  const approach = (prospect?.clientProfile?.approaches || []).find((item) => item.channel === "linkedin");
-  return String(approach?.opener || "").slice(0, 300);
+
+const INVITE_NOTE_DROPPED = {
+  notes_off: "у цій фазі прогріву записки не можна",
+  too_many_words: "задовга для цієї фази",
+  has_link: "у ній посилання"
+};
+
+// Words split on spaces and on the commas, semicolons, slashes and bars that
+// join them; a piece without a letter or digit (a dash) is not a word.
+function inviteNoteWords(note) {
+  return String(note ?? "").normalize("NFKC").split(/[\s,;\/|，]+/u)
+    .filter((piece) => /[\p{L}\p{N}]/u.test(piece)).length;
+}
+
+// Top-level domains in Cyrillic — a list, because «м.Київ» is not a link.
+const INVITE_NOTE_CYRILLIC_TLD = /^(?:укр|рф|бел|срб|мкд|қаз|рус|орг|ком|онлайн|сайт)(?![\p{L}\p{N}])/u;
+
+// NFKC and plain dots first, so «ａｄａｃｔｉｏｎ．com» and «adaction。com» are the
+// domain they display as; a first label may be in any script.
+function inviteNoteHasLink(note) {
+  const text = String(note ?? "").normalize("NFKC").toLowerCase().replace(/[。｡．]/g, ".");
+  if (text.includes("://") || /(?:^|[^a-z0-9-])www\./.test(text)) return true;
+  return text.split(/[^\p{L}\p{N}.-]+/u).some((chunk) => {
+    const labels = chunk.split(".");
+    return labels.some((label, index) => index > 0 && labels[index - 1] !== ""
+      && (/^[a-z]{2,}(?![a-z0-9])/.test(label) || INVITE_NOTE_CYRILLIC_TLD.test(label)));
+  });
+}
+
+function inviteNoteVerdict(note, rule) {
+  const text = typeof note === "string" ? note.trim() : "";
+  if (!text) return { note: null, dropped: null };
+  if (rule === true) return { note: text, dropped: null };
+  if (!rule || typeof rule !== "object") return { note: null, dropped: "notes_off" };
+  if (Number.isInteger(rule.maxWords) && rule.maxWords >= 0 && inviteNoteWords(text) > rule.maxWords) {
+    return { note: null, dropped: "too_many_words" };
+  }
+  if (rule.allowLinks !== true && inviteNoteHasLink(text)) return { note: null, dropped: "has_link" };
+  return { note: text, dropped: null };
+}
+
+/** Today's note rule on an account, in a seller's words. */
+function inviteNoteRuleText(rule) {
+  // `null`: the account cannot send today at all, and so has no rule to show.
+  if (rule === null || rule === undefined) return "цей акаунт сьогодні запитів не шле";
+  if (rule === true) return "сьогодні можна будь-яку";
+  if (!rule || typeof rule !== "object") return "сьогодні без записки";
+  const words = Number.isInteger(rule.maxWords)
+    ? `до ${rule.maxWords} ${uaPlural(rule.maxWords, "слова", "слів", "слів")}`
+    : "будь-якої довжини";
+  return `сьогодні ${words}${rule.allowLinks === true ? "" : ", без посилань"}`;
+}
+
+/**
+ * Why nothing leaves this account today, in a seller's words — or "" when
+ * something still can. «Вибрано» is only true of a quota that existed: on days
+ * 1–3 the plan has no requests at all, and nothing was used up.
+ */
+function inviteNoneTodayReason(account) {
+  if (!account?.canSend || Number(account.connectsLeft) > 0) return "";
+  return Number(account.connectQuota) > 0 ? "квоту вибрано" : "сьогодні запитів немає";
+}
+
+/**
+ * What happens to this note on this account, said before the button is
+ * pressed. Silent while the note would go as written.
+ *
+ * Definite only when the request can go today. Past today's allowance it goes
+ * on a later day, and that day's rule is the one that counts — so the form
+ * says what today's rule would do and that the later day decides, rather than
+ * "it will not go" followed by "it may". A seller told the note is dead
+ * deletes a note day 11 would have sent.
+ */
+function inviteNoteHintHtml(account, note) {
+  if (!account || account.noteRule === null || account.noteRule === undefined) return "";
+  const verdict = inviteNoteVerdict(note, account.noteRule);
+  if (!verdict.dropped) return "";
+  const words = inviteNoteWords(note);
+  const why = verdict.dropped === "too_many_words"
+    ? `${words} ${uaPlural(words, "слово", "слова", "слів")}, а сьогодні можна до ${account.noteRule.maxWords}`
+    : INVITE_NOTE_DROPPED[verdict.dropped];
+  const noneToday = inviteNoneTodayReason(account);
+  const text = noneToday
+    ? `Сьогодні записка б не пройшла: ${why}. Але ${noneToday} — запит піде пізніше, і записку перевірять тоді.`
+    : `Записка не піде: ${why}. Запит піде без неї.`;
+  return `<div class="outreach-warning"><i data-lucide="triangle-alert"></i><span>${escapeHtml(text)}</span></div>`;
+}
+
+/**
+ * The form's line when no account can send today, or "" when one can. Days
+ * 1–3 have no quota to use up, so "used up on every account" is said only
+ * when that is what happened.
+ */
+function inviteQueueLaterText(usable) {
+  if (!usable.length || usable.some((account) => Number(account.connectsLeft) > 0)) return "";
+  if (usable.every((account) => Number(account.connectQuota) > 0)) {
+    return "Квоту вибрано на всіх акаунтах — запит піде завтра.";
+  }
+  if (usable.every((account) => !(Number(account.connectQuota) > 0))) {
+    return "Сьогодні запитів немає на жодному акаунті — запит піде пізніше.";
+  }
+  return "Сьогодні жоден акаунт уже не надішле — запит піде пізніше.";
+}
+
+function inviteQueueNoteHtml(usable) {
+  if (!usable.length) {
+    return `<p class="is-muted">Жоден акаунт зараз не може надсилати — причини в списку вище.</p>`;
+  }
+  const later = inviteQueueLaterText(usable);
+  return later ? `<p class="is-muted">${escapeHtml(later)}</p>` : "";
+}
+
+/** Re-say the rule and the verdict for the account and note now on screen, without re-rendering the form. */
+function refreshInviteNoteHint() {
+  const accountId = document.getElementById("inviteAccountSelect")?.value || "";
+  const account = inviteAccounts.find((item) => item.id === accountId) || null;
+  const note = document.getElementById("inviteNoteInput")?.value || "";
+  setText("inviteNoteRule", inviteNoteRuleText(account?.noteRule));
+  const hint = document.getElementById("inviteNoteHint");
+  if (!hint) return;
+  hint.innerHTML = inviteNoteHintHtml(account, note);
+  refreshIcons();
 }
 
 function inviteStateHtml(invite, prospect) {
@@ -1172,7 +1424,7 @@ function inviteStateHtml(invite, prospect) {
   const when = (iso) => (iso ? new Date(iso).toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit" }) : "");
 
   const line = {
-    waiting: `В черзі на акаунті «${accountName}»${invite.waitingDays ? ` · чекає ${invite.waitingDays} ${uaPlural(invite.waitingDays, "день", "дні", "днів")}` : " · піде найближчою сесією"}`,
+    waiting: `В черзі на акаунті «${accountName}»${invite.fromCampaign ? ` · агент узяв із папки кампанії${invite.fromCampaign.name ? ` «${invite.fromCampaign.name}»` : ""}` : ""}${invite.waitingDays ? ` · чекає ${invite.waitingDays} ${uaPlural(invite.waitingDays, "день", "дні", "днів")}` : " · піде найближчою сесією"}`,
     queued: `Цю людину закріпила кампанія на акаунті «${accountName}»`,
     pending: `Надіслано ${when(invite.sentAt || invite.heldAt)} з акаунта «${accountName}»${invite.sentByWhom === "seller" ? " · вручну" : ""}`,
     accepted: `Прийняв(ла) — можна писати. Запит ішов з акаунта «${accountName}»`,
@@ -1183,6 +1435,12 @@ function inviteStateHtml(invite, prospect) {
 
   const stale = invite.status === "waiting" && invite.waitingDays >= 7
     ? `<div class="outreach-warning"><i data-lucide="triangle-alert"></i><span>Чекає понад тиждень. Акаунт «${escapeHtml(accountName)}» міг перестати гріти — перекинь на інший або скасуй.</span></div>`
+    : "";
+  // A block page on this request: the agent is not handed it until somebody
+  // moves or cancels it.
+  const attention = inviteAttentionText(invite);
+  const blocked = attention
+    ? `<div class="outreach-warning"><i data-lucide="octagon-alert"></i><span>${escapeHtml(attention)}</span></div>`
     : "";
 
   const movable = inviteAccounts.filter((item) => item.canSend && item.id !== invite.accountId);
@@ -1200,13 +1458,26 @@ function inviteStateHtml(invite, prospect) {
     ? inviteFirstMessageHtml(prospect)
     : "";
 
+  // Still queued: whether today's rule on its account lets the note go. Sent:
+  // whether it did — the note on the row is what was queued, not what went.
+  const noteFate = invite.status === "waiting"
+    ? inviteNoteHintHtml(account, invite.note || "")
+    : "";
+  const noteDropped = invite.noteDropped
+    ? `<small class="is-muted">Записка не пішла (${escapeHtml(INVITE_NOTE_DROPPED[invite.noteDropped] || invite.noteDropped)}) — запит пішов без неї.</small>`
+    : "";
+
   return `
+    ${blocked}
     ${stale}
+    ${noteFate}
     <div class="invite-state">
       <strong>${escapeHtml(INVITE_STATUS_LABEL[invite.status] || invite.status)}</strong>
       <span>${escapeHtml(line)}</span>
       ${invite.note ? `<pre>${escapeHtml(invite.note)}</pre>` : ""}
+      ${noteDropped}
       ${invite.overQuota ? `<small class="is-muted">Записано понад денну норму акаунта — видно в його історії.</small>` : ""}
+      ${invite.duringPause ? `<small class="is-muted">Надіслано, коли акаунт уже стояв на паузі після попередження LinkedIn, — у денну норму не зараховано.</small>` : ""}
       ${invite.lastCheckedAt ? `<small class="is-muted">Востаннє перевіряли ${relativeTime(invite.lastCheckedAt)}</small>` : ""}
     </div>
     ${actions}
@@ -1244,7 +1515,10 @@ const HISTORY_EVENT_LABEL = {
   "invite.sent": "Запит надіслано",
   "invite.cancelled": "Запит скасовано",
   "invite.reassigned": "Запит перекинуто на інший акаунт",
-  "invite.failed": "Запит не вдалося надіслати"
+  "invite.failed": "Запит не вдалося надіслати",
+  // The folder let the person go and will not offer them again; a seller can
+  // still queue them by hand.
+  "campaign.skipped": "Автопідбір більше не братиме цю людину"
 };
 
 async function loadHistory(prospect, { force = false } = {}) {
@@ -1303,9 +1577,9 @@ function renderHistory(prospect) {
     return;
   }
   if (!historyEntries.length) {
-    // Not "from any account": the read follows this person's one outreach row
-    // to one account, and a message that arrived on some other login would not
-    // be found. The claim the server can actually back is narrower.
+    // Not "from any account": messages carrying the person's key are found on
+    // every login, but older ones only on the account that approached them.
+    // The claim the server can actually back is narrower.
     content.innerHTML = `<div class="empty-state">За цією людиною тут ще нічого не записано.</div>`;
     return;
   }
@@ -1323,8 +1597,9 @@ function historyEntryHtml(entry) {
         <div class="history-when" title="${escapeAttr(exact)}">${escapeHtml(when)}</div>
         <div class="history-body">
           <strong>${escapeHtml(HISTORY_EVENT_LABEL[entry.event] || entry.event)}</strong>
+          ${entry.meta?.source === "campaign" ? `<small class="is-muted">з папки${entry.meta.campaignName ? ` «${escapeHtml(entry.meta.campaignName)}»` : ""}</small>` : ""}
           ${entry.meta?.note ? `<pre>${escapeHtml(entry.meta.note)}</pre>` : ""}
-          ${entry.meta?.by ? `<small class="is-muted">${entry.meta.by === "agent" ? "надіслав агент" : "надіслано вручну"}${entry.meta.overQuota ? " · понад денну норму" : ""}</small>` : ""}
+          ${entry.meta?.by ? `<small class="is-muted">${entry.meta.by === "agent" ? "надіслав агент" : "надіслано вручну"}${entry.meta.overQuota ? " · понад денну норму" : ""}${entry.meta.duringPause ? " · під час паузи, у норму не зараховано" : ""}${entry.meta.noteDropped ? ` · без записки: ${escapeHtml(INVITE_NOTE_DROPPED[entry.meta.noteDropped] || entry.meta.noteDropped)}` : ""}</small>` : ""}
           ${entry.meta?.outcome ? `<small class="is-muted">${escapeHtml(entry.meta.outcome)}</small>` : ""}
         </div>
       </li>
@@ -1338,7 +1613,11 @@ function historyEntryHtml(entry) {
       <div class="history-body">
         <strong>${mine ? "Ми написали" : "Прийшло у відповідь"}</strong>
         <pre>${escapeHtml(entry.body || "")}</pre>
-        <small class="is-muted">${escapeHtml(wordCountLabel(entry.body))}${entry.truncated ? " · текст обрізано при збереженні" : ""}${entry.matchedBy === "name_or_slug" ? " · звʼязано за імʼям, а не за контактом" : ""}</small>
+        <small class="is-muted">${[
+          entry.accountLabel ? `${mine ? "з" : "на"} ${escapeHtml(entry.accountLabel)}` : "",
+          entry.truncated ? "обрізано" : "",
+          entry.matchedBy === "name_or_slug" ? "збіг за імʼям" : ""
+        ].filter(Boolean).join(" · ")}</small>
       </div>
     </li>
   `;
@@ -2674,6 +2953,15 @@ function linkIfUrl(value) {
   return escapeHtml(text);
 }
 
+function contactLinkedInLink(value) {
+  const text = String(value || "").trim();
+  try {
+    const url = new URL(/^https?:\/\//i.test(text) ? text : `https://${text.replace(/^\/\//, "")}`);
+    if (!["http:", "https:"].includes(url.protocol) || !(url.hostname === "linkedin.com" || url.hostname.endsWith(".linkedin.com"))) return "—";
+    return `<a href="${escapeAttr(url.href)}" target="_blank" rel="noopener noreferrer">Відкрити LinkedIn</a>`;
+  } catch { return "—"; }
+}
+
 function companyLinkedInPeopleUrlForProspect(prospect = {}) {
   return prospect.publicCompanyResearch?.linkedinPeopleUrl
     || linkedInCompanyPeopleUrl(prospect.companyLinkedin)
@@ -2822,14 +3110,23 @@ function scrollLeadWorkspaceToTop() {
   document.getElementById("dashboard-overview")?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+/**
+ * What a lead tab reads when it is opened, rather than on every render. The
+ * history is heavy and read on demand; the invite form states today's note
+ * rule, which a page open since yesterday no longer knows.
+ */
+function leadSectionOpened(sectionId) {
+  const prospect = state?.prospects?.find((item) => item.id === selectedProspectId);
+  if (sectionId === "dashboard-history") void loadHistory(prospect).catch(() => {});
+  if (sectionId === "dashboard-invite" && prospect?.linkedin && crmContactIdOf(prospect)) void refreshInviteAccounts();
+}
+
 navItems.forEach((item) => {
   item.addEventListener("click", () => setView(item.dataset.view));
 });
 
 document.getElementById("mobileLeadSectionSelect").addEventListener("change", (event) => {
-  if (event.target.value === "dashboard-history") {
-    void loadHistory(state?.prospects?.find((item) => item.id === selectedProspectId)).catch(() => {});
-  }
+  leadSectionOpened(event.target.value);
   activeLeadSectionId = event.target.value || "dashboard-account";
   renderLeadSectionTabs();
   document.querySelector(".lead-section-nav")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -2971,6 +3268,10 @@ document.getElementById("analyzeIntelligenceQuick").addEventListener("click", as
   await runUiAction("intelligence", "Збираємо бриф по акаунту...", () => analyzeLeadIntelligence(false));
 });
 
+const leadQueueResizeObserver = new ResizeObserver(scheduleLeadQueueLayout);
+document.querySelectorAll(".lead-main-stack .lead-section").forEach((section) => leadQueueResizeObserver.observe(section));
+window.addEventListener("resize", scheduleLeadQueueLayout);
+
 document.getElementById("prevLeadBtn").addEventListener("click", () => {
   movePanel(-1);
 });
@@ -2985,6 +3286,10 @@ document.getElementById("nextLeadRailBtn").addEventListener("click", () => {
 
 document.getElementById("panelFolderSelect").addEventListener("change", async (event) => {
   panelFolderId = event.target.value;
+  panelActiveSearch = "";
+  ++panelSearchVersion;
+  document.getElementById("panelContactSearch").value = "";
+  closePanelContactResults();
   panelIndex = 0;
   panelTotal = 0;
   panelContact = null;
@@ -2995,6 +3300,26 @@ document.getElementById("panelFolderSelect").addEventListener("change", async (e
     return;
   }
   await openPanelPosition(0);
+});
+
+document.getElementById("panelContactSearch").addEventListener("input", () => {
+  ++panelSearchVersion;
+  clearTimeout(panelSearchTimer);
+  panelSearchTimer = setTimeout(() => void loadPanelContactResults(), 250);
+});
+document.getElementById("panelContactSearch").addEventListener("focus", () => void loadPanelContactResults());
+document.getElementById("panelContactPicker").addEventListener("keydown", (event) => {
+  if (event.key === "Escape") { document.getElementById("panelContactSearch").focus(); closePanelContactResults(); }
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    const rows = [...document.querySelectorAll("#panelContactResults:not([hidden]) button:not(:disabled)")];
+    if (!rows.length) return;
+    event.preventDefault();
+    const at = rows.indexOf(document.activeElement);
+    rows[(at + (event.key === "ArrowDown" ? 1 : -1) + rows.length) % rows.length].focus();
+  }
+});
+document.addEventListener("click", (event) => {
+  if (!event.target.closest("#panelContactPicker")) closePanelContactResults();
 });
 
 document.getElementById("panelProductSelect").addEventListener("change", async (event) => {
@@ -3065,6 +3390,19 @@ document.getElementById("warmupProbeBtn").addEventListener("click", async () => 
   }
 });
 
+// Typing and picking an account only re-say the note's fate. Re-rendering the
+// form here would drop the caret and whatever else was typed.
+document.getElementById("inviteContent").addEventListener("input", (event) => {
+  if (event.target.id === "inviteNoteInput") refreshInviteNoteHint();
+});
+document.getElementById("inviteContent").addEventListener("change", (event) => {
+  if (event.target.id !== "inviteAccountSelect") return;
+  // Said at once from what the page holds, then again from a fresh read: the
+  // rule is the picked account's today, and the page may be from yesterday.
+  refreshInviteNoteHint();
+  void refreshInviteAccounts();
+});
+
 document.getElementById("inviteContent").addEventListener("click", async (event) => {
   const button = event.target.closest("button");
   if (!button || button.disabled) return;
@@ -3129,7 +3467,9 @@ document.getElementById("inviteContent").addEventListener("click", async (event)
   }
 
   if (button.id === "inviteCancelBtn" && inviteState) {
-    if (!window.confirm("Скасувати запит і відпустити людину назад у пул?")) return;
+    // A person the folder added is taken out of its feed for good, and the
+    // question says so before anybody presses OK.
+    if (!window.confirm(inviteCancelQuestion(inviteState))) return;
     await run("Скасовуємо запит...", async () => {
       await warmupApi("/invites/cancel", { method: "POST", body: JSON.stringify({ outreachId: inviteState.outreachId }) });
       inviteState = null;
@@ -3173,9 +3513,7 @@ document.addEventListener("click", async (event) => {
   const leadTab = event.target.closest("[data-lead-tab]");
   if (leadTab) {
     activeLeadSectionId = leadTab.dataset.leadTab || "dashboard-account";
-    if (activeLeadSectionId === "dashboard-history") {
-      void loadHistory(state?.prospects?.find((item) => item.id === selectedProspectId)).catch(() => {});
-    }
+    leadSectionOpened(activeLeadSectionId);
     renderLeadSectionTabs();
     document.querySelector(".lead-section-nav")?.scrollIntoView({ behavior: "smooth", block: "start" });
     refreshIcons();
@@ -3787,7 +4125,7 @@ function renderContactCard() {
   const contact = contactRecord;
   if (!contact) {
     setText("contactCardTitle", "Контакт не вибрано");
-    setText("contactCardSubtitle", "Вибери папку зліва, потім людину — і побачиш усе, що про неї знає CRM");
+    setText("contactCardSubtitle", "");
     setText("contactCardPill", "—");
     setHtml("contactCardBody", `<div class="empty-state">Контакт не вибрано.</div>`);
     return;
@@ -3802,7 +4140,7 @@ function renderContactCard() {
       const value = contact[key];
       if (!value) return "";
       const text = key === "created_at" ? new Date(value).toLocaleDateString([], { dateStyle: "medium" }) : String(value);
-      return `<div><dt>${escapeHtml(label)}</dt><dd>${linkIfUrl(text)}</dd></div>`;
+      return `<div><dt>${escapeHtml(label)}</dt><dd>${key === "linkedin" ? contactLinkedInLink(text) : linkIfUrl(text)}</dd></div>`;
     })
     .filter(Boolean)
     .join("");
@@ -3815,6 +4153,7 @@ function renderContactCard() {
     <dl class="contact-fields">${rows || `<div><dt>Порожньо</dt><dd>CRM не знає про цю людину нічого, крім імені</dd></div>`}</dl>
     ${contact.description ? `<div class="contact-note"><strong>Нотатка з CRM</strong><p>${escapeHtml(contact.description)}</p></div>` : ""}
     ${custom}
+    ${contactHistoryFor && contactHistoryFor === String(contact.id) ? contactConversationHtml() : ""}
   `);
 }
 
@@ -3901,7 +4240,14 @@ async function fetchContactFolders({ force = false } = {}) {
 }
 
 async function loadContactFolders({ force = false } = {}) {
-  if (contactFoldersLoaded && !force) return;
+  // Панель читає той самий список папок одразу після входу, тож «завантажено»
+  // буває правдою ще до того, як цей екран його намалював. Малюємо наявне,
+  // а не лишаємо порожній список до натискання «Оновити».
+  if (contactFoldersLoaded && !force) {
+    if (!contactFolderId && contactFolders.length) await selectContactFolder(contactFolders[0].id);
+    else renderContacts();
+    return;
+  }
   contactsLoading = true;
   contactsError = "";
   renderContacts();
@@ -3957,6 +4303,7 @@ async function openContact(contactId) {
   contactRecord = null;
   contactDrafts = null;
   contactProspectId = null;
+  void loadContactHistory(contactId);
   renderContacts();
   try {
     const payload = await api(`/api/contacts/${encodeURIComponent(contactId)}`);
@@ -3972,6 +4319,44 @@ async function openContact(contactId) {
   }
   renderContacts();
   refreshIcons();
+}
+
+/**
+ * Листування з людиною для картки контакту — той самий маршрут, що й вкладка
+ * «Історія». Прогрів — окрема база: якщо він не відповів, картка з CRM
+ * лишається на місці, а замість стрічки — одне речення чому.
+ */
+async function loadContactHistory(contactId) {
+  contactHistoryFor = contactId;
+  contactHistory = null;
+  contactHistoryNotice = "";
+  try {
+    const payload = await warmupApi(`/history?crmContactId=${encodeURIComponent(contactId)}`);
+    // Людину могли перемкнути, поки відповідь ішла.
+    if (contactHistoryFor !== contactId) return;
+    contactHistory = payload.entries || [];
+  } catch (error) {
+    if (contactHistoryFor !== contactId) return;
+    contactHistoryNotice = error.message || "Прогрів не відповів.";
+  }
+  renderContactCard();
+  refreshIcons();
+}
+
+function contactConversationHtml() {
+  const body = contactHistoryNotice
+    ? `<p>Листування не прочиталося: ${escapeHtml(contactHistoryNotice)}</p>`
+    : !contactHistory
+      ? `<p>Читаємо листування...</p>`
+      : !contactHistory.length
+        ? `<p>Ще нічого.</p>`
+        : `<ol class="history-feed">${contactHistory.map(historyEntryHtml).join("")}</ol>`;
+  return `
+    <section class="contact-history">
+      <strong>Листування в LinkedIn</strong>
+      ${body}
+    </section>
+  `;
 }
 
 document.getElementById("contactFolderList").addEventListener("click", async (event) => {
@@ -4462,6 +4847,7 @@ function warmupApi(path, options) {
 
 const WARMUP_STATUS_TONE = {
   warming: "tone-live",
+  working: "tone-live",
   paused: "tone-warn",
   blocked: "tone-bad",
   needs_attention: "tone-warn",
@@ -4472,6 +4858,8 @@ const WARMUP_STATUS_TONE = {
 
 const WARMUP_STATUS_LABEL = {
   warming: "Прогрівається",
+  // Past the last phase an account does not stop; it settles into working mode.
+  working: "Робочий режим",
   paused: "На паузі",
   blocked: "Заблоковано",
   needs_attention: "Потребує уваги",
@@ -4502,9 +4890,11 @@ function warmupNextSessionCell(profile) {
 
 function warmupConnectionsCell(profile) {
   const { today = 0, total = 0, quota = 0, startsDay = null } = profile.connections || {};
-  if (quota > 0) return `${today}/${quota} <span class="warmup-subtle">· ${total} за весь час</span>`;
-  if (startsDay) return `<span class="warmup-subtle">з ${startsDay}-го дня</span>`;
-  return `<span class="warmup-subtle">${total} за весь час</span>`;
+  const week = profile.connections?.weekly;
+  const all = `title="${total} за весь час${week ? ` · ${week.done}/${week.limit} за 7 днів` : ""}"`;
+  if (quota > 0) return `<span ${all}>${today}/${quota}</span>`;
+  if (startsDay) return `<span class="warmup-subtle" ${all}>з ${startsDay}-го дня</span>`;
+  return `<span class="warmup-subtle" ${all}>${total}</span>`;
 }
 
 function renderWarmupConfigNote() {
@@ -4544,8 +4934,11 @@ function renderWarmupStats() {
   const window = warmupState.config?.window;
   const cards = [
     { label: "Прогріваються", value: totals.warming },
+    { label: "Робочий режим", value: totals.working ?? 0 },
     { label: "На паузі", value: totals.paused },
-    { label: "Завершені", value: totals.completed },
+    // The standard strategy never finishes any more — day 15 is working mode —
+    // so this card only appears when there is something to count.
+    ...(totals.completed ? [{ label: "Завершені", value: totals.completed }] : []),
     { label: "Не почали", value: totals.idle },
     { label: "Сьогодні", value: `${todayProgress.done}/${todayProgress.planned}` },
     { label: "Вікно сесій", value: window ? `${window.label}${window.open ? "" : " · зачинене"}` : "—" }
@@ -4572,19 +4965,23 @@ function renderWarmupStats() {
 
 const WARMUP_EMPTY_FILTERS = { country: "", position: "", leadStatus: "", ownerId: "" };
 
+/**
+ * З якого дня прогріву кампанія сама годує акаунти зі своєї папки. Сім —
+ * бо дні 4–6 для своїх і перевірених, яких ставлять вручну з картки ліда.
+ * Сервер має те саме число (`DEFAULT_FROM_DAY`); тут воно лише для форми.
+ */
+const WARMUP_DEFAULT_FROM_DAY = 7;
+
+/** День із поля форми, як рядок: перевіряє його сервер і каже реченням, що не так. */
+function warmupFromDayValue() {
+  return (document.getElementById("warmupCampaignFromDay")?.value || "").trim();
+}
+
 const WARMUP_CAMPAIGN_TONE = {
   draft: "tone-muted",
   running: "tone-live",
   paused: "tone-warn",
   done: "tone-done"
-};
-
-/** What a campaign in this state is doing, said once rather than implied. */
-const WARMUP_CAMPAIGN_STATE_NOTE = {
-  draft: "Чернетка не закріплює нікого. Запусти її — і її акаунти почнуть брати людей із цієї папки.",
-  running: "Працює: усе, що лишається від сьогоднішньої квоти, пропонується цій кампанії в порядку нижче.",
-  paused: "На паузі. Її акаунти витрачають квоту на кампанії, що нижче; уже закріплене нікуди не дівається.",
-  done: "Позначена завершеною. З неї більше нічого не закріплюється, а надіслане лишається історією."
 };
 
 /** Стан кампанії — це дані; те, що видно в пігулці, — це текст. */
@@ -4614,6 +5011,7 @@ function warmupFormValues() {
     name: (document.getElementById("warmupCampaignName")?.value || "").trim(),
     folderId: document.getElementById("warmupFolderSelect")?.value || "",
     productId: document.getElementById("warmupCampaignProduct")?.value || "",
+    fromDay: warmupFromDayValue(),
     filters
   };
 }
@@ -4636,6 +5034,7 @@ function warmupCampaignSaved(campaign) {
     name: campaign?.name || "",
     folderId: campaign?.folderId || "",
     productId: campaign?.productId || "",
+    fromDay: String(campaign?.fromDay || WARMUP_DEFAULT_FROM_DAY),
     filters: { ...WARMUP_EMPTY_FILTERS, ...(campaign?.filters || {}) }
   };
 }
@@ -4648,6 +5047,7 @@ function warmupFormDirty() {
   const form = warmupFormValues();
   const saved = warmupCampaignSaved(editing);
   if (form.name !== saved.name || form.folderId !== saved.folderId || form.productId !== saved.productId) return true;
+  if (form.fromDay !== saved.fromDay) return true;
   return Object.keys(WARMUP_EMPTY_FILTERS).some((key) => form.filters[key] !== saved.filters[key]);
 }
 
@@ -4753,10 +5153,7 @@ function warmupForecastHtml(campaign, { stale = "" } = {}) {
       || (campaign?.folderId ? "Для цієї папки прогноз не повернувся." : "У цієї кампанії ще немає папки.");
     return {
       tone: "is-muted",
-      html: `<p class="warmup-forecast-line">${escapeHtml(reason)}</p>
-        <p class="warmup-forecast-hint">${campaign?.folderId
-          ? "Поки сервер не порахує, ніщо не скаже, скільки ця папка займе, — тож вважай цю кампанію неперевіреною."
-          : "Відредагуй її й обери папку — доти їй нізвідки брати людей."}</p>${stale}`
+      html: `<p class="warmup-forecast-line">${escapeHtml(reason)}</p>${stale}`
     };
   }
 
@@ -4771,48 +5168,40 @@ function warmupForecastHtml(campaign, { stale = "" } = {}) {
 
   const parts = [
     `<span>${warmupCount(matching)} у папці</span>`,
-    `<span>до ${warmupCount(approached)} уже зверталися</span>`,
+    `<span>${warmupCount(approached)} вже звертались</span>`,
     `<strong>${warmupCount(peak)} на день</strong>`,
-    `<span>~${warmupCount(perMonth)} за місяць</span>`,
+    // Today only when it differs: the average can hide a morning when nobody
+    // may send yet.
+    peak && now < peak ? `<span>сьогодні ${warmupCount(now)}</span>` : "",
     remaining === 0
-      ? `<span>опрацьовувати більше нікого</span>`
+      ? `<span>усіх охоплено</span>`
       : fullPass
-        ? `<span>повний прохід ~${escapeHtml(fullPass)}</span>`
-        : `<span>повний прохід не завершиться ніколи</span>`
-  ];
+        ? `<span>~${escapeHtml(fullPass)} до кінця</span>`
+        : `<span>не закінчиться</span>`
+  ].filter(Boolean);
 
   let tone = "is-ok";
   let hint = "";
 
   // A folder that matches nobody and a folder worked to the end are both "0
-  // left", and they need opposite things done about them.
+  // left", and they need opposite things done about them — so only a problem
+  // gets a sentence, and one short one.
   if (matching === 0) {
     tone = "is-bad";
-    hint = "Під ці фільтри в папці не підпадає ніхто, тож цій кампанії немає з ким працювати взагалі. Розшир фільтри або спрямуй її на іншу папку.";
+    hint = "Під фільтри не підпадає ніхто.";
   } else if (chosen === 0) {
     tone = "is-bad";
-    hint = `Цю кампанію ніхто не веде, тож із ${warmupCount(remaining)}, що лишились, не дійде черга ні до кого. Познач унизу, у Профілях, акаунти, які мають з неї надсилати.`;
+    hint = "Не позначено жодного акаунта — познач їх у Профілях.";
   } else if (peak === 0) {
     tone = "is-bad";
-    hint = `${chosen === 1 ? "Позначений акаунт не має" : `${chosen} позначених акаунтів не мають`} квоти на запити навіть на піку, тож ця кампанія ніколи не зрушить. Познач акаунт, який справді прогрівається.`;
+    hint = "Позначені акаунти не мають квоти на запити.";
   } else if (remaining === 0) {
     tone = "is-muted";
-    hint = "До всіх, кого ця кампанія знаходить, уже зверталися. Розшир фільтри або спрямуй її на іншу папку.";
   } else if (remaining > perMonth * 3) {
     tone = "is-bad";
-    hint = `Такими темпами ця папка — це ${escapeHtml(fullPass || "більше роботи, ніж ці акаунти колись подужають")} роботи: за перший місяць черга дійде до ${warmupCount(perMonth)} із ${warmupCount(remaining)}, що лишились, а решта просто лежатиме. Відредагуй кампанію і звузь її за країною, посадою чи статусом ліда, поки не лишиться список, який ці акаунти справді закінчать.`;
+    hint = "Папка завелика для цих акаунтів — звузь фільтри.";
   } else if (remaining > perMonth) {
     tone = "is-warn";
-    hint = `${warmupCount(remaining)}, що лишились, — це більше ніж місяць надсилань. Закінчиться приблизно за ${escapeHtml(fullPass || "невідомо скільки")} — звузь фільтри, якщо це довше за саму кампанію.`;
-  }
-
-  // Today and at peak are different promises, and the panel should not let the
-  // better one stand for both.
-  let today = "";
-  if (peak && now === 0) {
-    today = `<p class="warmup-forecast-today"><strong>Сьогодні не піде нічого.</strong> Жодному з позначених акаунтів ще не можна надсилати запит на контакт — стратегія притримує їх перші дні, — тож <strong>${warmupCount(peak)} на день</strong> це те, до чого вони дійдуть, коли прогріється кожен, а не те, що буде сьогодні.</p>`;
-  } else if (peak && now !== peak) {
-    today = `<p class="warmup-forecast-today">Сьогодні це <strong>${warmupCount(now)} на день</strong>, а не ${warmupCount(peak)}: решта позначених акаунтів ще набирають обертів, стоять на паузі або взагалі не прогріваються.</p>`;
   }
 
   return {
@@ -4820,23 +5209,22 @@ function warmupForecastHtml(campaign, { stale = "" } = {}) {
     html: `
       <p class="warmup-forecast-line">${parts.join('<span class="warmup-forecast-dot" aria-hidden="true">·</span>')}</p>
       ${hint ? `<p class="warmup-forecast-hint">${hint}</p>` : ""}
-      ${today}
       ${stale}`
   };
 }
 
 function warmupTickedAccountsLine(campaign) {
   const ids = warmupCampaignAccountIds(campaign);
-  if (!ids.size) return "Не позначено жодного акаунта, тож ця кампанія нічого не надсилає.";
+  if (!ids.size) return "";
   const names = [];
   for (const profile of warmupState.profiles) {
     if (profile.account && ids.has(profile.account.id)) names.push(profile.name);
   }
   const hidden = ids.size - names.length;
-  if (!names.length) return `Її ведуть ${ids.size} ${uaPlural(ids.size, "акаунт", "акаунти", "акаунтів")}, яких цей список не показує.`;
+  if (!names.length) return `Ведуть ${ids.size} ${uaPlural(ids.size, "акаунт", "акаунти", "акаунтів")}`;
   const listed = escapeHtml(names.slice(0, 4).join(", "));
   const more = names.length > 4 ? ` +${names.length - 4} ще` : "";
-  return `Ведуть: ${listed}${more}${hidden > 0 ? ` · ще ${hidden} немає у списку нижче` : ""}`;
+  return `Ведуть: ${listed}${more}${hidden > 0 ? ` +${hidden}` : ""}`;
 }
 
 /**
@@ -4855,11 +5243,13 @@ function warmupCampaignRowHtml(campaign, rank) {
   const folder = campaign.folderName || warmupFolderName(campaign.folderId) || (campaign.folderId ? "папка, якої CRM не показує" : "без папки");
   const product = warmupProductName(campaign.productId);
 
+  const feedStart = campaignFeedStart(campaign, WARMUP_DEFAULT_FROM_DAY);
   const meta = [
     escapeHtml(folder),
     `${accounts} ${uaPlural(accounts, "акаунт", "акаунти", "акаунтів")}`,
-    product ? escapeHtml(product) : "без продукту"
-  ];
+    product ? escapeHtml(product) : "",
+    feedStart ? `<span title="${escapeAttr(feedStart.title)}">${escapeHtml(feedStart.text)}</span>` : ""
+  ].filter(Boolean);
 
   const controls = [];
   // The order is the only thing deciding which campaign an account actually
@@ -4868,29 +5258,29 @@ function warmupCampaignRowHtml(campaign, rank) {
   // the two arrows that set it.
   const index = warmupState.campaigns.indexOf(campaign);
   const rankLabel = rank
-    ? `<strong title="Квота її акаунтів пропонується активним кампаніям у цьому порядку, і бере її перша, у якої є робота.">#${rank} у черзі</strong>`
-    : `<em title="Її місце в порядку. У чергу вона стає, коли запрацює.">поза чергою</em>`;
+    ? `<strong title="Порядок: спільні акаунти першою заповнює кампанія вище">#${rank}</strong>`
+    : `<em title="Стане в порядок після запуску">—</em>`;
   controls.push(`<span class="warmup-campaign-move">
-    <button class="text-button" type="button" data-warmup-campaign-move="up" ${index <= 0 ? "disabled" : ""} title="Пропонувати цій кампанії квоту її акаунтів раніше" aria-label="Підняти ${escapeAttr(campaign.name || "цю кампанію")} вище в порядку"><i data-lucide="chevron-up"></i></button>
+    <button class="text-button" type="button" data-warmup-campaign-move="up" ${index <= 0 ? "disabled" : ""} title="Вище" aria-label="Підняти ${escapeAttr(campaign.name || "цю кампанію")} вище в порядку"><i data-lucide="chevron-up"></i></button>
     ${rankLabel}
-    <button class="text-button" type="button" data-warmup-campaign-move="down" ${index < 0 || index >= warmupState.campaigns.length - 1 ? "disabled" : ""} title="Пропонувати цій кампанії квоту її акаунтів пізніше" aria-label="Опустити ${escapeAttr(campaign.name || "цю кампанію")} нижче в порядку"><i data-lucide="chevron-down"></i></button>
+    <button class="text-button" type="button" data-warmup-campaign-move="down" ${index < 0 || index >= warmupState.campaigns.length - 1 ? "disabled" : ""} title="Нижче" aria-label="Опустити ${escapeAttr(campaign.name || "цю кампанію")} нижче в порядку"><i data-lucide="chevron-down"></i></button>
   </span>`);
   if (campaign.state === "running") {
-    controls.push(`<button class="text-button" type="button" data-warmup-campaign-state="paused" title="Припинити закріплення з цієї кампанії"><i data-lucide="pause"></i><span>Пауза</span></button>`);
+    controls.push(`<button class="text-button" type="button" data-warmup-campaign-state="paused" title="Зупинити: акаунти перестануть брати людей із папки"><i data-lucide="pause"></i><span>Пауза</span></button>`);
   } else if (campaign.state !== "done") {
-    controls.push(`<button class="text-button" type="button" data-warmup-campaign-state="running" title="Дозволити її акаунтам закріплювати людей із цієї кампанії"><i data-lucide="play"></i><span>Старт</span></button>`);
+    controls.push(`<button class="text-button" type="button" data-warmup-campaign-state="running" title="Запустити: акаунти почнуть брати людей із папки"><i data-lucide="play"></i><span>Старт</span></button>`);
   }
   if (campaign.state !== "done") {
-    controls.push(`<button class="text-button" type="button" data-warmup-campaign-state="done" title="З неї більше нічого не закріплюється"><i data-lucide="check"></i><span>Завершити</span></button>`);
+    controls.push(`<button class="text-button" type="button" data-warmup-campaign-state="done" title="Більше нікого не брати"><i data-lucide="check"></i><span>Завершити</span></button>`);
   } else {
-    controls.push(`<button class="text-button" type="button" data-warmup-campaign-state="running" title="Знову дозволити її акаунтам закріплювати з неї"><i data-lucide="rotate-ccw"></i><span>Відкрити знову</span></button>`);
+    controls.push(`<button class="text-button" type="button" data-warmup-campaign-state="running" title="Запустити знову"><i data-lucide="rotate-ccw"></i><span>Відкрити знову</span></button>`);
   }
   controls.push(`<button class="text-button" type="button" data-warmup-campaign-edit><i data-lucide="pencil"></i><span>Редагувати</span></button>`);
   controls.push(`<button class="text-button warmup-campaign-delete" type="button" data-warmup-campaign-delete><i data-lucide="trash-2"></i><span>Видалити</span></button>`);
 
   const count = remaining === null
-    ? `<span class="warmup-campaign-count-unknown">${warmupCount(sent)} надіслано · скільки лишилось, порахувати не вдалося</span>`
-    : `<strong>${warmupCount(sent)}</strong><span>надіслано з ${warmupCount(remaining)}, що лишились</span>`;
+    ? `<span class="warmup-campaign-count-unknown">${warmupCount(sent)} надіслано</span>`
+    : `<strong>${warmupCount(sent)}</strong><span>надіслано · ${warmupCount(remaining)} лишилось</span>`;
 
   return `
     <article class="warmup-campaign-row ${tone} ${selected ? "is-selected" : ""}" data-warmup-campaign="${escapeAttr(campaign.id)}">
@@ -4903,9 +5293,9 @@ function warmupCampaignRowHtml(campaign, rank) {
       </div>
       <div class="warmup-campaign-count">
         ${count}
-        ${queued ? `<span class="warmup-campaign-claimed">${warmupCount(queued)} закріплено й не надіслано</span>` : ""}
+        ${queued ? `<span class="warmup-campaign-claimed">${warmupCount(queued)} у черзі</span>` : ""}
         ${campaign.progressApproximate
-          ? '<span class="warmup-campaign-approx" title="Інша кампанія ділить із цією акаунт і цю папку, тож її рядки рахуються тут теж. Щоб їх розрізнити, потрібна колонка, якої в wl_outreach немає.">рахується разом зі спільним акаунтом</span>'
+          ? '<span class="warmup-campaign-approx" title="Інша кампанія ділить із цією акаунт і папку — їхні числа змішані">приблизно</span>'
           : ""}
       </div>
       <div class="warmup-campaign-actions">${controls.join("")}</div>
@@ -4965,7 +5355,7 @@ function renderWarmupCampaignDetail() {
     : "";
 
   const { tone, html } = warmupForecastHtml(campaign, { stale });
-  const note = WARMUP_CAMPAIGN_STATE_NOTE[campaign.state] || "";
+  const note = campaignStateNote(campaign, WARMUP_DEFAULT_FROM_DAY);
 
   host.innerHTML = `
     <div class="warmup-forecast ${tone}">${html}</div>
@@ -4995,6 +5385,8 @@ function renderWarmupCampaignForm({ resetForm = false } = {}) {
     for (const [key, input] of Object.entries(warmupFilterInputs())) {
       if (input) input.value = saved.filters[key] || "";
     }
+    const fromDayInput = document.getElementById("warmupCampaignFromDay");
+    if (fromDayInput) fromDayInput.value = saved.fromDay;
     // A new campaign starts on the product this workspace is already working.
     renderWarmupProductOptions(editing ? saved.productId : (state?.selectedProductId || ""));
     renderWarmupFolderOptions(saved.folderId);
@@ -5006,6 +5398,8 @@ function renderWarmupCampaignForm({ resetForm = false } = {}) {
   for (const input of Object.values(warmupFilterInputs())) {
     if (input) input.disabled = !warmupState.foldersReady;
   }
+  const fromDayInput = document.getElementById("warmupCampaignFromDay");
+  if (fromDayInput) fromDayInput.disabled = !warmupState.foldersReady;
 
   saveButton.disabled = !warmupState.campaignsReady || warmupState.savingCampaign;
   saveButton.querySelector("span").textContent = warmupState.savingCampaign
@@ -5027,14 +5421,14 @@ function renderWarmupCampaigns({ resetForm = false } = {}) {
 
   if (pill) {
     if (!warmupState.campaignsReady) {
+      pill.hidden = false;
       pill.className = "pill tone-muted";
       pill.textContent = warmupState.campaignsError ? "недоступно" : "завантаження";
     } else {
-      const running = warmupState.campaigns.filter((campaign) => campaign.state === "running").length;
-      pill.className = running ? "pill tone-live" : "pill tone-muted";
-      pill.textContent = warmupState.campaigns.length
-        ? `${warmupState.campaigns.length} ${uaPlural(warmupState.campaigns.length, "кампанія", "кампанії", "кампаній")} · ${running} ${uaPlural(running, "працює", "працюють", "працюють")}`
-        : "поки жодної";
+      // The list under it already shows every campaign and its state.
+      pill.className = "pill tone-muted";
+      pill.textContent = "";
+      pill.hidden = true;
     }
   }
   if (newButton) newButton.disabled = !warmupState.campaignsReady || !warmupState.foldersReady;
@@ -5095,10 +5489,15 @@ function warmupQueueAccountHtml(accountId, campaignId) {
   const connections = profile?.connections || {};
   const quotaLine = connections.quota > 0
     ? `${connections.today || 0}/${connections.quota} сьогодні`
-    : (connections.startsDay ? `запити з ${connections.startsDay}-го дня` : "сьогодні квоти на запити немає");
+    : (connections.startsDay ? `запити з ${connections.startsDay}-го дня` : "без запитів сьогодні");
   const meta = [day, quotaLine].filter(Boolean).join(" · ");
 
-  let body;
+  // Only what the campaign on screen is doing: the cache is keyed by account,
+  // and another campaign ticking the same account loaded it just as well.
+  const feedLine = warmupAutoFeedHtml(autoFeedFor(queue, campaignId));
+  const waitingList = warmupQueueWaitingHtml(queue?.waiting || []);
+
+  let body = "";
   if (!queue) {
     body = '<div class="empty-state">Завантажуємо...</div>';
   } else if (queue.unavailable) {
@@ -5107,33 +5506,75 @@ function warmupQueueAccountHtml(accountId, campaignId) {
     body = `<p class="warmup-queue-reason is-bad">${escapeHtml(queue.error)}</p>`;
   } else if (queue.rows?.length) {
     body = `<ul class="warmup-leads warmup-queue-list">${queue.rows.map((row) => warmupQueueRowHtml(row, accountId, campaignId)).join("")}</ul>`;
-  } else if (queue.reason) {
-    // The server's sentence, verbatim. "Day 2 of 14 — connection requests start
-    // on day 4" is the answer; an empty box is not.
+  } else if (queue.reason && !feedLine) {
+    // The server's sentence, verbatim — but only when the feed line has not
+    // already said why nothing is held: two answers to one question is noise.
     body = `<p class="warmup-queue-reason">${escapeHtml(queue.reason)}</p>`;
-  } else {
-    body = '<p class="warmup-queue-reason is-muted">За цим акаунтом нічого не закріплено, і сервер не сказав чому.</p>';
   }
 
   const released = Number(queue?.released) || 0;
   const releasedNote = released
-    ? `<p class="warmup-queue-released">${warmupCount(released)} ${uaPlural(released, "закріплення протухло, і його відпущено", "закріплення протухли, і їх відпущено", "закріплень протухло, і їх відпущено")} — ці люди знову в пулі.</p>`
+    ? `<p class="warmup-queue-released">${warmupCount(released)} ${uaPlural(released, "закріплення", "закріплення", "закріплень")} повернулось у пул</p>`
     : "";
 
   return `<article class="warmup-queue-account" data-warmup-queue-account="${escapeAttr(accountId)}">
     <header>
       <div class="warmup-queue-who">
-        <strong>${escapeHtml(profile?.name || "Акаунт, якого цей список не показує")}</strong>
+        <strong>${escapeHtml(profile?.name || "Акаунт")}</strong>
         ${identity?.name ? `<span class="warmup-identity"><i data-lucide="badge-check"></i><span>${escapeHtml(identity.name)}</span></span>` : ""}
         ${meta ? `<span class="warmup-subtle">${escapeHtml(meta)}</span>` : ""}
       </div>
-      <button class="text-button" type="button" data-warmup-claim="${escapeAttr(accountId)}" ${busy ? "disabled" : ""}>
-        <i data-lucide="hand"></i><span>${busy ? "Закріплюємо..." : "Закріпити зараз"}</span>
+      <button class="text-button" type="button" data-warmup-claim="${escapeAttr(accountId)}" ${busy ? "disabled" : ""} title="Закріпити людей для ручного надсилання">
+        <i data-lucide="hand"></i><span>${busy ? "Закріплюємо..." : "Закріпити"}</span>
       </button>
     </header>
+    ${feedLine}
+    ${waitingList}
     ${releasedNote}
     ${body}
   </article>`;
+}
+
+/** Чи годує ця кампанія акаунт сама — одним реченням; слова в `autoFeedLine`. */
+function warmupAutoFeedHtml(feed) {
+  const line = autoFeedLine(feed, WARMUP_DEFAULT_FROM_DAY);
+  if (!line) return "";
+  return `<p class="warmup-queue-feed ${line.tone}"><i data-lucide="${line.icon}"></i><span>${escapeHtml(line.text)}</span></p>`;
+}
+
+/**
+ * Хто чекає, поки агент надішле запит, — і хто з них із папки, а кого
+ * поставили вручну. Кнопок тут немає: це черга агента, не людини.
+ */
+function warmupQueueWaitingHtml(rows) {
+  if (!rows.length) return "";
+  const fromFolder = rows.filter((row) => row.fromFolder).length;
+  const items = rows.map((row) => {
+    const link = warmupLeadLink(row.linkedin);
+    const where = [row.position, row.company].filter(Boolean).join(" · ");
+    const source = row.fromFolder
+      ? `<span class="pill tone-muted" title="${escapeAttr(row.campaignName ? `Із папки кампанії «${row.campaignName}»` : "Із папки кампанії")}">з папки</span>`
+      : '<span class="pill tone-live" title="Поставлено вручну з картки ліда — піде першим">вручну</span>';
+    // A block page on this request: the agent is not handed it until
+    // somebody moves or cancels it on the card.
+    const attention = row.parked
+      ? `<span class="pill tone-warn" title="${escapeAttr(inviteAttentionText({ status: "waiting", parked: true }))}">потребує уваги</span>`
+      : "";
+    return `<li>
+      <div class="warmup-lead-who">
+        <strong>${escapeHtml(row.name || "Контакт без імені")}</strong>
+        ${where ? `<span class="warmup-subtle">${escapeHtml(where)}</span>` : ""}
+      </div>
+      ${source}
+      ${attention}
+      ${link ? `<a href="${escapeAttr(link)}" target="_blank" rel="noreferrer">профіль</a>` : ""}
+    </li>`;
+  }).join("");
+  const parked = rows.filter((row) => row.parked).length;
+  return `<details class="warmup-queue-waiting"${parked ? " open" : ""}>
+    <summary>Чекають агента: ${warmupCount(rows.length)}${fromFolder ? ` · з папки ${warmupCount(fromFolder)}` : ""}${parked ? ` · потребують уваги ${warmupCount(parked)}` : ""}</summary>
+    <ul class="warmup-leads warmup-queue-list">${items}</ul>
+  </details>`;
 }
 
 function renderWarmupQueue() {
@@ -5146,16 +5587,16 @@ function renderWarmupQueue() {
   title.textContent = campaign ? `Черга · ${campaign.name || "Кампанія без назви"}` : "Черга";
 
   if (!campaign) {
-    subtitle.textContent = "Кампанію не вибрано";
-    body.innerHTML = '<div class="empty-state">Обери кампанію вгорі, щоб побачити, що тримають її акаунти.</div>';
+    subtitle.textContent = "";
+    body.innerHTML = '<div class="empty-state">Обери кампанію вгорі.</div>';
     return;
   }
 
   const accountIds = campaign.accountIds || [];
   if (!accountIds.length) {
-    subtitle.textContent = "Цю кампанію поки ніхто не веде";
-    body.innerHTML = `<div class="warmup-leads-prompt"><strong>До цієї кампанії не позначено жодного акаунта.</strong>
-      <span>Познач акаунт нижче, у Профілях, — акаунт може закріплювати людей лише з тієї кампанії, яку веде.</span></div>`;
+    subtitle.textContent = "";
+    body.innerHTML = `<div class="warmup-leads-prompt"><strong>Не позначено жодного акаунта.</strong>
+      <span>Познач їх нижче, у Профілях.</span></div>`;
     refreshIcons();
     return;
   }
@@ -5163,10 +5604,7 @@ function renderWarmupQueue() {
   // A queue is an account's, so what is counted here is everything these
   // accounts hold — this campaign's claims and any other campaign's.
   const claimed = accountIds.reduce((total, id) => total + (warmupQueueState(id)?.rows?.length || 0), 0);
-  const held = `${warmupCount(claimed)} на руках у ${accountIds.length} ${uaPlural(accountIds.length, "акаунта", "акаунтів", "акаунтів")}`;
-  subtitle.textContent = campaign.state === "running"
-    ? `${held} · закріплення тримає людину, воно нічого не надсилає`
-    : `Ця кампанія — ${WARMUP_CAMPAIGN_STATE_LABEL[campaign.state] || campaign.state}, тож нічого нового з неї не закріплюється. ${held}.`;
+  subtitle.textContent = claimed ? `${warmupCount(claimed)} закріплено вручну` : "";
 
   body.innerHTML = `<div class="warmup-queue-accounts">${accountIds.map((id) => warmupQueueAccountHtml(id, campaign.id)).join("")}</div>`;
   refreshIcons();
@@ -5216,11 +5654,11 @@ function renderWarmupLeads() {
   }
 
   subtitle.textContent = Number.isFinite(warmupState.leadsTotal)
-    ? `${warmupCount(warmupState.leadsTotal)} ${uaPlural(warmupState.leadsTotal, "підпадає", "підпадають", "підпадають")} під цю папку й фільтри · показані наступні ${warmupState.leads.length}, без тих, до кого вже зверталися з будь-якого акаунта`
-    : "Наступні люди з цієї папки, без тих, до кого вже зверталися з будь-якого акаунта";
+    ? `Наступні ${warmupState.leads.length} з ${warmupCount(warmupState.leadsTotal)}`
+    : "";
 
   if (!warmupState.leads.length) {
-    body.innerHTML = '<div class="empty-state">Під цими фільтрами в цій папці більше нікого немає.</div>';
+    body.innerHTML = '<div class="empty-state">У папці більше нікого немає.</div>';
     return;
   }
 
@@ -5325,8 +5763,8 @@ function renderWarmupDetail() {
 
   const detail = warmupState.detail;
   if (!detail) {
-    title.textContent = "Профіль не вибрано";
-    subtitle.textContent = "Обери профіль, щоб побачити його день, сьогоднішню квоту і його власний лог";
+    title.textContent = "Профіль";
+    subtitle.textContent = "";
     body.innerHTML = '<div class="empty-state">Вибери профіль зі списку.</div>';
     refreshIcons();
     return;
@@ -5336,7 +5774,9 @@ function renderWarmupDetail() {
   const warmup = account.warmup;
   title.textContent = account.label;
   subtitle.textContent = warmup
-    ? `${warmup.strategyName} · день ${warmup.day} з ${warmup.totalDays}${warmup.phase ? ` · ${warmup.phase}` : ""}`
+    ? warmup.working
+      ? `${warmup.strategyName} · робочий режим · день ${warmup.day}`
+      : `${warmup.strategyName} · день ${warmup.day} з ${warmup.totalDays}${warmup.phase ? ` · ${warmup.phase}` : ""}`
     : "Ще не прогрівається";
 
   const actionRows = warmup && !warmup.finished
@@ -5366,7 +5806,8 @@ function renderWarmupDetail() {
     controls.push('<button class="primary-button" type="button" data-warmup-control="start">Почати прогрів</button>');
     controls.push('<button class="text-button" type="button" data-warmup-control="exclude">Виключити</button>');
   } else if (warmup.state === "paused") {
-    controls.push('<button class="primary-button" type="button" data-warmup-control="resume">Продовжити</button>');
+    // The pause ends by itself; this is for ending it early.
+    controls.push('<button class="primary-button" type="button" data-warmup-control="resume" title="Продовжити зараз, не чекаючи кінця паузи">Продовжити</button>');
     controls.push('<button class="danger-button" type="button" data-warmup-control="stop">Зупинити</button>');
   } else {
     controls.push('<button class="text-button" type="button" data-warmup-control="warning">Прилетіло попередження</button>');
@@ -5402,7 +5843,7 @@ function renderWarmupDetail() {
 
   body.innerHTML = `
     <div class="warmup-detail-controls">${controls.join("")}</div>
-    ${warmup?.pausedUntil ? `<p class="warmup-paused">На паузі після попередження до ${escapeHtml(warmup.pausedUntil)}.</p>` : ""}
+    ${warmup?.state === "paused" && warmup.pausedUntil ? `<p class="warmup-paused">На паузі після попередження: до ${escapeHtml(warmup.pausedUntil)} включно акаунт нічого не робить. Далі прогрів продовжиться сам, а дні паузи в нього не рахуються.</p>` : ""}
     ${actionRows ? `<div class="warmup-actions">${actionRows}</div>` : ""}
     ${rules}
     <div class="warmup-health">
@@ -5481,6 +5922,7 @@ function spliceWarmupCampaign(campaign) {
 }
 
 function openWarmupCampaignForm(campaignId = null) {
+  const moved = Boolean(campaignId) && warmupState.selectedCampaignId !== campaignId;
   warmupState.formOpen = true;
   warmupState.formCampaignId = campaignId;
   warmupState.campaignNotice = "";
@@ -5488,6 +5930,12 @@ function openWarmupCampaignForm(campaignId = null) {
   renderWarmupCampaigns({ resetForm: true });
   renderWarmupProfiles();
   renderWarmupQueue();
+  // «Редагувати» on another campaign selects it, and the queue and the pool
+  // below have to follow — they were loaded for the one selected before.
+  if (moved) {
+    loadWarmupQueues();
+    loadWarmupLeads();
+  }
   document.getElementById("warmupCampaignName")?.focus();
 }
 
@@ -5524,7 +5972,10 @@ async function saveWarmupCampaignForm() {
       name: form.name,
       folderId: form.folderId,
       filters: form.filters,
-      productId: form.productId || null
+      productId: form.productId || null,
+      // Порожнє поле — це «як було» для збереженої кампанії і сім для нової;
+      // решту перевіряє сервер і відповідає реченням, яке видно у формі.
+      ...(form.fromDay === "" ? {} : { fromDay: form.fromDay })
     };
     const payload = editing
       ? await warmupApi("/campaigns", { method: "PATCH", body: JSON.stringify({ id: editing.id, ...body }) })
@@ -5742,15 +6193,24 @@ async function saveWarmupCampaignAccounts(campaignId, accountIds) {
  */
 
 async function loadWarmupQueue(accountId) {
+  // The campaign on screen, so the server answers whether *this* one feeds
+  // the account by itself today, and from which day it will.
+  const campaignId = warmupState.selectedCampaignId || "";
   try {
-    const payload = await warmupApi(`/queue?accountId=${encodeURIComponent(accountId)}`);
+    const payload = await warmupApi(`/queue?accountId=${encodeURIComponent(accountId)}${campaignId ? `&campaignId=${encodeURIComponent(campaignId)}` : ""}`);
+    // Somebody picked another campaign while this was on its way: its answer
+    // is about the old one, and the new one's request is already out.
+    if (!queueAnswerIsCurrent(campaignId, warmupState.selectedCampaignId)) return;
     warmupState.queues[accountId] = {
       rows: payload.queue || payload.claimed || [],
       reason: payload.reason || "",
+      waiting: payload.waiting || [],
+      autoFeed: payload.autoFeed || null,
       error: "",
       unavailable: ""
     };
   } catch (error) {
+    if (!queueAnswerIsCurrent(campaignId, warmupState.selectedCampaignId)) return;
     warmupState.queues[accountId] = {
       rows: [],
       reason: "",
@@ -5788,6 +6248,7 @@ async function claimWarmupQueue(accountId) {
     const claimed = payload.claimed || [];
     const existing = warmupState.queues[accountId]?.rows || [];
     warmupState.queues[accountId] = {
+      ...(warmupState.queues[accountId] || {}),
       // Oldest first, as the queue itself is ordered.
       rows: existing.concat(claimed),
       reason: payload.reason || "",
@@ -5798,14 +6259,9 @@ async function claimWarmupQueue(accountId) {
       unavailable: ""
     };
   } catch (error) {
-    warmupState.queues[accountId] = {
-      rows: warmupState.queues[accountId]?.rows || [],
-      reason: "",
-      error: error.status === 404
-        ? "Цей сервер ще не вміє закріплювати."
-        : error.message,
-      unavailable: ""
-    };
+    // Everything the card already showed stays: the auto-feed line and who is
+    // waiting for the agent are still true when a claim fails.
+    warmupState.queues[accountId] = queueAfterFailedClaim(warmupState.queues[accountId], error);
   } finally {
     warmupState.queueBusy[accountId] = false;
   }
@@ -6072,7 +6528,7 @@ document.getElementById("warmupFolderSelect")?.addEventListener("change", warmup
 document.getElementById("warmupCampaignProduct")?.addEventListener("change", warmupCampaignFormTouched);
 document.getElementById("warmupCampaignName")?.addEventListener("input", warmupCampaignFormTouched);
 
-for (const id of ["warmupFilterCountry", "warmupFilterPosition", "warmupFilterStatus", "warmupFilterOwner"]) {
+for (const id of ["warmupFilterCountry", "warmupFilterPosition", "warmupFilterStatus", "warmupFilterOwner", "warmupCampaignFromDay"]) {
   document.getElementById(id)?.addEventListener("input", warmupCampaignFormTouched);
 }
 
@@ -6359,8 +6815,7 @@ function warmupSyncGapHtml(sync) {
   if (sync.accountsSynced >= sync.accountsTotal) return "";
   const missing = sync.accountsTotal - sync.accountsSynced;
   return `<div class="warmup-inbox-note is-warn">
-    <strong>${warmupCount(missing)} ${uaPlural(missing, "акаунт із", "акаунти із", "акаунтів із")} ${warmupCount(sync.accountsTotal)} не читали жодного разу.</strong>
-    <span>Те, що надійшло ${missing === 1 ? "на нього" : "на них"}, не показане нижче і не враховане — цей список повний рівно настільки, наскільки агент справді відкривав акаунти.</span>
+    <strong>${warmupCount(missing)} з ${warmupCount(sync.accountsTotal)} ${uaPlural(sync.accountsTotal, "акаунта", "акаунтів", "акаунтів")} ще не читали — їхніх відповідей тут немає</strong>
   </div>`;
 }
 
@@ -6383,32 +6838,26 @@ function warmupInboxEmptyHtml() {
 
   if (!sync.known) {
     return `<div class="warmup-inbox-note is-warn">
-      <strong>Відповідей немає — і цей сервер не каже, коли акаунти читали востаннє.</strong>
-      <span>Тому тут не відрізнити порожні вхідні від агента, який жодного разу не заглядав, а це не те саме: у першому випадку просто тихий тиждень, у другому — кожна відповідь на кожному акаунті лишається непоміченою. Розрізняє їх саме час останнього читання.</span>
+      <strong>Відповідей немає, але невідомо, коли вхідні читали востаннє.</strong>
     </div>`;
   }
 
   if (!sync.lastSyncedAt) {
     return `<div class="warmup-inbox-note is-bad">
-      <strong>Жодного акаунта ще не читали. Це не порожні вхідні — це агент, який жодного разу не заглядав.</strong>
-      <span>Наприкінці кожного прогону агент прогріву відкриває повідомлення LinkedIn і складає знайдене сюди. Сюди не склали ще нічого, тож відповідь на будь-якому з цих акаунтів не бачить ніхто, крім того, хто відкриє акаунт руками. Перевір, що агент працює, дивиться саме на цей портал і що його токен заданий з обох боків.</span>
+      <strong>Вхідні ще жодного разу не читали.</strong>
+      <span>Перевір, що агент працює і його токен заданий.</span>
     </div>`;
   }
 
   if (sync.stale) {
     return `<div class="warmup-inbox-note is-warn">
-      <strong>Нічого не надходило, а востаннє сюди заглядали ${escapeHtml(warmupAgo(sync.lastSyncedAt))}.</strong>
-      <span>Останнє читання — ${escapeHtml(warmupStamp(sync.lastSyncedAt))}. Агент читає акаунти наприкінці кожного прогону, тож така пауза — це радше зупинений агент, ніж тихий тиждень: вхідні, яких ніхто не читає, виглядають точно так само, як вхідні, куди ніхто не написав.</span>
+      <strong>Вхідні не читали ${escapeHtml(warmupAgo(sync.lastSyncedAt))} — схоже, агент зупинився.</strong>
     </div>`;
   }
 
-  const coverage = sync.accountsTotal !== null && sync.accountsSynced !== null
-    ? ` Прочитано всі ${warmupCount(sync.accountsSynced)} із ${warmupCount(sync.accountsTotal)} ${uaPlural(sync.accountsTotal, "акаунта", "акаунтів", "акаунтів")}.`
-    : "";
-
   return `<div class="warmup-inbox-note is-calm">
-    <strong>Нічого не надходило.</strong>
-    <span>Акаунти востаннє читали ${escapeHtml(warmupAgo(sync.lastSyncedAt))}, і відтоді ніхто не написав у відповідь.${escapeHtml(coverage)} Це порожні вхідні, а не непрочитані.</span>
+    <strong>Нових відповідей немає.</strong>
+    <span>Читали ${escapeHtml(warmupAgo(sync.lastSyncedAt))}.</span>
   </div>`;
 }
 
@@ -6418,9 +6867,6 @@ function warmupThreadRowHtml(thread) {
   const account = warmupThreadAccount(thread);
   const last = thread.lastMessage || {};
   const inbound = last.direction !== "out";
-  const count = Number(thread.messageCount) || 0;
-  const status = String(thread.outreachStatus || "").trim();
-
   // No "на <account>" here any more: the rows sit under a heading that names
   // the account, and repeating it on every row is what made a thread look like
   // it belonged to whoever was printed last.
@@ -6428,7 +6874,7 @@ function warmupThreadRowHtml(thread) {
     <button class="warmup-thread ${thread.unread ? "is-unread" : ""}" type="button"
       data-warmup-thread="${escapeAttr(thread.threadKey || "")}"
       data-warmup-thread-account="${escapeAttr(thread.accountId || "")}"
-      aria-label="${escapeAttr(`Розмова з ${name}, акаунт ${account.name}`)}">
+      aria-label="${escapeAttr(`Розмова з ${name}, акаунт ${account.name}${thread.unread ? ", непрочитане" : ""}`)}">
       <span class="warmup-thread-mark" aria-hidden="true"></span>
       <span class="warmup-thread-who">
         <strong${warmupParticipantNameAttr(participant)}>${escapeHtml(name)}</strong>
@@ -6440,9 +6886,6 @@ function warmupThreadRowHtml(thread) {
       </span>
       <span class="warmup-thread-meta">
         <time datetime="${escapeAttr(last.sentAt || "")}" title="${escapeAttr(warmupStamp(last.sentAt))}">${escapeHtml(warmupAgo(last.sentAt) || "—")}</time>
-        <span class="warmup-subtle">${warmupCount(count)} ${uaPlural(count, "повідомлення", "повідомлення", "повідомлень")}</span>
-        ${status ? `<span class="pill ${WARMUP_OUTREACH_TONE[status] || "tone-muted"}">${escapeHtml(WARMUP_OUTREACH_LABEL[status] || status)}</span>` : ""}
-        ${thread.unread ? '<span class="warmup-thread-unread">непрочитане</span>' : ""}
       </span>
     </button>`;
 }
@@ -6504,7 +6947,6 @@ function warmupThreadGroupsHtml(threads) {
         ${unread
           ? `<span class="warmup-group-unread">${warmupCount(unread)} ${uaPlural(unread, "нова відповідь", "нові відповіді", "нових відповідей")}</span>`
           : '<span class="warmup-subtle">усе прочитано</span>'}
-        <span class="warmup-subtle">${warmupCount(held.length)} ${uaPlural(held.length, "розмова", "розмови", "розмов")} тут</span>
       </h3>
       <div class="warmup-threads">${held.map((thread) => warmupThreadRowHtml(thread)).join("")}</div>
     </section>`;
@@ -6685,8 +7127,8 @@ function renderWarmupInbox() {
   // Three answers, not two: read at a time, never read, and not reported. The
   // subtitle must not turn the third into the second.
   const read = sync.lastSyncedAt
-    ? `акаунти востаннє читали ${warmupAgo(sync.lastSyncedAt)}`
-    : (sync.known ? "жодного акаунта ще не читали" : "цей сервер не каже, коли акаунти читали востаннє");
+    ? `читали ${warmupAgo(sync.lastSyncedAt)}`
+    : (sync.known ? "ще не читали" : "");
 
   if (!inbox.threads.length) {
     subtitle.textContent = inbox.unreadOnly ? "Тільки непрочитані" : read;
@@ -6695,13 +7137,9 @@ function renderWarmupInbox() {
     return;
   }
 
-  // How many accounts the list spans, said before the groups themselves: five
-  // conversations on one login and five on five are different days of work.
-  const spread = new Set(inbox.threads.map((thread) => thread.accountId)).size;
-  const across = spread
-    ? ` на ${warmupCount(spread)} ${uaPlural(spread, "акаунті", "акаунтах", "акаунтах")}`
-    : "";
-  subtitle.textContent = `${warmupCount(inbox.threads.length)} ${uaPlural(inbox.threads.length, "розмова", "розмови", "розмов")}${inbox.unreadOnly ? " непрочитаних" : ""}${across} · ${read}`;
+  // The groups below already name each account and count what is new; the
+  // subtitle only says when the inbox was last read.
+  subtitle.textContent = read;
 
   const shown = inbox.showAll ? inbox.threads : inbox.threads.slice(0, WARMUP_INBOX_PREVIEW);
   const hidden = inbox.threads.length - shown.length;

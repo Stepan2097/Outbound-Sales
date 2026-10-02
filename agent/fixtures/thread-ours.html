@@ -1,0 +1,111 @@
+<!-- A conversation we did all the talking in, at
+     /messaging/thread/2-NTRhYjIxMDAtOGUwNy00/ .
+     Constructed, not saved — see README.md in this folder.
+
+     Two things are deliberately missing here, and they are the two that break
+     readers in production.
+
+     First, every `msg-*` class is gone: this is the same page after LinkedIn
+     ships a build where the semantic names are hashes like everything else.
+     The reader has to find the messages structurally or find nothing.
+
+     Second, the account's own profile slug is unknown — which is not a corner
+     case but the normal state, because `wl_accounts.identity.slug` is null for
+     the accounts on warm-up today. The only thing saying which bubbles are ours
+     is our own name on the group header. Get that wrong and the portal is told
+     a stranger replied: the outreach row moves to `connected` and an activity
+     lands in the CRM that a seller reads as a lead answering. -->
+<title>(5) Messaging | LinkedIn</title>
+<style>
+  /* LinkedIn's rows are block-level flex containers. Without saying so, an
+     anchor wrapping block children lays out as overlapping inline boxes and a
+     click at the centre of one row lands on its neighbour — an artefact of a
+     fixture with no stylesheet, not of the messenger. */
+  ul { list-style: none; margin: 0; padding: 0; }
+  li { display: block; }
+  li > a, li > div > a, li > button { display: block; padding: 8px; border-bottom: 1px solid #eee; }
+</style>
+<section class="_1f9c3b2a">
+
+  <aside class="_0d4e7c33">
+    <ul class="_4c1b8e7f">
+      <li class="_77ab90cd">
+        <a class="_51ade9c0" href="/messaging/thread/2-ZjE4ZmQ1NzQtYjE1NC00ZjQ4LThm/">
+          <img alt="Marta Kowalczyk" src="https://media.licdn.com/dms/image/v2/aaa/x?e=1" />
+          <h3 class="_9a4c11bd">Marta Kowalczyk</h3>
+          <time class="_2b7e01aa">2h</time>
+          <p class="_6d3f22bc">Thanks for reaching out — happy to chat next week 😊</p>
+        </a>
+      </li>
+      <li class="_77ab90cd">
+        <a class="_51ade9c0" href="/messaging/thread/2-NTRhYjIxMDAtOGUwNy00/">
+          <img alt="Dmytro Herasymenko" src="https://media.licdn.com/dms/image/v2/bbb/x?e=1" />
+          <h3 class="_9a4c11bd">Dmytro Herasymenko</h3>
+          <time class="_2b7e01aa">Yesterday</time>
+          <p class="_6d3f22bc">You: Sent a connection note</p>
+        </a>
+      </li>
+      <li class="_77ab90cd">
+        <a class="_51ade9c0" href="/messaging/thread/2-R3JvdXBDaGF0MDAx/">
+          <img alt="Anna Bauer" src="https://media.licdn.com/dms/image/v2/ccc/x?e=1" />
+          <h3 class="_9a4c11bd">Anna Bauer, Tomás Ruiz</h3>
+          <time class="_2b7e01aa">3d</time>
+          <p class="_6d3f22bc">Anna: we should compare notes on the Q4 pipeline</p>
+        </a>
+      </li>
+      <li class="_77ab90cd">
+        <a class="_51ade9c0" href="/messaging/thread/2-T2xkZXJUaHJlYWQwMDI%3D/">
+          <img alt="Priya Nair" src="https://media.licdn.com/dms/image/v2/eee/x?e=1" />
+          <h3 class="_9a4c11bd">Priya Nair</h3>
+          <time class="_2b7e01aa">Sep 12</time>
+          <p class="_6d3f22bc">Priya: congratulations on the new role!</p>
+        </a>
+      </li>
+    </ul>
+  </aside>
+
+  <div class="_b7d21e04">
+    <header class="_33c0fa18">
+      <a href="/in/dmytro-herasymenko-77c1/" class="_8e2a44df">
+        <span class="_77b1c2e9">Dmytro Herasymenko</span>
+      </a>
+      <div class="_1c9e00ab">Operations Director at Kyiv Freight Union</div>
+    </header>
+
+    <ul class="_5f8ac210">
+      <li class="_a01b3c4d">
+        <time class="_2b7e01aa">SEP 15</time>
+      </li>
+
+      <li class="_a01b3c4d">
+        <div class="_ce90ab21">
+          <a class="_8e2a44df" href="/in/mary-lindsay-0a12b3/">
+            <img alt="Mary Lindsay" src="https://media.licdn.com/dms/image/v2/zzz/x?e=1" />
+          </a>
+          <div class="_44de1290">
+            <a class="_8e2a44df" href="/in/mary-lindsay-0a12b3/"><span class="_77b1c2e9">Mary Lindsay</span></a>
+            <time class="_2b7e01aa">9:41 AM</time>
+          </div>
+          <p class="_6d3f22bc">Hi Dmytro — we work with freight forwarders on the same lane. Worth a short call?</p>
+        </div>
+      </li>
+
+      <!-- Grouped continuation: ours, but nothing on this bubble says so. -->
+      <li class="_a01b3c4d">
+        <div class="_ce90ab21">
+          <p class="_6d3f22bc">ok</p>
+        </div>
+      </li>
+
+      <li class="_a01b3c4d">
+        <div class="_ce90ab21">
+          <p class="_6d3f22bc">(sorry, sent that half-written — I meant: happy to send over a one-pager first.)</p>
+        </div>
+      </li>
+    </ul>
+
+    <form class="_22f0ab19">
+      <div class="_7e0ab133" contenteditable="true" role="textbox" aria-label="Write a message…"></div>
+    </form>
+  </div>
+</section>

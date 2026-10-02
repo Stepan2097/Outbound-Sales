@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ACTION_KINDS, DEFAULT_STRATEGY, currentDay, dailyQuota, planForDay, totalDays, validateStrategy } from "../warmup/strategy.mjs";
+import {
+  ACTION_KINDS, CONNECT_HARD_MAX, DEFAULT_STRATEGY, currentDay, dailyQuota, planForDay, totalDays, validateStrategy
+} from "../warmup/strategy.mjs";
 import { SESSION_WINDOW, insideWindow, nextSession, sessionTimeOn } from "../warmup/schedule.mjs";
 import { deriveStatus } from "../warmup/status.mjs";
 import { parseProxy, platformOf, retag } from "../warmup/platform.mjs";
@@ -50,10 +52,102 @@ test("paused days are dead time, not progress", () => {
   assert.equal(currentDay(started, 99, now), 1, "progress never runs backwards past day 1");
 });
 
-test("a day past the last phase is finished", () => {
+test("a day past the last phase is working mode, not the end", () => {
+  // Day 15 used to be "finished", with no quota for anything — an account
+  // warmed for two weeks and then never used.
   assert.equal(totalDays(strategy), 14);
-  assert.equal(planForDay(strategy, "account-a", 15).finished, true);
-  assert.equal(planForDay(strategy, "account-a", 14).finished, false);
+  const day14 = planForDay(strategy, "account-a", 14);
+  assert.equal(day14.working, false);
+  assert.equal(day14.finished, false);
+
+  const day15 = planForDay(strategy, "account-a", 15);
+  assert.equal(day15.working, true);
+  assert.equal(day15.finished, false, "working mode is a plan, not a stop");
+  assert.equal(day15.phase.label, "Working mode");
+  assert.deepEqual(day15.connectionNote, { maxWords: 3, allowLinks: false }, "the day 11–14 note rule carries on");
+  assert.ok(day15.quotas.connect >= 10 && day15.quotas.connect <= 15);
+  assert.equal(day15.quotas.post_comment, 0, "a kind with no working-mode quota stays forbidden");
+  assert.equal(planForDay(strategy, "account-a", 400).working, true, "and it has no last day");
+});
+
+test("every working-mode figure stays inside its range, and moves from day to day", () => {
+  const { quotas } = strategy.workingMode;
+  assert.deepEqual(quotas, { profile_view: [10, 12], like: [2, 3], connect: [10, 15] });
+  for (const [kind, [low, high]] of Object.entries(quotas)) {
+    const seen = new Set();
+    for (let day = 15; day < 75; day += 1) {
+      for (let index = 0; index < 10; index += 1) {
+        const drawn = dailyQuota(strategy, `account-${index}`, day, kind);
+        assert.ok(drawn >= low && drawn <= high, `${kind} day ${day} drew ${drawn}, outside ${low}-${high}`);
+        seen.add(drawn);
+      }
+    }
+    assert.ok(seen.size > 1, `${kind}: every day the same figure would itself be a pattern`);
+  }
+});
+
+test("a run started before working mode existed gets it without a restart", () => {
+  // Every snapshot frozen so far is `{ name, phases, pauseDays }`, and so is the
+  // default row in wl_strategies. Neither carries a working mode, and neither
+  // may stop sending on day 15 for want of one.
+  const legacy = { name: strategy.name, phases: strategy.phases, pauseDays: 2 };
+  const plan = planForDay(legacy, "account-a", 20);
+  assert.equal(plan.working, true);
+  assert.equal(plan.finished, false);
+  assert.equal(plan.quotas.connect, dailyQuota(strategy, "account-a", 20, "connect"), "the same figure the code default draws");
+
+  // A snapshot with no phases is not a strategy, and gets nothing to fall back on.
+  assert.equal(planForDay({ phases: [] }, "account-a", 3).finished, true);
+  assert.equal(dailyQuota({ phases: [] }, "account-a", 3, "connect"), 0);
+});
+
+test("nothing sends more than twenty requests a day, whatever the snapshot says", () => {
+  assert.equal(CONNECT_HARD_MAX, 20);
+  // A snapshot saved before the ceiling, or typed into the table by hand.
+  const greedy = {
+    phases: [{ fromDay: 1, toDay: 2, quotas: { connect: [40, 40], profile_view: [30, 30] } }],
+    workingMode: { quotas: { connect: [25, 30] } }
+  };
+  assert.equal(dailyQuota(greedy, "account-a", 1, "connect"), 20);
+  assert.equal(dailyQuota(greedy, "account-a", 9, "connect"), 20, "working mode is clamped the same way");
+  assert.equal(dailyQuota(greedy, "account-a", 1, "profile_view"), 30, "the ceiling is about requests only");
+});
+
+test("a strategy asking for more than twenty requests a day is refused, in a phase or in working mode", () => {
+  assert.equal(validateStrategy(DEFAULT_STRATEGY), null, "the shipped strategy passes its own rule");
+
+  const base = { name: "Fast", pauseDays: 2, phases: [
+    { fromDay: 1, toDay: 3, label: "a", quotas: { profile_view: [1, 2], connect: [10, 20] }, connectionNote: false, rules: [] }
+  ] };
+  assert.equal(validateStrategy(base), null, "twenty itself is allowed");
+
+  const phaseOver = structuredClone(base);
+  phaseOver.phases[0].quotas.connect = [15, 21];
+  assert.match(validateStrategy(phaseOver), /Фаза 1: більше 20 запитів на контакт/);
+
+  assert.equal(validateStrategy({ ...base, workingMode: { quotas: { connect: [10, 20] } } }), null);
+  assert.match(validateStrategy({ ...base, workingMode: { quotas: { connect: [10, 25] } } }), /Робочий режим: більше 20 запитів/);
+  assert.match(validateStrategy({ ...base, workingMode: { quotas: { message: [1, 1] } } }), /Робочий режим: невідома дія/);
+  assert.match(validateStrategy({ ...base, workingMode: "fast" }), /Робочому режиму потрібні квоти/);
+});
+
+test("a note rule the hand-off could not enforce is refused when the strategy is saved", () => {
+  // The hand-off enforces what it can read. A `maxWords` of "3" reads as no
+  // word limit at all, so a strategy that meant three words would have sent
+  // three hundred characters — refused here instead of discovered on LinkedIn.
+  const withNote = (connectionNote) => ({ name: "Notes", pauseDays: 2, phases: [
+    { fromDay: 1, toDay: 3, label: "a", quotas: { profile_view: [1, 2] }, connectionNote, rules: [] }
+  ] });
+  assert.equal(validateStrategy(withNote(false)), null);
+  assert.equal(validateStrategy(withNote({ maxWords: 3, allowLinks: false })), null);
+  assert.equal(validateStrategy(withNote(undefined)), null, "absent is no note, as it always was");
+  assert.match(validateStrategy(withNote({ maxWords: "3" })), /Фаза 1: правило записки/);
+  assert.match(validateStrategy(withNote({ maxWords: 3, allowLinks: "no" })), /Фаза 1: правило записки/);
+  assert.match(validateStrategy(withNote("short")), /Фаза 1: правило записки/);
+  assert.match(
+    validateStrategy({ ...withNote(false), workingMode: { quotas: { connect: [10, 15] }, connectionNote: { maxWords: 0 } } }),
+    /Робочий режим: правило записки/
+  );
 });
 
 test("a strategy with a gap between phases is refused", () => {
@@ -106,6 +200,27 @@ test("an unfinished quota keeps the session due today, not tomorrow", () => {
   assert.equal(ahead.inMinutes, 60);
 });
 
+test("an account the scheduler is holding back shows when the hold ends, not 'time has come'", () => {
+  const account = "account-c";
+  const slot = sessionTimeOn(account, new Date("2026-09-16T00:00:00"));
+  const afterSlot = new Date(slot.getTime() + 30 * 60 * 1000);
+  const restEnds = afterSlot.getTime() + 45 * 60 * 1000;
+
+  const resting = nextSession(account, { outstanding: true, now: afterSlot, notBefore: restEnds });
+  assert.equal(resting.at, new Date(restEnds).toISOString());
+  assert.equal(resting.overdue, false, "the scheduler will not hand it out before then, so nothing is late");
+  assert.equal(resting.inMinutes, 45);
+
+  const over = nextSession(account, { outstanding: true, now: afterSlot, notBefore: afterSlot.getTime() - 1000 });
+  assert.equal(over.overdue, true, "a hold that has ended changes nothing");
+
+  const early = nextSession(account, { outstanding: true, now: new Date(slot.getTime() - 60 * 60 * 1000), notBefore: slot.getTime() - 30 * 60 * 1000 });
+  assert.equal(early.at, slot.toISOString(), "a hold that ends before the planned slot leaves the slot as it was");
+
+  const doneForToday = nextSession(account, { outstanding: false, now: afterSlot, notBefore: restEnds });
+  assert.equal(doneForToday.today, false, "nothing owed today still points at tomorrow, whatever the hold");
+});
+
 test("a finished day points at tomorrow even before today's slot has passed", () => {
   const account = "account-b";
   const slot = sessionTimeOn(account, new Date("2026-09-16T00:00:00"));
@@ -136,8 +251,13 @@ test("status folds health and the run in a fixed order of urgency", () => {
   assert.equal(deriveStatus({ ...healthy, profile_remote_id: null }, run, todayIso), "needs_attention");
   assert.equal(deriveStatus(healthy, null, todayIso), "off");
   assert.equal(deriveStatus(null, null, todayIso), "off");
-  // Past the last day is finished whether or not anything marked it completed.
-  assert.equal(deriveStatus(healthy, { ...run, started_at: "2026-01-01T00:00:00Z" }, todayIso), "finished");
+  // Past the last day is working mode whether or not anything marked it — and
+  // this snapshot has no working mode of its own, like every run started before
+  // there was one, so it is the code default that makes it so.
+  assert.equal(deriveStatus(healthy, { ...run, started_at: "2026-01-01T00:00:00Z" }, todayIso), "working");
+  assert.equal(deriveStatus(healthy, { ...run, state: "completed" }, todayIso), "finished");
+  // A pause still wins: working mode stops for a warning like any other day.
+  assert.equal(deriveStatus(healthy, { ...run, started_at: "2026-01-01T00:00:00Z", paused_until: "2026-09-20" }, todayIso), "paused");
 });
 
 test("a profile's platform is read the way Anty reads it", () => {

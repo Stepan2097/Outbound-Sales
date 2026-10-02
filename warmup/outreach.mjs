@@ -92,3 +92,39 @@ export function describeClaim(row, campaign = null) {
     claimedAt: row.created_at
   };
 }
+
+function segment(value) {
+  try {
+    return decodeURIComponent(value).trim().toLowerCase();
+  } catch {
+    // A stray percent in a pasted URL is not worth losing the match over.
+    return value.trim().toLowerCase();
+  }
+}
+
+/**
+ * A comparable key out of whatever form a LinkedIn link takes: a full URL, an
+ * `/in/` path, or the slug on its own. Lower-cased and stripped of the query
+ * and the trailing slash, because the same person arrives spelled three ways —
+ * the agent reads a href, the CRM holds whatever a seller once pasted.
+ *
+ * A company, school or showcase page keeps its kind in the key. Plenty of the
+ * CRM's contacts carry `/company/...` in the column meant for the person, and
+ * without the prefix `linkedin.com/company/acme` and `linkedin.com/in/acme`
+ * reduce to the same string — which would file somebody's reply against a row
+ * belonging to a different person entirely.
+ *
+ * A bare slug with no path is read as a person: that is what the agent hands
+ * us, because what it reads is an `/in/` href.
+ */
+export function linkedinSlug(value) {
+  const raw = typeof value === "string" ? value.trim().slice(0, 300) : "";
+  if (!raw) return "";
+  const person = /\/in\/([^/?#]+)/i.exec(raw);
+  if (person) return segment(person[1]);
+
+  const page = /\/(company|school|showcase)\/([^/?#]+)/i.exec(raw);
+  if (page) return `${page[1].toLowerCase()}:${segment(page[2])}`;
+
+  return segment(raw.split(/[/?#]/).filter(Boolean).pop() || "");
+}

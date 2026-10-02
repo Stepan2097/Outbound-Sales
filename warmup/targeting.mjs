@@ -1,6 +1,7 @@
 import { anty, crm, CONTACT_ID_BATCH, queueQuery, queueTotal, today } from "./db.mjs";
-import { DEFAULT_STRATEGY, dailyQuota, totalDays } from "./strategy.mjs";
+import { DEFAULT_STRATEGY, dailyQuota, totalDays, workingModeOf } from "./strategy.mjs";
 import { connectQuotaToday } from "./store.mjs";
+import { weeklyConnectCounts, WEEKLY_CONNECT_LIMIT } from "./weekly.mjs";
 
 /**
  * Which folder the warm-up works, narrowed by which filters, worked by which
@@ -115,19 +116,32 @@ export async function folderNameOf(folderId) {
 
 // ── what it comes to ──────────────────────────────────────────────────────
 
+/** How many working-mode days the rate below is averaged over: a month. */
+const WORKING_RATE_DAYS = 30;
+
 /**
- * The most connection requests this account will ever be allowed in a day.
+ * What this account sends in a day once it is warm.
  *
- * Drawn day by day through the same helper the live quota uses, so the peak is
- * a figure this account actually reaches rather than the top corner of a range
- * it may never be dealt.
+ * That is working mode, where an account spends everything after its last
+ * phase — the warm-up is two weeks and working mode is the rest of its life.
+ * The warm-up's own top day (5–6 on the standard strategy) was the figure
+ * here while day 15 still meant zero, and against 10–15 a day it made every
+ * "days to finish" about twice as long as it will be.
+ *
+ * Drawn day by day through the same helper the live quota uses, over a month
+ * of working-mode days, and the average kept, rounded down: the figure an
+ * ordinary day deals, not the top corner of the range, which is the lucky day
+ * and would promise a pace nobody sees. A strategy with no working mode to
+ * fall back on — no phases at all — sends nothing once warm, and says so.
  */
 export function peakConnect(strategy, accountId) {
-  let peak = 0;
-  for (let day = 1; day <= totalDays(strategy); day += 1) {
-    peak = Math.max(peak, dailyQuota(strategy, accountId, day, "connect"));
+  if (!workingModeOf(strategy)) return 0;
+  const first = totalDays(strategy) + 1;
+  let sum = 0;
+  for (let day = first; day < first + WORKING_RATE_DAYS; day += 1) {
+    sum += dailyQuota(strategy, accountId, day, "connect");
   }
-  return peak;
+  return Math.min(Math.floor(sum / WORKING_RATE_DAYS), Math.floor(WEEKLY_CONNECT_LIMIT / 7));
 }
 
 /**
@@ -198,12 +212,13 @@ async function accountCapacity(accountIds) {
   const houseDefault = strategies.find((row) => row.is_default && !row.is_archived) || DEFAULT_STRATEGY;
 
   const todayIso = today();
+  const weeklyByAccount = await weeklyConnectCounts(accountIds, todayIso);
   let perDayNow = 0;
   let perDayAtPeak = 0;
 
   for (const account of accounts) {
     const run = runByAccount.get(account.id) || null;
-    perDayNow += connectQuotaToday(account, run, todayIso);
+    perDayNow += Math.min(connectQuotaToday(account, run, todayIso), Math.max(0, WEEKLY_CONNECT_LIMIT - (weeklyByAccount.get(account.id) ?? 0)));
     // A run is worked to its own snapshot; an account with no run has not
     // frozen one yet, so the peak comes from the strategy it would start under.
     const strategy = run?.strategy_snapshot?.phases

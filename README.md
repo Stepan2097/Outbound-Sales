@@ -86,8 +86,11 @@ why.
 
 Writing to a stranger on LinkedIn means connecting first, so the **Запрошення**
 tab turns the account list into something a seller can use without leaving the
-person they are reading about: pick one of the warmed logins, edit the note the
-model already wrote, and the request goes into that account's queue.
+person they are reading about: pick one of the warmed logins, add a note if
+the account's phase allows one, and the request goes into that account's queue.
+The note follows the warm-up: none on days 4–10, at most three words and no
+link from day 11 and in working mode. A note that breaks the rule on the day the
+request goes out is dropped, never the request — the form says so as you type.
 
 Into the queue, not out the door. **The daily allowance belongs to the account,
 not to whoever is feeling productive** — an account with nothing left today
@@ -135,14 +138,25 @@ breaks when somebody renames their profile, so those lines **say on screen that
 they were matched by name**. A history that quietly guessed would be worse than
 one that admits which half it is sure about.
 
+**The same story is written to the CRM.** Each account's inbox is read once a
+day, and every message of a thread it finds — what we wrote and what they
+answered — becomes one line on the person's CRM activity timeline, once, with
+its real time in the text; so does each connection request that goes out, with
+the note it actually carried. A thread is tied to the person through the
+account's approach, or, failing that, through the contact whose LinkedIn link
+is that profile. A copy the CRM refused is made again on the next day's read.
+The Contacts card shows the same conversation.
+
 ## Contacts
 
 The Contacts tab reads the CRM directly: its folders, one page of a folder at a
-time, and everything the CRM knows about one person. Nothing is written back —
-the CRM is somebody else's system of record — and nothing lands in this
-workspace until somebody presses **Додати в ліди**, which takes the contact into
-the lead queue carrying its CRM id, so importing the same person twice is still
-one lead.
+time, and everything the CRM knows about one person, with the person's LinkedIn
+conversation under it. The contact itself is never edited from here — the CRM
+is somebody else's system of record; the only thing written to it is the
+append-only activity line per message and per request described above — and
+nothing lands in this workspace until somebody presses **Додати в ліди**, which
+takes the contact into the lead queue carrying its CRM id, so importing the same
+person twice is still one lead.
 
 With a contact open, one call writes three drafts for three channels: an email
 (subject and body), a Telegram message, and LinkedIn (an invitation note plus
@@ -200,12 +214,39 @@ here that Anty does not have would be a browser profile nobody can open.
   that changed on refresh would leave nobody knowing what today's plan was.
 - **A warning stops everything for the strategy's pause length**, and those days
   are subtracted from progress, so a flagged account does not return into a
-  heavier phase.
+  heavier phase. The operator's button, the agent's `warning` report and an
+  invitation reported `blocked` all start it, and it ends by itself. Days after
+  it on which nobody took the account count as paused too, so an account that
+  sat stalled comes back on the day after its warning, not weeks further on.
+- **One account at a time, first sessions first.** An account that has not had
+  a session today goes before one that has, and the same account is not opened
+  again until an hour after its last session finished
+  (`WARMUP_SAME_DAY_GAP_MINUTES`); a failed one waits out the cool-off instead
+  (`WARMUP_COOL_OFF_MINUTES`). On a day with more requests than one run
+  carries, and people for them, the first session leaves two profile views
+  for the next, so that one does not open on a Connect — even when the first
+  failed part-way.
 - A run stores a snapshot of the strategy it started under, so editing one never
   rewrites what an account part-way through was working to.
 - Connection requests go to real people from the CRM lead queue and are recorded
   against the account that sent them, with the person snapshotted. A unique index
   means the same person cannot be approached twice from any account.
+- **A running campaign feeds its accounts by itself.** From each ticked
+  account's warm-up day N — the campaign's `fromDay`, 7 by default (days 4–6
+  are the team's, picked by hand) — every ticked account's queue is topped up
+  from the campaign's folder to what today still allows, after whatever a
+  seller picked by hand, skipping anybody without a LinkedIn profile link or
+  already approached from any account — by contact and by profile, so a person
+  entered twice in the CRM is still one person.
+  Somebody the browser could not reach, or a seller cancelled, is let go and
+  never offered by the folder again — except after a `no_note` from an agent
+  too old to send a bare request, or a report that came while an earlier
+  block page already had the account paused, neither of which says anything
+  about the person, so they go back to the pool; and no account takes more
+  than twice its day's quota from a folder in one day, however many of those
+  it hits. A person picked by hand whose request LinkedIn answered with a
+  block page is parked for a seller at once (not when the account was
+  already paused), and a report the agent retries is recorded once.
 - **A request the campaign queue sends is refused before anything is written**,
   so a request that was never allowed leaves no trace claiming the person was
   approached. A request *asked for from the lead workspace* is the other way
@@ -258,3 +299,7 @@ Verified contact results are accepted at:
 ```http
 POST /api/webhooks/fullenrich?token={FULLENRICH_WEBHOOK_SECRET}
 ```
+
+## Local LinkedIn agent
+
+The Mac browser agent is part of this repository in `agent/`. Install it with `npm ci --prefix agent`, configure `WARMUP_PORTAL` and `WARMUP_AGENT_TOKEN` in the root environment, and start it with `npm run agent`. The server controls the schedule and queues and enforces the daily strategy plus 60 requests per account over seven UTC dates. See `agent/README.md` for local verification and generating a LaunchAgent. The server container continues to run the API; the agent runs on the Mac that holds the Anty profiles.
