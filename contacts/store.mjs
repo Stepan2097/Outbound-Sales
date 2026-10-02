@@ -63,13 +63,20 @@ export async function listContactFolders() {
  * claim is read out of the JWT without verifying it; this is a hint for a
  * sentence on a screen, not a security decision.
  */
-export function crmKeyKind() {
-  let key = "";
-  try {
-    key = crm.config().key || "";
-  } catch {
-    return "missing";
-  }
+/**
+ * What kind of Supabase key this is, read from the key itself.
+ *
+ * Exported separately from `crmKeyKind` because there is more than one key in
+ * play — the CRM client's and the one Auth signs in with — and they are
+ * configured apart. One definition of "what can this key see" keeps the two
+ * from drifting into two different ideas of the same question.
+ *
+ * The claim is read without verifying the signature: this decides what to say
+ * on a screen, never what somebody may do.
+ */
+export function supabaseKeyKind(keyValue) {
+  const key = String(keyValue || "");
+  if (!key) return "missing";
   if (key.startsWith("sb_secret_")) return "service_role";
   if (key.startsWith("sb_publishable_")) return "anon";
   try {
@@ -77,6 +84,14 @@ export function crmKeyKind() {
     return claims.role === "service_role" ? "service_role" : claims.role === "anon" ? "anon" : "unknown";
   } catch {
     return "unknown";
+  }
+}
+
+export function crmKeyKind() {
+  try {
+    return supabaseKeyKind(crm.config().key);
+  } catch {
+    return "missing";
   }
 }
 

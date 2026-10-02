@@ -3,8 +3,8 @@ import { createServer } from "node:http";
 import test from "node:test";
 
 import { handleWarmupApi } from "../warmup/api.mjs";
-import { ACCEPTED_STATUS, WAITING_STATUS, canMove, describeInvite } from "../warmup/invites.mjs";
-import { DEFAULT_STRATEGY, noteHasLink, noteRuleOn, noteUnderRule, noteWordCount } from "../warmup/strategy.mjs";
+import { ACCEPTED_STATUS, WAITING_STATUS, canMove, describeInvite, heldCounts } from "../warmup/invites.mjs";
+import { DEFAULT_STRATEGY, noteHasLink, noteRuleOn, noteUnderRule, noteWordCount, nextNoteDay, noteAllowedOnDay } from "../warmup/strategy.mjs";
 
 // ── the transition table ──────────────────────────────────────────────────
 //
@@ -175,6 +175,10 @@ function matches(row, params) {
       if (!expression.slice(4, -1).split(",").includes(String(value))) return false;
     } else if (expression.startsWith("lt.")) {
       if (!(String(value) < expression.slice(3))) return false;
+    } else if (expression === "is.null") {
+      if (value !== null && value !== undefined) return false;
+    } else if (expression === "not.is.null") {
+      if (value === null || value === undefined) return false;
     }
   }
   return true;
@@ -470,38 +474,27 @@ test("a note LinkedIn will not carry stops the request rather than sending it ba
   assert.equal(rows.wl_outreach[0].status, WAITING_STATUS);
 });
 
-test("on a no-notes day the request is handed out bare, not held back for its note", async () => {
-  // Day 5. Queueing stays permissive — the request may go on a later day with
-  // a later rule — so the note is stored as the seller typed it.
-  await call({
-    method: "POST", path: "/api/warmup/invites",
-    body: { accountId: "acc-1", crmContactId: "c-1", note: "Пишу без приводу — одне питання." }
-  });
-  assert.equal(rows.wl_outreach[0].note, "Пишу без приводу — одне питання.");
-
-  const agent = await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" });
-  assert.equal(agent.payload.connectionNote, false);
-  assert.equal(agent.payload.invites.toSend.length, 1, "the request still goes");
-  // An empty string, not null: the agent in the field was built when `note`
-  // was always a string, and "" is the value it already knew as "no note".
-  assert.equal(agent.payload.invites.toSend[0].note, "", "empty: send it bare");
-  assert.equal(typeof agent.payload.invites.toSend[0].note, "string");
-  assert.equal(agent.payload.invites.toSend[0].noteDropped, "notes_off");
-
-  const outreachId = rows.wl_outreach[0].id;
-  const sent = await call({
-    method: "POST", path: "/api/warmup/agent",
-    body: { action: "invite.sent", accountId: "acc-1", outreachId, outcome: "sent" }
-  });
+test("a queued note is preserved through the early phase and sent on an allowed day", async () => {
+  const note = "Привіт, Марто!";
+  await call({ method: "POST", path: "/api/warmup/invites",
+    body: { accountId: "acc-1", crmContactId: "c-1", note } });
+  const early = await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" });
+  assert.equal(early.payload.connectionNote, false);
+  assert.deepEqual(early.payload.invites.toSend, []);
+  assert.equal(rows.wl_outreach[0].note, note);
+  assert.equal(rows.wl_outreach[0].status, WAITING_STATUS);
+  rows.wl_runs[0].started_at = startedForDay(12);
+  const later = await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" });
+  assert.equal(later.payload.invites.toSend[0].note, note);
+  assert.equal(later.payload.invites.toSend[0].noteExpected, true);
+  const sent = await call({ method: "POST", path: "/api/warmup/agent",
+    body: { action: "invite.sent", accountId: "acc-1", outreachId: rows.wl_outreach[0].id, outcome: "sent" } });
   assert.equal(sent.payload.moved, true);
-
-  // The record says what went, not what was queued.
   const event = rows.wl_events.find((row) => row.type === "invite.sent");
-  assert.equal(event.meta.note, null);
-  assert.equal(event.meta.noteDropped, "notes_off");
+  assert.equal(event.meta.note, note);
+  assert.equal(event.meta.noteDropped, null);
   const card = await call({ method: "GET", path: "/api/warmup/invites?crmContactId=c-1" });
-  assert.equal(card.payload.invite.noteDropped, "notes_off");
-  assert.equal(card.payload.invite.note, "Пишу без приводу — одне питання.", "the queued note is still there to read");
+  assert.equal(card.payload.invite.note, note);
 });
 
 test("from day 11 a short note without a link goes, and anything else goes bare", async () => {
@@ -1005,4 +998,83 @@ test("the account picker offers only accounts that could carry a request, and sa
   assert.ok(chloe.connectQuota >= 0);
   assert.equal(sam.canSend, false);
   assert.match(sam.reason, /captcha|Account health/i, "a blocked account is listed with its reason, not hidden");
+});
+
+// ── the day's rule about notes, and the seller's approved sentence ─────────
+//
+// Two rules that were written apart and meet here. The warm-up says early days
+// send requests with nothing attached; outreach says a note a human approved
+// must never silently vanish. An invitation queued on day 2 and sent on day 5
+// used to satisfy the first by breaking the second — the request went out bare
+// and the screen called it sent.
+
+test("an invitation carrying a note is not handed over on a day that forbids notes", async () => {
+  // Day 5 of the shipped strategy: requests are allowed, notes are not.
+  await call({
+    method: "POST", path: "/api/warmup/invites",
+    body: { accountId: "acc-1", crmContactId: "c-1", note: "одне коротке питання" }
+  });
+
+  const answer = await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" });
+  assert.equal(answer.status, 200);
+  assert.deepEqual(answer.payload.invites.toSend, [], "sending it today would drop the sentence a human approved");
+  assert.equal(answer.payload.invites.notesAllowedToday, false);
+  assert.equal(answer.payload.invites.nextNoteDay, 11, "and the answer says when it can go");
+  assert.equal(rows.wl_outreach[0].status, WAITING_STATUS, "the person is held, not spent");
+});
+
+test("an invitation with no note goes out on that same day, because bare is what the day means", async () => {
+  await call({
+    method: "POST", path: "/api/warmup/invites",
+    body: { accountId: "acc-1", crmContactId: "c-1" }
+  });
+
+  const answer = await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" });
+  const [invitation] = answer.payload.invites.toSend;
+  assert.ok(invitation, "nothing is lost here — there is no text to lose");
+  assert.equal(invitation.note, "");
+  assert.equal(invitation.noteExpected, false, "so `no_note` would be the wrong report on this one");
+});
+
+test("on a day that allows a note the person and the note travel together", async () => {
+  rows.wl_runs[0].started_at = startedForDay(12);
+  await call({
+    method: "POST", path: "/api/warmup/invites",
+    body: { accountId: "acc-1", crmContactId: "c-1", note: "одне коротке питання" }
+  });
+
+  const answer = await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" });
+  const [invitation] = answer.payload.invites.toSend;
+  assert.ok(invitation);
+  assert.equal(invitation.note, "одне коротке питання");
+  assert.equal(invitation.noteExpected, true, "and here a missing note really is `no_note`");
+  assert.equal(answer.payload.invites.notesAllowedToday, true);
+  assert.equal(answer.payload.invites.nextNoteDay, 12, "today is the day");
+});
+
+test("the screen where the note is written learns the same rule", async () => {
+  const answer = await call({ method: "GET", path: "/api/warmup/invites/accounts" });
+  const [account] = answer.payload.accounts;
+  assert.equal(account.notesAllowedToday, false);
+  assert.equal(account.nextNoteDay, 11);
+  assert.equal(account.day, 5, "a seller can see which day they are on");
+});
+
+test("a strategy that never allows a note says so instead of promising a day", () => {
+  const silent = { phases: [{ fromDay: 1, toDay: 14, quotas: { connect: [1, 2] }, connectionNote: false }] };
+  assert.equal(noteAllowedOnDay(silent, 7), false);
+  assert.equal(nextNoteDay(silent, 1), null, "null is an answer: somebody decided this, it is not a wait that ends");
+  assert.equal(nextNoteDay(DEFAULT_STRATEGY, 1), 11);
+  assert.equal(nextNoteDay(DEFAULT_STRATEGY, 12), 12, "asking from a day that allows one answers that day");
+  assert.equal(nextNoteDay(DEFAULT_STRATEGY, 15), null, "past the end of the plan there is no next day");
+});
+
+
+test("a note waiting for a permitted day does not consume today's folder or scheduler capacity", async () => {
+  await call({ method: "POST", path: "/api/warmup/invites", body: { accountId: "acc-1", crmContactId: "c-1", note: "Привіт, Марто!" } });
+  const early = await heldCounts(["acc-1"], { notesAllowedOf: new Map([["acc-1", false]]) });
+  assert.equal(early.waiting.get("acc-1") || 0, 0);
+  const later = await heldCounts(["acc-1"], { notesAllowedOf: new Map([["acc-1", true]]) });
+  assert.equal(later.waiting.get("acc-1"), 1);
+  assert.equal(rows.wl_outreach[0].status, WAITING_STATUS);
 });

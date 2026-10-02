@@ -382,10 +382,11 @@ other abbreviations typed without a space are not links; a dot spelled out
 ("adaction dot com") is out of scope.
 
 - A note the rule allows goes as it was queued, trimmed.
-- A note it does not allow comes out as `note: ""` with `noteDropped` saying
-  why. **The request is never held back for its note** — days 4–10 allow none
-  and every later day allows three words, so holding it would, for almost any
-  note, hold it for ever — and never shortened.
+- On a day that forbids notes, a request carrying one stays waiting. The
+  scheduler and folder top-up exclude it from today's sendable work; bare
+  requests can still go. `notesAllowedToday` and `nextNoteDay` explain the wait.
+- On a note-enabled day, a note beyond that day's word/link rule comes out as
+  `note: ""` with `noteDropped` saying why; it is never shortened.
 - **Queueing stays permissive.** `POST /invites` stores whatever note was typed,
   because the request may go on a later day under a later rule.
 - `GET /invites/accounts` gives each account `noteRule` — today's rule, or

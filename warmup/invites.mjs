@@ -573,14 +573,14 @@ const WAITING_READ_LIMIT = 200;
  * makes of it. An empty string was already a value it could be handed.
  */
 export async function invitesToSend(accountId, limit = MAX_INVITES_PER_RUN, {
-  noteRule = false, todayIso = today(), day = null, fromDayOf
+  noteRule = false, notesAllowed = true, todayIso = today(), day = null, fromDayOf
 } = {}) {
   if (!accountId || limit <= 0) return [];
   const waiting = await anty.from("wl_outreach").select(OUTREACH_COLUMNS)
     .eq("account_id", accountId).eq("status", WAITING_STATUS)
     .order("created_at", { ascending: true }).limit(WAITING_READ_LIMIT).rows();
   const facts = await waitingFacts(waiting, todayIso);
-  const sendable = waiting.filter((row) => sendableToday(row, facts, { day, fromDayOf }));
+  const sendable = waiting.filter((row) => (notesAllowed || !row.note) && sendableToday(row, facts, { day, fromDayOf }));
   const fed = (row) => facts.fed.has(String(row.id));
   const rows = [...sendable.filter((row) => !fed(row)), ...sendable.filter(fed)].slice(0, limit);
   return rows.map((row) => {
@@ -593,7 +593,8 @@ export async function invitesToSend(accountId, limit = MAX_INVITES_PER_RUN, {
       position: row.person_position,
       linkedin: row.person_linkedin,
       note: note ?? "",
-      noteDropped: dropped
+      noteDropped: dropped,
+      noteExpected: Boolean(note)
     };
   });
 }
@@ -775,15 +776,16 @@ export function sendableToday(row, facts, { day = null, fromDayOf = () => DEFAUL
  * invitations `sendableToday` says are not today's: `dayOf` is each account's
  * warm-up day, and `fromDayOf` the day each campaign starts feeding.
  */
-export async function heldCounts(accountIds = [], { claimsSince = null, todayIso = today(), dayOf = new Map(), fromDayOf } = {}) {
+export async function heldCounts(accountIds = [], { claimsSince = null, todayIso = today(), dayOf = new Map(), notesAllowedOf = new Map(), fromDayOf } = {}) {
   const waiting = new Map();
   const claimed = new Map();
   if (!accountIds.length) return { waiting, claimed };
-  const rows = await anty.from("wl_outreach").select("id,account_id,status,created_at")
+  const rows = await anty.from("wl_outreach").select("id,account_id,status,created_at,note")
     .in("account_id", accountIds).in("status", [WAITING_STATUS, CLAIM_STATUS]).rows();
   const facts = await waitingFacts(rows.filter((row) => row.status === WAITING_STATUS), todayIso);
   for (const row of rows) {
     if (row.status === WAITING_STATUS) {
+      if (row.note && notesAllowedOf.get(row.account_id) === false) continue;
       if (!sendableToday(row, facts, { day: dayOf.get(row.account_id), fromDayOf })) continue;
       waiting.set(row.account_id, (waiting.get(row.account_id) || 0) + 1);
     } else if (row.status === CLAIM_STATUS && (!claimsSince || String(row.created_at || "") >= claimsSince)) {

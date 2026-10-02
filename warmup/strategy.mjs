@@ -136,6 +136,41 @@ export function phaseForDay(strategy, day) {
   return inWorkingMode(strategy, day) ? workingModeOf(strategy) : null;
 }
 
+/**
+ * Whether this day's plan permits a note on a connection request.
+ *
+ * The warm-up says this per phase, and it is a rule about the account rather
+ * than about the person: early days send requests to colleagues and verified
+ * contacts with nothing attached, because a new account writing to strangers
+ * is the pattern the whole plan exists to avoid.
+ *
+ * It matters to outreach because a seller writes and approves a note when the
+ * person is queued, which can be days before the request actually goes out. A
+ * day that forbids notes would send that request bare — the approved sentence
+ * silently gone, and a cold request made in a phase meant for people who
+ * already know the account. So the two are read together, and a note-carrying
+ * invitation waits for a day that can carry it.
+ */
+export function noteAllowedOnDay(strategy, day) {
+  return Boolean(phaseForDay(strategy, day)?.connectionNote);
+}
+
+/**
+ * The first day from `fromDay` onwards whose plan allows a note, or `null`
+ * when the rest of the plan has none.
+ *
+ * `null` is a real answer and the screens say it in words: a strategy edited
+ * to forbid notes throughout is a decision somebody made, not a wait that will
+ * end on its own.
+ */
+export function nextNoteDay(strategy, fromDay = 1) {
+  const last = totalDays(strategy);
+  for (let day = Math.max(1, Math.trunc(fromDay) || 1); day <= last; day += 1) {
+    if (noteAllowedOnDay(strategy, day)) return day;
+  }
+  return null;
+}
+
 function seedHash(text) {
   let hash = 2166136261;
   for (let index = 0; index < text.length; index += 1) {
@@ -479,4 +514,70 @@ export function validateStrategy(input = {}) {
     return "Тривалість паузи має бути цілим числом днів";
   }
   return null;
+}
+
+/* ── Days, which is how a person reads a schedule ──────────────────────────
+ *
+ * Storage keeps phases — a label, a day range, one set of quotas — because
+ * that is what a strategy is: four stretches, not fourteen unrelated days.
+ * Nobody edits it that way. Asked to slow Tuesday down, a person looks for
+ * Tuesday, and a phase boundary is not something they should have to compute
+ * before they can change a number.
+ *
+ * So the screen reads days and writes days, and these two functions are the
+ * whole translation. `toDays` spreads a phase across the days it covers;
+ * `fromDays` folds neighbouring days back into one phase whenever they say the
+ * same thing. Edit day 5 alone and its phase splits in three; set day 5 back to
+ * what its neighbours say and the three become one again. What comes out is
+ * always contiguous and always starts at day 1, which is exactly what
+ * `validateStrategy` demands.
+ */
+
+function sameDay(left, right) {
+  return left.label === right.label
+    && JSON.stringify(left.quotas) === JSON.stringify(right.quotas)
+    && JSON.stringify(left.connectionNote ?? false) === JSON.stringify(right.connectionNote ?? false)
+    && JSON.stringify(left.rules || []) === JSON.stringify(right.rules || []);
+}
+
+export function toDays(strategy) {
+  const days = [];
+  for (const phase of strategy?.phases || []) {
+    for (let day = phase.fromDay; day <= phase.toDay; day += 1) {
+      days.push({
+        day,
+        label: phase.label,
+        quotas: JSON.parse(JSON.stringify(phase.quotas || {})),
+        connectionNote: phase.connectionNote ?? false,
+        rules: [...(phase.rules || [])]
+      });
+    }
+  }
+  return days.sort((left, right) => left.day - right.day);
+}
+
+export function fromDays(days) {
+  const phases = [];
+  for (const day of [...days].sort((left, right) => left.day - right.day)) {
+    const open = phases[phases.length - 1];
+    if (open && open.toDay === day.day - 1 && sameDay(open, day)) {
+      open.toDay = day.day;
+      continue;
+    }
+    phases.push({
+      fromDay: day.day,
+      toDay: day.day,
+      label: day.label,
+      quotas: JSON.parse(JSON.stringify(day.quotas || {})),
+      connectionNote: day.connectionNote ?? false,
+      rules: [...(day.rules || [])]
+    });
+  }
+  return phases;
+}
+
+/** One day changed, and the phases that fall out of it. */
+export function withDay(strategy, day, patch) {
+  const days = toDays(strategy).map((row) => (row.day === day ? { ...row, ...patch } : row));
+  return fromDays(days);
 }

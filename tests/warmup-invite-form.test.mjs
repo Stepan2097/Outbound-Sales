@@ -165,7 +165,7 @@ test("picking another account re-says its rule from a fresh read, and keeps the 
   const send = page.element("inviteSendBtn");
   form.context.refreshInviteNoteHint();
   assert.equal(rule.textContent, "сьогодні без записки");
-  assert.match(plain(hint.innerHTML), /Записка не піде/);
+  assert.match(plain(hint.innerHTML), /Запит із запискою чекатиме/);
 
   // Past midnight: day 11. The seller picks the first account.
   api.accounts = [DAY_11, { ...DAY_11, id: "acc-2", label: "Mark" }];

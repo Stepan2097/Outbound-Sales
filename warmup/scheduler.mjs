@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { anty, today } from "./db.mjs";
 import { SESSION_WINDOW, insideWindow, windowLabel } from "./schedule.mjs";
-import { dailyQuota, dayOfRun, hasPlanOn, inWorkingMode, pausedOn } from "./strategy.mjs";
+import { dailyQuota, dayOfRun, hasPlanOn, inWorkingMode, noteAllowedOnDay, pausedOn } from "./strategy.mjs";
 import { LIVE_ACCOUNT_STATUSES, LIVE_RUN_STATES, logEvent, readHoldsFrom, settlePause } from "./store.mjs";
 import {
   MAX_INVITES_PER_RUN, MAX_INVITE_CHECKS_PER_RUN, checkedTodayAccounts, folderAddedToday, heldCounts,
@@ -197,7 +197,8 @@ export async function viewsHeldBackFor({
   const todayIso = today();
   const day = dayOfRun(run, now);
   const { waiting, claimed } = await heldCounts([account.id], {
-    claimsSince: claimCutoff(nowMs), todayIso, dayOf: new Map([[account.id, day]]), fromDayOf: fromDayLookup(campaigns)
+    claimsSince: claimCutoff(nowMs), todayIso, dayOf: new Map([[account.id, day]]),
+    notesAllowedOf: new Map([[account.id, noteAllowedOnDay(run.strategy_snapshot, day)]]), fromDayOf: fromDayLookup(campaigns)
   });
   const feeds = await boundedFolderFeeds({ campaigns, runs: [run], nowMs, todayIso });
   const fedToday = (await folderAddedToday([account.id], todayIso)).get(account.id) ?? 0;
@@ -689,7 +690,8 @@ async function candidates(todayIso, nowMs, campaigns = []) {
   // the day each account is on goes in, read off the same clock as `dueFrom`.
   const dayOf = new Map(runs.map((run) => [run.account_id, dayOfRun(run, new Date(nowMs))]));
   const { waiting: invitesWaiting, claimed: invitesClaimed } = await heldCounts(ids, {
-    claimsSince: claimCutoff(nowMs), todayIso, dayOf, fromDayOf: fromDayLookup(campaigns)
+    claimsSince: claimCutoff(nowMs), todayIso, dayOf,
+    notesAllowedOf: new Map(runs.map((run) => [run.account_id, noteAllowedOnDay(run.strategy_snapshot, dayOf.get(run.account_id))])), fromDayOf: fromDayLookup(campaigns)
   });
   // What each running campaign's folder could still offer the accounts it
   // feeds today, and how much of the day's cap each account has already had.

@@ -4,7 +4,7 @@ import { anty, crm, CONTACT_ID_BATCH, antyTeamId, crmError, leadById, queueTotal
 import { RestError } from "./rest.mjs";
 import {
   ACTION_KINDS, ACTION_LABEL, DEFAULT_STRATEGY, dayOfRun, hasPlanOn, inWorkingMode, noteRuleOn, noteUnderRule,
-  pausedDaysOn, pausedOn, planForDay, resumeCredit, runDay, totalDays, validateStrategy, workingModeOf
+  pausedDaysOn, pausedOn, planForDay, resumeCredit, runDay, totalDays, validateStrategy, workingModeOf, currentDay, fromDays, nextNoteDay, noteAllowedOnDay, toDays
 } from "./strategy.mjs";
 import { SESSION_WINDOW, insideWindow, nextSession, windowLabel } from "./schedule.mjs";
 import { HEALTH_LABEL, HEALTH_VALUES, deriveStatus, isHealth } from "./status.mjs";
@@ -296,9 +296,17 @@ async function upkeepWorkFor(account, run, { now = new Date() } = {}) {
 async function inviteWorkFor(account, campaigns = []) {
   const allowance = await connectAllowance(account);
   const left = allowance.blocked ? 0 : Math.max(0, (allowance.quota || 0) - (allowance.spent || 0));
+  const strategy = allowance.run?.strategy_snapshot;
+  // Today's rule about notes, and the first day that has one. Both travel with
+  // the work rather than being left for the agent to derive: an empty `toSend`
+  // on an account with people queued is otherwise indistinguishable from a
+  // fault, and "their note cannot go out until day 11" is the one sentence
+  // that explains it.
+  const notesAllowed = Boolean(strategy) && noteAllowedOnDay(strategy, allowance.day);
   return {
     toSend: await invitesToSend(account.id, Math.min(left, MAX_INVITES_PER_RUN), {
       noteRule: noteRuleFor(allowance),
+      notesAllowed,
       todayIso: today(),
       day: allowance.day ?? null,
       fromDayOf: fromDayLookup(campaigns)
@@ -308,7 +316,9 @@ async function inviteWorkFor(account, campaigns = []) {
     toCheck: allowance.paused ? [] : await invitesToCheck(account.id, MAX_INVITE_CHECKS_PER_RUN),
     lastCheckedAt: await invitesLastCheckedAt(account.id),
     connectsLeft: left,
-    weekly: allowance.weekly
+    weekly: allowance.weekly,
+    notesAllowedToday: notesAllowed,
+    nextNoteDay: strategy ? nextNoteDay(strategy, allowance.day || 1) : null
   };
 }
 
@@ -368,7 +378,8 @@ async function fillFromFolder(account, campaigns) {
   const left = Math.max(0, (allowance.quota || 0) - (allowance.spent || 0));
   const todayIso = today();
   const { waiting, claimed } = await heldCounts([account.id], {
-    claimsSince: claimCutoff(), todayIso, dayOf: new Map([[account.id, allowance.day]]), fromDayOf: fromDayLookup(campaigns)
+    claimsSince: claimCutoff(), todayIso, dayOf: new Map([[account.id, allowance.day]]),
+    notesAllowedOf: new Map([[account.id, noteAllowedOnDay(allowance.run?.strategy_snapshot, allowance.day)]]), fromDayOf: fromDayLookup(campaigns)
   });
   const held = { waiting: waiting.get(account.id) ?? 0, claimed: claimed.get(account.id) ?? 0 };
   // The day's cap: what the folder already added to this account today, let
@@ -1441,17 +1452,31 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
     }
 
     // ── strategies ─────────────────────────────────────────────────────────
+    //
+    // A strategy is stored as phases and edited as days, and the fold from one
+    // to the other lives here rather than on the screen: it is the half with
+    // the rules — neighbouring days that say the same thing are one phase, and
+    // what comes out has to be contiguous from day 1 or `validateStrategy`
+    // refuses it. A client that sends `days` gets it done for them; one that
+    // sends `phases` is talking to the same endpoint it always was.
     if (method === "GET" && path === "/strategies") {
       await ensureDefaultStrategy();
       const rows = await anty.from("wl_strategies").select("*").eq("is_archived", false)
         .order("is_default", { ascending: false }).order("created_at").rows();
-      sendJson(response, 200, { success: true, strategies: rows.map(toStrategy) });
+      sendJson(response, 200, {
+        success: true,
+        strategies: rows.map((row) => {
+          const strategy = toStrategy(row);
+          return { ...strategy, days: toDays(strategy), totalDays: totalDays(strategy) };
+        })
+      });
       return true;
     }
 
     if (method === "POST" && path === "/strategies") {
       const body = await readJson(request);
       if (!body) return fail(response, sendJson, 400, "Некоректне тіло JSON");
+      if (Array.isArray(body.days)) body.phases = fromDays(body.days);
       const problem = validateStrategy(body);
       if (problem) return fail(response, sendJson, 400, problem);
 
@@ -1470,6 +1495,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
     if (method === "PATCH" && path === "/strategies") {
       const body = await readJson(request);
       if (!body?.id) return fail(response, sendJson, 400, "Яка стратегія?");
+      if (Array.isArray(body.days)) body.phases = fromDays(body.days);
       const problem = validateStrategy(body);
       if (problem) return fail(response, sendJson, 400, problem);
 
@@ -1848,7 +1874,8 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       // so a row it will not send today does not hold the day's room either.
       const campaigns = await loadCampaigns();
       const { waiting, claimed: held } = await heldCounts([account.id], {
-        todayIso: today(), dayOf: new Map([[account.id, allowance.day]]), fromDayOf: fromDayLookup(campaigns)
+        todayIso: today(), dayOf: new Map([[account.id, allowance.day]]),
+    notesAllowedOf: new Map([[account.id, noteAllowedOnDay(allowance.run?.strategy_snapshot, allowance.day)]]), fromDayOf: fromDayLookup(campaigns)
       });
       const holding = (held.get(account.id) ?? 0) + (waiting.get(account.id) ?? 0);
 
@@ -2101,6 +2128,14 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         const waiting = await anty.from("wl_outreach").select("id")
           .eq("account_id", account.id).eq("status", WAITING_STATUS).count();
         const left = allowance.blocked ? 0 : Math.max(0, (allowance.quota || 0) - (allowance.spent || 0));
+        const strategy = allowance.run?.strategy_snapshot;
+        // What this account's plan says about notes, sent to the screen where
+        // the note is actually written. A seller approves a sentence days
+        // before the request goes out, and on a day that forbids notes it
+        // would never reach anybody — silently, and looking like a success.
+        // Saying it at the keyboard is the only place it can still be acted
+        // on.
+        const notesAllowed = Boolean(strategy) && noteAllowedOnDay(strategy, allowance.day);
         return {
           id: account.id,
           label: account.label,
@@ -2117,6 +2152,9 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           // the note is typed, whether it will go; the hand-off decides for
           // real, by the rule of the day the request actually leaves.
           noteRule: allowance.blocked ? null : noteRuleFor(allowance),
+          day: allowance.blocked ? null : allowance.day ?? null,
+          notesAllowedToday: notesAllowed,
+          nextNoteDay: strategy ? nextNoteDay(strategy, allowance.day || 1) : null,
           // An account that cannot carry an invitation is still listed, with
           // the reason. Hiding it leaves a seller wondering where their login
           // went; saying "on a captcha" tells them what to go and fix.

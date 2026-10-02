@@ -7,7 +7,7 @@ import { connect as connectTcp } from "node:net";
 import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CHANNEL_RULES, LANGUAGES, buildFallbackDrafts, draftsPromptPayload, normalizeDrafts, normalizeLanguage } from "./contacts/drafts.mjs";
-import { contactAsProspect, contactsConfigured, contactsMissingConfig, crmKeyKind, folderContactAt, listContactFolders, listFolderContacts, searchFolderContacts, readContact } from "./contacts/store.mjs";
+import { contactAsProspect, contactsConfigured, contactsMissingConfig, crmKeyKind, folderContactAt, listContactFolders, listFolderContacts, searchFolderContacts, readContact, supabaseKeyKind } from "./contacts/store.mjs";
 import { handleKnowledgeLibraryApi } from "./knowledge/api.mjs";
 import { knowledgeExcerptsForPrompt, knowledgeFilesForProduct, loadKnowledgeLibrary } from "./knowledge/library.mjs";
 import { handleWarmupApi } from "./warmup/api.mjs";
@@ -30,6 +30,13 @@ const defaultSecondaryCompanyPeopleActorId = "scraper-engine/linkedin-company-em
 const defaultPersonEnrichmentActorId = "enrich-crm/enrich-crm-enrich-contact";
 const legacyPipelineLabsActorId = "kVYdvNOefemtiDXO5";
 const defaultFullEnrichBaseUrl = "https://app.fullenrich.com/api/v2";
+// Скільки разів дослідження відновлюється саме після перезапуску сервера.
+// Оголошено тут, а не біля самого дослідження: стан вантажиться на старті
+// модуля, тобто до того, як ініціалізуються `const` нижче по файлу.
+const MAX_RESEARCH_RESUMES = 3;
+// Черга записів стану на диск. Тут із тієї ж причини: завантаження стану вже
+// пише файл, а це відбувається раніше, ніж виконаються оголошення нижче.
+let stateWriteChain = Promise.resolve();
 // Who is making the current API call. Attribution has to reach two places
 // deep inside the AI paths — the model a request picks and the usage row it
 // writes — and threading a profile through every caller in between would touch
@@ -424,7 +431,41 @@ server.listen(port, () => {
   // process what to do — but the leases and cool-offs it keeps are in memory,
   // so they begin and end with the process that serves /agent/due.
   startScheduler();
+  // Дослідження, яке урвав перезапуск, доробляється саме — з тієї стадії, на
+  // якій його застали. Після того, як порт уже слухається, щоб сторінка бачила
+  // прогрес із першої ж секунди.
+  void resumeInterruptedResearch();
 });
+
+/**
+ * Вимкнення, яке не рве запис посередині.
+ *
+ * SIGTERM приходить при кожному деплої, а деплой тут — кожен пуш у `main`.
+ * Стадію дослідження, що саме в польоті, врятувати не можна: вона триває
+ * хвилини, а контейнеру дають секунди — її доробить наступний старт. Рятувати
+ * тут треба інше: `writeFile` перезаписує стан цілком, і процес, убитий
+ * посеред нього, лишає обрізаний JSON — тобто втрату всього робочого
+ * простору, а не однієї стадії.
+ *
+ * Тому тут не пишеться нічого нового: кожна зміна вже збережена у своєму
+ * місці, а зайвий запис на виході встигав створити файл у теці, яку вже
+ * прибирали, і ламав те, чого мав би не торкатися. Чекаємо рівно на запис,
+ * який уже почався.
+ */
+let stopping = false;
+
+for (const signal of ["SIGTERM", "SIGINT"]) {
+  process.on(signal, () => {
+    // Друге натискання — вихід без розмов: процес, який не дає себе спинити,
+    // гірший за будь-який недописаний байт.
+    if (stopping) process.exit(0);
+    stopping = true;
+    server.close();
+    const leave = () => process.exit(0);
+    setTimeout(leave, 1000).unref();
+    stateWriteChain.then(leave, leave);
+  });
+}
 
 async function handleApi(request, response, url) {
   if (request.method === "GET" && url.pathname === "/api/health") {
@@ -451,6 +492,21 @@ async function handleApi(request, response, url) {
     const body = await readJson(request);
     const result = await createWorkspaceUser(body, { role: "admin", bootstrap: true });
     setAuthSessionCookies(request, response, result.session);
+    sendJson(response, 201, { auth: publicAuthStatus({ user: result.user, profile: result.profile }) });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/auth/register") {
+    const body = await readJson(request);
+    const result = await registerWorkspaceUser(body);
+    if (!result.session) {
+      // 202: прийнято і зроблено рівно половину — акаунт є, доступу ще немає.
+      sendJson(response, 202, { pending: true, message: result.message });
+      return;
+    }
+    setAuthSessionCookies(request, response, result.session);
+    result.profile.lastLoginAt = new Date().toISOString();
+    await writePersistentWorkspaceState();
     sendJson(response, 201, { auth: publicAuthStatus({ user: result.user, profile: result.profile }) });
     return;
   }
@@ -482,6 +538,32 @@ async function handleApi(request, response, url) {
     const body = await readJson(request);
     await updateSupabasePassword(cleanText(body.accessToken || ""), body.password);
     sendJson(response, 200, { ok: true });
+    return;
+  }
+
+  /**
+   * An `/api/auth/...` path nobody above handled is a missing route, not a
+   * missing session.
+   *
+   * Without this it falls through to the authenticated block below, and a
+   * visitor standing at the sign-in screen is told «Сесія завершилася. Увійди
+   * знову» — about a request made precisely because they have no session and
+   * are trying to get one. It sends them to log in when logging in cannot
+   * help, and it hides the real cause completely.
+   *
+   * The real cause has a name and it will happen again: the page is served
+   * from disk on every request while the routes live in a process that started
+   * before them. A dev server left running across a deploy, or a browser
+   * holding a newer page than the server it talks to, lands here — so the
+   * answer says which route is missing and what usually explains it.
+   */
+  if (url.pathname.startsWith("/api/auth/")) {
+    addEvent("auth", `${request.method} ${url.pathname} has no route on this server.`);
+    sendJson(response, 404, {
+      error: `Цей сервер не знає маршруту ${url.pathname}. Найчастіше це означає, що сторінка новіша за процес: перезапусти сервер.`,
+      route: url.pathname,
+      method: request.method
+    });
     return;
   }
 
@@ -841,6 +923,18 @@ async function handleApi(request, response, url) {
       existingAccount: Boolean(result.existingAccount),
       state: publicState()
     });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/account/users/remove") {
+    if (request.auth.profile.role !== "admin") {
+      sendJson(response, 403, { error: "Прибирати акаунти може лише адміністратор робочого простору." });
+      return;
+    }
+    const body = await readJson(request);
+    const result = await removeWorkspaceUser(request.auth.profile, body);
+    await writePersistentWorkspaceState();
+    sendJson(response, 200, result);
     return;
   }
 
@@ -2183,6 +2277,129 @@ async function createWorkspaceUser(input = {}, options = {}) {
   return { user, profile, session: null, existingAccount };
 }
 
+/**
+ * Somebody signing themselves up, rather than being created by an admin.
+ *
+ * Two things are deliberately separate here: **having an account** and **being
+ * let in**. This makes the first one and never the second. Access is the CRM's
+ * decision — a `profiles` row marked `approved` — exactly as it is for a person
+ * who signed up in the CRM's own app, and nothing on this screen can grant it.
+ * That is the whole reason registration is safe to offer at a public URL: it
+ * hands out no access, so an open door here is not an open door anywhere.
+ *
+ * It goes through the public `signup` endpoint rather than `admin/users`, for
+ * the same reason: that is the door the CRM's own app uses, so whatever the
+ * base does on a new account — defaults, triggers, a `profiles` row — happens
+ * identically. Creating people through the admin API would quietly make a
+ * second kind of account, confirmed by us rather than by the base.
+ *
+ * An address that already exists is not treated as a failure. A person who
+ * forgot they had an account should end up signed in, not told off, so the
+ * sign-in below is what decides — and it is the same sign-in the login form
+ * runs, with the same admission check.
+ */
+async function registerWorkspaceUser(input = {}) {
+  const email = cleanText(input.email || "").toLowerCase();
+  const password = String(input.password || "");
+  const name = cleanText(input.name || email.split("@")[0] || "").slice(0, 120);
+  const title = cleanText(input.title || "").slice(0, 120);
+  if (!/^\S+@\S+\.\S+$/.test(email)) throw apiError("Введи коректну робочу email-адресу.");
+  if (password.length < 10) throw apiError("Пароль має містити щонайменше 10 символів.");
+
+  try {
+    await supabaseAuthRequest("signup", {
+      method: "POST",
+      body: { email, password, data: { name, title } }
+    });
+  } catch (error) {
+    // "Вже зареєстрований" — це не збій реєстрації, це відповідь «акаунт уже
+    // є». Вирішує вхід нижче: правильний пароль пустить, неправильний скаже
+    // те саме, що сказала б форма входу.
+    if (!/already registered|already exists|user_repeated_signup/i.test(String(error?.message || ""))) throw error;
+  }
+
+  try {
+    return await loginWorkspaceUser(email, password, { defaults: { name, title } });
+  } catch (error) {
+    // 403 тут означає «акаунт створено, але доступу ще немає»: немає рядка в
+    // CRM або він не підтверджений. Це не помилка реєстрації, і казати про це
+    // треба словами, а не червоним написом — інакше людина повторює реєстрацію
+    // знову і знову, бо екран каже «не вдалося».
+    //
+    // Перше речення — про реєстрацію, і воно тут головне: сама лише причина
+    // відмови («цього акаунта немає в базі користувачів CRM») читається як
+    // «нічого не сталося», хоча акаунт щойно створено. Друге — причина як є,
+    // бо продавцеві вона однаково означає «попроси адміністратора», а
+    // адміністраторові каже, де саме дивитися: додати рядок чи зняти «pending».
+    if (Number(error?.statusCode || 0) === 403) {
+      return {
+        session: null,
+        pending: true,
+        message: `Акаунт створено — тепер доступ має відкрити адміністратор. ${error.message}`
+      };
+    }
+    throw error;
+  }
+}
+
+/**
+ * Прибрати акаунт назовсім.
+ *
+ * Єдина незворотна дія в цій вкладці, і тому вона поводиться інакше за сусідні.
+ * Натискає її людина: сервер нічого не прибирає сам і ніколи не прибирає за
+ * підозрою — лише той акаунт, який назвали ідентифікатором.
+ *
+ * Чого вона свідомо **не** робить: не чіпає рядок у `profiles`. Це таблиця
+ * CRM, чужа система обліку, і цей застосунок її лише читає. Якщо там щось
+ * лишиться, відповідь про це скаже — мовчазне піввидалення гірше за чесне.
+ *
+ * Помилковий акаунт тут — не рідкість, а наслідок: реєстрація відкрита, пошта
+ * підтверджує себе сама, тож описка в адресі стає акаунтом, до якого ніхто
+ * ніколи не дістанеться. Доти, доки прибрати його можна було лише в дашборді
+ * Supabase, кожна описка лишалася назавжди.
+ */
+async function removeWorkspaceUser(actor, input = {}) {
+  const userId = cleanText(input.userId || "");
+  if (!userId) throw apiError("Кого прибирати? Потрібен ідентифікатор акаунта.");
+  // Адміністратор, який прибрав сам себе, замикає двері зсередини: ролі
+  // роздає лише адміністратор, і повернути собі доступ буде нікому.
+  if (cleanText(actor?.id || "") === userId) {
+    throw apiError("Свій власний акаунт прибрати не можна — попроси про це іншого адміністратора.", 409);
+  }
+
+  // Ключ без адмінських прав відмовить уже в Supabase, але скаже це чужими
+  // словами («User not allowed»), і на екрані це виглядатиме як поломка
+  // застосунку. Краще сказати своїми і назвати, що робити.
+  if (authKeyKind() !== "service_role") {
+    // Назва місця має бути справжньою. Екрана для ключа в застосунку немає:
+    // маршрут `/api/integrations/data/configure` його приймає, але сховище
+    // шифрується ключем, який генерується заново на кожен старт, і у файл
+    // стану не пишеться — тобто заданий так ключ живе до першого перезапуску,
+    // а на проді це кожен деплой. Єдине місце, де він тримається, — оточення.
+    throw apiError(
+      "Ключ Supabase, яким працює цей сервер, не має адміністраторських прав, тож акаунт звідси не прибрати. Постав службовий ключ у змінну SUPABASE_API_KEY на сервері і перезапусти його — або видали акаунт у дашборді Supabase.",
+      409
+    );
+  }
+
+  const profile = state.users.find((user) => user.id === userId) || null;
+  const email = cleanText(input.email || profile?.email || "").toLowerCase();
+
+  await supabaseAuthRequest(`admin/users/${encodeURIComponent(userId)}`, { method: "DELETE" });
+  state.users = state.users.filter((user) => user.id !== userId);
+  addEvent("auth", `${cleanText(actor?.email || "admin")} removed account ${email || userId}.`);
+  // Читається наживо, а не з хвилинного кешу: відповідь про те, що лишилося в
+  // CRM, має описувати зараз, а не хвилину тому.
+  const crmRow = (await crmProfilesByEmail({ maxAgeMs: 0 })).get(email) || null;
+  return {
+    removed: true,
+    userId,
+    email,
+    hadWorkspaceProfile: Boolean(profile),
+    crmProfileRemains: Boolean(crmRow)
+  };
+}
+
 /** Supabase answers both halves with one sentence; this is that sentence. */
 function isInvalidCredentials(error) {
   const message = String(error?.message || "").toLowerCase();
@@ -2208,11 +2425,48 @@ function isInvalidCredentials(error) {
  * With the CRM unreachable we cannot tell the two apart, and the old sentence
  * is then the honest one.
  */
+/** What the key Auth signs in with can see. Not the CRM client's key — separate setting. */
+function authKeyKind() {
+  try {
+    return supabaseKeyKind(supabaseAuthConfig().apiKey);
+  } catch {
+    return "missing";
+  }
+}
+
 async function credentialFailure(email) {
   let known = state.users.some((user) => user.email === email);
   if (!known) {
+    // A key without visibility does not get to claim absence.
+    //
+    // Under an anon key `profiles` is read through RLS, so "not found" can
+    // just as well mean "not shown", and `admin/users` answers 403 — which
+    // makes the Auth lookup below silently inert. The neutral sentence still
+    // came out, but only because that request threw: the right answer for an
+    // accidental reason. Then any later tidy-up — a `catch` around the lookup
+    // "to be safe", a reordering — would bring the lie back with nothing
+    // failing. So the decision is made here and on purpose. Only a key we know
+    // sees everything may say somebody is not here.
+    if (authKeyKind() !== "service_role") return apiError("Пошта або пароль не підходять.", 401);
     try {
       known = (await crmProfilesByEmail()).has(email);
+      // A miss is re-read from the CRM rather than believed, because the cache
+      // is up to a minute old and the person most likely to be missing from it
+      // is the one who registered thirty seconds ago — which is also the person
+      // most likely to fumble the password they have just chosen. Telling them
+      // their account does not exist would be the worst possible lie at that
+      // moment, and it costs one request to avoid.
+      if (!known) known = (await crmProfilesByEmail({ maxAgeMs: 0 })).has(email);
+      // A fresh read can still miss somebody who plainly has an account.
+      // `profiles` is the CRM's table and the registration form here creates an
+      // Auth account, not that row — so whether the base writes one is the
+      // CRM's business, and the answer to "does this address exist" must not
+      // depend on it. Existence is Auth's question, so Auth is asked before the
+      // answer becomes "you are not here". Somebody with an account and no
+      // profile row is then told the truth — the password is wrong — and the
+      // right password gives them the honest 403 that names what to ask an
+      // admin for.
+      if (!known) known = Boolean(await findSupabaseUserByEmail(email));
     } catch {
       return apiError("Пошта або пароль не підходять.", 401);
     }
@@ -3233,11 +3487,40 @@ function applyPersistentWorkspaceState(saved = {}) {
   if (Array.isArray(saved.researchJobs)) {
     state.researchJobs = saved.researchJobs.slice(0, 100).map((job) => {
       if (!["queued", "running"].includes(job.status)) return job;
+      const resumes = Number(job.resumes || 0) + 1;
+      const now = new Date().toISOString();
+
+      // Перезапуск сервера більше не коштує людині натискання.
+      //
+      // Кожна стадія пише стан на диск одразу, щойно закінчилася, тож падіння
+      // посеред роботи коштує рівно одну стадію — ту, що була в польоті. Вона
+      // повертається в «очікує» і буде зроблена ще раз; усе, що вже зроблено,
+      // не переробляється. Раніше тут стояло «failed» і прохання натиснути
+      // кнопку ще раз — при автодеплої, який перезбирає прод з кожного пуша,
+      // це означало просити людину доробити чужу роботу.
+      if (resumes <= MAX_RESEARCH_RESUMES) {
+        return {
+          ...job,
+          status: "queued",
+          resumes,
+          interruptedAt: now,
+          updatedAt: now,
+          error: "",
+          stages: (job.stages || []).map((stage) =>
+            stage.status === "running" ? { ...stage, status: "pending", detail: "", startedAt: null } : stage)
+        };
+      }
+
+      // Запобіжник: робота, яка валить процес, інакше відновлювалася б вічно і
+      // з кожним колом витрачала гроші наново. Після трьох спроб це вже не
+      // перезапуск, а щось у самій роботі, і про це треба сказати людині.
       return {
         ...job,
         status: "failed",
-        error: "Дослідження перервав перезапуск сервера. Запусти його ще раз — воно продовжить зі збережених даних.",
-        completedAt: new Date().toISOString(),
+        resumes,
+        error: `Дослідження переривалося ${resumes} ${uaPlural(resumes, "раз", "рази", "разів")} поспіль і більше не відновлюється саме. Запусти його вручну — усе вже зібране збережено.`,
+        completedAt: now,
+        updatedAt: now,
         stages: (job.stages || []).map((stage) => stage.status === "running" ? { ...stage, status: "failed" } : stage)
       };
     });
@@ -3371,7 +3654,21 @@ function persistWorkspaceState() {
   }, 150);
 }
 
-async function writePersistentWorkspaceState() {
+/**
+ * Записи стану шикуються в чергу, а не йдуть навперейми.
+ *
+ * `writeFile` перезаписує файл цілком, тож два виклики одночасно можуть лягти
+ * один на одного і лишити обрізаний JSON — а це втрата всього робочого
+ * простору, не однієї стадії. Дослідження пише стан після кожної з семи
+ * стадій, а вимкнення пише його ще раз згори, тож збіг тут не теоретичний.
+ * Обгортка тримає той самий підпис, тому жоден виклик міняти не довелося.
+ */
+function writePersistentWorkspaceState() {
+  stateWriteChain = stateWriteChain.then(writeWorkspaceStateNow, writeWorkspaceStateNow);
+  return stateWriteChain;
+}
+
+async function writeWorkspaceStateNow() {
   try {
     await mkdir(dirname(stateFilePath), { recursive: true });
     await writeFile(stateFilePath, JSON.stringify({
@@ -6034,55 +6331,88 @@ function normalizeClientProfile(data = {}, fallback, modelUsed) {
   };
 }
 
+/**
+ * Сім стадій дослідження, кожна — крок, який можна пропустити.
+ *
+ * Список, а не сім пар рядків поспіль, саме тому, що роботу треба вміти
+ * продовжити з середини: `updateResearchJobStage` пише стан на диск після
+ * кожної стадії, тож після перезапуску видно, що вже зроблено, і залишається
+ * пройти рештою. Усе, що стадія здобула, лягає на самого проспекта, а він
+ * зберігається — тому пропущений крок нічого не забирає в наступних.
+ */
+function researchSteps(job, prospect, product) {
+  return [
+    ["company", "Шукаємо сайт, продукти, релізи, гео і модель монетизації.", async () => {
+      const companyDetail = await researchCompanyForProspect(prospect, { force: job.force });
+      prospect.companyProfile = buildCompanyProfile(prospect, product);
+      return companyDetail;
+    }],
+    ["people", "Дивимось, хто працює в компанії і хто з них ухвалює рішення.", async () => {
+      prospect.contactDiscovery = await enrichProspectContacts(prospect, { phase: "people" });
+      return `${prospect.companyPeople?.length || 0} релевантних людей у компанії.`;
+    }],
+    ["contacts", "Перевіряємо робочу пошту і прямий телефон.", async () => {
+      prospect.contactDiscovery = await enrichProspectContacts(prospect, { phase: "contacts" });
+      return `${prospect.contactDiscovery?.candidates?.length || 0} кандидатів у контакти перевірено.`;
+    }],
+    ["scoring", "Рахуємо відповідність, доступність і момент.", async () => {
+      await ensureLeadIntelligenceSnapshot(prospect, { force: true, useAi: true, refreshReason: "background_research", product });
+      prospect.companyProfile = buildCompanyProfile(prospect, product);
+      const analysis = analyzeLead(prospect, product);
+      return `Бал ${analysis.score}; відповідність продукту — ${analysis.productFit}.`;
+    }],
+    ["profile", "Пишемо опис клієнта і підходи до розмови.", async () => {
+      prospect.clientProfile = await buildClientProfile(prospect, product, job.profile);
+      const approaches = prospect.clientProfile.approaches.length;
+      return `${approaches} ${uaPlural(approaches, "підхід", "підходи", "підходів")} до розмови · ${prospect.clientProfile.modelUsed}.`;
+    }],
+    ["writing", "Готуємо три різні кути першого повідомлення.", async () => {
+      prospect.outreach = await prepareAndLogOutreach(prospect, job.profile, "SEQUENCE_GENERATION", {
+        source: "background-research",
+        actor: job.actor,
+        researchJobId: job.id,
+        product,
+        // Тексти пишуться мовою, яку щойно визначив опис клієнта, і розгортають
+        // його перший підхід — інакше сусідні вкладки радять різне.
+        language: job.language || prospect.clientProfile?.openerLanguage,
+        approachIndex: 0
+      });
+      prospect.status = statusAfterOutreachPlan(prospect.outreach);
+      return isNamedPersonProspect(prospect)
+        ? outreachStageDetail(prospect.outreach)
+        : "Повідомлення чекають, поки буде обрано конкретну людину.";
+    }],
+    ["crm", "Фіксуємо дослідження і персоналізацію в CRM.", async () => {
+      const crmStatus = prospect.outreach?.crmActivity?.syncStatus || "not_synced";
+      return crmStatus === "synced" ? "Активність записано в CRM." : "Збережено локально; запис у CRM можна повторити.";
+    }]
+  ];
+}
+
 async function runResearchJob(job) {
   const prospect = findProspect(job.prospectId);
-  if (!prospect) return;
+  if (!prospect) {
+    // Ліда прибрали з черги, поки сервер лежав. Доробляти нема що, і сказати
+    // це чесно краще, ніж лишити роботу вічно в «очікує».
+    job.status = "failed";
+    job.error = "Ліда, якого досліджували, уже немає в черзі.";
+    job.completedAt = new Date().toISOString();
+    job.updatedAt = job.completedAt;
+    await writePersistentWorkspaceState();
+    return;
+  }
   const product = productById(job.productId);
   job.status = "running";
-  job.startedAt = new Date().toISOString();
+  if (!job.startedAt) job.startedAt = new Date().toISOString();
   try {
-    await updateResearchJobStage(job, "company", "running", "Шукаємо сайт, продукти, релізи, гео і модель монетизації.");
-    const companyDetail = await researchCompanyForProspect(prospect, { force: job.force });
-    prospect.companyProfile = buildCompanyProfile(prospect, product);
-    await updateResearchJobStage(job, "company", "complete", companyDetail);
-
-    await updateResearchJobStage(job, "people", "running", "Дивимось, хто працює в компанії і хто з них ухвалює рішення.");
-    prospect.contactDiscovery = await enrichProspectContacts(prospect, { phase: "people" });
-    await updateResearchJobStage(job, "people", "complete", `${prospect.companyPeople?.length || 0} релевантних людей у компанії.`);
-
-    await updateResearchJobStage(job, "contacts", "running", "Перевіряємо робочу пошту і прямий телефон.");
-    prospect.contactDiscovery = await enrichProspectContacts(prospect, { phase: "contacts" });
-    await updateResearchJobStage(job, "contacts", "complete", `${prospect.contactDiscovery?.candidates?.length || 0} кандидатів у контакти перевірено.`);
-
-    await updateResearchJobStage(job, "scoring", "running", "Рахуємо відповідність, доступність і момент.");
-    await ensureLeadIntelligenceSnapshot(prospect, { force: true, useAi: true, refreshReason: "background_research", product });
-    prospect.companyProfile = buildCompanyProfile(prospect, product);
-    const analysis = analyzeLead(prospect, product);
-    await updateResearchJobStage(job, "scoring", "complete", `Бал ${analysis.score}; відповідність продукту — ${analysis.productFit}.`);
-
-    await updateResearchJobStage(job, "profile", "running", "Пишемо опис клієнта і підходи до розмови.");
-    prospect.clientProfile = await buildClientProfile(prospect, product, job.profile);
-    await updateResearchJobStage(job, "profile", "complete", `${prospect.clientProfile.approaches.length} ${uaPlural(prospect.clientProfile.approaches.length, "підхід", "підходи", "підходів")} до розмови · ${prospect.clientProfile.modelUsed}.`);
-
-    await updateResearchJobStage(job, "writing", "running", "Готуємо три різні кути першого повідомлення.");
-    prospect.outreach = await prepareAndLogOutreach(prospect, job.profile, "SEQUENCE_GENERATION", {
-      source: "background-research",
-      actor: job.actor,
-      researchJobId: job.id,
-      product,
-      // Тексти пишуться мовою, яку щойно визначив опис клієнта, і розгортають
-      // його перший підхід — інакше сусідні вкладки радять різне.
-      language: job.language || prospect.clientProfile?.openerLanguage,
-      approachIndex: 0
-    });
-    prospect.status = statusAfterOutreachPlan(prospect.outreach);
-    await updateResearchJobStage(job, "writing", "complete", isNamedPersonProspect(prospect)
-      ? outreachStageDetail(prospect.outreach)
-      : "Повідомлення чекають, поки буде обрано конкретну людину.");
-
-    await updateResearchJobStage(job, "crm", "running", "Фіксуємо дослідження і персоналізацію в CRM.");
-    const crmStatus = prospect.outreach?.crmActivity?.syncStatus || "not_synced";
-    await updateResearchJobStage(job, "crm", "complete", crmStatus === "synced" ? "Активність записано в CRM." : "Збережено локально; запис у CRM можна повторити.");
+    for (const [id, note, work] of researchSteps(job, prospect, product)) {
+      // Стадія, яка встигла завершитися до перезапуску, не переробляється:
+      // вона коштувала запитів до моделі й до платних джерел, а її результат
+      // уже лежить на проспекті.
+      if (job.stages?.find((stage) => stage.id === id)?.status === "complete") continue;
+      await updateResearchJobStage(job, id, "running", note);
+      await updateResearchJobStage(job, id, "complete", await work());
+    }
 
     recordLeadResearch(prospect, {
       stage: "background_research_complete",
@@ -6111,6 +6441,29 @@ async function runResearchJob(job) {
     addEvent("research", `${prospect.name} research stopped: ${message}`);
   }
   await writePersistentWorkspaceState();
+}
+
+/**
+ * Доробити те, що перервав перезапуск.
+ *
+ * Викликається, коли сервер уже слухає порт: сторінка тоді одразу бачить
+ * роботу в стані «виконується» і показує, на якій вона стадії, замість
+ * повідомлення про збій із проханням натиснути кнопку.
+ */
+async function resumeInterruptedResearch() {
+  const waiting = state.researchJobs.filter((job) => job.status === "queued");
+  if (!waiting.length) return;
+  addEvent("research", `Resuming ${waiting.length} research job(s) interrupted by a restart.`);
+  // По одній. Кожна стадія ходить до моделі й до платних джерел, і старт
+  // сервера — найгірший момент, щоб підняти їх усі водночас.
+  for (const job of waiting) {
+    if (job.status !== "queued") continue;
+    try {
+      await runResearchJob(job);
+    } catch (error) {
+      addEvent("research", `Resume failed for ${job.prospectName}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
 }
 
 async function researchAppPortfolio(prospect, options = {}) {

@@ -6621,3 +6621,10 @@ dialog {
 .contacts-sidebar > .panel, .contacts-detail > .panel { min-width: 0; }
 .contacts-detail .contact-draft-list, .contacts-detail .contact-draft { min-width: 0; }
 @media (max-width: 900px) { .contacts-layout { grid-template-columns: minmax(0, 1fr); } }
+
+.auth-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  justify-content: space-between;
+}
