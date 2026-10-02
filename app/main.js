@@ -2843,7 +2843,6 @@ function renderBusyState() {
   const anyBusy = Boolean(busyAction);
   setBusyButton("quickPrepareBtn", "research", "Виконується...");
   setBusyButton("runResearchTopBtn", "research", "Виконується...");
-  setBusyButton("enrichLeadBtn", "research", "Збагачуємо...");
   setBusyButton("writeMessagesBtn", "messages", "Пишемо...");
   setBusyButton("refreshCompanyBtn", "research", "Шукаємо...");
   setBusyButton("prepareOutreachBtn", "research", "Виконується...");
@@ -2862,7 +2861,7 @@ function renderBusyState() {
   // і інакше просто ввімкнув би їх назад.
   if (!selectedProspectId) {
     for (const id of [
-      "quickPrepareBtn", "runResearchTopBtn", "enrichLeadBtn", "writeMessagesBtn", "refreshCompanyBtn",
+      "quickPrepareBtn", "runResearchTopBtn", "writeMessagesBtn", "refreshCompanyBtn",
       "prepareOutreachBtn", "analyzeIntelligenceBtn", "refreshIntelligenceBtn", "analyzeIntelligenceQuick",
       "enrichProspectBtn", "removeLeadQuick"
     ]) {
@@ -3455,10 +3454,6 @@ document.getElementById("panelProductSelect").addEventListener("change", async (
 
 document.getElementById("panelFoldersRefreshBtn").addEventListener("click", async () => {
   await loadPanelFolders({ force: true });
-});
-
-document.getElementById("enrichLeadBtn").addEventListener("click", async () => {
-  await runUiAction("research", "Шукаємо все про людину і компанію, пишемо опис і підходи...", () => researchAndPrepareSelected());
 });
 
 document.getElementById("historyRefreshBtn").addEventListener("click", async () => {
