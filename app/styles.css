@@ -2868,8 +2868,36 @@ dialog {
 
 .contact-draft-form {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
   gap: 10px;
   margin-bottom: 12px;
+}
+
+.contact-draft-form label,
+.contact-draft-form input,
+.contact-draft-form select {
+  min-width: 0;
+}
+
+.contact-draft-form .split-fields {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.contact-draft-form .button-row {
+  flex-wrap: wrap;
+}
+
+@media (max-width: 650px) {
+  .contact-draft-form .split-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .contact-draft-form .button-row button {
+    flex: 1 1 100%;
+    min-width: 0;
+    white-space: normal;
+  }
 }
 
 .contact-draft-list {
