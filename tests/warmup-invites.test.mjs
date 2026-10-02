@@ -5,6 +5,7 @@ import test from "node:test";
 import { handleWarmupApi } from "../warmup/api.mjs";
 import { ACCEPTED_STATUS, WAITING_STATUS, canMove, describeInvite, heldCounts } from "../warmup/invites.mjs";
 import { DEFAULT_STRATEGY, noteHasLink, noteRuleOn, noteUnderRule, noteWordCount, nextNoteDay, noteAllowedOnDay } from "../warmup/strategy.mjs";
+import { checkQuota, commitAction } from "../warmup/store.mjs";
 
 // ── the transition table ──────────────────────────────────────────────────
 //
@@ -209,6 +210,13 @@ test.before(async () => {
     const [route, query] = request.url.split("?");
     const table = route.replace("/rest/v1/", "");
     const params = new URLSearchParams(query || "");
+    // The deployed day-counter table has id/on_date/updated_at, but no
+    // created_at. An unconstrained mock used to hide the production failure.
+    if (table === "wl_day_actions" && /(?:^|,)created_at\./.test(params.get("order") || "")) {
+      response.writeHead(400, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ message: "column wl_day_actions.created_at does not exist", code: "42703" }));
+      return;
+    }
     const found = (rows[table] ?? []).filter((row) => matches(row, params));
 
     const refused = refuse[table]?.[request.method];
@@ -290,6 +298,27 @@ test.beforeEach(() => {
     id: "c-1", name: "Marta Kovalenko", company: "Fleetify", position: "Head of UA",
     linkedin: "https://linkedin.com/in/marta", country: "Poland"
   }];
+});
+
+test("day counters without creation timestamps keep duplicate totals and enforce the daily limit", async () => {
+  const account = rows.wl_accounts[0];
+  const run = rows.wl_runs[0];
+  // Fix the phase's allowance so this test covers the last permitted action.
+  run.strategy_snapshot = { phases: [{ fromDay: 1, toDay: 14, quotas: { connect: [4, 4] } }] };
+  const day = new Date().toISOString().slice(0, 10);
+  const first = await checkQuota(account, run, "connect");
+  assert.equal(first.ok, true);
+  await commitAction(account, run, "connect", first);
+  assert.equal(rows.wl_day_actions[0].done, 1, "the first counter is created");
+  rows.wl_day_actions.push({ id: "duplicate-day", run_id: run.id, account_id: account.id, on_date: day, kind: "connect", quota: 4, done: 2 });
+  const last = await checkQuota(account, run, "connect");
+  assert.equal(last.ok, true);
+  assert.equal(last.done, 4, "both counters contribute to the allowance");
+  await commitAction(account, run, "connect", last);
+  assert.equal(rows.wl_day_actions.reduce((sum, row) => sum + row.done, 0), 4);
+  const exceeded = await checkQuota(account, run, "connect");
+  assert.equal(exceeded.ok, false);
+  assert.equal(exceeded.error, "Daily quota reached (4)");
 });
 
 test("an invitation asked for from the workspace holds the person and spends no quota", async () => {

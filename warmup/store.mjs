@@ -413,7 +413,7 @@ export async function checkQuota(account, run, kind, step = 1) {
   // half the day's work and hand out the quota twice.
   const existing = await anty.from("wl_day_actions").select("id,done")
     .eq("run_id", run.id).eq("on_date", today()).eq("kind", kind)
-    .order("created_at", { ascending: true }).rows();
+    .order("id", { ascending: true }).rows();
   const already = existing.reduce((total, row) => total + (Number(row.done) || 0), 0);
 
   const weekly = kind === "connect" ? await weeklyConnectAllowance(account.id) : null;
@@ -495,7 +495,7 @@ export async function commitAction(account, run, kind, allowance, detail = null)
     // two requests arrive a few hundred milliseconds apart.
     const appeared = await anty.from("wl_day_actions").select("id,done")
       .eq("run_id", run.id).eq("on_date", today()).eq("kind", kind)
-      .order("created_at", { ascending: true }).rows();
+      .order("id", { ascending: true }).rows();
     if (appeared.length) {
       const mine = appeared[0];
       await anty.from("wl_day_actions")
