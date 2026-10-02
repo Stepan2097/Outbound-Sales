@@ -4585,6 +4585,10 @@ function normalizeProspect(input) {
     verifiedContactEnrichment: input.verifiedContactEnrichment && typeof input.verifiedContactEnrichment === "object"
       ? input.verifiedContactEnrichment
       : null,
+    // Keep the paid scraper cache across restarts so fresh evidence is reused.
+    ...(input.apifyContactEnrichment && typeof input.apifyContactEnrichment === "object" && !Array.isArray(input.apifyContactEnrichment)
+      ? { apifyContactEnrichment: input.apifyContactEnrichment }
+      : {}),
     outreach: input.outreach || null,
     researchHistory: Array.isArray(input.researchHistory) ? input.researchHistory.slice(0, 12) : [],
     nextActionPlan: input.nextActionPlan || null,

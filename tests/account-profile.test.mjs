@@ -303,6 +303,26 @@ test("a user who has chosen no model falls back to the workspace default and can
   }
 });
 
+test("a saved prospect keeps its paid enrichment cache after a restart", async () => {
+  const marker = {
+    completedAt: new Date().toISOString(),
+    actorRuns: [{ source: "contactEmail", status: "complete", chargeCeilingUsd: 0.02 }],
+    directTypes: ["email"],
+    candidateCount: 1
+  };
+  const server = await startServer({
+    port: 43269,
+    savedState: { version: 1, prospects: [{ id: "cached-prospect", name: "Test Contact", company: "Test Company", apifyContactEnrichment: marker }] }
+  });
+  try {
+    const { status, payload } = await server.get("/api/state");
+    assert.equal(status, 200);
+    assert.deepEqual(payload.prospects.find((prospect) => prospect.id === "cached-prospect").apifyContactEnrichment, marker);
+  } finally {
+    await server.stop();
+  }
+});
+
 test("a saved workspace whose people chose a thinking level still comes back after a restart", async () => {
   // The restore reads every person's model through normalizeUserModelId, which
   // reads REASONING_EFFORTS. While that list was declared below the top-level
