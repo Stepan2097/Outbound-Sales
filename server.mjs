@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { createReadStream, existsSync } from "node:fs";
+import { createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { connect as connectTcp } from "node:net";
@@ -28,7 +28,23 @@ if (process.env.AUTH_DEV_BYPASS === "1" && !authDevBypass) {
 // Найбільше легітимне тіло — скріншот прикладу (dataUrl до 2,5 МБ) у JSON.
 // Без межі один запит на гігабайт тримав би всю пам'ять процесу.
 const maxJsonBodyBytes = 5 * 1024 * 1024;
-const masterKey = createHash("sha256").update(randomBytes(32)).digest();
+// Ключ, яким зашифровано ключі з Settings. Раніше генерувався на кожному
+// старті, тож після деплою жоден збережений ключ уже не розшифровувався.
+// Тепер: OUTBOUND_SECRETS_KEY з env, а без неї — файл поруч зі станом
+// (на проді це volume /data), створений один раз.
+const masterKey = loadMasterKey();
+/** Сховище → змінна env, з якої воно ж заповнюється на старті. */
+const secretVaultEnv = {
+  vault: "OPENROUTER_API_KEY",
+  apifyVault: "APIFY_API_TOKEN",
+  contactEnrichmentVault: "FULLENRICH_API_KEY",
+  contactEnrichmentWebhookVault: "FULLENRICH_WEBHOOK_SECRET",
+  mcpVault: "MCP_API_TOKEN",
+  crmVault: "CRM_API_TOKEN",
+  transcriptVault: "",
+  supabaseVault: "SUPABASE_API_KEY",
+  postgresVault: "POSTGRES_PASSWORD"
+};
 const openRouterDefaults = {
   analysisModel: "anthropic/claude-haiku-4.5",
   writingModel: "anthropic/claude-sonnet-5"
@@ -3464,6 +3480,7 @@ async function loadPersistentWorkspaceState() {
 }
 
 function applyPersistentWorkspaceState(saved = {}) {
+  restoreSecretVaults(saved.secretVaults);
   if (Array.isArray(saved.products)) {
     const byKey = new Map(state.products.map((product) => [productCanonicalKey(product), product]));
     const idAliases = new Map();
@@ -3741,6 +3758,9 @@ async function writeWorkspaceStateNow() {
         modelVersion: state.learning.modelVersion,
         lastTrainedAt: state.learning.lastTrainedAt
       },
+      // Ключі з Settings, зашифровані masterKey. Ті, що прийшли з env, не
+      // пишуться: вони й так повернуться на старті.
+      secretVaults: persistedSecretVaults(),
       integrationSettings: {
         apify: {
           actorIds: state.integrations.apify.actorIds,
@@ -3766,6 +3786,63 @@ async function writeWorkspaceStateNow() {
     }, null, 2), "utf8");
   } catch (error) {
     console.error("Could not persist workspace memory:", error instanceof Error ? error.message : error);
+  }
+}
+
+
+function loadMasterKey() {
+  const fromEnv = String(process.env.OUTBOUND_SECRETS_KEY || "").trim();
+  if (fromEnv) return createHash("sha256").update(fromEnv).digest();
+  const keyPath = process.env.SECRETS_KEY_PATH || join(dirname(stateFilePath), ".secrets.key");
+  const read = () => {
+    const key = Buffer.from(readFileSync(keyPath, "utf8").trim(), "hex");
+    if (key.length !== 32) throw new Error(`${keyPath} is not a 32-byte hex key`);
+    return key;
+  };
+  if (existsSync(keyPath)) return read();
+  mkdirSync(dirname(keyPath), { recursive: true });
+  const key = randomBytes(32);
+  try {
+    writeFileSync(keyPath, key.toString("hex"), { mode: 0o600, flag: "wx" });
+    return key;
+  } catch (error) {
+    // Другий процес встиг створити файл першим — беремо його ключ.
+    if (error?.code === "EEXIST") return read();
+    throw error;
+  }
+}
+
+function persistedSecretVaults() {
+  const out = {};
+  for (const [field, envName] of Object.entries(secretVaultEnv)) {
+    const record = state[field];
+    if (!record?.encryptedValue) continue;
+    const envValue = envName ? String(process.env[envName] || "").trim() : "";
+    if (envValue) {
+      try {
+        if (decryptSecret(record).trim() === envValue) continue;
+      } catch {
+        continue;
+      }
+    }
+    out[field] = record;
+  }
+  return out;
+}
+
+function restoreSecretVaults(saved) {
+  if (!saved || typeof saved !== "object") return;
+  for (const field of Object.keys(secretVaultEnv)) {
+    const record = saved[field];
+    if (!record?.encryptedValue) continue;
+    try {
+      decryptSecret(record);
+      state[field] = record;
+    } catch {
+      // Зашифровано іншим ключем (до цієї зміни ключ жив до рестарту) — такий
+      // ключ треба ввести в Settings ще раз; решта стану завантажується.
+      addEvent("system", `A saved ${field} could not be decrypted and was skipped — enter it again in Settings.`);
+    }
   }
 }
 
