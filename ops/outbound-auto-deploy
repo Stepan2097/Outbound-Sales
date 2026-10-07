@@ -1,16 +1,24 @@
 #!/usr/bin/env bash
 # Poll GitHub for changes to Outbound-Sales and ask Coolify to deploy only
-# when the running image does not contain the current main commit.
+# when the running image does not contain the current main commit — and only
+# after `npm test` is green for exactly that commit. A red commit is never
+# deployed; why it is red goes to the journal (journalctl -t outbound-auto-deploy)
+# and the full output to ${STATE_DIR}/test-<sha>.log.
 set -Eeuo pipefail
 
 readonly APP_UUID='ronkmbbm2d6m431vz4l3emdm'
 readonly APP_CONTAINER_PREFIX="${APP_UUID}-"
 readonly COOLIFY_CLIENT_CONTAINER_PREFIX='y4iu85iu74ceyoo8k9d6b0xa-'
 readonly REPOSITORY='https://github.com/Stepan2097/Outbound-Sales.git'
-readonly STATE_DIR='/var/lib/outbound-auto-deploy'
+readonly STATE_DIR="${OUTBOUND_DEPLOY_STATE_DIR:-/var/lib/outbound-auto-deploy}"
 readonly PENDING_FILE="${STATE_DIR}/pending-sha"
-readonly LOCK_FILE='/run/lock/outbound-auto-deploy.lock'
+# "<sha> green" або "<sha> red": тести одного коміту ганяються один раз.
+readonly TESTED_FILE="${STATE_DIR}/tested-sha"
+readonly LOCK_FILE="${OUTBOUND_DEPLOY_LOCK_FILE:-/run/lock/outbound-auto-deploy.lock}"
 readonly RETRY_AFTER_SECONDS=1200
+# Той самий образ, що й у Dockerfile застосунку: тести бачать той самий Node.
+readonly TEST_IMAGE='node:20-alpine'
+readonly TEST_TIMEOUT_SECONDS=900
 
 mkdir -p "${STATE_DIR}" "$(dirname "${LOCK_FILE}")"
 exec 9>"${LOCK_FILE}"
@@ -39,6 +47,62 @@ if [[ -f "${PENDING_FILE}" ]]; then
     log "Deployment for ${remote_sha} is already in progress."
     exit 0
   fi
+fi
+
+# Тести саме цього коміту. Клон — у тимчасову теку, прогін — у контейнері,
+# бо на хості немає Node.
+run_tests() {
+  local sha="$1" workdir status=0
+  workdir="$(mktemp -d)"
+  if ! git clone --quiet --depth 1 --branch main "${REPOSITORY}" "${workdir}/repo" >/dev/null 2>&1; then
+    rm -rf "${workdir}"
+    log "Cannot clone ${REPOSITORY} to test ${sha}; no deploy started."
+    return 2
+  fi
+  if [[ "$(git -C "${workdir}/repo" rev-parse HEAD)" != "${sha}" ]]; then
+    rm -rf "${workdir}"
+    log "main moved while cloning ${sha}; will test the new head on the next run."
+    return 2
+  fi
+  docker run --rm --network bridge -v "${workdir}/repo:/app" -w /app "${TEST_IMAGE}" \
+    timeout "${TEST_TIMEOUT_SECONDS}" npm test > "${STATE_DIR}/test-${sha}.log" 2>&1 || status=$?
+  rm -rf "${workdir}"
+  # Лишаємо журнали лише п'яти останніх прогонів.
+  ls -1t "${STATE_DIR}"/test-*.log 2>/dev/null | tail -n +6 | xargs -r rm -f || true
+  return "${status}"
+}
+
+if [[ -f "${TESTED_FILE}" ]]; then
+  read -r tested_sha tested_result < "${TESTED_FILE}" || true
+fi
+if [[ "${tested_sha:-}" == "${remote_sha}" && "${tested_result:-}" == 'red' ]]; then
+  # Уже сказано в журналі, чому червоний; чекаємо наступного коміту.
+  exit 0
+fi
+if [[ "${tested_sha:-}" != "${remote_sha}" || "${tested_result:-}" != 'green' ]]; then
+  log "Running npm test for ${remote_sha} before deploying."
+  test_status=0
+  run_tests "${remote_sha}" || test_status=$?
+  if [[ ${test_status} -eq 2 ]]; then
+    exit 1
+  fi
+  if [[ ${test_status} -ne 0 ]]; then
+    printf '%s red\n' "${remote_sha}" > "${TESTED_FILE}"
+    reason="$(grep -E '^not ok|^# fail|^ℹ fail|Error' "${STATE_DIR}/test-${remote_sha}.log" | head -n 8 | tr '\n' ' ' | cut -c1-600 || true)"
+    [[ ${test_status} -eq 124 ]] && reason="timed out after ${TEST_TIMEOUT_SECONDS}s. ${reason}"
+    log "Tests are red for ${remote_sha} (exit ${test_status}); NOT deploying. ${reason} Full log: ${STATE_DIR}/test-${remote_sha}.log"
+    exit 1
+  fi
+  printf '%s green\n' "${remote_sha}" > "${TESTED_FILE}"
+  log "Tests are green for ${remote_sha}."
+fi
+
+# Coolify деплоїть голову main, а не названий коміт. Якщо поки йшли тести
+# з'явився новий коміт, він ще не перевірений — чекаємо наступного прогону.
+current_sha="$(git ls-remote "${REPOSITORY}" refs/heads/main | awk 'NR == 1 { print $1 }')"
+if [[ "${current_sha}" != "${remote_sha}" ]]; then
+  log "main moved to ${current_sha} during tests; it will be tested before any deploy."
+  exit 0
 fi
 
 coolify_client_container="$(docker ps --filter "name=${COOLIFY_CLIENT_CONTAINER_PREFIX}" --format '{{.Names}}' | head -n 1)"
