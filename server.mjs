@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { connect as connectTcp } from "node:net";
 import { dirname, extname, join, normalize } from "node:path";
@@ -11,6 +11,7 @@ import { contactAsProspect, contactsConfigured, contactsMissingConfig, crmKeyKin
 import { handleKnowledgeLibraryApi } from "./knowledge/api.mjs";
 import { knowledgeExcerptsForPrompt, knowledgeFilesForProduct, loadKnowledgeLibrary } from "./knowledge/library.mjs";
 import { handleWarmupApi } from "./warmup/api.mjs";
+import { writeFileAtomic } from "./state/atomic-write.mjs";
 import { startScheduler } from "./warmup/scheduler.mjs";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
@@ -3731,7 +3732,8 @@ function writePersistentWorkspaceState() {
 async function writeWorkspaceStateNow() {
   try {
     await mkdir(dirname(stateFilePath), { recursive: true });
-    await writeFile(stateFilePath, JSON.stringify({
+    // Атомарно: обрив посередині лишає попередню версію, а не обрізаний JSON.
+    await writeFileAtomic(stateFilePath, JSON.stringify({
       version: 1,
       savedAt: new Date().toISOString(),
       selectedProductId: state.selectedProductId,
@@ -3783,7 +3785,7 @@ async function writeWorkspaceStateNow() {
         postgres: nonSecretIntegrationSettings(state.integrations.postgres),
         knowledgeDatabase: nonSecretIntegrationSettings(state.integrations.knowledgeDatabase)
       }
-    }, null, 2), "utf8");
+    }, null, 2));
   } catch (error) {
     console.error("Could not persist workspace memory:", error instanceof Error ? error.message : error);
   }
