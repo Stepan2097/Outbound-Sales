@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { createReadStream, existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
@@ -25,6 +25,9 @@ const authDevBypass = process.env.AUTH_DEV_BYPASS === "1" && runtimeEnv !== "pro
 if (process.env.AUTH_DEV_BYPASS === "1" && !authDevBypass) {
   console.error("[auth] AUTH_DEV_BYPASS=1 is ignored in production — sign-in stays required.");
 }
+// Найбільше легітимне тіло — скріншот прикладу (dataUrl до 2,5 МБ) у JSON.
+// Без межі один запит на гігабайт тримав би всю пам'ять процесу.
+const maxJsonBodyBytes = 5 * 1024 * 1024;
 const masterKey = createHash("sha256").update(randomBytes(32)).digest();
 const openRouterDefaults = {
   analysisModel: "anthropic/claude-haiku-4.5",
@@ -505,6 +508,7 @@ async function handleApi(request, response, url) {
   }
 
   if (request.method === "POST" && url.pathname === "/api/auth/register") {
+    if (rejectRateLimited(request, response, "register", authRateLimits.registerPerIp)) return;
     const body = await readJson(request);
     const result = await registerWorkspaceUser(body);
     if (!result.session) {
@@ -520,8 +524,19 @@ async function handleApi(request, response, url) {
   }
 
   if (request.method === "POST" && url.pathname === "/api/auth/login") {
+    if (rejectRateLimited(request, response, "login", authRateLimits.loginPerIp)) return;
     const body = await readJson(request);
-    const result = await loginWorkspaceUser(body.email, body.password);
+    // Підбір пароля до одного акаунта з різних адрес — окремий лічильник,
+    // і рахуються лише невдалі спроби: власник, що зайшов, себе не блокує.
+    const emailKey = cleanText(body.email || "").toLowerCase();
+    if (emailKey && rejectRateLimited(request, response, `login-fail:${emailKey}`, authRateLimits.loginFailuresPerEmail, { peek: true })) return;
+    let result;
+    try {
+      result = await loginWorkspaceUser(body.email, body.password);
+    } catch (error) {
+      if (emailKey && [400, 401, 403].includes(Number(error?.statusCode || 0))) hitRateLimit(`login-fail:${emailKey}`, authRateLimits.loginFailuresPerEmail);
+      throw error;
+    }
     setAuthSessionCookies(request, response, result.session);
     result.profile.lastLoginAt = new Date().toISOString();
     await writePersistentWorkspaceState();
@@ -576,13 +591,24 @@ async function handleApi(request, response, url) {
   }
 
   if (request.method === "POST" && url.pathname === "/api/webhooks/fullenrich") {
-    const suppliedToken = cleanText(url.searchParams.get("token") || request.headers["x-webhook-token"] || "");
+    // Лише заголовки: токен у ?query потрапляв у логи доступу проксі. FullEnrich
+    // підписує кожен вебхук X-Signature-SHA1 — HMAC-SHA1 сирого тіла на нашому
+    // API-ключі (docs.fullenrich.com/api/v2/general/webhooks); x-webhook-token —
+    // наш власний секрет для ручних і тестових викликів.
+    const raw = await readBody(request);
+    const signature = cleanText(request.headers["x-signature-sha1"] || "").toLowerCase();
+    const apiKey = state.contactEnrichmentVault ? decryptSecret(state.contactEnrichmentVault) : "";
+    const signed = Boolean(signature && apiKey) && secretsMatch(signature, createHmac("sha1", apiKey).update(raw).digest("hex"));
+    const headerToken = cleanText(request.headers["x-webhook-token"] || "");
     const expectedToken = state.contactEnrichmentWebhookVault ? decryptSecret(state.contactEnrichmentWebhookVault) : "";
-    if (!expectedToken || !secretsMatch(suppliedToken, expectedToken)) {
+    const tokenOk = Boolean(headerToken && expectedToken) && secretsMatch(headerToken, expectedToken);
+    if (!signed && !tokenOk) {
+      // Без значень — лише що прийшло: так перший справжній вебхук після зміни видно в лозі.
+      console.warn(`[fullenrich] webhook rejected: signature header ${signature ? "present, mismatch" : "absent"}, token header ${headerToken ? "present" : "absent"}, query token ${url.searchParams.has("token") ? "present (ignored)" : "absent"}`);
       sendJson(response, 401, { error: "FullEnrich webhook authentication failed." });
       return;
     }
-    const body = await readJson(request);
+    const body = parseJsonBody(raw);
     const result = await ingestFullEnrichWebhook(body);
     await writePersistentWorkspaceState();
     sendJson(response, 200, result);
@@ -615,7 +641,8 @@ async function handleApi(request, response, url) {
     // refuses anything it did not sign — see warmup/login-check.mjs.
   } else if (url.pathname.startsWith("/api/webhooks/")) {
     const suppliedToken = cleanText(request.headers["x-webhook-token"] || String(request.headers.authorization || "").replace(/^Bearer\s+/i, ""));
-    if (!state.transcriptVault || suppliedToken !== decryptSecret(state.transcriptVault)) {
+    // За сталий час: !== виказував довжину спільного префікса таймінгом відповіді.
+    if (!state.transcriptVault || !suppliedToken || !secretsMatch(suppliedToken, decryptSecret(state.transcriptVault))) {
       sendJson(response, 401, { error: "Webhook authentication failed." });
       return;
     }
@@ -639,7 +666,9 @@ async function handleApi(request, response, url) {
       readJson: async (incoming) => {
         try {
           return await readJson(incoming);
-        } catch {
+        } catch (error) {
+          // Завелике тіло — це 413, а не «зламаний JSON».
+          if (Number(error?.statusCode) === 413) throw error;
           return null;
         }
       },
@@ -3913,13 +3942,74 @@ function publicOutreachForProspect(prospect, product = currentProduct(), analysi
   };
 }
 
-async function readJson(request) {
+/** Тіло запиту з межею розміру: більше — 413, і читання зупиняється. */
+async function readBody(request, limit = maxJsonBodyBytes) {
+  const declared = Number(request.headers["content-length"] || 0);
+  if (declared > limit) throw apiError("Запит завеликий.", 413);
   const chunks = [];
+  let size = 0;
   for await (const chunk of request) {
+    size += chunk.length;
+    if (size > limit) {
+      request.destroy();
+      throw apiError("Запит завеликий.", 413);
+    }
     chunks.push(chunk);
   }
-  const text = Buffer.concat(chunks).toString("utf8");
+  return Buffer.concat(chunks);
+}
+
+function parseJsonBody(raw) {
+  const text = raw.toString("utf8");
   return text ? JSON.parse(text) : {};
+}
+
+async function readJson(request) {
+  return parseJsonBody(await readBody(request));
+}
+
+// Обмеження спроб входу й реєстрації: у пам'яті процесу, ковзне вікно.
+const authRateLimits = {
+  loginPerIp: { limit: 20, windowMs: 15 * 60 * 1000 },
+  loginFailuresPerEmail: { limit: 8, windowMs: 15 * 60 * 1000 },
+  registerPerIp: { limit: 10, windowMs: 60 * 60 * 1000 }
+};
+const rateLimitHits = new Map();
+
+/** Адреса клієнта: останній X-Forwarded-For — той, що дописав наш проксі, а не клієнт. */
+function clientAddress(request) {
+  const forwarded = String(request.headers["x-forwarded-for"] || "").split(",").map((item) => item.trim()).filter(Boolean);
+  return forwarded.at(-1) || request.socket?.remoteAddress || "unknown";
+}
+
+function recentHits(key, windowMs) {
+  const cutoff = Date.now() - windowMs;
+  const hits = (rateLimitHits.get(key) || []).filter((at) => at > cutoff);
+  if (hits.length) rateLimitHits.set(key, hits); else rateLimitHits.delete(key);
+  return hits;
+}
+
+function hitRateLimit(key, rule) {
+  const hits = recentHits(key, rule.windowMs);
+  hits.push(Date.now());
+  rateLimitHits.set(key, hits);
+}
+
+/**
+ * true — запит відхилено з 429. Ключ із назвою дії рахується на адресу
+ * клієнта; з `peek` лише перевіряється, не додаючи спроби.
+ */
+function rejectRateLimited(request, response, action, rule, options = {}) {
+  const key = action.includes(":") ? action : `${action}:${clientAddress(request)}`;
+  const hits = recentHits(key, rule.windowMs);
+  if (hits.length >= rule.limit) {
+    const retryAfter = Math.max(1, Math.ceil((hits[0] + rule.windowMs - Date.now()) / 1000));
+    response.setHeader("Retry-After", String(retryAfter));
+    sendJson(response, 429, { error: `Забагато спроб. Спробуй ще раз за ${Math.ceil(retryAfter / 60)} хв.` });
+    return true;
+  }
+  if (!options.peek) hitRateLimit(key, rule);
+  return false;
 }
 
 function sendJson(response, status, payload) {
@@ -6665,7 +6755,8 @@ async function enrichProspectWithFullEnrich(prospect) {
 
   const requestId = `fullenrich-${randomBytes(8).toString("hex")}`;
   const webhookSecret = decryptSecret(state.contactEnrichmentWebhookVault);
-  const webhookUrl = `${integration.webhookBaseUrl.replace(/\/+$/, "")}/api/webhooks/fullenrich?token=${encodeURIComponent(webhookSecret)}`;
+  // Без токена в адресі: FullEnrich підписує доставку сам (X-Signature-SHA1).
+  const webhookUrl = `${integration.webhookBaseUrl.replace(/\/+$/, "")}/api/webhooks/fullenrich`;
   const enrichFields = [];
   if (integration.includeWorkEmail) enrichFields.push("contact.work_emails");
   if (integration.includePersonalEmail) enrichFields.push("contact.personal_emails");

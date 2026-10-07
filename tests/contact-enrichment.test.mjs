@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { createHmac } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -40,6 +41,29 @@ test("FullEnrich webhooks are authenticated, approval-gated, and idempotent", as
     });
     assert.equal(unauthorized.status, 401);
 
+    // Секрет в адресі більше не відчиняє: він потрапляв у логи доступу.
+    const queryOnly = await fetch(`${origin}/api/webhooks/fullenrich?token=test-webhook-secret`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ data: [] })
+    });
+    assert.equal(queryOnly.status, 401);
+
+    // Підпис, який FullEnrich ставить сам: HMAC-SHA1 сирого тіла на API-ключі.
+    const forged = await fetch(`${origin}/api/webhooks/fullenrich`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Signature-SHA1": "0".repeat(40) },
+      body: JSON.stringify({ data: [] })
+    });
+    assert.equal(forged.status, 401);
+    const signedBody = JSON.stringify({ id: "enrichment-signed", data: [] });
+    const signed = await fetch(`${origin}/api/webhooks/fullenrich`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Signature-SHA1": createHmac("sha1", "test-api-key").update(signedBody).digest("hex") },
+      body: signedBody
+    });
+    assert.equal(signed.status, 200);
+
     const payload = {
       id: "enrichment-test-1",
       data: [{
@@ -73,9 +97,9 @@ test("FullEnrich webhooks are authenticated, approval-gated, and idempotent", as
 });
 
 async function postWebhook(payload) {
-  const response = await fetch(`${origin}/api/webhooks/fullenrich?token=test-webhook-secret`, {
+  const response = await fetch(`${origin}/api/webhooks/fullenrich`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "x-webhook-token": "test-webhook-secret" },
     body: JSON.stringify(payload)
   });
   assert.equal(response.status, 200);
