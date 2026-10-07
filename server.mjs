@@ -17,6 +17,14 @@ const root = fileURLToPath(new URL(".", import.meta.url));
 const appRoot = join(root, "app");
 const stateFilePath = process.env.STATE_FILE_PATH || join(root, ".data", "outbound-state.json");
 const port = Number.parseInt(process.env.PORT ?? "4173", 10);
+// AUTH_DEV_BYPASS віддає права admin кожному запиту без входу — це лише для
+// локальної розробки й тестів. На проді прапорець ігнорується, а старт пише
+// про нього помилку в лог: забута змінна не повинна відкривати CRM.
+const runtimeEnv = process.env.APP_ENV || process.env.NODE_ENV || "";
+const authDevBypass = process.env.AUTH_DEV_BYPASS === "1" && runtimeEnv !== "production";
+if (process.env.AUTH_DEV_BYPASS === "1" && !authDevBypass) {
+  console.error("[auth] AUTH_DEV_BYPASS=1 is ignored in production — sign-in stays required.");
+}
 const masterKey = createHash("sha256").update(randomBytes(32)).digest();
 const openRouterDefaults = {
   analysisModel: "anthropic/claude-haiku-4.5",
@@ -2508,7 +2516,7 @@ async function loginWorkspaceUser(emailValue, passwordValue, options = {}) {
 }
 
 async function authenticateApiRequest(request, response, options = {}) {
-  if (process.env.AUTH_DEV_BYPASS === "1") {
+  if (authDevBypass) {
     const user = { id: "dev-user", email: "developer@localhost", user_metadata: { name: "Local Tester", role: "admin" } };
     return { user, profile: ensureWorkspaceUserProfile(user, { role: "admin" }), accessToken: "dev-bypass" };
   }
