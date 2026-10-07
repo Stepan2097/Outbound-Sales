@@ -1,6 +1,23 @@
 # LinkedIn agent in Outbound-Sales
 
-All code is in this repository. The server (`warmup/`) chooses the accounts, schedule, recipients and quotas. The local Mac agent (`agent/`) opens the account's existing Anty profile, performs the allowed work, and reports each result. The retired Next.js application is not required.
+All code is in this repository. The server (`warmup/`) chooses the accounts, schedule, recipients and quotas. The browser agent (`agent/`) opens the account's existing Anty profile, performs the allowed work, and reports each result. The retired Next.js application is not required.
+
+## Linux / server Anty
+
+Set `WARMUP_ANTY_API=http://127.0.0.1:3032` to use the Linux Anty runtime instead
+of reading the Mac's database. The worker must share the runtime's Docker network
+namespace; the API and CDP ports are private. Use `agent/Dockerfile` as the worker
+image and Anty's `compose.linux.yml` and `docs/linux-server.md` for deployment,
+profile import, backups and manual login.
+
+The API resolves the exact cloud profile ID, refuses missing proxies and busy
+profiles, then returns a private CDP endpoint. The runner uses Anty's existing
+persistent context and asks Anty to flush and close it at the end. The server
+continues to own all quota, lease, warning and inbox decisions.
+
+`node agent/check-anty.mjs --profile <cloud-id> --linkedin` checks a selected
+profile's proxy and login markers without likes, requests, messages or opening
+the inbox. It needs `WARMUP_ANTY_API`, but does not run the production scheduler.
 
 ## Install on the Mac with Anty
 
