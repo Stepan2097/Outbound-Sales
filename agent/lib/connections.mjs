@@ -14,6 +14,45 @@ export function profileSlug(link) {
   } catch { return null; }
 }
 
+/**
+ * Who this account is already waiting on, read from LinkedIn's own list of
+ * sent invitations.
+ *
+ * The profile page used to answer this: a «Pending» button in the header meant
+ * the request was out. On 08.10.2026 it stopped — the header keeps only
+ * «More», with withdrawing moved inside it — and the agent clicked Connect,
+ * sent a real invitation, then threw «LinkedIn did not confirm Pending» and
+ * ended the visit. The request had gone out; only our reading of it had not.
+ *
+ * So the evidence moved to the page that exists for exactly this question. It
+ * is one load per visit plus one after each send, it is the same list a person
+ * would open to check, and it does not care what LinkedIn calls its buttons
+ * this quarter or in which language.
+ *
+ * Unreadable list → an empty set, never a thrown visit: not knowing who is
+ * pending must cost at most a careful re-send that LinkedIn itself refuses,
+ * not the morning's work.
+ */
+const SENT_INVITATIONS = 'https://www.linkedin.com/mynetwork/invitation-manager/sent/';
+
+export async function pendingSlugs(page, { sleep = wait, guard = async () => {} } = {}) {
+  const slugs = new Set();
+  try {
+    await page.goto(SENT_INVITATIONS, { waitUntil: 'domcontentloaded', timeout: 45000 });
+    await sleep(1500);
+    await guard();
+    const hrefs = await page.evaluate(() =>
+      [...document.querySelectorAll('a[href*="/in/"]')].map((node) => node.getAttribute('href') || ''));
+    for (const href of hrefs) {
+      const slug = profileSlug(/^https?:/i.test(href) ? href : `https://www.linkedin.com${href}`);
+      if (slug) slugs.add(slug);
+    }
+  } catch (error) {
+    if (error instanceof VisitStopped) throw error;
+  }
+  return slugs;
+}
+
 /** An explicit restriction stops the whole visit, including the inbox. */
 export async function linkedinWarning(page) {
   if (/\/(checkpoint|challenge|captcha)(\/|\?)/i.test(page.url())) return 'LinkedIn checkpoint or CAPTCHA';
@@ -151,7 +190,11 @@ async function openProfile(page, invite, { sleep = wait, guard = async () => {} 
   return { card, gone: false };
 }
 
-export async function sendInvitation(page, invite, { sleep = wait, guard = async () => {} } = {}) {
+export async function sendInvitation(page, invite, { sleep = wait, guard = async () => {}, pending = null } = {}) {
+  const slug = profileSlug(invite.linkedin);
+  // Asked before the profile is even opened: a request already out there is
+  // the one thing worth not opening a browser tab for.
+  if (pending?.has(slug)) return 'already_pending';
   const { card, gone } = await openProfile(page, invite, { sleep, guard });
   await guard();
   if (gone) return 'profile_gone';
@@ -200,22 +243,34 @@ export async function sendInvitation(page, invite, { sleep = wait, guard = async
     await guard();
     await send.click();
   }
-  // Some profiles send directly on Connect. The Pending state is the evidence.
-  for (let attempt = 0; attempt < 12; attempt += 1) {
+  // Some profiles send directly on Connect. A header that still says so is the
+  // quickest evidence; where the header no longer says anything, LinkedIn's
+  // own list of sent invitations does.
+  for (let attempt = 0; attempt < 6; attempt += 1) {
     await sleep(500);
     await guard();
-    const freshCard = await profileCard(page, invite.name, profileSlug(invite.linkedin));
+    const freshCard = await profileCard(page, invite.name, slug);
     if (freshCard && await relation(freshCard) === 'pending') return 'sent';
   }
+  const sentNow = await pendingSlugs(page, { sleep, guard });
+  if (sentNow.has(slug)) {
+    pending?.add(slug);
+    return 'sent';
+  }
   // An uncertain click is not a failed send: leave it waiting for reconciliation.
-  throw new VisitStopped('Invitation was clicked but LinkedIn did not confirm Pending');
+  throw new VisitStopped('Invitation was clicked but neither the profile nor the sent list shows it');
 }
 
 export async function sendQueuedInvitations(page, portal, invites, {
   sleep = wait, guard = () => stopOnWarning(page, portal), leaseId = null,
-  send = sendInvitation, onSent = () => {}
+  send = sendInvitation, onSent = () => {}, pending = null
 } = {}) {
-  for (const queued of invites ?? []) {
+  const queue = invites ?? [];
+  // One read for the whole visit: everybody this account is already waiting
+  // on. Without it a queue the portal has not reconciled yet is a queue of
+  // second requests to the same people.
+  const alreadyPending = pending ?? (queue.length ? await pendingSlugs(page, { sleep, guard }) : new Set());
+  for (const queued of queue) {
     await guard();
     const prepared = await reportWithRetry(() => portal.prepareInvite(queued.outreachId), { sleep });
     if (prepared.stopAll || prepared.duringPause) throw new VisitStopped('Server stopped this account');
@@ -227,7 +282,7 @@ export async function sendQueuedInvitations(page, portal, invites, {
     if (invite.outreachId !== queued.outreachId || profileSlug(invite.linkedin) !== profileSlug(queued.linkedin)) {
       throw new VisitStopped('The queued recipient changed during preparation');
     }
-    const outcome = await send(page, invite, { sleep, guard });
+    const outcome = await send(page, invite, { sleep, guard, pending: alreadyPending });
     const answer = await reportWithRetry(() => portal.inviteSent(invite.outreachId, outcome, leaseId), { sleep });
     if (!answer.success) throw new VisitStopped(`Invitation report refused: ${answer.error}`);
     if (outcome === 'sent') onSent(invite);

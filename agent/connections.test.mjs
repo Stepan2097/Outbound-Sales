@@ -14,24 +14,39 @@ const sleep = async () => {};
 const queued = { outreachId: 'invite-1', name: 'Person One', linkedin: 'https://www.linkedin.com/in/person-one/', note: '' };
 
 /** All LinkedIn URLs are intercepted. These are local synthetic pages. */
-async function profile(t, { more = false, pending = false, accepted = false, noButton = false, noteLimit = 200, warning = '', redirected = false, heading = 'h1' } = {}) {
+async function profile(t, { more = false, pending = false, accepted = false, noButton = false, noteLimit = 200, warning = '', redirected = false, heading = 'h1', confirms = true, sentList = [] } = {}) {
   const context = await browser.newContext();
   t.after(() => context.close());
   const page = await context.newPage();
   await context.route('**/*', (route) => {
+    // LinkedIn's own list of sent invitations, as a synthetic page: links to
+    // /in/<slug> are the whole of what the agent reads from it.
+    if (route.request().url().includes('/invitation-manager/sent/')) {
+      return route.fulfill({ contentType: 'text/html', body: `<!doctype html><html><body><main>`
+        + sentList.map((slug) => `<a href="/in/${slug}/">somebody</a>`).join('')
+        + `</main></body></html>` });
+    }
     const action = pending ? '<button>Pending</button>' : accepted ? '<span>1st</span><button>Message</button>' : noButton ? '' : more ? '<button id="more">More</button>' : '<button id="connect">Connect</button>';
     return route.fulfill({ contentType: 'text/html', body: `<!doctype html><html><body>
       ${warning}<main><section><${heading}>Person One</${heading}><div id="actions">${action}</div></section>
       <aside><h2>Other Person</h2><button id="wrong">Connect</button></aside></main>
       <script>
       window.sent = []; window.wrongClicks = 0;
+      try { if (!sessionStorage.getItem('sent')) sessionStorage.setItem('sent', '[]'); } catch {}
       document.querySelector('#wrong').onclick = () => window.wrongClicks++;
       const dialog = () => {
         document.querySelector('[role="menu"]')?.remove();
         const el = document.createElement('div'); el.setAttribute('role','dialog');
         el.innerHTML = '<button id="add">Add a note</button><button id="bare">Send without a note</button>';
         document.body.append(el);
-        const send = (note) => { window.sent.push(note); el.remove(); document.querySelector('#actions').innerHTML = '<button>Pending</button>'; };
+        const send = (note) => {
+          window.sent.push(note);
+          // Mirrored: confirming through the sent list navigates away and
+          // takes the window with it.
+          try { sessionStorage.setItem('sent', JSON.stringify(window.sent)); } catch {}
+          el.remove();
+          ${confirms ? "document.querySelector('#actions').innerHTML = '<button>Pending</button>';" : ''}
+        };
         el.querySelector('#bare').onclick = () => send('');
         el.querySelector('#add').onclick = () => {
           el.innerHTML = '<textarea maxlength="${noteLimit}"></textarea><button id="send">Send</button>';
@@ -71,6 +86,44 @@ test('a request behind «Більше» is sent on a page with no h1 either', as
   assert.equal(await sendInvitation(page, { ...queued, note: '' }, { sleep }), 'sent');
   assert.deepEqual(await page.evaluate(() => window.sent), ['']);
   assert.equal(await page.evaluate(() => window.wrongClicks), 0);
+});
+
+/** Що саме надсилалось, із дзеркала, яке переживає перехід на інші сторінки. */
+async function sentNotes(page) {
+  return page.evaluate(() => JSON.parse(sessionStorage.getItem('sent') || '[]'));
+}
+
+/**
+ * 08.10.2026: the profile header stopped saying «Pending» — withdrawing moved
+ * inside «More» — so a real invitation went out and the agent then threw
+ * «LinkedIn did not confirm Pending» and ended the visit. The evidence now
+ * comes from the page that exists for this question.
+ */
+test('коли шапка профілю більше нічого не каже, надісланий запит підтверджує список надісланих', async (t) => {
+  const page = await profile(t, { heading: 'h2', confirms: false, sentList: ['person-one'] });
+  assert.equal(await sendInvitation(page, { ...queued, note: '' }, { sleep }), 'sent');
+  assert.deepEqual(await sentNotes(page), ['']);
+});
+
+test('клік, якого не видно ні в шапці, ні в списку, зупиняє візит, а не зараховується', async (t) => {
+  const page = await profile(t, { heading: 'h2', confirms: false, sentList: [] });
+  await assert.rejects(
+    () => sendInvitation(page, { ...queued, note: '' }, { sleep }),
+    (error) => error instanceof VisitStopped && /sent list/.test(error.message)
+  );
+  // Клік таки був — рядок лишається в черзі на звірку, а не списується.
+  assert.deepEqual(await sentNotes(page), ['']);
+});
+
+test('людину, яка вже в надісланих, другим запитом не чіпають', async (t) => {
+  const page = await profile(t, { sentList: ['person-one'] });
+  const outcomes = [];
+  await sendQueuedInvitations(page, { prepareInvite: async () => ({ success: true, allowed: true, invite: queued, connectsLeft: 5 }),
+    inviteSent: async (_id, outcome) => { outcomes.push(outcome); return { success: true }; } },
+    [queued], { sleep, guard: async () => {} });
+  assert.deepEqual(outcomes, ['already_pending']);
+  // Жодного кліку: діалог навіть не відкривався.
+  assert.deepEqual(await sentNotes(page), []);
 });
 
 test('a bare request and a request with an approved note reach only the queued profile', async (t) => {
