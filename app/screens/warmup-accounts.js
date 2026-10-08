@@ -130,6 +130,18 @@ function warmupNextSessionCell(profile) {
   return `завтра ${new Date(next.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
 }
 
+/**
+ * On a phone the status, the day and today's requests do not get columns of
+ * their own — the table would not fit 390px — so they ride under the name.
+ */
+function warmupPhoneLine(profile) {
+  const { today = 0, quota = 0 } = profile.connections || {};
+  const parts = [];
+  if (profile.day) parts.push(`день ${profile.day}`);
+  if (quota > 0) parts.push(`${today}/${quota} сьогодні`);
+  return parts.join(" · ");
+}
+
 function warmupConnectionsCell(profile) {
   const { today = 0, total = 0, quota = 0, startsDay = null } = profile.connections || {};
   const week = profile.connections?.weekly;
@@ -346,6 +358,7 @@ export function renderWarmupProfiles() {
               ? `<div class="warmup-identity" title="На останньому вході агента залогінений як ця особа"><i data-lucide="badge-check"></i><span>${escapeHtml(identity.name)}</span></div>`
               : ""}
             ${profile.proxy ? "" : '<div class="warmup-subtle warmup-no-proxy" title="LinkedIn бачить справжню адресу цього профілю">без проксі</div>'}
+            <div class="warmup-row-phone"><span class="pill ${WARMUP_STATUS_TONE[status] || "tone-muted"}">${escapeHtml(WARMUP_STATUS_LABEL[status] || status)}</span>${account && warmupPhoneLine(profile) ? ` <span class="warmup-subtle">${escapeHtml(warmupPhoneLine(profile))}</span>` : ""}</div>
           </td>
           <td><span class="pill ${WARMUP_STATUS_TONE[status] || "tone-muted"}">${escapeHtml(WARMUP_STATUS_LABEL[status] || status)}</span></td>
           <td>${escapeHtml(profile.day || "—")}</td>

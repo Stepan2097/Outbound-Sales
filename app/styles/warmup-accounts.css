@@ -318,3 +318,46 @@
   gap: 6px;
   margin: 4px 0 14px;
 }
+
+/* On a phone: the account and its next session. The campaign tick goes (it is
+   set at a desk), and the status, the day and today's requests move under the
+   name, so the table fits 390px with nothing to scroll sideways. */
+.warmup-row-phone {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .warmup-list-panel table {
+    min-width: 0;
+  }
+
+  .warmup-list-panel th:nth-child(1),
+  .warmup-list-panel td:nth-child(1):not([colspan]),
+  .warmup-list-panel th:nth-child(3),
+  .warmup-list-panel td:nth-child(3),
+  .warmup-list-panel th:nth-child(4),
+  .warmup-list-panel td:nth-child(4),
+  .warmup-list-panel th:nth-child(5),
+  .warmup-list-panel td:nth-child(5) {
+    display: none;
+  }
+
+  .warmup-list-panel th,
+  .warmup-list-panel td {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+
+  .warmup-row-phone {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 6px;
+    margin-top: 4px;
+  }
+
+  /* An e-mail as an account name has no space to break at. */
+  .warmup-list-panel td strong {
+    overflow-wrap: anywhere;
+  }
+}
