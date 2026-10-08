@@ -9,7 +9,7 @@ import {
   api, escapeAttr, escapeHtml, onScreen, refreshIcons, uaPlural
 } from "../core.js";
 import {
-  loadWarmupInbox, renderWarmupInbox, setWarmupUnread, showWarmupInboxAccount, warmupInboxUnreadFor
+  loadWarmupInbox, setWarmupUnread, showWarmupInboxAccount, warmupInboxUnreadFor
 } from "./inbox.js";
 import {
   loadWarmupCampaigns, loadWarmupStrategy, renderWarmupCampaignDetail, renderWarmupCampaigns, renderWarmupStrategy, toggleWarmupAccount, warmupAutoFeedHtml, warmupCampaignAccountIds, warmupSelectedCampaign
@@ -70,8 +70,6 @@ export const warmupState = {
     ready: false,
     available: true,
     error: "",
-    unreadOnly: false,
-    showAll: false,
     // The open thread, held as account + thread because a thread key is only
     // unique within the account it arrived on.
     openAccountId: null,
@@ -575,7 +573,6 @@ export async function loadWarmup({ full = true } = {}) {
       warmupState.inbox.available = false;
       renderWarmupProfiles();
       renderWarmupStats();
-      renderWarmupInbox();
       renderWarmupStrategy();
       renderWarmupCampaigns();
       return;
@@ -588,8 +585,9 @@ export async function loadWarmup({ full = true } = {}) {
 
     warmupState.dashboard = await warmupApi("/dashboard");
     renderWarmupStats();
-    // The inbox before the plan: it is the top panel, it depends on nothing
-    // else here, and it is the one thing on this screen somebody else wrote.
+    // The replies, though they have a screen of their own: the accounts table
+    // marks each account with its unread count («1 нова відповідь»), and that
+    // count comes from this read, not from the menu badge's.
     await loadWarmupInbox();
     // The schedule every account runs on. It depends on nothing else here and
     // nothing here depends on it, so it is read once and left alone.

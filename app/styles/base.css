@@ -667,8 +667,10 @@ output {
     overflow-x: auto;
   }
 
+  /* Four items share the bar: a fixed 76px was cut for six, and at 390px it
+     cut «Налаштування» to «Налаштува…». */
   .nav-item {
-    flex: 0 0 76px;
+    flex: 1 1 0;
     min-height: 50px;
     display: grid;
     place-items: center;
@@ -973,8 +975,10 @@ dialog {
     overflow-x: auto;
   }
 
+  /* Four items share the bar: a fixed 76px was cut for six, and at 390px it
+     cut «Налаштування» to «Налаштува…». */
   .nav-item {
-    flex: 0 0 76px;
+    flex: 1 1 0;
     min-height: 50px;
     display: grid;
     place-items: center;
