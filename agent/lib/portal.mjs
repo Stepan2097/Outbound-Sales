@@ -36,8 +36,9 @@ export class Portal {
   }
   /** Every account the portal knows, health and all — one source for the rest. */
   async accounts() {
-    const accounts = await this.accounts();
-    return Array.isArray(accounts) ? accounts : [];
+    const answer = await this.#json(`${this.prefix}/accounts`);
+    if (!answer.success) throw new Error(answer.error || 'Could not list accounts');
+    return Array.isArray(answer.accounts) ? answer.accounts : [];
   }
   async warming() {
     const accounts = await this.accounts();
