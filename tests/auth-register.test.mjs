@@ -5,6 +5,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { listeningOrigin } from "./server-origin.mjs";
 
 // Registration, and the line it must not cross.
 //
@@ -93,21 +94,15 @@ function startFakeSupabase() {
   });
 }
 
-// Порт на кожен тест свій, а не випадковий: випадкові з одного діапазону
-// зрідка збігалися, і тоді один тест падав через сервер сусіднього. Тест, який
-// падає раз на десять прогонів, гірший за відсутній — йому перестають вірити.
-let nextPort = 4900;
-
 async function startWorkspace(supabasePort, savedState = null, apiKey = "sb_secret_test") {
   const dir = await mkdtemp(join(tmpdir(), "outbound-register-"));
   const statePath = join(dir, "state.json");
   if (savedState) await writeFile(statePath, JSON.stringify(savedState), "utf8");
-  const port = nextPort += 1;
   const child = spawn(process.execPath, ["server.mjs"], {
     cwd: new URL("..", import.meta.url),
     env: {
       ...process.env,
-      PORT: String(port),
+      PORT: "0",
       STATE_FILE_PATH: statePath,
       // Registration has to be reachable without a session, so the bypass that
       // hands every request an admin is exactly what must be off here.
@@ -120,18 +115,9 @@ async function startWorkspace(supabasePort, savedState = null, apiKey = "sb_secr
     },
     stdio: ["ignore", "pipe", "pipe"]
   });
-  await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("workspace did not start")), 15000);
-    child.stdout.on("data", (chunk) => {
-      if (String(chunk).includes("running at")) {
-        clearTimeout(timer);
-        resolve();
-      }
-    });
-    child.on("exit", (code) => reject(new Error(`workspace exited with ${code}`)));
-  });
+  const origin = await listeningOrigin(child);
   const post = async (path, payload) => {
-    const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+    const response = await fetch(`${origin}${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)

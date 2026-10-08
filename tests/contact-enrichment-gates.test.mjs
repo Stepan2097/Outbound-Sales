@@ -4,6 +4,8 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { readSavedState } from "./saved-state.mjs";
+import { listeningOrigin } from "./server-origin.mjs";
 
 // Збагачення — єдине місце в застосунку, де натискання кнопки коштує грошей:
 // за ним стоять платні актори Apify. Тому воно має два запобіжники, і обидва
@@ -20,7 +22,7 @@ import test from "node:test";
 // мережі: обидва запобіжники й те, що каже застосунок, коли Apify не
 // налаштований.
 
-async function startServer({ port, savedState = null, env = {} } = {}) {
+async function startServer({ savedState = null, env = {} } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "outbound-enrich-gates-test-"));
   const statePath = join(directory, "state.json");
   if (savedState) await writeFile(statePath, JSON.stringify(savedState), "utf8");
@@ -28,16 +30,16 @@ async function startServer({ port, savedState = null, env = {} } = {}) {
     cwd: new URL("..", import.meta.url),
     env: {
       ...process.env,
-      PORT: String(port),
+      PORT: "0",
       STATE_FILE_PATH: statePath,
       AUTH_DEV_BYPASS: "1",
       WARMUP_SCHEDULER_DISABLED: "1",
       ...env
     },
-    stdio: "ignore"
+    stdio: ["ignore", "pipe", "ignore"]
   });
   const exitPromise = new Promise((resolve) => child.once("exit", resolve));
-  const origin = `http://127.0.0.1:${port}`;
+  const origin = await listeningOrigin(child);
   const deadline = Date.now() + 8000;
   while (Date.now() < deadline) {
     try {
@@ -51,7 +53,7 @@ async function startServer({ port, savedState = null, env = {} } = {}) {
   return {
     origin,
     async savedState() {
-      return JSON.parse(await readFile(statePath, "utf8"));
+      return readSavedState(statePath);
     },
     async post(path, body) {
       const response = await fetch(`${origin}${path}`, {
@@ -113,7 +115,7 @@ test("збагачення, зроблене хвилину тому, не шу�
       warnings: []
     }
   });
-  const server = await startServer({ port: 43326, savedState: { version: 1, prospects: [lead], interactions: [] } });
+  const server = await startServer({ savedState: { version: 1, prospects: [lead], interactions: [] } });
   try {
     const reused = await server.post("/api/prospects/enrich", { prospectId: "lead-enrich" });
     assert.equal(reused.status, 200);
@@ -138,7 +140,7 @@ test("збагачення, зроблене хвилину тому, не шу�
 });
 
 test("без налаштованого Apify застосунок каже, чого бракує, і не вигадує прямих контактів", async () => {
-  const server = await startServer({ port: 43327, savedState: { version: 1, prospects: [researchedLead()], interactions: [] } });
+  const server = await startServer({ savedState: { version: 1, prospects: [researchedLead()], interactions: [] } });
   try {
     const { status, payload } = await server.post("/api/prospects/enrich", { prospectId: "lead-enrich", force: true });
     assert.equal(status, 200);
@@ -173,7 +175,7 @@ test("схвалити контакт можна лише з доказом ве
       warnings: []
     }
   });
-  const server = await startServer({ port: 43328, savedState: { version: 1, prospects: [lead], interactions: [] } });
+  const server = await startServer({ savedState: { version: 1, prospects: [lead], interactions: [] } });
   try {
     // Вгадана адреса доказів не має, тож схваленню не підлягає — і відмова
     // каже, чого саме бракує.

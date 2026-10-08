@@ -4,6 +4,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { listeningOrigin } from "./server-origin.mjs";
 
 // The Profile screen is one endpoint over three new pieces of workspace state:
 // a model on the profile, a user on every usage row, and seconds per day from
@@ -35,7 +36,7 @@ function usageRow(overrides = {}) {
   };
 }
 
-async function startServer({ port, savedState = null, env = {} } = {}) {
+async function startServer({ savedState = null, env = {} } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "outbound-profile-test-"));
   const statePath = join(directory, "state.json");
   if (savedState) await writeFile(statePath, JSON.stringify(savedState), "utf8");
@@ -43,16 +44,16 @@ async function startServer({ port, savedState = null, env = {} } = {}) {
     cwd: new URL("..", import.meta.url),
     env: {
       ...process.env,
-      PORT: String(port),
+      PORT: "0",
       STATE_FILE_PATH: statePath,
       AUTH_DEV_BYPASS: "1",
       WARMUP_SCHEDULER_DISABLED: "1",
       ...env
     },
-    stdio: "ignore"
+    stdio: ["ignore", "pipe", "ignore"]
   });
   const exitPromise = new Promise((resolve) => child.once("exit", resolve));
-  const origin = `http://127.0.0.1:${port}`;
+  const origin = await listeningOrigin(child);
   const deadline = Date.now() + 8000;
   while (Date.now() < deadline) {
     try {
@@ -90,7 +91,6 @@ async function startServer({ port, savedState = null, env = {} } = {}) {
 
 test("daily spend buckets cover thirty days, empty ones included, and only this person's real rows", async () => {
   const server = await startServer({
-    port: 43261,
     savedState: {
       version: 1,
       users: [{
@@ -165,7 +165,7 @@ test("daily spend buckets cover thirty days, empty ones included, and only this 
 });
 
 test("a fabricated mock row never lands in a person's spend, even when it is attributed to them", async () => {
-  const server = await startServer({ port: 43262 });
+  const server = await startServer({});
 
   try {
     const before = await server.get("/api/account/profile");
@@ -194,7 +194,7 @@ test("a fabricated mock row never lands in a person's spend, even when it is att
 test("a tab left open overnight buys one heartbeat, not a working day", async () => {
   // One second of credit per beat makes the silence in this test stand for a
   // night: any gap longer than the cap is worth exactly the cap.
-  const server = await startServer({ port: 43263, env: { ACTIVITY_MAX_CREDIT_SECONDS: "1" } });
+  const server = await startServer({ env: { ACTIVITY_MAX_CREDIT_SECONDS: "1" } });
 
   try {
     const first = await server.post("/api/account/heartbeat", { tabId: "tab-a" });
@@ -223,7 +223,7 @@ test("a tab left open overnight buys one heartbeat, not a working day", async ()
 });
 
 test("two open tabs count once, because the clock belongs to the person", async () => {
-  const server = await startServer({ port: 43264 });
+  const server = await startServer({});
 
   try {
     const startedAt = Date.now();
@@ -260,7 +260,7 @@ test("two open tabs count once, because the clock belongs to the person", async 
 });
 
 test("a user who has chosen no model falls back to the workspace default and can choose, clear, and be refused", async () => {
-  const server = await startServer({ port: 43265 });
+  const server = await startServer({});
 
   try {
     const initial = await server.get("/api/account/profile");
@@ -311,7 +311,6 @@ test("a saved prospect keeps its paid enrichment cache after a restart", async (
     candidateCount: 1
   };
   const server = await startServer({
-    port: 43269,
     savedState: { version: 1, prospects: [{ id: "cached-prospect", name: "Test Contact", company: "Test Company", apifyContactEnrichment: marker }] }
   });
   try {
@@ -332,7 +331,6 @@ test("a saved workspace whose people chose a thinking level still comes back aft
   // an empty one. A model without an effort never reached that line, which is
   // why the choice with one is the case worth keeping a test on.
   const server = await startServer({
-    port: 43267,
     savedState: {
       version: 1,
       users: [{

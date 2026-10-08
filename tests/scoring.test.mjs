@@ -4,6 +4,8 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { readSavedState } from "./saved-state.mjs";
+import { listeningOrigin } from "./server-origin.mjs";
 
 // Скоринг у цьому застосунку — дві різні речі, і плутати їх дорого.
 //
@@ -19,7 +21,7 @@ import test from "node:test";
 // Нижче тести правил, не рубрики: конкретні ваги можна крутити, а правила —
 // ні.
 
-async function startServer({ port, savedState = null, env = {} } = {}) {
+async function startServer({ savedState = null, env = {} } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "outbound-scoring-test-"));
   const statePath = join(directory, "state.json");
   if (savedState) await writeFile(statePath, JSON.stringify(savedState), "utf8");
@@ -27,16 +29,16 @@ async function startServer({ port, savedState = null, env = {} } = {}) {
     cwd: new URL("..", import.meta.url),
     env: {
       ...process.env,
-      PORT: String(port),
+      PORT: "0",
       STATE_FILE_PATH: statePath,
       AUTH_DEV_BYPASS: "1",
       WARMUP_SCHEDULER_DISABLED: "1",
       ...env
     },
-    stdio: "ignore"
+    stdio: ["ignore", "pipe", "ignore"]
   });
   const exitPromise = new Promise((resolve) => child.once("exit", resolve));
-  const origin = `http://127.0.0.1:${port}`;
+  const origin = await listeningOrigin(child);
   const deadline = Date.now() + 8000;
   while (Date.now() < deadline) {
     try {
@@ -51,7 +53,7 @@ async function startServer({ port, savedState = null, env = {} } = {}) {
     origin,
     statePath,
     async savedState() {
-      return JSON.parse(await readFile(statePath, "utf8"));
+      return readSavedState(statePath);
     },
     async get(path) {
       const response = await fetch(`${origin}${path}`);
@@ -82,7 +84,7 @@ function savedProspect(saved, name) {
 // ці два тести й дивляться: інакше вони перевіряли б не те, що називають.
 
 test("бал ліда рахується з фактів: ті самі факти — те саме число, і стеля не пробивається", async () => {
-  const server = await startServer({ port: 43311 });
+  const server = await startServer({});
   try {
     const senior = {
       name: "Maryna Holod",
@@ -119,7 +121,7 @@ test("бал ліда рахується з фактів: ті самі факт
 });
 
 test("бал, що прийшов разом із лідом, не перераховується", async () => {
-  const server = await startServer({ port: 43312 });
+  const server = await startServer({});
   try {
     await server.post("/api/prospects/import", {
       prospects: [{ name: "Olena Kravets", company: "Dovzhenko Games", title: "Head of Growth", score: 41 }]
@@ -135,7 +137,6 @@ test("бал, що прийшов разом із лідом, не перера�
 
 test("модель скорингу не вмикається, поки розв'язаних результатів мало, і нічого не важить", async () => {
   const server = await startServer({
-    port: 43313,
     savedState: {
       version: 1,
       prospects: [
@@ -195,7 +196,7 @@ test("двадцять розв'язаних результатів вмикаю
     prospects.push({ id: `lost-${index}`, name: `Quiet ${index}`, company: "Silent Co" });
     interactions.push({ id: `li-${index}`, prospectId: `lost-${index}`, type: "linkedin_invite_sent", outcome: "no_reply", note: "", at });
   }
-  const server = await startServer({ port: 43314, savedState: { version: 1, prospects, interactions } });
+  const server = await startServer({ savedState: { version: 1, prospects, interactions } });
   try {
     const { payload } = await server.post("/api/scoring/retrain", {});
     const model = payload.scoringModel;

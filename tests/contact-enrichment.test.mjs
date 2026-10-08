@@ -5,9 +5,12 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { readSavedState } from "./saved-state.mjs";
+import { listeningOrigin } from "./server-origin.mjs";
 
-const port = 43199;
-const origin = `http://127.0.0.1:${port}`;
+// Адресу сервер дає ОС, тож вона відома лише після запуску; допоміжні функції
+// нижче читають її звідси.
+let origin = "";
 
 test("FullEnrich webhooks are authenticated, approval-gated, and idempotent", async () => {
   const directory = await mkdtemp(join(tmpdir(), "outbound-enrichment-test-"));
@@ -16,15 +19,18 @@ test("FullEnrich webhooks are authenticated, approval-gated, and idempotent", as
     cwd: new URL("..", import.meta.url),
     env: {
       ...process.env,
-      PORT: String(port),
+      PORT: "0",
       STATE_FILE_PATH: statePath,
       FULLENRICH_API_KEY: "test-api-key",
       FULLENRICH_WEBHOOK_SECRET: "test-webhook-secret",
-      FULLENRICH_WEBHOOK_BASE_URL: origin
+      // Лише має бути непорожньою: сервер складає з неї адресу для виходу назовні,
+      // а цей тест шле вебхук у нього сам і адреси не звіряє.
+      FULLENRICH_WEBHOOK_BASE_URL: "https://outbound-sales.test"
     },
-    stdio: "ignore"
+    stdio: ["ignore", "pipe", "ignore"]
   });
   const exitPromise = new Promise((resolve) => child.once("exit", resolve));
+  origin = await listeningOrigin(child);
 
   try {
     await waitForHealth();
@@ -81,7 +87,7 @@ test("FullEnrich webhooks are authenticated, approval-gated, and idempotent", as
     assert.deepEqual(duplicate, { ok: true, processed: 0, candidatesAdded: 0, duplicatesIgnored: 1 });
 
     await waitForFile(statePath);
-    const saved = JSON.parse(await readFile(statePath, "utf8"));
+    const saved = await readSavedState(statePath);
     const prospect = saved.prospects.find((item) => item.id === "seed-maya-chen");
     const candidates = prospect.contactDiscovery.candidates.filter((item) => String(item.source).startsWith("fullenrich"));
     assert.equal(candidates.length, 3);

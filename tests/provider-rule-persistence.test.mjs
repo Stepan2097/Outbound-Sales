@@ -4,6 +4,8 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { readSavedState } from "./saved-state.mjs";
+import { listeningOrigin } from "./server-origin.mjs";
 
 // Правило вибору провайдера — це не зручність, а межа приватності: воно каже,
 // чи можна відправляти дані ліда до моделі, що вчиться на запитах, і до такої,
@@ -24,20 +26,20 @@ const DEFAULT_RULE = {
   requireZeroRetention: false
 };
 
-async function boot({ port, statePath }) {
+async function boot({ statePath }) {
   const child = spawn(process.execPath, ["server.mjs"], {
     cwd: new URL("..", import.meta.url),
     env: {
       ...process.env,
-      PORT: String(port),
+      PORT: "0",
       STATE_FILE_PATH: statePath,
       AUTH_DEV_BYPASS: "1",
       WARMUP_SCHEDULER_DISABLED: "1"
     },
-    stdio: "ignore"
+    stdio: ["ignore", "pipe", "ignore"]
   });
   const exitPromise = new Promise((resolve) => child.once("exit", resolve));
-  const origin = `http://127.0.0.1:${port}`;
+  const origin = await listeningOrigin(child);
   const deadline = Date.now() + 8000;
   while (Date.now() < deadline) {
     try {
@@ -72,13 +74,13 @@ async function workspace(saved = null) {
   const directory = await mkdtemp(join(tmpdir(), "outbound-provider-rule-test-"));
   const statePath = join(directory, "state.json");
   if (saved) await writeFile(statePath, JSON.stringify(saved), "utf8");
-  return { directory, statePath, saved: async () => JSON.parse(await readFile(statePath, "utf8")) };
+  return { directory, statePath, saved: async () => await readSavedState(statePath) };
 }
 
 test("правило, яке людина змінила, лежить на диску ще до відповіді і переживає рестарт", async () => {
   const space = await workspace();
   const strict = { policy: "lowest_cost", allowProviderFallbacks: false, requireNoTraining: false, requireZeroRetention: true };
-  let server = await boot({ port: 43371, statePath: space.statePath });
+  let server = await boot({ statePath: space.statePath });
   try {
     const { status } = await server.update(strict);
     assert.equal(status, 200);
@@ -88,7 +90,7 @@ test("правило, яке людина змінила, лежить на ди
     assert.deepEqual((await space.saved()).providerRule, strict, "правило не дійшло до файлу стану");
 
     await server.stop();
-    server = await boot({ port: 43372, statePath: space.statePath });
+    server = await boot({ statePath: space.statePath });
     assert.deepEqual(await server.rule(), strict, "після рестарту повернулось типове правило");
   } finally {
     await server.stop();
@@ -98,7 +100,7 @@ test("правило, яке людина змінила, лежить на ди
 
 test("файл стану без правила — від до цього виправлення — лишає типове", async () => {
   const space = await workspace({ version: 1, prospects: [], interactions: [] });
-  const server = await boot({ port: 43373, statePath: space.statePath });
+  const server = await boot({ statePath: space.statePath });
   try {
     assert.deepEqual(await server.rule(), DEFAULT_RULE);
   } finally {
@@ -117,8 +119,8 @@ test("зіпсоване збережене правило не стирає т�
     // те, що розібралось (нульове зберігання), — лишається.
     providerRule: { policy: 5, allowProviderFallbacks: "yes", requireNoTraining: "no", requireZeroRetention: true }
   });
-  const first = await boot({ port: 43374, statePath: garbage.statePath });
-  const second = await boot({ port: 43375, statePath: partial.statePath });
+  const first = await boot({ statePath: garbage.statePath });
+  const second = await boot({ statePath: partial.statePath });
   try {
     assert.deepEqual(await first.rule(), DEFAULT_RULE);
     assert.deepEqual(await second.rule(), { ...DEFAULT_RULE, requireZeroRetention: true });

@@ -5,6 +5,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { listeningOrigin } from "./server-origin.mjs";
 
 // Removing an account, which is the only action in the team panel that cannot
 // be taken back.
@@ -48,18 +49,15 @@ function startFakeSupabase() {
   });
 }
 
-let nextPort = 5200;
-
 async function startWorkspace(supabasePort, savedState, apiKey) {
   const dir = await mkdtemp(join(tmpdir(), "outbound-remove-"));
   const statePath = join(dir, "state.json");
   await writeFile(statePath, JSON.stringify(savedState), "utf8");
-  const port = nextPort += 1;
   const child = spawn(process.execPath, ["server.mjs"], {
     cwd: new URL("..", import.meta.url),
     env: {
       ...process.env,
-      PORT: String(port),
+      PORT: "0",
       STATE_FILE_PATH: statePath,
       // The bypass signs us in as an admin, which is who this route is for.
       AUTH_DEV_BYPASS: "1",
@@ -69,18 +67,9 @@ async function startWorkspace(supabasePort, savedState, apiKey) {
     },
     stdio: ["ignore", "pipe", "pipe"]
   });
-  await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("workspace did not start")), 15000);
-    child.stdout.on("data", (chunk) => {
-      if (String(chunk).includes("running at")) {
-        clearTimeout(timer);
-        resolve();
-      }
-    });
-    child.on("exit", (code) => reject(new Error(`workspace exited with ${code}`)));
-  });
+  const origin = await listeningOrigin(child);
   const post = async (path, payload) => {
-    const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+    const response = await fetch(`${origin}${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)

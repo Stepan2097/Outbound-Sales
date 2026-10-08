@@ -4,18 +4,20 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { listeningOrigin } from "./server-origin.mjs";
 
-const port = 43201;
-const origin = `http://127.0.0.1:${port}`;
+// Адресу сервер дає ОС, тож вона відома лише після запуску.
+let origin = "";
 
 test("AdAction analysis persists a complete source-locked A-M strategy", async () => {
   const directory = await mkdtemp(join(tmpdir(), "outbound-strategy-test-"));
   const child = spawn(process.execPath, ["server.mjs"], {
     cwd: new URL("..", import.meta.url),
-    env: { ...process.env, PORT: String(port), STATE_FILE_PATH: join(directory, "state.json"), AUTH_DEV_BYPASS: "1" },
-    stdio: "ignore"
+    env: { ...process.env, PORT: "0", STATE_FILE_PATH: join(directory, "state.json"), AUTH_DEV_BYPASS: "1" },
+    stdio: ["ignore", "pipe", "ignore"]
   });
   const exitPromise = new Promise((resolve) => child.once("exit", resolve));
+  origin = await listeningOrigin(child);
 
   try {
     await waitForHealth();

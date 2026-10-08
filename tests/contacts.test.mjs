@@ -5,11 +5,14 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { readSavedState } from "./saved-state.mjs";
 
 import { buildFallbackDrafts, normalizeDrafts, normalizeLanguage } from "../contacts/drafts.mjs";
+import { listeningOrigin } from "./server-origin.mjs";
 
-const port = 43221;
-const origin = `http://127.0.0.1:${port}`;
+// Адресу сервер дає ОС, тож вона відома лише після запуску; допоміжні функції
+// нижче читають її звідси.
+let origin = "";
 
 /**
  * A stand-in for the CRM's PostgREST, answering the four questions the Contacts
@@ -109,15 +112,16 @@ test("contacts are read from the CRM, and three drafts are written for one of th
     cwd: new URL("..", import.meta.url),
     env: {
       ...process.env,
-      PORT: String(port),
+      PORT: "0",
       STATE_FILE_PATH: statePath,
       AUTH_DEV_BYPASS: "1",
       WARMUP_CRM_SUPABASE_URL: crmUrl,
       WARMUP_CRM_SERVICE_ROLE_KEY: "test-key"
     },
-    stdio: "ignore"
+    stdio: ["ignore", "pipe", "ignore"]
   });
   const exitPromise = new Promise((resolve) => child.once("exit", resolve));
+  origin = await listeningOrigin(child);
 
   try {
     await waitForHealth();
@@ -172,7 +176,7 @@ test("contacts are read from the CRM, and three drafts are written for one of th
     assert.match((await unscoped.json()).error, /обери папку/i);
 
     await waitForFile(statePath);
-    const saved = JSON.parse(await readFile(statePath, "utf8"));
+    const saved = await readSavedState(statePath);
     assert.ok(saved.contactDrafts["22222222-2222-4222-8222-222222222221"], "drafts outlive the process that wrote them");
   } finally {
     if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
@@ -188,7 +192,7 @@ test("a CRM this workspace cannot reach is said to be the CRM, not a bug here", 
     cwd: new URL("..", import.meta.url),
     env: {
       ...process.env,
-      PORT: String(port + 1),
+      PORT: "0",
       STATE_FILE_PATH: join(directory, "state.json"),
       AUTH_DEV_BYPASS: "1",
       WARMUP_CRM_SUPABASE_URL: "",
@@ -196,12 +200,13 @@ test("a CRM this workspace cannot reach is said to be the CRM, not a bug here", 
       SUPABASE_URL: "",
       SUPABASE_API_KEY: ""
     },
-    stdio: "ignore"
+    stdio: ["ignore", "pipe", "ignore"]
   });
   const exitPromise = new Promise((resolve) => child.once("exit", resolve));
+  const noCrmOrigin = await listeningOrigin(child);
   try {
-    await waitForHealth(`http://127.0.0.1:${port + 1}`);
-    const response = await fetch(`http://127.0.0.1:${port + 1}/api/contacts/folders`);
+    await waitForHealth(noCrmOrigin);
+    const response = await fetch(`${noCrmOrigin}/api/contacts/folders`);
     assert.equal(response.status, 503);
     const body = await response.json();
     // The sentence names the variables somebody has to set.
@@ -232,21 +237,20 @@ test("the panel walks a folder by position and takes each person into the queue"
   ];
   const { server: crm, url: crmUrl } = await startFakeCrm(roster);
   const directory = await mkdtemp(join(tmpdir(), "outbound-panel-test-"));
-  const walkPort = port + 2;
-  const walkOrigin = `http://127.0.0.1:${walkPort}`;
   const child = spawn(process.execPath, ["server.mjs"], {
     cwd: new URL("..", import.meta.url),
     env: {
       ...process.env,
-      PORT: String(walkPort),
+      PORT: "0",
       STATE_FILE_PATH: join(directory, "state.json"),
       AUTH_DEV_BYPASS: "1",
       WARMUP_CRM_SUPABASE_URL: crmUrl,
       WARMUP_CRM_SERVICE_ROLE_KEY: "test-key"
     },
-    stdio: "ignore"
+    stdio: ["ignore", "pipe", "ignore"]
   });
   const exitPromise = new Promise((resolve) => child.once("exit", resolve));
+  const walkOrigin = await listeningOrigin(child);
   const open = async (index, search = "") => {
     const response = await fetch(`${walkOrigin}/api/contacts/queue`, {
       method: "POST",

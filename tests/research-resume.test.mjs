@@ -4,6 +4,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { listeningOrigin } from "./server-origin.mjs";
 
 // Перезапуск сервера і незавершене дослідження.
 //
@@ -59,7 +60,7 @@ function jobRow(overrides = {}) {
   };
 }
 
-async function startServer({ port, savedState }) {
+async function startServer({ savedState }) {
   const directory = await mkdtemp(join(tmpdir(), "outbound-resume-test-"));
   const statePath = join(directory, "state.json");
   await writeFile(statePath, JSON.stringify(savedState), "utf8");
@@ -67,15 +68,15 @@ async function startServer({ port, savedState }) {
     cwd: new URL("..", import.meta.url),
     env: {
       ...process.env,
-      PORT: String(port),
+      PORT: "0",
       STATE_FILE_PATH: statePath,
       AUTH_DEV_BYPASS: "1",
       WARMUP_SCHEDULER_DISABLED: "1"
     },
-    stdio: "ignore"
+    stdio: ["ignore", "pipe", "ignore"]
   });
   const exitPromise = new Promise((resolve) => child.once("exit", resolve));
-  const origin = `http://127.0.0.1:${port}`;
+  const origin = await listeningOrigin(child);
   const deadline = Date.now() + 8000;
   while (Date.now() < deadline) {
     try {
@@ -120,7 +121,6 @@ test("дослідження, яке урвав перезапуск, дороб
   // Відновлення має дійти до кінця, не зробивши жодного зовнішнього запиту —
   // якби воно переробляло зроблене, тест пішов би в мережу і не був би таким.
   const server = await startServer({
-    port: 43301,
     savedState: {
       version: 1,
       prospects: [PROSPECT],
@@ -145,7 +145,6 @@ test("стадія, яку застали в польоті, повертаєт�
   // Лід зник, поки сервер лежав: відновлення не має за що взятися і каже про
   // це чесно. Важливе тут — що сталося зі стадіями дорогою.
   const server = await startServer({
-    port: 43302,
     savedState: {
       version: 1,
       prospects: [],
@@ -172,7 +171,6 @@ test("робота, яка переривається знову і знову, 
   // Запобіжник. Без нього робота, яка валить процес, відновлювалася б вічно і
   // з кожним колом витрачала гроші наново.
   const server = await startServer({
-    port: 43303,
     savedState: {
       version: 1,
       prospects: [PROSPECT],

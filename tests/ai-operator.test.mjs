@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { readSavedState } from "./saved-state.mjs";
+import { listeningOrigin } from "./server-origin.mjs";
 
 // AI-оператор робить пачками те, що продавець робив би руками: сортує чергу,
 // переставляє статуси, пише взаємодії в історію. Коли ключа провайдера немає
@@ -22,7 +24,7 @@ import test from "node:test";
 
 const STUB = fileURLToPath(new URL("./stub-network.mjs", import.meta.url));
 
-async function startServer({ port, savedState = null, env = {} } = {}) {
+async function startServer({ savedState = null, env = {} } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "outbound-operator-test-"));
   const statePath = join(directory, "state.json");
   if (savedState) await writeFile(statePath, JSON.stringify(savedState), "utf8");
@@ -30,16 +32,16 @@ async function startServer({ port, savedState = null, env = {} } = {}) {
     cwd: new URL("..", import.meta.url),
     env: {
       ...process.env,
-      PORT: String(port),
+      PORT: "0",
       STATE_FILE_PATH: statePath,
       AUTH_DEV_BYPASS: "1",
       WARMUP_SCHEDULER_DISABLED: "1",
       ...env
     },
-    stdio: "ignore"
+    stdio: ["ignore", "pipe", "ignore"]
   });
   const exitPromise = new Promise((resolve) => child.once("exit", resolve));
-  const origin = `http://127.0.0.1:${port}`;
+  const origin = await listeningOrigin(child);
   const deadline = Date.now() + 8000;
   while (Date.now() < deadline) {
     try {
@@ -53,7 +55,7 @@ async function startServer({ port, savedState = null, env = {} } = {}) {
   return {
     origin,
     async savedState() {
-      return JSON.parse(await readFile(statePath, "utf8"));
+      return readSavedState(statePath);
     },
     async post(path, body) {
       const response = await fetch(`${origin}${path}`, {
@@ -100,9 +102,8 @@ function threeLeads() {
  * його було «нічим». Насправді є чим — `OPENROUTER_BASE_URL` плюс підміна
  * `globalThis.fetch` у дочірньому процесі через `NODE_OPTIONS=--import`.
  */
-async function withModel({ port, returns, prospects = threeLeads() }) {
+async function withModel({ returns, prospects = threeLeads() }) {
   const server = await startServer({
-    port,
     savedState: savedWith(prospects),
     env: {
       NODE_OPTIONS: `--import=${STUB}`,
@@ -120,7 +121,6 @@ async function withModel({ port, returns, prospects = threeLeads() }) {
 
 test("дію, якої немає в списку дозволених, модель не проштовхне", async () => {
   const server = await withModel({
-    port: 43341,
     returns: JSON.stringify({
       summary: "План від моделі",
       actions: [
@@ -150,7 +150,6 @@ test("дію, якої немає в списку дозволених, моде
 
 test("модель, яка повернула лише вигадані дії, не стає приводом зробити щось навмання", async () => {
   const server = await withModel({
-    port: 43342,
     returns: JSON.stringify({ summary: "нічого корисного", actions: [{ type: "launch_missiles", scope: "all" }] })
   });
   try {
@@ -169,7 +168,7 @@ test("модель, яка повернула лише вигадані дії, 
 });
 
 test("інструкція, закоротка щоб бути задачею, нічого не запускає", async () => {
-  const server = await startServer({ port: 43315, savedState: savedWith(threeLeads()) });
+  const server = await startServer({ savedState: savedWith(threeLeads()) });
   try {
     const { status, action } = await server.task({ instruction: "go", scope: "all" });
     assert.equal(status, 200);
@@ -187,7 +186,7 @@ test("інструкція, закоротка щоб бути задачею, �
 });
 
 test("інструкцію, якої оператор не зрозумів, він не вигадує, а каже що вміє", async () => {
-  const server = await startServer({ port: 43316, savedState: savedWith(threeLeads()) });
+  const server = await startServer({ savedState: savedWith(threeLeads()) });
   try {
     const { action } = await server.task({ instruction: "what is the weather in Kyiv today", scope: "all" });
     assert.equal(action.status, "blocked");
@@ -207,7 +206,7 @@ test("інструкцію, якої оператор не зрозумів, в�
 });
 
 test("«sort leads by score» перевпорядковує чергу, і напрямок справді напрямок", async () => {
-  const server = await startServer({ port: 43317, savedState: savedWith(threeLeads()) });
+  const server = await startServer({ savedState: savedWith(threeLeads()) });
   try {
     const descending = await server.task({ instruction: "sort leads by score", scope: "all" });
     assert.equal(descending.action.status, "completed");
@@ -225,7 +224,7 @@ test("«sort leads by score» перевпорядковує чергу, і на
 });
 
 test("статус пачкою переставляється й лишає подію в журналі", async () => {
-  const server = await startServer({ port: 43318, savedState: savedWith(threeLeads()) });
+  const server = await startServer({ savedState: savedWith(threeLeads()) });
   try {
     const { payload, action } = await server.task({ instruction: "mark all leads as follow up due", scope: "all" });
     assert.equal(action.status, "completed");
@@ -241,7 +240,7 @@ test("статус пачкою переставляється й лишає п�
 });
 
 test("записана взаємодія з'являється по одній на лід і підтягує статус за собою", async () => {
-  const server = await startServer({ port: 43319, savedState: savedWith(threeLeads()) });
+  const server = await startServer({ savedState: savedWith(threeLeads()) });
   try {
     const { action } = await server.task({ instruction: "log a linkedin reply for all leads", scope: "all" });
     assert.equal(action.status, "completed");
@@ -258,7 +257,7 @@ test("записана взаємодія з'являється по одній 
 });
 
 test("пачка, під яку не підпадає жоден лід, повертає причину, а не тихий успіх", async () => {
-  const server = await startServer({ port: 43320, savedState: savedWith(threeLeads()) });
+  const server = await startServer({ savedState: savedWith(threeLeads()) });
   try {
     // Жоден лід не має статусу meeting_booked, тож дія не має над чим працювати.
     const { action } = await server.task({ instruction: "mark all leads as follow up due", scope: "meeting_booked" });

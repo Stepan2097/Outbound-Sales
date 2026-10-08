@@ -4,6 +4,8 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { readSavedState } from "./saved-state.mjs";
+import { listeningOrigin } from "./server-origin.mjs";
 
 // Усе, що людина змінює в застосунку, мусить пережити деплой — а тут кожен пуш
 // у main це деплой. Правило провайдера, транскрипт вебхука й «Збагатити» вже
@@ -18,14 +20,14 @@ import test from "node:test";
 
 const QUIET = { OPENROUTER_API_KEY: "", OPENROUTER_ANALYSIS_MODEL: "", OPENROUTER_WRITING_MODEL: "", TRANSCRIPT_WEBHOOK_TOKEN: "" };
 
-async function boot({ port, statePath, env = {} }) {
+async function boot({ statePath, env = {} }) {
   const child = spawn(process.execPath, ["server.mjs"], {
     cwd: new URL("..", import.meta.url),
-    env: { ...process.env, ...QUIET, PORT: String(port), STATE_FILE_PATH: statePath, AUTH_DEV_BYPASS: "1", WARMUP_SCHEDULER_DISABLED: "1", ...env },
-    stdio: "ignore"
+    env: { ...process.env, ...QUIET, PORT: "0", STATE_FILE_PATH: statePath, AUTH_DEV_BYPASS: "1", WARMUP_SCHEDULER_DISABLED: "1", ...env },
+    stdio: ["ignore", "pipe", "ignore"]
   });
   const exitPromise = new Promise((resolve) => child.once("exit", resolve));
-  const origin = `http://127.0.0.1:${port}`;
+  const origin = await listeningOrigin(child);
   const deadline = Date.now() + 8000;
   while (Date.now() < deadline) {
     try {
@@ -60,20 +62,20 @@ async function workspace(saved = { version: 1, prospects: [], interactions: [] }
   await writeFile(statePath, JSON.stringify(saved), "utf8");
   return {
     statePath,
-    file: async () => JSON.parse(await readFile(statePath, "utf8")),
+    file: async () => await readSavedState(statePath),
     async cleanup() { await rm(directory, { recursive: true, force: true }); }
   };
 }
 
 /** Змінити щось, переконатись, що файл уже має це, перезапустити — і віддати перший сервер на перевірку другого. */
-async function restarted(space, ports, change, { env } = {}) {
-  const first = await boot({ port: ports[0], statePath: space.statePath, env });
+async function restarted(space, change, { env } = {}) {
+  const first = await boot({ statePath: space.statePath, env });
   try {
     await change(first);
   } finally {
     await first.stop();
   }
-  return boot({ port: ports[1], statePath: space.statePath, env });
+  return boot({ statePath: space.statePath, env });
 }
 
 test("бюджети й жорсткий ліміт витрат переживають рестарт", async () => {
@@ -81,7 +83,7 @@ test("бюджети й жорсткий ліміт витрат пережив�
   const changed = { monthlyWorkspaceBudgetUsd: 123, dailyWorkspaceBudgetUsd: 11, perUserMonthlyBudgetUsd: 22, hardLimitEnabled: false, warningThresholdPercent: 55 };
   let second;
   try {
-    second = await restarted(space, [43381, 43382], async (server) => {
+    second = await restarted(space, async (server) => {
       assert.equal((await server.post("/api/budgets/update", changed)).status, 200);
       // Файл читається одразу після відповіді: саме з нього сервер підніметься.
       assert.deepEqual((await space.file()).budgets, changed, "бюджети не дійшли до файлу стану");
@@ -98,7 +100,7 @@ test("ручний перемикач моделі переживає реста
   const space = await workspace();
   let second;
   try {
-    second = await restarted(space, [43383, 43384], async (server) => {
+    second = await restarted(space, async (server) => {
       const before = (await server.state()).models.find((model) => model.id === "mock/premium");
       assert.equal(before.enabled, true, "припущення тесту: модель типово ввімкнена");
       assert.equal((await server.post("/api/models/toggle", { modelId: "mock/premium", enabled: false })).status, 200);
@@ -118,7 +120,7 @@ test("маршрутизація задачі — модель, ліміт ви�
   const change = { taskType: "COLD_EMAIL", primaryModel: "mock/premium", fallbackModels: ["mock/balanced"], qualityTier: "premium", maxCostUsd: 0.5, maxLatencyMs: 9000, privacyLevel: "zero_retention" };
   let second;
   try {
-    second = await restarted(space, [43385, 43386], async (server) => {
+    second = await restarted(space, async (server) => {
       assert.equal((await server.post("/api/tasks/update", change)).status, 200);
       assert.ok((await space.file()).taskRouting.some((record) => record.taskType === "COLD_EMAIL" && record.maxCostUsd === 0.5), "маршрутизація не дійшла до файлу");
     });
@@ -137,7 +139,7 @@ test("вибір моделей аналізу й письма пережива�
   const space = await workspace();
   let second;
   try {
-    second = await restarted(space, [43387, 43388], async (server) => {
+    second = await restarted(space, async (server) => {
       // Без ключа запит відхиляється, але вибір моделей уже застосований — і мусить бути збережений, а не лишитись напівзробленим.
       const refused = await server.post("/api/openrouter/configure", { analysisModel: "vendor/analysis-x", writingModel: "vendor/writing-y" });
       assert.equal(refused.status, 400);
@@ -156,7 +158,7 @@ test("слід дій AI-оператора переживає рестарт", 
   let second;
   try {
     let summary;
-    second = await restarted(space, [43389, 43391], async (server) => {
+    second = await restarted(space, async (server) => {
       const { status, payload } = await server.post("/api/assistant/task", { instruction: "mark all leads as follow up due", scope: "all" });
       assert.equal(status, 200);
       summary = payload.aiActions[0].summary;
@@ -176,7 +178,7 @@ test("ICP: сід-ліди, профіль із них і відомості п�
   const space = await workspace();
   let second;
   try {
-    second = await restarted(space, [43392, 43395], async (server) => {
+    second = await restarted(space, async (server) => {
       const seeded = await server.post("/api/icp/seeds/import", {
         prospects: [{ name: "Ivan Teslenko", company: "Harbor Interactive", title: "Head of User Acquisition", location: "Warsaw, Poland" }]
       });
@@ -205,7 +207,7 @@ test("токен вебхука транскриптів із середовищ
   try {
     // Два запуски поспіль: токен із середовища однаково працює після кожного
     // рестарту, і саме цього не було в токена, введеного в застосунку.
-    second = await restarted(space, [43393, 43396], async (server) => {
+    second = await restarted(space, async (server) => {
       assert.equal((await server.post("/api/webhooks/call-transcript", call, { "x-webhook-token": "env-webhook-token-12345" })).status, 200);
     }, { env });
     assert.equal((await second.post("/api/webhooks/call-transcript", call, { "x-webhook-token": "wrong-token" })).status, 401);
@@ -221,7 +223,7 @@ test("токен вебхука транскриптів із середовищ
 test("без змінної токена вебхук лишається зачиненим", async () => {
   const lead = { id: "lead-env", name: "Daria Lysenko", company: "Portside Games", title: "Head of UA", status: "contacted" };
   const space = await workspace({ version: 1, prospects: [lead], interactions: [] });
-  const server = await boot({ port: 43397, statePath: space.statePath });
+  const server = await boot({ statePath: space.statePath });
   try {
     const call = { prospectId: "lead-env", transcript: "Daria asked for the workflow and said send me the deck next week so we can follow up with her team." };
     assert.equal((await server.post("/api/webhooks/call-transcript", call, { "x-webhook-token": "anything" })).status, 401);
@@ -243,7 +245,7 @@ test("зіпсований файл стану не валить старт і �
     aiActions: { not: "a list" },
     icp: 5
   });
-  const server = await boot({ port: 43398, statePath: space.statePath });
+  const server = await boot({ statePath: space.statePath });
   try {
     const state = await server.state();
     assert.equal(state.budgets.hardLimitEnabled, true, "жорсткий ліміт типово мусить бути в силі");

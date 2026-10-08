@@ -5,6 +5,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { listeningOrigin } from "./server-origin.mjs";
 
 // There is one user base and it belongs to the CRM. This app invites nobody:
 // whoever the CRM approved signs in with their CRM account, and the profile
@@ -59,12 +60,11 @@ async function startWorkspace(supabasePort, savedState = null) {
   const dir = await mkdtemp(join(tmpdir(), "outbound-directory-"));
   const statePath = join(dir, "state.json");
   if (savedState) await writeFile(statePath, JSON.stringify(savedState), "utf8");
-  const port = 4600 + Math.floor(Math.random() * 300);
   const child = spawn(process.execPath, ["server.mjs"], {
     cwd: process.cwd(),
     env: {
       ...process.env,
-      PORT: String(port),
+      PORT: "0",
       STATE_FILE_PATH: statePath,
       AUTH_DEV_BYPASS: "1",
       WARMUP_SCHEDULER_DISABLED: "1",
@@ -73,18 +73,9 @@ async function startWorkspace(supabasePort, savedState = null) {
     },
     stdio: ["ignore", "pipe", "pipe"]
   });
-  await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("workspace did not start")), 15000);
-    child.stdout.on("data", (chunk) => {
-      if (String(chunk).includes("running at")) {
-        clearTimeout(timer);
-        resolve();
-      }
-    });
-    child.on("exit", (code) => reject(new Error(`workspace exited with ${code}`)));
-  });
+  const origin = await listeningOrigin(child);
   const call = async (path, options = {}) => {
-    const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+    const response = await fetch(`${origin}${path}`, {
       ...options,
       headers: { "Content-Type": "application/json", ...(options.headers || {}) }
     });

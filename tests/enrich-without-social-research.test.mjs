@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { listeningOrigin } from "./server-origin.mjs";
 
 // «Збагатити» на ліді, якого ще не шукали в соцмережах, падало 500-кою:
 // normalizeProspect зберігає відсутнє дослідження як `null`, а
@@ -33,7 +34,7 @@ globalThis.fetch = (input, init) => {
 };
 `;
 
-async function startServer({ port, savedState }) {
+async function startServer({ savedState }) {
   const directory = await mkdtemp(join(tmpdir(), "outbound-enrich-test-"));
   const statePath = join(directory, "state.json");
   const guardPath = join(directory, "guard.mjs");
@@ -47,15 +48,15 @@ async function startServer({ port, savedState }) {
       ...process.env,
       NODE_OPTIONS: `--import=${guardPath}`,
       GUARD_LOG: guardLog,
-      PORT: String(port),
+      PORT: "0",
       STATE_FILE_PATH: statePath,
       AUTH_DEV_BYPASS: "1",
       WARMUP_SCHEDULER_DISABLED: "1"
     },
-    stdio: "ignore"
+    stdio: ["ignore", "pipe", "ignore"]
   });
   const exitPromise = new Promise((resolve) => child.once("exit", resolve));
-  const origin = `http://127.0.0.1:${port}`;
+  const origin = await listeningOrigin(child);
   const deadline = Date.now() + 8000;
   while (Date.now() < deadline) {
     try {
@@ -121,7 +122,6 @@ test("лід з досліджуваною компанією, але без д�
   // Жодного publicSocialResearch у збереженому ліді: так виглядає людина,
   // якої ще не шукали, — після завантаження це `null`.
   const server = await startServer({
-    port: 43361,
     savedState: { version: 1, prospects: [lead({ publicCompanyResearch: freshCompany })], interactions: [] }
   });
   try {
@@ -140,7 +140,6 @@ test("лід з досліджуваною компанією, але без д�
 
 test("дзеркальний випадок: соцмережі досліджено, компанії — ні", async () => {
   const server = await startServer({
-    port: 43362,
     savedState: {
       version: 1,
       prospects: [lead({

@@ -465,7 +465,11 @@ const server = createServer(async (request, response) => {
 });
 
 server.listen(port, () => {
-  console.log(`OpenRouter orchestration platform running at http://localhost:${port}`);
+  // The port the OS actually gave. With PORT=0 — which is how the tests start a
+  // server, so that two test runs at once cannot fight over a number — the
+  // configured port means nothing; whoever started this process reads the real
+  // one from this line.
+  console.log(`OpenRouter orchestration platform running at http://localhost:${server.address().port}`);
   // The warm-up's clock. It launches nothing — the Mac's worker asks this
   // process what to do — but the leases and cool-offs it keeps are in memory,
   // so they begin and end with the process that serves /agent/due.

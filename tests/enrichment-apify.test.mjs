@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { readSavedState } from "./saved-state.mjs";
+import { listeningOrigin } from "./server-origin.mjs";
 
 /**
  * Платний водоспад Apify — єдине місце в застосунку, де кнопка списує гроші,
@@ -53,7 +55,7 @@ function lead(extra = {}) {
   };
 }
 
-async function startServer({ port, savedState, items = {}, env = {} }) {
+async function startServer({ savedState, items = {}, env = {} }) {
   const directory = await mkdtemp(join(tmpdir(), "outbound-apify-test-"));
   const statePath = join(directory, "state.json");
   const logPath = join(directory, "network.log");
@@ -66,7 +68,7 @@ async function startServer({ port, savedState, items = {}, env = {} }) {
       NODE_OPTIONS: `--import=${STUB}`,
       STUB_NETWORK_LOG: logPath,
       STUB_APIFY_ITEMS: JSON.stringify(items),
-      PORT: String(port),
+      PORT: "0",
       STATE_FILE_PATH: statePath,
       AUTH_DEV_BYPASS: "1",
       WARMUP_SCHEDULER_DISABLED: "1",
@@ -77,10 +79,10 @@ async function startServer({ port, savedState, items = {}, env = {} }) {
       ...PEOPLE_ACTORS,
       ...env
     },
-    stdio: "ignore"
+    stdio: ["ignore", "pipe", "ignore"]
   });
   const exitPromise = new Promise((resolve) => child.once("exit", resolve));
-  const origin = `http://127.0.0.1:${port}`;
+  const origin = await listeningOrigin(child);
   const deadline = Date.now() + 10000;
   while (Date.now() < deadline) {
     try {
@@ -96,7 +98,7 @@ async function startServer({ port, savedState, items = {}, env = {} }) {
       return { status: response.status, payload: await response.json() };
     },
     async saved() {
-      return JSON.parse(await readFile(statePath, "utf8"));
+      return readSavedState(statePath);
     },
     /** Кого насправді викликали — і скільки разів. */
     async calls() {
@@ -121,7 +123,6 @@ test("водоспад зупиняється на стелі акторів н�
   // раніше сам, і стеля лишилась би неперевіреною.
   const items = Object.fromEntries(Object.values(CONTACT_ACTORS).map((actor) => [actor, [{ website: "harborinteractive.example" }]]));
   const server = await startServer({
-    port: 43331,
     savedState: { version: 1, prospects: [lead()] },
     items,
     env: { APIFY_MAX_ACTORS_PER_LEAD: "2" }
@@ -146,7 +147,6 @@ test("водоспад зупиняється на стелі акторів н�
 
 test("те, що віддав актор, стає кандидатами — і жоден канал не відчиняється сам", async () => {
   const server = await startServer({
-    port: 43332,
     savedState: { version: 1, prospects: [lead()] },
     items: {
       "test/person": [{
@@ -202,7 +202,6 @@ test("свіжий кеш не дає запустити жодного плат
   });
   const items = Object.fromEntries(Object.values(CONTACT_ACTORS).map((actor) => [actor, [{ email: "нова@адреса.example" }]]));
   const server = await startServer({
-    port: 43333,
     savedState: { version: 1, prospects: [cached] },
     items,
     env: { APIFY_ENRICHMENT_CACHE_DAYS: "30", APIFY_MAX_ACTORS_PER_LEAD: "3" }

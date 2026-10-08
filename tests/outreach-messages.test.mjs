@@ -5,9 +5,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { listeningOrigin } from "./server-origin.mjs";
 
-const port = 43255;
-const origin = `http://127.0.0.1:${port}`;
+// Адресу сервер дає ОС, тож вона відома лише після запуску; допоміжні функції
+// нижче читають її звідси.
+let origin = "";
 
 /**
  * A stand-in for OpenRouter that keeps what it was asked.
@@ -107,7 +109,7 @@ test("the panel writes the three channels in the seller's language, even when pr
     cwd: new URL("..", import.meta.url),
     env: {
       ...process.env,
-      PORT: String(port),
+      PORT: "0",
       STATE_FILE_PATH: join(directory, "state.json"),
       AUTH_DEV_BYPASS: "1",
       OPENROUTER_API_KEY: "test-key",
@@ -117,9 +119,10 @@ test("the panel writes the three channels in the seller's language, even when pr
       SUPABASE_URL: "",
       SUPABASE_API_KEY: ""
     },
-    stdio: "ignore"
+    stdio: ["ignore", "pipe", "ignore"]
   });
   const exitPromise = new Promise((resolve) => child.once("exit", resolve));
+  origin = await listeningOrigin(child);
 
   try {
     await waitForHealth();
@@ -216,13 +219,11 @@ test("the panel writes the three channels in the seller's language, even when pr
 test("an account parked by a policy decision is not written for at all", async () => {
   const { server: provider, chatRequests, url: providerUrl } = await startFakeOpenRouter(MODEL_ANSWER);
   const directory = await mkdtemp(join(tmpdir(), "outbound-parked-test-"));
-  const parkedPort = port + 1;
-  const parkedOrigin = `http://127.0.0.1:${parkedPort}`;
   const child = spawn(process.execPath, ["server.mjs"], {
     cwd: new URL("..", import.meta.url),
     env: {
       ...process.env,
-      PORT: String(parkedPort),
+      PORT: "0",
       STATE_FILE_PATH: join(directory, "state.json"),
       AUTH_DEV_BYPASS: "1",
       OPENROUTER_API_KEY: "test-key",
@@ -232,9 +233,10 @@ test("an account parked by a policy decision is not written for at all", async (
       SUPABASE_URL: "",
       SUPABASE_API_KEY: ""
     },
-    stdio: "ignore"
+    stdio: ["ignore", "pipe", "ignore"]
   });
   const exitPromise = new Promise((resolve) => child.once("exit", resolve));
+  const parkedOrigin = await listeningOrigin(child);
   const post = async (path, body) => {
     const response = await fetch(`${parkedOrigin}${path}`, {
       method: "POST",
@@ -282,13 +284,11 @@ test("a channel the model skips is left empty under a hold, not filled with the 
   const partial = { ...MODEL_ANSWER, messages: [MODEL_ANSWER.messages[0]] };
   const { server: provider, url: providerUrl } = await startFakeOpenRouter(partial);
   const directory = await mkdtemp(join(tmpdir(), "outbound-partial-test-"));
-  const partialPort = port + 2;
-  const partialOrigin = `http://127.0.0.1:${partialPort}`;
   const child = spawn(process.execPath, ["server.mjs"], {
     cwd: new URL("..", import.meta.url),
     env: {
       ...process.env,
-      PORT: String(partialPort),
+      PORT: "0",
       STATE_FILE_PATH: join(directory, "state.json"),
       AUTH_DEV_BYPASS: "1",
       OPENROUTER_API_KEY: "test-key",
@@ -298,9 +298,10 @@ test("a channel the model skips is left empty under a hold, not filled with the 
       SUPABASE_URL: "",
       SUPABASE_API_KEY: ""
     },
-    stdio: "ignore"
+    stdio: ["ignore", "pipe", "ignore"]
   });
   const exitPromise = new Promise((resolve) => child.once("exit", resolve));
+  const partialOrigin = await listeningOrigin(child);
   const post = async (path, body) => {
     const response = await fetch(`${partialOrigin}${path}`, {
       method: "POST",

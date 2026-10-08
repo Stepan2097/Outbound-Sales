@@ -4,6 +4,8 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { readSavedState } from "./saved-state.mjs";
+import { listeningOrigin } from "./server-origin.mjs";
 
 // Вебхук транскриптів — єдина двері в застосунок, яку відчиняє не людина, а
 // чужий сервіс: провайдер телефонії шле текст дзвінка, і з нього тут
@@ -21,7 +23,7 @@ import test from "node:test";
 // Аналіз тут рахує детермінована половина (без ключа провайдера), тож
 // очікування в тестах — це правила тієї половини, а не вигадка моделі.
 
-async function startServer({ port, savedState = null, env = {} } = {}) {
+async function startServer({ savedState = null, env = {} } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "outbound-transcript-test-"));
   const statePath = join(directory, "state.json");
   if (savedState) await writeFile(statePath, JSON.stringify(savedState), "utf8");
@@ -29,16 +31,16 @@ async function startServer({ port, savedState = null, env = {} } = {}) {
     cwd: new URL("..", import.meta.url),
     env: {
       ...process.env,
-      PORT: String(port),
+      PORT: "0",
       STATE_FILE_PATH: statePath,
       AUTH_DEV_BYPASS: "1",
       WARMUP_SCHEDULER_DISABLED: "1",
       ...env
     },
-    stdio: "ignore"
+    stdio: ["ignore", "pipe", "ignore"]
   });
   const exitPromise = new Promise((resolve) => child.once("exit", resolve));
-  const origin = `http://127.0.0.1:${port}`;
+  const origin = await listeningOrigin(child);
   const deadline = Date.now() + 8000;
   while (Date.now() < deadline) {
     try {
@@ -65,7 +67,7 @@ async function startServer({ port, savedState = null, env = {} } = {}) {
       return token;
     },
     async savedState() {
-      return JSON.parse(await readFile(statePath, "utf8"));
+      return readSavedState(statePath);
     },
     async transcript(body, { webhookToken = token } = {}) {
       const headers = { "Content-Type": "application/json" };
@@ -101,7 +103,7 @@ const agreedCall = "Daria asked for the workflow and said send me the deck next 
 const flatCall = "We walked through the current reporting setup and the team history for about ten minutes in total today.";
 
 test("дзвінок без ліда не записується нікому", async () => {
-  const server = await startServer({ port: 43321, savedState: { version: 1, prospects: [lead], interactions: [] } });
+  const server = await startServer({ savedState: { version: 1, prospects: [lead], interactions: [] } });
   try {
     await server.configureTranscripts();
     const { status, payload } = await server.transcript({ name: "Nobody Here", company: "Nowhere Ltd", transcript: agreedCall });
@@ -118,7 +120,7 @@ test("дзвінок без ліда не записується нікому", 
 });
 
 test("текст, закороткий для аналізу, відхиляється, а не аналізується наполовину", async () => {
-  const server = await startServer({ port: 43322, savedState: { version: 1, prospects: [lead], interactions: [] } });
+  const server = await startServer({ savedState: { version: 1, prospects: [lead], interactions: [] } });
   try {
     await server.configureTranscripts();
     const { status, payload } = await server.transcript({ prospectId: "lead-call", transcript: "подзвонили, ок" });
@@ -130,7 +132,7 @@ test("текст, закороткий для аналізу, відхиляєт
 });
 
 test("вебхук знаходить ліда за іменем і компанією, без наших id", async () => {
-  const server = await startServer({ port: 43323, savedState: { version: 1, prospects: [lead], interactions: [] } });
+  const server = await startServer({ savedState: { version: 1, prospects: [lead], interactions: [] } });
   try {
     await server.configureTranscripts();
     const { status, payload } = await server.transcript({
@@ -162,7 +164,7 @@ test("вебхук знаходить ліда за іменем і компан
 });
 
 test("домовленість про наступний крок стає задачею, а дзвінок без неї — ні", async () => {
-  const server = await startServer({ port: 43324, savedState: { version: 1, prospects: [lead], interactions: [], followUpTasks: [] } });
+  const server = await startServer({ savedState: { version: 1, prospects: [lead], interactions: [], followUpTasks: [] } });
   try {
     await server.configureTranscripts();
     const agreed = await server.transcript({ prospectId: "lead-call", transcript: agreedCall });
@@ -190,7 +192,7 @@ test("домовленість про наступний крок стає за�
 });
 
 test("прийнятий дзвінок лежить у файлі стану, а не лише в пам'яті", async () => {
-  const server = await startServer({ port: 43329, savedState: { version: 1, prospects: [lead], interactions: [], followUpTasks: [] } });
+  const server = await startServer({ savedState: { version: 1, prospects: [lead], interactions: [], followUpTasks: [] } });
   try {
     await server.configureTranscripts();
     const { status } = await server.transcript({
@@ -228,7 +230,7 @@ test("прийнятий дзвінок лежить у файлі стану, �
 });
 
 test("вебхук зачинений, доки токен не налаштували, і чужий токен не відчиняє його", async () => {
-  const server = await startServer({ port: 43325, savedState: { version: 1, prospects: [lead], interactions: [] } });
+  const server = await startServer({ savedState: { version: 1, prospects: [lead], interactions: [] } });
   try {
     // Токена ще немає в налаштуваннях — отже вхід зачинений, а не відкритий.
     const unset = await server.transcript({ prospectId: "lead-call", transcript: agreedCall }, { webhookToken: null });

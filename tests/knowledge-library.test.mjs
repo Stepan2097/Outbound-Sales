@@ -4,23 +4,26 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { readSavedState } from "./saved-state.mjs";
 
 import { knowledgeExcerptsForPrompt, knowledgeFilesForProduct, loadKnowledgeLibrary } from "../knowledge/library.mjs";
+import { listeningOrigin } from "./server-origin.mjs";
 
-const port = 43211;
-const origin = `http://127.0.0.1:${port}`;
-const briefPort = 43212;
-const briefOrigin = `http://127.0.0.1:${briefPort}`;
+// Адреси серверів дає ОС, тож вони відомі лише після запуску. Бриф-тест запускає
+// свій сервер двічі, і другий отримує інший порт, ніж перший.
+let origin = "";
+let briefOrigin = "";
 
 test("the knowledge library seeds two products, shares one file, and keeps files on disk", async () => {
   const directory = await mkdtemp(join(tmpdir(), "outbound-knowledge-test-"));
   const statePath = join(directory, "state.json");
   const child = spawn(process.execPath, ["server.mjs"], {
     cwd: new URL("..", import.meta.url),
-    env: { ...process.env, PORT: String(port), STATE_FILE_PATH: statePath, AUTH_DEV_BYPASS: "1" },
-    stdio: "ignore"
+    env: { ...process.env, PORT: "0", STATE_FILE_PATH: statePath, AUTH_DEV_BYPASS: "1" },
+    stdio: ["ignore", "pipe", "ignore"]
   });
   const exitPromise = new Promise((resolve) => child.once("exit", resolve));
+  origin = await listeningOrigin(child);
 
   try {
     await waitForHealth();
@@ -121,10 +124,11 @@ test("the product brief is what the rest of the workspace reads a product from",
   const statePath = join(directory, "state.json");
   const child = spawn(process.execPath, ["server.mjs"], {
     cwd: new URL("..", import.meta.url),
-    env: { ...process.env, PORT: String(briefPort), STATE_FILE_PATH: statePath, AUTH_DEV_BYPASS: "1" },
-    stdio: "ignore"
+    env: { ...process.env, PORT: "0", STATE_FILE_PATH: statePath, AUTH_DEV_BYPASS: "1" },
+    stdio: ["ignore", "pipe", "ignore"]
   });
   const exitPromise = new Promise((resolve) => child.once("exit", resolve));
+  briefOrigin = await listeningOrigin(child);
 
   try {
     await waitForHealth(briefOrigin);
@@ -165,7 +169,7 @@ test("the product brief is what the rest of the workspace reads a product from",
     assert.equal(refused.status, 400);
 
     await waitForFile(statePath);
-    const persisted = JSON.parse(await readFile(statePath, "utf8"));
+    const persisted = await readSavedState(statePath);
     const persistedProduct = persisted.products.find((item) => item.id === "adaction-value-exchange-ua");
     assert.match(persistedProduct.brief.offer, /value-exchange/i);
     // The three demo products the first version shipped with are gone for good.
@@ -180,10 +184,12 @@ test("the product brief is what the rest of the workspace reads a product from",
   // gone — so the brief is asked for again from a second process.
   const second = spawn(process.execPath, ["server.mjs"], {
     cwd: new URL("..", import.meta.url),
-    env: { ...process.env, PORT: String(briefPort), STATE_FILE_PATH: statePath, AUTH_DEV_BYPASS: "1" },
-    stdio: "ignore"
+    env: { ...process.env, PORT: "0", STATE_FILE_PATH: statePath, AUTH_DEV_BYPASS: "1" },
+    stdio: ["ignore", "pipe", "ignore"]
   });
   const secondExit = new Promise((resolve) => second.once("exit", resolve));
+  // Другий процес — інший порт: адресу беремо наново.
+  briefOrigin = await listeningOrigin(second);
   try {
     await waitForHealth(briefOrigin);
     const restored = await fetch(`${briefOrigin}/api/state`).then((response) => response.json());
