@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 // AI-оператор робить пачками те, що продавець робив би руками: сортує чергу,
@@ -18,6 +19,8 @@ import test from "node:test";
 //
 // Статус у відповіді /api/state перекривається станом дослідження під вибраний
 // продукт, тож статуси лідів тести читають зі збереженого стану.
+
+const STUB = fileURLToPath(new URL("./stub-network.mjs", import.meta.url));
 
 async function startServer({ port, savedState = null, env = {} } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "outbound-operator-test-"));
@@ -52,6 +55,12 @@ async function startServer({ port, savedState = null, env = {} } = {}) {
     async savedState() {
       return JSON.parse(await readFile(statePath, "utf8"));
     },
+    async post(path, body) {
+      const response = await fetch(`${origin}${path}`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {})
+      });
+      return { status: response.status, payload: await response.json() };
+    },
     async task(body) {
       const response = await fetch(`${origin}/api/assistant/task`, {
         method: "POST",
@@ -82,6 +91,82 @@ function threeLeads() {
     { id: "lead-mid", name: "Mid Signal", company: "Gamma Co", title: "Manager", score: 65, status: "new" }
   ];
 }
+
+/**
+ * Гілка моделі. Локальний парсер — це запасний шлях; коли ключ провайдера є,
+ * план будує модель, і єдине, що стоїть між її відповіддю й діями над лідами
+ * — список дозволених дій у `normalizeAssistantActions`. До 08.10 цей шлях не
+ * мав жодного тесту: сервер ходив на справжній openrouter.ai, тож перевірити
+ * його було «нічим». Насправді є чим — `OPENROUTER_BASE_URL` плюс підміна
+ * `globalThis.fetch` у дочірньому процесі через `NODE_OPTIONS=--import`.
+ */
+async function withModel({ port, returns, prospects = threeLeads() }) {
+  const server = await startServer({
+    port,
+    savedState: savedWith(prospects),
+    env: {
+      NODE_OPTIONS: `--import=${STUB}`,
+      OPENROUTER_BASE_URL: "http://stub.invalid/v1",
+      OPENROUTER_API_KEY: "test-openrouter-key",
+      STUB_OPENROUTER_JSON: returns
+    }
+  });
+  // Поки з'єднання не перевірене, сервер моделі не довіряє і бере локальний
+  // парсер — тож спершу те саме, що робить людина кнопкою в налаштуваннях.
+  const health = await server.post("/api/openrouter/test", {});
+  assert.equal(health.payload.providerHealth.status, "healthy", "заглушка провайдера не відповіла");
+  return server;
+}
+
+test("дію, якої немає в списку дозволених, модель не проштовхне", async () => {
+  const server = await withModel({
+    port: 43341,
+    returns: JSON.stringify({
+      summary: "План від моделі",
+      actions: [
+        { type: "set_status", scope: "all", limit: 5, status: "follow_up_due" },
+        { type: "send_messages", scope: "all", limit: 99 },
+        { type: "delete_leads", scope: "all" }
+      ]
+    })
+  });
+  try {
+    const { action } = await server.task({ instruction: "наведи лад у лідах", scope: "all" });
+    assert.notEqual(action.modelUsed, "local-parser", "це мала бути гілка моделі, а не запасний парсер");
+    assert.equal(action.summary, "План від моделі");
+
+    // Дозволене виконалось.
+    const saved = await server.savedState();
+    assert.deepEqual(saved.prospects.map((item) => item.status), ["follow_up_due", "follow_up_due", "follow_up_due"]);
+
+    // Вигаданого — жодного сліду: ні в результатах, ні в попередженнях.
+    const trace = JSON.stringify(action);
+    assert.equal(/send_messages|delete_leads/.test(trace), false, `вигадана дія лишила слід: ${trace.slice(0, 200)}`);
+    assert.equal(action.results.some((item) => item.type === "set_status"), true);
+  } finally {
+    await server.stop();
+  }
+});
+
+test("модель, яка повернула лише вигадані дії, не стає приводом зробити щось навмання", async () => {
+  const server = await withModel({
+    port: 43342,
+    returns: JSON.stringify({ summary: "нічого корисного", actions: [{ type: "launch_missiles", scope: "all" }] })
+  });
+  try {
+    // Інструкція, у якій і локальний парсер нічого не бачить: отже порожній
+    // план моделі не підмінюється тихо чимось іншим.
+    const { action } = await server.task({ instruction: "погода в Києві сьогодні", scope: "all" });
+    assert.equal(action.status, "blocked");
+    assert.deepEqual(action.results, []);
+    assert.match(action.warnings.join(" "), /No supported action was detected/i);
+
+    const saved = await server.savedState();
+    assert.deepEqual(saved.prospects.map((item) => item.status), ["new", "new", "new"]);
+  } finally {
+    await server.stop();
+  }
+});
 
 test("інструкція, закоротка щоб бути задачею, нічого не запускає", async () => {
   const server = await startServer({ port: 43315, savedState: savedWith(threeLeads()) });
