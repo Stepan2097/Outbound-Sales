@@ -7,7 +7,7 @@ import {
   DEFAULT_FROM_DAY, feedingFor, folderRoom, folderWork, normalizeCampaign, parseFromDay
 } from "../warmup/campaigns.mjs";
 import { resetFeedHints } from "../warmup/feed.mjs";
-import { MAX_INVITES_PER_RUN } from "../warmup/invites.mjs";
+import { MAX_INVITES_PER_RUN, skippedAmong } from "../warmup/invites.mjs";
 import { anty } from "../warmup/db.mjs";
 import { dueFrom, resetScheduler, sameDayGapMinutes } from "../warmup/scheduler.mjs";
 import { DEFAULT_STRATEGY, dailyQuota } from "../warmup/strategy.mjs";
@@ -770,7 +770,8 @@ function secondAccount(day = 8) {
 test("a held outcome about the person lets a folder person go, and the folder never offers them again", async (t) => {
   // `blocked` is here on purpose: the page may have been about the account,
   // not the person, but offering them again risks a second two-day pause.
-  for (const outcome of ["no_button", "profile_gone", "blocked"]) {
+  // `no_button` is deliberately NOT here — see the test below it.
+  for (const outcome of ["profile_gone", "blocked"]) {
     t.mock.timers.setTime(MORNING.getTime());
     resetScheduler();
     resetFeedHints();
@@ -811,6 +812,43 @@ test("a held outcome about the person lets a folder person go, and the folder ne
     resetFeedHints();
     t.mock.timers.setTime(MORNING.getTime() + DAY_MS);
     assert.equal((await pool()).includes(broken.crm_contact_id), false, `${outcome}: not in the pool the walk offers`);
+  }
+});
+
+/**
+ * The defect this exists for: on 08.10.2026 a profile page moved the person's
+ * name out of its `h1`, the agent stopped finding the Connect control, and ten
+ * requests in one visit came back `no_button`. Each one was written off as if
+ * LinkedIn had refused that person — eleven leads out of the folder for good,
+ * because of our selectors. A row like that still goes back to the pool: it has
+ * no seller waiting for it, and left waiting it would hold a slot of the day's
+ * allowance. It simply must not be marked.
+ */
+test("a request our own browser could not send puts the person back in the pool unmarked", async (t) => {
+  for (const outcome of ["no_button"]) {
+    t.mock.timers.setTime(MORNING.getTime());
+    resetScheduler();
+    resetFeedHints();
+    onDay(8);
+    rows.wl_outreach = [];
+    rows.wl_events = [];
+    rows.wl_accounts[0].status = "warming";
+
+    await lease();
+    const [broken] = waitingRows();
+    const answer = await report(broken.id, outcome);
+    assert.equal(answer.status, 200, outcome);
+    assert.equal(answer.payload.recorded, outcome);
+    assert.equal(answer.payload.released, true, `${outcome}: nobody is waiting for it, so the slot goes back`);
+    assert.equal(answer.payload.skipped, false, `${outcome}: our browser's fault is not the person's`);
+    assert.equal(events("campaign.skipped").length, 0, `${outcome}: nobody written off`);
+    assert.equal(events("invite.failed").length, 1, `${outcome}: why is still on the record`);
+
+    // And nothing tells the next walk to step over them: the write-off the
+    // folder reads is exactly the marker that was not written.
+    const stepped = await skippedAmong({ contactIds: [broken.crm_contact_id], slugs: [] });
+    assert.equal(stepped.ids.size, 0, `${outcome}: the folder is not told to skip them`);
+    assert.equal(stepped.slugs.size, 0, `${outcome}: nor their profile`);
   }
 });
 
@@ -929,7 +967,10 @@ test("an agent that can reach nobody cannot walk the folder: it adds twice the d
   const fed = events("invite.requested").filter((event) => event.meta.source === "campaign");
   assert.equal(fed.length, 2 * quota, "one full replacement of everybody, and no more");
   assert.equal(sessions, 2);
-  assert.equal(events("campaign.skipped").length, 2 * quota);
+  // And not one of them written off: `no_button` is our selectors, not their
+  // profile. What ended the morning is the cap above, which is the thing that
+  // has to hold when the browser is broken.
+  assert.equal(events("campaign.skipped").length, 0);
   assert.equal(waitingRows().length, 0, "and nobody left behind holding the account's day");
 
   // The poll counts the same cap: nothing to wake the account for.
@@ -1283,9 +1324,11 @@ test("a held report whose release failed half-way is finished by its retry", asy
   const again = await report(undeleted.id, "no_button");
   assert.equal(again.status, 200);
   assert.equal(again.payload.released, true);
-  assert.equal(again.payload.skipped, true);
+  // `no_button` is our browser's fault, so nothing is written off — and the
+  // retry still has to finish the release, which is the point of this half.
+  assert.equal(again.payload.skipped, false);
   assert.equal(rows.wl_outreach.some((row) => row.id === undeleted.id), false, "let go now");
-  assert.ok(events("campaign.skipped").some((event) => event.meta.outreachId === undeleted.id));
+  assert.equal(events("campaign.skipped").filter((event) => event.meta.outreachId === undeleted.id).length, 0);
   assert.equal(events("invite.failed").filter((event) => event.meta.outreachId === undeleted.id).length, 1);
 
   // The skip marker does not land: a block page's folder row stayed in the

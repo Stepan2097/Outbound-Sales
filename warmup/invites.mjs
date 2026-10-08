@@ -114,6 +114,28 @@ export const INVITE_TYPES = [
  * `wl_outreach` has nowhere else to keep it. It binds the automatic feed only:
  * a seller can still queue the person by hand from the lead workspace.
  */
+/**
+ * Which held outcomes say something about the *person*, and so earn the
+ * folder's "not this one again".
+ *
+ * `profile_gone` is LinkedIn's own answer about them. `blocked` is a page we
+ * must not walk into twice, whoever it was really about. `no_note` is theirs
+ * too when the note was real: a Connect that will not carry an approved
+ * sentence is this person's Connect — and when the note was never there, the
+ * `mismatch` branch already keeps the row unmarked.
+ *
+ * `no_button` is the one that is about **us**: our selectors did not find the
+ * control. On 08.10.2026 that cost eleven people out of a folder in one
+ * morning — a profile page moved the name out of its `h1`, ten requests in a
+ * visit came back `no_button`, and each was written off as if LinkedIn had
+ * refused them. Such a row still goes back to the pool (it has no seller to
+ * wait for, and waiting it would hold a slot of the day's allowance); it is
+ * simply not marked, so the folder may offer them again once the browser
+ * works. What keeps a broken agent from walking the whole folder is the daily
+ * cap in `folderRoom`, not a write-off.
+ */
+export const INVITE_PERSON_OUTCOMES = ["no_note", "profile_gone", "blocked"];
+
 export const FEED_SKIPPED = "campaign.skipped";
 
 /** What a person's history is read from: their invitation, and the folder letting them go. */

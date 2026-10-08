@@ -11,7 +11,7 @@ import { HEALTH_LABEL, HEALTH_VALUES, deriveStatus, isHealth } from "./status.mj
 import { PLATFORMS, parseProxy, platformOf, proxyString, retag } from "./platform.mjs";
 import { CLAIM_STATUS, OUTREACH_COLUMNS, OUTREACH_STATUSES, describeClaim, describeOutreach, personSnapshot, sentBy } from "./outreach.mjs";
 import {
-  ACCEPTED_STATUS, INVITE_HELD_OUTCOMES, INVITE_OUTCOMES, MAX_INVITES_PER_RUN, MAX_INVITE_CHECKS_PER_RUN,
+  ACCEPTED_STATUS, INVITE_HELD_OUTCOMES, INVITE_OUTCOMES, INVITE_PERSON_OUTCOMES, MAX_INVITES_PER_RUN, MAX_INVITE_CHECKS_PER_RUN,
   OUTREACH_SENT, WAITING_STATUS, cancelInvite, copyRequestToCrm, fedInvites, folderAddedToday,
   heldCounts, heldRetryAnswer, describeInvite, inviteEvents, invitesToCheck, invitesToSend, lastCheckedAt as invitesLastCheckedAt,
   checkedTodayAccounts, moveStatus, openConversationCounts, outreachForContact, pendingCounts,
@@ -491,9 +491,11 @@ async function pausedByThisReport(run, { outreachId, leaseId }) {
  *
  * - **A seller's row** stays `waiting` for that seller: it rests until
  *   tomorrow (`waitingFacts`), and a `blocked` one is parked at once.
- * - **A folder's row** is let go (`releaseFedInvite`), and skipped by the
- *   folder from then on unless the report is about the agent rather than the
- *   person — see `INVITE_HELD_OUTCOMES`.
+ * - **A folder's row** is let go (`releaseFedInvite`) — it has no seller to
+ *   wait for it — and the folder is told never to offer them again only when
+ *   the outcome was about the person (`INVITE_PERSON_OUTCOMES`). `no_button`
+ *   and `no_note` are about our browser, so the person goes back to the pool
+ *   unmarked: a page LinkedIn redesigned must not empty the folder.
  * - **`blocked`** also pauses the account for two days, whoever picked the
  *   row: a block page on Connect is LinkedIn's warning arriving mid-send.
  *   Its answer says `overQuota` beside `stopSending`, which is what an agent
@@ -581,7 +583,7 @@ async function reportHeld({ account, outreachId, outcome, leaseId }) {
   // answer is stored before it: a seller's click in the same instant can
   // still take the row first, and the delete then finds nothing to do.
   const release = Boolean(fed) && waiting;
-  const skip = release && !mismatch && !duringPause;
+  const skip = release && !mismatch && !duringPause && INVITE_PERSON_OUTCOMES.includes(outcome);
   const answer = { status: outreach.status, moved: false, recorded: outcome, released: release, skipped: skip };
 
   if (outcome === "blocked") {
