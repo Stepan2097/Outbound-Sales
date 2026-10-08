@@ -184,24 +184,17 @@
         <section class="view" id="view-contacts">
           <div class="contacts-layout">
             <div class="contacts-sidebar">
-            <section class="panel contact-folders-panel">
-              <div class="panel-heading">
-                <div>
-                  <h2>Папки CRM</h2>
-                  <p id="contactFoldersSubtitle"></p>
-                </div>
-                <button class="text-button" id="contactFoldersRefreshBtn" type="button"><i data-lucide="refresh-cw"></i><span>Оновити</span></button>
-              </div>
-              <div class="contact-folder-list" id="contactFolderList"></div>
-            </section>
-
             <section class="panel contact-list-panel">
               <div class="panel-heading">
                 <div>
-                  <h2 id="contactListTitle">Контакти</h2>
+                  <h2>Контакти</h2>
                   <p id="contactListSubtitle">Вибери папку, щоб побачити людей</p>
                 </div>
               </div>
+              <label class="contact-folder-pick">
+                <span>Папка CRM</span>
+                <select id="contactFolderSelect" aria-label="Папка CRM"></select>
+              </label>
               <label class="contact-search">
                 <i data-lucide="search"></i>
                 <input id="contactSearchInput" type="search" placeholder="Ім'я, компанія, посада або пошта" />
@@ -217,43 +210,9 @@
                   <h2 id="contactCardTitle">Контакт не вибрано</h2>
                   <p id="contactCardSubtitle"></p>
                 </div>
-                <span class="pill" id="contactCardPill">—</span>
+                <span class="pill tone-muted" id="contactCardPill" title="Де ця людина в запрошеннях LinkedIn">—</span>
               </div>
               <div id="contactCardBody"><div class="empty-state">Контакт не вибрано.</div></div>
-            </section>
-
-            <section class="panel contact-drafts-panel">
-              <div class="panel-heading">
-                <div>
-                  <h2>Повідомлення</h2>
-                </div>
-                <span class="pill" id="contactDraftsPill">немає</span>
-              </div>
-              <form class="contact-draft-form" id="contactDraftForm">
-                <div class="split-fields">
-                  <label>
-                    <span>Продукт</span>
-                    <select id="contactProductSelect"></select>
-                  </label>
-                  <label>
-                    <span>Мова</span>
-                    <select id="contactLanguageSelect">
-                      <option value="en">English</option>
-                      <option value="uk">Українською</option>
-                      <option value="ru">Русский</option>
-                    </select>
-                  </label>
-                </div>
-                <label>
-                  <span>Що врахувати (необов'язково)</span>
-                  <input id="contactInstructionInput" type="text" placeholder="Наприклад: коротше, без згадки ціни, зайти через їхній новий застосунок" />
-                </label>
-                <div class="button-row">
-                  <button class="primary-button" type="submit" id="contactGenerateBtn"><i data-lucide="sparkles"></i><span>Згенерувати три чернетки</span></button>
-
-                </div>
-              </form>
-              <div class="contact-draft-list" id="contactDraftList"></div>
             </section>
             </div>
           </div>
