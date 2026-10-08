@@ -1,0 +1,8 @@
+[Unit]
+Description=Start the warm-up containers if anything stopped them
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/outbound-agent-keepalive

@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Keep the warm-up's containers running on a host that also runs Coolify.
+#
+# The agent, the login watch and the Anty runtime are started by hand — they
+# are not Coolify applications, and Coolify's own cleanup stops containers it
+# does not manage. On 08.10.2026 `outbound-login-watch` took a SIGTERM out of
+# nowhere at 15:16 and stayed down; nothing in its log said why, and the
+# warm-up would have been silently absent the next morning. A restart policy
+# does not cover that case: a container somebody else stopped deliberately is
+# not restarted by Docker.
+#
+# So this starts what is down and says so. It never *creates* a container: the
+# env files and the image tag belong to whoever deployed it, and a wrong
+# re-creation is worse than a clear line in the journal saying the container is
+# gone.
+set -Eeuo pipefail
+
+readonly CONTAINERS=(outbound-anty-linux outbound-linux-agent outbound-login-watch)
+
+log() {
+  logger -t outbound-agent-keepalive -- "$*"
+}
+
+for name in "${CONTAINERS[@]}"; do
+  state="$(docker inspect -f '{{.State.Status}}' "${name}" 2>/dev/null || echo 'missing')"
+  case "${state}" in
+    running)
+      ;;
+    missing)
+      log "${name} does not exist — it has to be re-created by hand (see agent/README.md)."
+      ;;
+    *)
+      if docker start "${name}" >/dev/null 2>&1; then
+        log "${name} was ${state}; started it."
+      else
+        log "${name} was ${state} and would not start."
+      fi
+      ;;
+  esac
+done

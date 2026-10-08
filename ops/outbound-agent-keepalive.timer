@@ -1,0 +1,10 @@
+[Unit]
+Description=Check every five minutes that the warm-up containers are up
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
