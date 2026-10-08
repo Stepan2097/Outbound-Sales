@@ -86,6 +86,33 @@ node agent/login-watch.mjs --once     # один прохід, для крона
 з паузи те, що відновилось, — просто молча. Стан (зсув оновлень Telegram і
 дата останньої перевірки по акаунту) лежить у `agent/runs/login-watch.json`.
 
+**Токен міняється — контейнер перестворюється, не перезапускається.** `docker run
+--env-file` читає файл **один раз, при створенні** контейнера: після правки
+`telegram.env` команда `docker restart` піднімає той самий контейнер зі старим
+оточенням, і в лозі лишається «Telegram: не налаштований» при вписаному токені.
+Саме так і сталося 08.10. Правильно так:
+
+```sh
+docker rm -f outbound-login-watch
+docker run -d --name outbound-login-watch --restart unless-stopped \
+  --network container:outbound-anty-linux \
+  --env-file /opt/outbound-anty-linux/runtime.env \
+  --env-file /opt/outbound-anty-linux/telegram.env \
+  -e WARMUP_ANTY_API=http://127.0.0.1:3032 \
+  -v /opt/outbound-anty-linux/agent-runs:/app/agent/runs \
+  outbound-linux-agent:<тег> node login-watch.mjs
+```
+
+Перший рядок логу після цього мусить казати «Telegram: налаштований». Якщо
+добову перевірку вже прогнали цього дня (у стані лежить сьогоднішня дата), то
+щоб перевірити доставку не чекаючи завтра — один прохід із власним файлом
+стану, який не чіпає лічильник демона:
+
+```sh
+docker run --rm … outbound-linux-agent:<тег> \
+  node login-watch.mjs --once --state /app/agent/runs/verify-once.json
+```
+
 Запускати окремо від воркера: воркер — це руки розкладу, і його не має
 затримувати профіль, якого ніхто не може відкрити. Рантайм у них один, тож
 профіль одночасно тримає тільько хтось один — тому вартовий і відкриває лише
