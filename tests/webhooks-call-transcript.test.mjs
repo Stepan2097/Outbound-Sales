@@ -190,7 +190,7 @@ test("домовленість про наступний крок стає за�
 });
 
 test("прийнятий дзвінок лежить у файлі стану, а не лише в пам'яті", async () => {
-  const server = await startServer({ port: 43326, savedState: { version: 1, prospects: [lead], interactions: [], followUpTasks: [] } });
+  const server = await startServer({ port: 43329, savedState: { version: 1, prospects: [lead], interactions: [], followUpTasks: [] } });
   try {
     await server.configureTranscripts();
     const { status } = await server.transcript({
