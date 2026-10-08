@@ -42,7 +42,7 @@ export const BUTTON_TEXT = 'Вже залогінився — продовжит
 export const NEEDS_PERSON = ['needs_login', 'captcha'];
 
 export function emptyState() {
-  return { lastCheck: {}, lastTold: {} };
+  return { lastCheck: {}, lastTold: {}, asked: {} };
 }
 
 /**
@@ -62,6 +62,9 @@ export function normalizeState(input) {
   }
   for (const [id, day] of Object.entries(input.lastTold ?? {})) {
     if (typeof day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(day)) state.lastTold[id] = day;
+  }
+  for (const [nonce, at] of Object.entries(input.asked ?? {})) {
+    if (Number.isFinite(at) && at > 0) state.asked[nonce] = Number(at);
   }
   return state;
 }
@@ -91,23 +94,40 @@ async function restore({ portal, telegram, account, asked = false, log = () => {
  * somebody's phone. A probe that throws is reported as "no login seen" with
  * its reason rather than left silent: the person tapped, they get a verdict.
  */
-export async function answerAsks({ portal, telegram, probe, log = () => {} }) {
+export async function answerAsks({ portal, telegram, probe, state, nowMs = Date.now(), log = () => {} }) {
   let asks;
   try {
     asks = await portal.loginChecks();
   } catch (error) {
     log(`не зміг прочитати запити з групи: ${error.message}`);
-    return { asks: 0, restored: 0 };
+    return { asks: 0, restored: 0, skipped: 0 };
   }
-  if (!asks.length) return { asks: 0, restored: 0 };
+  if (!asks.length) return { asks: 0, restored: 0, skipped: 0 };
 
   const accounts = await portal.accounts();
   let restored = 0;
+  let skipped = 0;
+  let answered = 0;
   for (const ask of asks) {
+    /**
+     * One look per ask per half hour, and this is why.
+     *
+     * 08.10.2026: the verdict could not be written (a crash in the portal's
+     * route), so the ask stayed open, and every minute this opened the profile
+     * again and sent the group another «входу ще не видно». The owner got three
+     * of them for one tap of a button he had not even pressed. An ask that
+     * cannot be closed must go quiet, not louder — and a profile opened every
+     * minute is the very pattern this whole folder avoids.
+     */
+    if (nowMs - Number(state?.asked?.[ask.nonce] ?? 0) < RECHECK_MS) {
+      skipped += 1;
+      continue;
+    }
     const account = accounts.find((item) => item.id === ask.accountId);
     if (!account) {
       portal.accountId = ask.accountId;
       await portal.loginRecheck(ask.nonce, false, 'акаунта вже немає в прогріві').catch(() => {});
+      if (state?.asked) state.asked[ask.nonce] = nowMs;
       continue;
     }
     let result;
@@ -116,19 +136,47 @@ export async function answerAsks({ portal, telegram, probe, log = () => {} }) {
     } catch (error) {
       result = { signedIn: false, reason: `не вдалося відкрити профіль: ${error.message}` };
     }
+    if (state?.asked) state.asked[ask.nonce] = nowMs;
+    answered += 1;
+
     if (result.signedIn) {
+      // Health first: an account that recovered must come back even if the ask
+      // cannot be closed afterwards.
       await restore({ portal, telegram, account, asked: true, log });
       restored += 1;
-    } else {
-      log(`${account.label}: за посиланням із групи входу не видно (${result.reason})`);
-      if (telegram.configured) {
-        await telegram.send(`${account.label}: входу ще не видно (${result.reason}). Перевір, що залогінився саме в цьому профілі.`);
-      }
+      portal.accountId = account.id;
+      await portal.loginRecheck(ask.nonce, true, result.reason || '').catch((error) => {
+        log(`${account.label}: вердикт не записався — ${error.message}`);
+      });
+      continue;
     }
+
+    // Verdict before the message, and no message without it: the page is what
+    // the person is looking at, and an unwritten verdict means this will be
+    // asked again. Saying "no login yet" on every retry is how one tap became
+    // three notifications.
     portal.accountId = account.id;
-    await portal.loginRecheck(ask.nonce, result.signedIn === true, result.reason || '');
+    let written = false;
+    try {
+      const answer = await portal.loginRecheck(ask.nonce, false, result.reason || '');
+      written = answer?.success === true;
+    } catch (error) {
+      log(`${account.label}: вердикт не записався — ${error.message}`);
+    }
+    log(`${account.label}: за посиланням із групи входу не видно (${result.reason})`);
+    if (written && telegram.configured) {
+      await telegram.send(`${account.label}: входу ще не видно (${result.reason}). Перевір, що залогінився саме в цьому профілі.`);
+    }
   }
-  return { asks: asks.length, restored };
+
+  // The nonces are a short memory, not a ledger: anything older than a day is
+  // past its ask's own lifetime.
+  if (state?.asked) {
+    for (const [nonce, at] of Object.entries(state.asked)) {
+      if (nowMs - Number(at) > 24 * 60 * 60_000) delete state.asked[nonce];
+    }
+  }
+  return { asks: answered, restored, skipped };
 }
 
 /**

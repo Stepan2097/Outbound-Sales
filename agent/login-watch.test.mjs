@@ -135,9 +135,12 @@ test('перевірка, що впала, не купує акаунту пів
 });
 
 test('стан від старої версії не ламає вартового: день у lastCheck і offset просто відкидаються', () => {
-  assert.deepEqual(normalizeState(null), { lastCheck: {}, lastTold: {} });
-  assert.deepEqual(normalizeState({ offset: 12, lastCheck: { 'acc-47': '2026-10-08' } }), { lastCheck: {}, lastTold: {} });
-  assert.deepEqual(normalizeState({ lastCheck: { a: AT }, lastTold: { a: '2026-10-08' } }), { lastCheck: { a: AT }, lastTold: { a: '2026-10-08' } });
+  assert.deepEqual(normalizeState(null), { lastCheck: {}, lastTold: {}, asked: {} });
+  assert.deepEqual(normalizeState({ offset: 12, lastCheck: { 'acc-47': '2026-10-08' } }), { lastCheck: {}, lastTold: {}, asked: {} });
+  assert.deepEqual(
+    normalizeState({ lastCheck: { a: AT }, lastTold: { a: '2026-10-08' }, asked: { n: AT, зле: 'колись' } }),
+    { lastCheck: { a: AT }, lastTold: { a: '2026-10-08' }, asked: { n: AT } }
+  );
 });
 
 
@@ -151,8 +154,8 @@ test('запит із групи перевіряється одразу, і в�
   const portal = fakePortal([parked], { checks: [{ nonce: 'n1', accountId: 'acc-47', requestedAt: '2026-10-08T09:00:00Z' }] });
   const telegram = fakeTelegram();
 
-  const result = await answerAsks({ portal, telegram, probe: signedIn });
-  assert.deepEqual(result, { asks: 1, restored: 1 });
+  const result = await answerAsks({ portal, telegram, probe: signedIn, state: normalizeState(null), nowMs: AT });
+  assert.deepEqual(result, { asks: 1, restored: 1, skipped: 0 });
   assert.deepEqual(portal.written, [{ accountId: 'acc-47', health: 'ok', note: 'Вхід підтверджено за посиланням із групи.' }]);
   assert.deepEqual(portal.verdicts, [{ accountId: 'acc-47', nonce: 'n1', signedIn: true, reason: 'feed' }]);
   assert.match(telegram.sent[0].text, /вхід відновлено/i);
@@ -162,8 +165,8 @@ test('натиснули, а входу немає: вердикт усе одн
   const portal = fakePortal([parked], { checks: [{ nonce: 'n2', accountId: 'acc-47' }] });
   const telegram = fakeTelegram();
 
-  const result = await answerAsks({ portal, telegram, probe: signedOut });
-  assert.deepEqual(result, { asks: 1, restored: 0 });
+  const result = await answerAsks({ portal, telegram, probe: signedOut, state: normalizeState(null), nowMs: AT });
+  assert.deepEqual(result, { asks: 1, restored: 0, skipped: 0 });
   assert.equal(portal.written.length, 0, 'мертву сесію в ротацію не повертаємо');
   assert.deepEqual(portal.verdicts, [{ accountId: 'acc-47', nonce: 'n2', signedIn: false, reason: 'сторінка входу' }]);
   assert.match(telegram.sent[0].text, /входу ще не видно/i);
@@ -174,7 +177,7 @@ test('профіль, який не відкрився, теж отримує в
   const telegram = fakeTelegram();
   const broken = async () => { throw new Error('рантайм не відповів'); };
 
-  await answerAsks({ portal, telegram, probe: broken });
+  await answerAsks({ portal, telegram, probe: broken, state: normalizeState(null), nowMs: AT });
   assert.equal(portal.verdicts.length, 1);
   assert.equal(portal.verdicts[0].signedIn, false);
   assert.match(portal.verdicts[0].reason, /рантайм не відповів/);
@@ -184,7 +187,7 @@ test('запит на акаунт, якого вже немає, закрива
   const portal = fakePortal([healthy], { checks: [{ nonce: 'n4', accountId: 'acc-зник' }] });
   const telegram = fakeTelegram();
 
-  await answerAsks({ portal, telegram, probe: signedIn });
+  await answerAsks({ portal, telegram, probe: signedIn, state: normalizeState(null), nowMs: AT });
   assert.deepEqual(portal.verdicts, [{ accountId: 'acc-зник', nonce: 'n4', signedIn: false, reason: 'акаунта вже немає в прогріві' }]);
   assert.equal(telegram.sent.length, 0);
 });
@@ -194,9 +197,62 @@ test('портал, який не відповів про запити, не л�
   portal.loginChecks = async () => { throw new Error('портал не відповів'); };
   const telegram = fakeTelegram();
   const lines = [];
-  const result = await answerAsks({ portal, telegram, probe: signedIn, log: (line) => lines.push(line) });
-  assert.deepEqual(result, { asks: 0, restored: 0 });
+  const result = await answerAsks({ portal, telegram, probe: signedIn, state: normalizeState(null), nowMs: AT, log: (line) => lines.push(line) });
+  assert.deepEqual(result, { asks: 0, restored: 0, skipped: 0 });
   assert.match(lines.join(' '), /не зміг прочитати запити/);
+});
+
+
+/**
+ * Інцидент 08.10: вердикт не записувався через падіння в маршруті порталу, тож
+ * запит лишався відкритим — і вартовий щохвилини відкривав профіль і слав у
+ * групу ще одне «входу ще не видно». Власник отримав три повідомлення за один
+ * дотик, якого сам навіть не робив. Два правила нижче — звідти.
+ */
+test('вердикт, який не записався, не перетворюється на повідомлення', async () => {
+  const portal = fakePortal([parked], { checks: [{ nonce: 'n5', accountId: 'acc-47' }] });
+  portal.loginRecheck = async () => ({ success: false, error: 'щось у порталі' });
+  const telegram = fakeTelegram();
+  const state = normalizeState(null);
+
+  await answerAsks({ portal, telegram, probe: signedOut, state, nowMs: AT });
+  assert.equal(telegram.sent.length, 0, 'сторінка все одно скаже «перевіряю» — повторимо тихо');
+});
+
+test('один запит дивиться профіль не частіше, ніж раз на півгодини', async () => {
+  const portal = fakePortal([parked], { checks: [{ nonce: 'n6', accountId: 'acc-47' }] });
+  const telegram = fakeTelegram();
+  const state = normalizeState(null);
+  let probes = 0;
+  const counted = async (account) => { probes += 1; return signedOut(account); };
+
+  const first = await answerAsks({ portal, telegram, probe: counted, state, nowMs: AT });
+  assert.deepEqual(first, { asks: 1, restored: 0, skipped: 0 });
+  assert.equal(probes, 1);
+  assert.equal(telegram.sent.length, 1);
+
+  // Запит лишився відкритим (портал його не закрив) — наступне коло мусить
+  // пройти мимо, а не відкрити профіль знову й написати вдруге.
+  const soon = await answerAsks({ portal, telegram, probe: counted, state, nowMs: AT + 60_000 });
+  assert.deepEqual(soon, { asks: 0, restored: 0, skipped: 1 });
+  assert.equal(probes, 1, 'профіль не відкривався вдруге');
+  assert.equal(telegram.sent.length, 1, 'і другого повідомлення не було');
+
+  // Через півгодини — можна знову.
+  await answerAsks({ portal, telegram, probe: counted, state, nowMs: AT + RECHECK_MS + 1000 });
+  assert.equal(probes, 2);
+});
+
+test('памʼять про запити не росте вічно: старші за добу забуваються', async () => {
+  const portal = fakePortal([parked]);
+  const telegram = fakeTelegram();
+  const state = normalizeState({ asked: { "старий": AT - 2 * 24 * 3600_000, "свіжий": AT } });
+  portal.loginChecks = async () => [];
+  await answerAsks({ portal, telegram, probe: signedOut, state, nowMs: AT });
+  // Жодного запиту — але й чистити нічого: прибирання йде разом із відповіддю.
+  portal.loginChecks = async () => [{ nonce: "n7", accountId: "acc-47" }];
+  await answerAsks({ portal, telegram, probe: signedOut, state, nowMs: AT });
+  assert.deepEqual(Object.keys(state.asked).sort(), ["n7", "свіжий"]);
 });
 
 test('клієнт Telegram уміє лише надсилати: читати оновлення бота нічим', () => {

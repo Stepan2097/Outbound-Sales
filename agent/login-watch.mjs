@@ -102,8 +102,9 @@ do {
   const state = readState();
   try {
     // The asks first: somebody is holding a phone with a refreshing page.
-    const asked = await answerAsks({ portal, telegram, probe, log });
+    const asked = await answerAsks({ portal, telegram, probe, state, nowMs: Date.now(), log });
     if (asked.asks) log(`запитів із групи: ${asked.asks}, відновлено ${asked.restored}`);
+    if (asked.skipped) log(`запитів, які вже дивились цієї півгодини: ${asked.skipped}`);
     const checked = await checkParked({
       portal, telegram, probe, state, today: today(), nowMs: Date.now(), portalUrl: PORTAL, log
     });
