@@ -56,7 +56,17 @@ export async function settle(page, timeoutMs = 40000) {
     }
     await sleep(1500);
   }
-  return { signedIn: false, url: page.url(), reason: 'timed out waiting for the feed', seen: last };
+  // Said after the whole wait, never instead of it: a live session is bounced
+  // through /login first, so the page being a login page proves nothing until
+  // the bounce has had its time. Afterwards it is the clearest thing we can
+  // tell a person — "this account is logged out" rather than "timed out".
+  const url = page.url();
+  return {
+    signedIn: false,
+    url,
+    reason: /\/(login|uas\/login|signup)/.test(url) ? 'сторінка входу' : 'timed out waiting for the feed',
+    seen: last
+  };
 }
 
 /**
