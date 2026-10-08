@@ -2148,6 +2148,7 @@ async function handleApi(request, response, url) {
     state.integrations.transcripts.lastIngestedAt = new Date().toISOString();
     state.integrations.transcripts.status = "receiving_calls";
     addEvent("call", `${prospect.name} call transcript ingested from ${source}.`);
+    await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
   }

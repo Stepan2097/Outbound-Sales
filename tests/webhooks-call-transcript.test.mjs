@@ -189,6 +189,44 @@ test("домовленість про наступний крок стає за�
   }
 });
 
+test("прийнятий дзвінок лежить у файлі стану, а не лише в пам'яті", async () => {
+  const server = await startServer({ port: 43326, savedState: { version: 1, prospects: [lead], interactions: [], followUpTasks: [] } });
+  try {
+    await server.configureTranscripts();
+    const { status } = await server.transcript({
+      prospectId: "lead-call",
+      transcript: agreedCall,
+      source: "aircall",
+      callId: "aircall-9002"
+    });
+    assert.equal(status, 200);
+
+    // Відповідь 200 провайдеру означає «записано», і вдруге він той самий
+    // дзвінок не надішле. Тому все, що народилось із нього, мусить бути вже
+    // на диску на момент відповіді — не після таймера й не після наступної
+    // дії людини: рестарт тут трапляється кілька разів на день, бо кожен пуш
+    // у main — це деплой.
+    const saved = await server.savedState();
+    const prospect = saved.prospects.find((item) => item.id === "lead-call");
+    assert.ok(prospect.callAnalysis, "аналіз дзвінка не дожив до файлу стану");
+    assert.equal(prospect.callAnalysis.externalCallId, "aircall-9002");
+    assert.equal(
+      saved.interactions.filter((item) => item.prospectId === "lead-call" && item.type === "call_completed").length,
+      1,
+      "слід дзвінка в історії людини не дожив до файлу стану"
+    );
+    assert.equal(
+      saved.followUpTasks.filter((item) => item.prospectId === "lead-call").length,
+      1,
+      "задача на фолоу-ап не дожила до файлу стану"
+    );
+    // І сам канал видно живим після підняття заново.
+    assert.equal(saved.integrationSettings.transcripts.status, "receiving_calls");
+  } finally {
+    await server.stop();
+  }
+});
+
 test("вебхук зачинений, доки токен не налаштували, і чужий токен не відчиняє його", async () => {
   const server = await startServer({ port: 43325, savedState: { version: 1, prospects: [lead], interactions: [] } });
   try {
