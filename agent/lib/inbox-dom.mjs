@@ -31,13 +31,33 @@ import { createHash } from 'node:crypto';
 // ── inside the page ────────────────────────────────────────────────────────
 
 /**
- * The conversation list, as links.
+ * The conversation list — by its links where they exist, by its shape where
+ * they do not.
  *
  * Runs in the page. Returns raw strings only; `conversationRow()` below turns
- * them into something with a name and a date. Everything is best-effort except
- * the thread key, which comes out of the href and is the one thing LinkedIn
- * cannot rename without breaking its own router.
+ * them into something with a name and a date.
+ *
+ * A link was the whole spine of this file: a conversation *was* an anchor to
+ * `/messaging/thread/<id>`, and the id out of that href was the one thing
+ * LinkedIn could not rename without breaking its own router. On 08.10.2026 it
+ * renamed it anyway — by removing it. A live messenger now has **no**
+ * `/messaging/thread/` anchors at all: rows are `li` elements with a `tabindex`
+ * and a click handler, the id is nowhere in the DOM, and the sweep read zero
+ * conversations off a page carrying twenty-three timestamps.
+ *
+ * So there is a second way to see a row, used only when the first finds
+ * nothing: an `li` that holds a `time` and an `img[alt]` and no `li` of its
+ * own. That is the shape of a conversation card and not much else on the page,
+ * and both parts are there for the screen reader rather than the layout. Such a
+ * row carries no key — it is marked with `data-outbound-row` so the sweep can
+ * click the same element it read, and the thread id is taken from the address
+ * bar once the click lands.
+ *
+ * The anchor path is kept first and unchanged: if the links come back, nothing
+ * about this changes with them.
  */
+export const ROW_MARK = 'data-outbound-row';
+
 export function harvestConversations() {
   const flat = (el) => (el?.textContent ?? '').replace(/\s+/g, ' ').trim();
   const notes = [];
@@ -50,10 +70,46 @@ export function harvestConversations() {
   const times = document.querySelectorAll('time').length;
   const chars = (document.body?.innerText ?? '').length;
 
+  /** The strings one card gives up, however the card was found. */
+  const describe = (card, order) => ({
+    // The avatar's alt text is the participant's name in every build so far,
+    // and it is written for screen readers rather than for layout, which is
+    // why it survives redesigns that move every visible element.
+    alts: [...card.querySelectorAll('img[alt]')]
+      .map((img) => (img.getAttribute('alt') || '').trim())
+      .filter(Boolean),
+    slugs: [...card.querySelectorAll('a[href*="/in/"]')]
+      .map((el) => ((el.getAttribute('href') || el.href || '').match(/\/in\/([^/?#]+)/) || [])[1])
+      .filter(Boolean),
+    // innerText keeps the card's line breaks, which is what separates the
+    // name from the snippet. A card rendered as one line falls back to the
+    // middot LinkedIn uses to join them.
+    lines: ((card.innerText || '').split('\n').map((s) => s.trim()).filter(Boolean).length > 1
+      ? (card.innerText || '').split('\n')
+      : flat(card).split('·')
+    ).map((s) => s.trim()).filter(Boolean).slice(0, 8),
+    stampIso: card.querySelector('time')?.getAttribute('datetime') ?? null,
+    stampText: flat(card.querySelector('time')) || null,
+    order,
+  });
+
   const anchors = [...document.querySelectorAll('a[href*="/messaging/thread/"]')];
   if (!anchors.length) {
-    notes.push(`жодного посилання на /messaging/thread/ (${location.pathname}, ${chars} символів тексту, ${times} міток часу)`);
-    return { rows: [], notes, chars, times, url: location.href };
+    document.querySelectorAll(`[${'data-outbound-row'}]`).forEach((node) => node.removeAttribute('data-outbound-row'));
+    const cards = [...document.querySelectorAll('li')].filter((li) =>
+      li.querySelector('time') && li.querySelector('img[alt]') && !li.querySelector('li')
+      && (li.offsetWidth || li.offsetHeight || li.getClientRects().length));
+    if (!cards.length) {
+      notes.push(`жодного посилання на /messaging/thread/ (${location.pathname}, ${chars} символів тексту, ${times} міток часу)`);
+      return { rows: [], notes, chars, times, url: location.href };
+    }
+    notes.push(`список без посилань: беру ${cards.length} рядків за часом і аватаркою (${location.pathname})`);
+    const rows = cards.map((card, index) => {
+      card.setAttribute('data-outbound-row', String(index));
+      // No key until the click lands: the id lives only in the address bar.
+      return { threadKey: null, rowMark: index, href: null, ...describe(card, index) };
+    });
+    return { rows, notes, chars, times, url: location.href };
   }
 
   /**
@@ -91,30 +147,7 @@ export function harvestConversations() {
     seen.add(threadKey);
 
     const card = cardOf(a);
-    const timeEl = card.querySelector('time');
-    rows.push({
-      threadKey,
-      href,
-      // The avatar's alt text is the participant's name in every build so far,
-      // and it is written for screen readers rather than for layout, which is
-      // why it survives redesigns that move every visible element.
-      alts: [...card.querySelectorAll('img[alt]')]
-        .map((img) => (img.getAttribute('alt') || '').trim())
-        .filter(Boolean),
-      slugs: [...card.querySelectorAll('a[href*="/in/"]')]
-        .map((el) => ((el.getAttribute('href') || el.href || '').match(/\/in\/([^/?#]+)/) || [])[1])
-        .filter(Boolean),
-      // innerText keeps the card's line breaks, which is what separates the
-      // name from the snippet. A card rendered as one line falls back to the
-      // middot LinkedIn uses to join them.
-      lines: ((card.innerText || '').split('\n').map((s) => s.trim()).filter(Boolean).length > 1
-        ? (card.innerText || '').split('\n')
-        : flat(card).split('·')
-      ).map((s) => s.trim()).filter(Boolean).slice(0, 8),
-      stampIso: timeEl?.getAttribute('datetime') ?? null,
-      stampText: flat(timeEl) || null,
-      order: rows.length,
-    });
+    rows.push({ threadKey, href, rowMark: null, ...describe(card, rows.length) });
   }
 
   if (!rows.length) notes.push(`знайшов ${anchors.length} посилань, але жодного ключа розмови в них`);
@@ -311,13 +344,27 @@ export function parseStamp(raw, nowMs = Date.now()) {
  */
 export function conversationRow(raw, nowMs = Date.now()) {
   const alt = (raw.alts ?? []).find((a) => a && a.length > 1 && !/^linkedin$|logo|banner|background|icon/i.test(a)) ?? null;
-  const visible = (raw.lines ?? []).find((line) => line.length > 1 && line !== raw.stampText) ?? null;
+  // A line that ends with the row's own timestamp is a name and a time
+  // rendered as one line — which is how the list looks when LinkedIn puts the
+  // `time` inside the same row element as the name. The stamp is read from the
+  // `time` element itself, so here it is only in the way: without this the
+  // conversation is filed under «Marta Kowalczyk 2h».
+  const withoutStamp = (line) => {
+    const stamp = String(raw.stampText ?? '').trim();
+    if (!stamp) return line;
+    const trimmed = line.endsWith(stamp) ? line.slice(0, -stamp.length) : line;
+    return trimmed.replace(/[\s·,-]+$/, '').trim();
+  };
+  const visible = (raw.lines ?? [])
+    .map(withoutStamp)
+    .find((line) => line.length > 1 && line !== raw.stampText) ?? null;
   const name = (alt && visible && visible.toLowerCase().includes(alt.toLowerCase())) ? visible : (alt ?? visible);
   const lines = (raw.lines ?? []).filter((line) => line !== name && line !== raw.stampText);
   const stamp = parseStamp(raw.stampIso ?? raw.stampText, nowMs);
   return {
     threadKey: raw.threadKey,
     href: raw.href ?? null,
+    rowMark: raw.rowMark ?? null,
     name,
     slug: (raw.slugs ?? [])[0] ?? null,
     preview: lines.length ? lines[lines.length - 1].slice(0, 200) : null,

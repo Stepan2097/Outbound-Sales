@@ -114,6 +114,57 @@ describe('the conversation list', () => {
     assert.ok(rows.every((r) => r.at != null), 'жоден рядок не лишився без дати');
   });
 
+  /**
+   * 08.10.2026: the live messenger had no `/messaging/thread/` anchors at all —
+   * rows became `li` elements with a click handler, and the sweep read zero
+   * conversations off a page carrying twenty-three timestamps. The second way
+   * of seeing a row exists for exactly that page.
+   */
+  test('список без жодного посилання читається за формою рядка', async (t) => {
+    if (!page) return t.skip('Chrome не знайдено');
+    await open('messaging-list-nolinks.html');
+    const raw = await page.evaluate(harvestConversations);
+    const rows = raw.rows.map((r) => conversationRow(r, NOW));
+
+    assert.equal(rows.length, 3, 'три рядки: час плюс аватарка');
+    assert.deepEqual(rows.map((r) => r.name), ['Marta Kowalczyk', 'Dmytro Herasymenko', 'Hiring Assistant']);
+    // Ключа до кліку немає — і це сказано прямо, а не вдається порожнім рядком.
+    assert.ok(rows.every((r) => r.threadKey === null));
+    assert.deepEqual(rows.map((r) => r.rowMark), [0, 1, 2]);
+    assert.match(rows[0].preview, /happy to chat next week/);
+    assert.equal(Math.round((NOW - rows[1].at) / 3600_000), 24, '«Yesterday» лишається «Yesterday»');
+    // І сторінка не вважається зламаною: у нотатці сказано, що взяли за формою.
+    assert.ok(raw.notes.some((note) => /список без посилань/.test(note)), raw.notes.join(' | '));
+  });
+
+  test('кожен рядок позначений так, щоб клікнути саме той, який прочитали', async (t) => {
+    if (!page) return t.skip('Chrome не знайдено');
+    await open('messaging-list-nolinks.html');
+    await page.evaluate(harvestConversations);
+    const marked = await page.evaluate(() =>
+      [...document.querySelectorAll('[data-outbound-row]')].map((node) => ({
+        mark: node.getAttribute('data-outbound-row'),
+        name: node.querySelector('img[alt]')?.getAttribute('alt') ?? null
+      })));
+    assert.deepEqual(marked, [
+      { mark: '0', name: 'Marta Kowalczyk' },
+      { mark: '1', name: 'Dmytro Herasymenko' },
+      { mark: '2', name: 'LinkedIn' }
+    ]);
+    // Друге читання не плодить других позначок на тих самих рядках.
+    await page.evaluate(harvestConversations);
+    assert.equal(await page.evaluate(() => document.querySelectorAll('[data-outbound-row]').length), 3);
+  });
+
+  test('сторінка з посиланнями читається по-старому: форма рядка не підмінює їх', async (t) => {
+    if (!page) return t.skip('Chrome не знайдено');
+    await open('messaging-list.html');
+    const raw = await page.evaluate(harvestConversations);
+    assert.ok(raw.rows.every((r) => r.threadKey), 'ключі з href, як і раніше');
+    assert.ok(raw.rows.every((r) => r.rowMark === null));
+    assert.equal(await page.evaluate(() => document.querySelectorAll('[data-outbound-row]').length), 0);
+  });
+
   test('an empty inbox is empty, and says so differently from a broken one', async (t) => {
     if (!page) return t.skip('Chrome не знайдено');
     await open('messaging-empty.html');
@@ -123,14 +174,31 @@ describe('the conversation list', () => {
     assert.equal(raw.notes.length, 1, 'нуль розмов завжди з поясненням');
   });
 
-  test('when the anchors go, it reports zero loudly', async (t) => {
+  /**
+   * This fixture was written as a prediction: the day the anchors go. It
+   * arrived on 08.10.2026, and the answer is no longer "report zero loudly" —
+   * it is to read the page by the shape of its rows. The loud zero is kept for
+   * the page where even the shape is gone, below.
+   */
+  test('коли посилання зникли, список читається за формою, а не падає в нуль', async (t) => {
     if (!page) return t.skip('Chrome не знайдено');
     await open('messaging-rotted.html');
     const raw = await page.evaluate(harvestConversations);
+    assert.ok(raw.rows.length > 0, 'рядки знайдені за часом і аватаркою');
+    assert.ok(raw.rows.every((row) => row.threadKey === null && row.rowMark !== null));
+    assert.ok(raw.notes.some((note) => /список без посилань/.test(note)), raw.notes.join(' | '));
+    assert.ok(raw.chars > 100);
+  });
+
+  test('сторінка, де немає ні посилань, ні форми рядка, лишається голосним нулем', async (t) => {
+    if (!page) return t.skip('Chrome не знайдено');
+    await open('messaging-rotted.html');
+    // Аватарки — друга половина форми рядка. Без них сторінку вже не прочитати,
+    // і тоді нуль мусить бути сказаний так, щоб його знайшли в логу.
+    await page.evaluate(() => document.querySelectorAll('img').forEach((img) => img.remove()));
+    const raw = await page.evaluate(harvestConversations);
     assert.equal(raw.rows.length, 0);
     assert.match(raw.notes[0], /messaging\/thread/);
-    // The page is full of conversations — this zero is a failure, and the note
-    // carrying the character count is what lets a reader of the log tell.
     assert.ok(raw.chars > 100, 'сторінка не порожня, отже нуль — це поломка');
   });
 });

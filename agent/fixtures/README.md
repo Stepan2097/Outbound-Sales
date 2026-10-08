@@ -36,3 +36,16 @@ What that means for trust:
 Run them with `node --test agent/inbox-dom.test.mjs`. The tests parse these files
 in a local headless Chromium over a `data:` URL — a real DOM, no network, and no
 LinkedIn.
+
+## messaging-list-nolinks.html
+
+Список розмов, як LinkedIn віддав його 08.10.2026: на сторінці **немає жодного**
+посилання на `/messaging/thread/`. Рядок — це `li` з `tabindex`, аватаркою,
+`time` і обробником кліку всередині; id розмови існує лише в адресному рядку
+після того, як рядок відкрили.
+
+Зібрана з read-only огляду живого месенджера (ember-id і хешовані класи
+лишені такими, як на живій сторінці — читач, що спирається на будь-який із них,
+ловиться тут). `messaging-rotted.html` поруч — це та сама поломка, передбачена
+заздалегідь; тепер обидві читаються за формою рядка, а голосний нуль лишився
+для сторінки, де немає навіть форми.

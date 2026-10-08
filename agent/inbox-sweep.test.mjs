@@ -160,17 +160,23 @@ describe('a sweep of the messenger', () => {
     assert.equal(portal.calls.logs.at(-1).level, 'info');
   });
 
-  test('a full inbox with no links is reported as a failure, loudly', async (t) => {
+  /**
+   * The day the anchors went was predicted by this fixture and arrived on
+   * 08.10.2026. A full inbox with no links is no longer a failure to report —
+   * it is a list to read by the shape of its rows. What must still hold is
+   * that the run says how it read them, and that the mark goes to the portal
+   * either way.
+   */
+  test('a full inbox with no links is read by the shape of its rows, and says so', async (t) => {
     if (!page) return t.skip('Chrome не знайдено');
     inboxFixture = 'messaging-rotted.html';
     const portal = stubPortal();
     const result = await sweep(portal);
 
-    assert.equal(result.threadsSeen, 0);
-    assert.equal(result.suspicious, true, 'нуль на непорожній сторінці — це сигнал');
-    assert.equal(portal.calls.logs.at(-1).level, 'warn', 'і він має бути видимим у логу');
-    assert.match(portal.calls.logs.at(-1).meta.notes.join(' '), /messaging\/thread/);
-    assert.deepEqual(portal.calls.done, [0]);
+    assert.ok(result.listed > 0, 'рядки знайдені');
+    assert.equal(result.suspicious, false, 'це вже не поломка — сторінку прочитали');
+    assert.ok(result.notes.some((note) => /список без посилань/.test(note)), result.notes.join(' | '));
+    assert.equal(portal.calls.done.length, 1, 'мітка «дивились сьогодні» однаково пішла');
   });
 
   test('a portal with no inbox is asked once, not twenty times', async (t) => {

@@ -81,6 +81,19 @@ async function settleMessenger(page, { timeoutMs = 30_000, pace = 1 } = {}) {
   return { ok: false, reason: 'не дочекався месенджера', seen: last };
 }
 
+/**
+ * The thread id out of the address bar.
+ *
+ * The one place it still exists for a list that has no links: LinkedIn routes
+ * to `/messaging/thread/<id>/` whether the row that opened it was an anchor or
+ * a div with a click handler. Read after the click, never before it.
+ */
+export function threadKeyFromUrl(url = '') {
+  const raw = (String(url).match(/\/messaging\/thread\/([^/?#]+)/) || [])[1];
+  if (!raw || /^(new|compose)$/i.test(raw)) return null;
+  try { return decodeURIComponent(raw); } catch { return raw; }
+}
+
 /** Wait for one conversation to paint, using the same reader the sweep uses. */
 async function settleThread(page, row, { timeoutMs = 20_000, pace = 1 } = {}) {
   const deadline = Date.now() + timeoutMs;
@@ -89,7 +102,11 @@ async function settleThread(page, row, { timeoutMs = 20_000, pace = 1 } = {}) {
     try {
       const harvest = await page.evaluate(harvestThread);
       const url = page.url();
-      const here = url.includes(encodeURIComponent(row.threadKey)) || url.includes(row.threadKey);
+      // A row that came without a key is "here" as soon as any thread is open:
+      // which thread it turned out to be is read from the address bar after.
+      const here = row.threadKey
+        ? (url.includes(encodeURIComponent(row.threadKey)) || url.includes(row.threadKey))
+        : Boolean(threadKeyFromUrl(url));
       if (here && harvest.items.length) return { ok: true, harvest };
       last = harvest;
     } catch { /* still routing */ }
@@ -108,8 +125,15 @@ async function settleThread(page, row, { timeoutMs = 20_000, pace = 1 } = {}) {
  * is kept as the fallback for when the row has scrolled out from under us.
  */
 async function openConversation(page, row, origin, pace = 1) {
-  const here = () => page.url().includes(encodeURIComponent(row.threadKey)) || page.url().includes(row.threadKey);
-  const link = row.href ? await page.$(`a[href="${row.href}"]`) : null;
+  const here = () => (row.threadKey
+    ? (page.url().includes(encodeURIComponent(row.threadKey)) || page.url().includes(row.threadKey))
+    : Boolean(threadKeyFromUrl(page.url())));
+  // A row with no link is the marked element the harvest read, clicked where
+  // it sits. There is no navigation to fall back on: the id it would need is
+  // exactly what the page no longer carries.
+  const link = row.href
+    ? await page.$(`a[href="${row.href}"]`)
+    : (row.rowMark != null ? await page.$(`[data-outbound-row="${row.rowMark}"]`) : null);
 
   if (link) {
     await link.scrollIntoViewIfNeeded().catch(() => {});
@@ -140,6 +164,7 @@ async function openConversation(page, row, origin, pace = 1) {
     }
   }
 
+  if (!row.threadKey) return link ? 'клік не спрацював' : 'рядок зник зі списку';
   await page.goto(`${origin}/messaging/thread/${encodeURIComponent(row.threadKey)}/`,
     { waitUntil: 'domcontentloaded', timeout: 45_000 });
   return link ? 'клік не спрацював, перехід' : 'перехід';
@@ -223,7 +248,13 @@ export async function syncInbox(page, {
   const { picked, skipped } = pickConversations(rows, { since, limit });
   log(`  розмов у списку: ${rows.length}, беру ${picked.length}${skipped.length ? `, пропускаю ${skipped.length}` : ''}`);
 
+  const opened = new Set();
   for (const row of picked) {
+    // Two names for one row: the key is what a reader of the notes greps for,
+    // the person is what a reader of the log recognises. A row from a list
+    // without links has no key until it is open, so there the two are the same.
+    const label = row.threadKey ?? row.name ?? `рядок ${row.rowMark ?? '?'}`;
+    const who = row.name ?? label;
     try {
       await guard();
       const how = await openConversation(page, row, origin, pace);
@@ -231,21 +262,33 @@ export async function syncInbox(page, {
       await sleep(rand(1200, 2400) * pace);
       const { ok, harvest } = await settleThread(page, row, { pace });
       if (!ok) {
-        result.notes.push(`${row.threadKey}: розмова не відкрилась (${how})`);
-        log(`  ⚠️ не відкрилась: ${row.name ?? row.threadKey}`);
+        result.notes.push(`${label}: розмова не відкрилась (${how})`);
+        log(`  ⚠️ не відкрилась: ${who}`);
         continue;
       }
+      // For a list without links this is where the conversation finally gets
+      // its name: before the click there was nothing to call it.
+      const threadKey = row.threadKey ?? threadKeyFromUrl(page.url());
+      if (!threadKey) {
+        result.notes.push(`${label}: розмова відкрилась, але ключа в адресі немає`);
+        continue;
+      }
+      if (opened.has(threadKey)) {
+        result.notes.push(`${label}: той самий ключ ${threadKey} вже читали цього прогону`);
+        continue;
+      }
+      opened.add(threadKey);
 
       // Read down it the way somebody reading their messages would, rather
       // than opening twenty conversations in twenty seconds.
       await sleep(rand(1500, 3200) * pace);
 
-      const built = buildThread({ threadKey: row.threadKey, harvest, self, listRow: row, nowMs });
+      const built = buildThread({ threadKey, harvest, self, listRow: row, nowMs });
       if (built.skip) {
-        result.notes.push(`${row.threadKey}: ${built.skip}`);
+        result.notes.push(`${threadKey}: ${built.skip}`);
         continue;
       }
-      result.notes.push(...built.notes.map((n) => `${row.threadKey}: ${n}`));
+      result.notes.push(...built.notes.map((n) => `${threadKey}: ${n}`));
 
       const res = await portal.inboxThread(built.payload);
       if (!res.success) {
@@ -256,8 +299,8 @@ export async function syncInbox(page, {
           log(`  ⛔ ${result.reason} — припиняю читати`);
           break;
         }
-        result.notes.push(`${row.threadKey}: портал відмовив — ${res.error}`);
-        log(`  ⚠️ портал відмовив (${row.name ?? row.threadKey}): ${res.error}`);
+        result.notes.push(`${threadKey}: портал відмовив — ${res.error}`);
+        log(`  ⚠️ портал відмовив (${who}): ${res.error}`);
         continue;
       }
 
@@ -272,8 +315,8 @@ export async function syncInbox(page, {
       await sleep(rand(1800, 4200) * pace);
     } catch (e) {
       if (e instanceof VisitStopped) throw e;
-      result.notes.push(`${row.threadKey}: ${e.message}`);
-      log(`  ⚠️ розмова ${row.name ?? row.threadKey}: ${e.message}`);
+      result.notes.push(`${label}: ${e.message}`);
+      log(`  ⚠️ розмова ${who}: ${e.message}`);
     }
   }
 

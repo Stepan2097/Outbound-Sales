@@ -1,0 +1,58 @@
+<!-- The conversation list as LinkedIn served it on 08.10.2026: no anchors to
+     /messaging/thread/ anywhere on the page. A row is an `li` with a
+     `tabindex`, an avatar, a `time` and a click handler; the thread id exists
+     only in the address bar after the row is opened. Constructed from a
+     read-only look at a live messenger — see README.md in this folder.
+
+     The ember ids and hashed classes are kept because they are what the live
+     page has, and a reader leaning on either one is caught here. -->
+<title>(3) Messaging | LinkedIn</title>
+<style>
+  ul { list-style: none; margin: 0; padding: 0; }
+  li { display: block; }
+  li > div { display: block; padding: 8px; border-bottom: 1px solid #eee; }
+</style>
+<div class="scaffold-layout__list e0sk3z">
+  <header class="e0skxx">
+    <h2 class="e0skzy">Messaging</h2>
+    <input placeholder="Search messages" class="e0sliw" />
+  </header>
+
+  <ul class="e0skxr e0sjqw">
+
+    <li id="ember47" class="ember-view scaffold-layout__list-item e0sbif" tabindex="-1">
+      <div role="button" tabindex="0" class="e0sgwb">
+        <img alt="Marta Kowalczyk" class="e0sarr"
+             src="https://media.licdn.com/dms/image/v2/aaa/profile-displayphoto-shrink_100_100/0/1?e=1" />
+        <div class="e0sga1">
+          <span class="e0skyo">Marta Kowalczyk</span>
+          <time class="e0skyu">2h</time>
+        </div>
+        <p class="e0skyx">Thanks for reaching out — happy to chat next week 😊</p>
+      </div>
+    </li>
+
+    <li id="ember56" class="ember-view scaffold-layout__list-item e0sbif" tabindex="-1">
+      <div role="button" tabindex="0" class="e0sgwb">
+        <img alt="Dmytro Herasymenko" class="e0sarr" src="https://media.licdn.com/dms/image/v2/bbb/x?e=1" />
+        <div class="e0sga1">
+          <span class="e0skyo">Dmytro Herasymenko</span>
+          <time class="e0skyu">Yesterday</time>
+        </div>
+        <p class="e0skyx">Привіт! Дякую за запрошення.</p>
+      </div>
+    </li>
+
+    <li id="ember64" class="ember-view scaffold-layout__list-item e0sbif" tabindex="-1">
+      <div role="button" tabindex="0" class="e0sgwb">
+        <img alt="LinkedIn" class="e0sarr" src="https://static.licdn.com/logo.png" />
+        <div class="e0sga1">
+          <span class="e0skyo">Hiring Assistant</span>
+          <time class="e0skyu">Sep 30</time>
+        </div>
+        <p class="e0skyx">Your weekly summary is ready</p>
+      </div>
+    </li>
+
+  </ul>
+</div>
