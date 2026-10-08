@@ -23,6 +23,7 @@ import os from 'node:os';
 import { Portal } from './lib/portal.mjs';
 import { readProfile, normalizeCookie } from './lib/anty.mjs';
 import { syncInbox } from './lib/inbox.mjs';
+import { AntyApi } from './lib/anty-api.mjs';
 
 // ── arguments ──────────────────────────────────────────────────────────────
 const argv = process.argv.slice(2);
@@ -121,10 +122,12 @@ async function count(kind, detail) {
 
 // ── the account, and what it is allowed to do today ────────────────────────
 let ownLeaseId = null;
-let activeContext = null;
+let closeBrowser = null;
 const suppliedLeaseId = arg('lease-id');
 for (const signal of ['SIGINT', 'SIGTERM']) {
-  process.on(signal, () => { activeContext?.close().catch(() => {}); });
+  process.on(signal, () => {
+    void closeBrowser?.().catch(error => { console.error(`Browser cleanup: ${error.message}`); });
+  });
 }
 async function main() {
 const found = await portal.resolve(ACCOUNT);
@@ -160,20 +163,24 @@ if (!Object.values(remaining).some((n) => n > 0) && !plan.inbox?.due && !(plan.i
 }
 
 // ── the browser this account lives in ──────────────────────────────────────
-const profile = readProfile(found.profileRemoteId);
+const runtime = process.env.WARMUP_ANTY_API
+  ? await new AntyApi(process.env.WARMUP_ANTY_API).open(found.profileRemoteId, chromium)
+  : null;
+if (runtime) closeBrowser = runtime.close;
+const profile = runtime?.profile || readProfile(found.profileRemoteId);
 if (!profile) throw new Error(`Anty has no local copy of profile ${found.profileRemoteId} — open it in Anty once`);
-if (profile.openInAnty) {
+if (!runtime && profile.openInAnty) {
   throw new Error(`${profile.name} is open in Anty right now — two browsers on one profile corrupt the session`);
 }
-if (!profile.proxy) throw new Error(`${profile.name} has no proxy; refusing to show LinkedIn this machine's IP`);
+if (!runtime && !profile.proxy) throw new Error(`${profile.name} has no proxy; refusing to show LinkedIn this machine's IP`);
 
 // A profile that has never been launched on this machine has no user-data-dir.
 // Its session is in Anty's database instead, and has to be poured in — the same
 // thing Anty's launcher does on a first run.
-const firstRun = !fs.existsSync(profile.userDataDir);
-log(`профіль ${profile.name} → ${path.basename(profile.userDataDir)}${firstRun ? ' (створюю, переношу куки)' : ''}`);
+const firstRun = !runtime && !fs.existsSync(profile.userDataDir);
+log(`профіль ${profile.name} → ${runtime ? 'Linux Anty API' : path.basename(profile.userDataDir)}${firstRun ? ' (створюю, переношу куки)' : ''}`);
 
-const context = activeContext = await chromium.launchPersistentContext(profile.userDataDir, {
+const context = runtime?.context || await chromium.launchPersistentContext(profile.userDataDir, {
   headless: false,
   executablePath: CHROME_PATH,
   viewport: { width: 1440, height: 900 },
@@ -187,11 +194,12 @@ const context = activeContext = await chromium.launchPersistentContext(profile.u
   args: ['--no-first-run', '--no-default-browser-check', '--disable-blink-features=AutomationControlled'],
 });
 
+if (!runtime) closeBrowser = () => context.close();
 let failed = false;
 try {
 // The user agent says Windows; without this navigator still says the host. The
 // pair is the first thing a fingerprinting script cross-checks.
-if (/Windows/i.test(profile.userAgent ?? '') && os.platform() !== 'win32') {
+if (!runtime && /Windows/i.test(profile.userAgent ?? '') && os.platform() !== 'win32') {
   await context.addInitScript(() => {
     try {
       Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
@@ -483,11 +491,15 @@ log(`сесію відкрито (${session.sessionId}${session.resumed ? ', п�
   const inboxNote = report.inbox
     ? ` | розмов: ${report.inbox.threadsSeen}/${report.inbox.listed}, нових повідомлень: ${report.inbox.stored}`
     : '';
+  try { await closeBrowser?.(); } catch (error) {
+    failed = true;
+    report.errors.push(`Browser cleanup: ${error.message}`);
+    await portal.log('agent.error', `Browser cleanup: ${error.message}`, null, 'error').catch(() => {});
+  }
   await portal.closeSession(`${summary}${inboxNote}`.slice(0, 500), failed).catch(() => {});
-  await context.close().catch(() => {});
   fs.writeFileSync(path.join(SHOTS, 'result.json'), JSON.stringify(report, null, 2));
   log(`готово. дій: ${report.actions.length} | помилок: ${report.errors.length}${inboxNote} | скріни: ${SHOTS}`);
-  activeContext = null;
+  if (!failed) closeBrowser = null;
 }
 return failed ? 1 : 0;
 }
@@ -496,7 +508,7 @@ try {
   exitCode = await main();
 } catch (error) {
   console.error(error.message);
-  await activeContext?.close().catch(() => {});
+  await closeBrowser?.().catch(error => console.error(`Browser cleanup: ${error.message}`));
 } finally {
   if (ownLeaseId) {
     try {
@@ -505,4 +517,3 @@ try {
   }
 }
 process.exitCode = exitCode;
-
