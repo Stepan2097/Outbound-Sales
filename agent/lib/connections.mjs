@@ -45,23 +45,81 @@ export async function reportWithRetry(send, { sleep = wait, attempts = 2 } = {})
   throw new VisitStopped(`Report failed; stopping this visit: ${failure}`);
 }
 
-/** Mark only the main profile header, so a Connect in a suggestion is never clicked. */
-async function profileCard(page) {
-  const marked = await page.evaluate(() => {
+/**
+ * Mark only the main profile header, so a Connect in a suggestion is never clicked.
+ *
+ * The anchor is the person's own name, not the page's shape. It used to be
+ * `main h1`, and on 08.10.2026 that stopped existing: a live profile now has no
+ * `h1` anywhere on it and carries the name in an `h2` with generated class
+ * names. Every queued invitation failed as `no_button` — the agent could not
+ * find the card, so it never looked for a button at all.
+ *
+ * So the heading is found by what it says. We already know whose profile this
+ * is — the queue carries the name and the URL, and the URL was checked before
+ * this runs — and a suggestion's card carries somebody else's name, which is
+ * what keeps "never click a Connect in a suggestion" true without relying on
+ * where LinkedIn happens to put its asides this quarter.
+ *
+ * Three anchors, in order: the heading that says this person's name; the
+ * heading whose card links to this person's own profile; and, last, an `h1`,
+ * for the shape the page had before and may have again. A card that holds two
+ * headings is two people's, not this person's header, and is refused.
+ */
+async function profileCard(page, name = '', slug = null) {
+  const tokens = nameTokens(name);
+  const safeSlug = typeof slug === 'string' && /^[a-z0-9-]+$/.test(slug) ? slug : null;
+  const marked = await page.evaluate(({ tokens, slug }) => {
     document.querySelectorAll('[data-outbound-profile]').forEach((node) => node.removeAttribute('data-outbound-profile'));
-    const heading = document.querySelector('main h1');
-    if (!heading) return false;
-    let card = heading.closest('section');
-    if (!card) {
-      card = heading.parentElement;
-      while (card && card.tagName !== 'MAIN' && !card.querySelector('button')) card = card.parentElement;
+    const main = document.querySelector('main');
+    if (!main) return false;
+    const headings = [...main.querySelectorAll('h1, h2')];
+    const flat = (text) => String(text || '').normalize('NFKD').replace(/\p{M}+/gu, '').toLowerCase();
+    const cardOf = (heading) => {
+      let card = heading.closest('section');
+      if (!card) {
+        card = heading.parentElement;
+        while (card && card.tagName !== 'MAIN' && !card.querySelector('button')) card = card.parentElement;
+      }
+      if (!card || card.tagName === 'MAIN') return null;
+      // One heading to a card: a container that holds another person's name is
+      // not this person's header.
+      if (card.querySelectorAll('h1, h2').length !== 1) return null;
+      return card;
+    };
+    const byName = tokens.length
+      ? headings.filter((heading) => {
+          const text = flat(heading.textContent);
+          return tokens.every((token) => text.includes(token));
+        })
+      : [];
+    const bySlug = slug
+      ? headings.filter((heading) => cardOf(heading)?.querySelector(`a[href*="/in/${slug}"]`))
+      : [];
+    for (const heading of [...byName, ...bySlug, ...headings.filter((heading) => heading.tagName === 'H1')]) {
+      const card = cardOf(heading);
+      if (card) {
+        card.setAttribute('data-outbound-profile', 'true');
+        return true;
+      }
     }
-    if (!card || card.tagName === 'MAIN' || card.querySelectorAll('h1').length !== 1) return false;
-    card.setAttribute('data-outbound-profile', 'true');
-    return true;
-  });
+    return false;
+  }, { tokens, slug: safeSlug });
   if (!marked) return null;
   return page.locator('[data-outbound-profile="true"]');
+}
+
+/**
+ * A name as the page would spell it: without accents, case or punctuation, so
+ * "Álex Galindo" in the CRM still matches "Alex Galindo" on screen. One-letter
+ * pieces are dropped — an initial matches almost any heading.
+ */
+function nameTokens(name) {
+  return String(name || '')
+    .normalize('NFKD')
+    .replace(/\p{M}+/gu, '')
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((token) => token.length > 1);
 }
 
 async function visibleButton(scope, name) {
@@ -89,7 +147,7 @@ async function openProfile(page, invite, { sleep = wait, guard = async () => {} 
   await guard();
   if (response?.status() === 404) return { gone: true };
   if (profileSlug(page.url()) !== expected) throw new VisitStopped('LinkedIn redirected away from the queued person');
-  const card = await profileCard(page);
+  const card = await profileCard(page, invite.name, expected);
   return { card, gone: false };
 }
 
@@ -146,7 +204,7 @@ export async function sendInvitation(page, invite, { sleep = wait, guard = async
   for (let attempt = 0; attempt < 12; attempt += 1) {
     await sleep(500);
     await guard();
-    const freshCard = await profileCard(page);
+    const freshCard = await profileCard(page, invite.name, profileSlug(invite.linkedin));
     if (freshCard && await relation(freshCard) === 'pending') return 'sent';
   }
   // An uncertain click is not a failed send: leave it waiting for reconciliation.

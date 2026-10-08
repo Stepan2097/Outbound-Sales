@@ -14,14 +14,14 @@ const sleep = async () => {};
 const queued = { outreachId: 'invite-1', name: 'Person One', linkedin: 'https://www.linkedin.com/in/person-one/', note: '' };
 
 /** All LinkedIn URLs are intercepted. These are local synthetic pages. */
-async function profile(t, { more = false, pending = false, accepted = false, noButton = false, noteLimit = 200, warning = '', redirected = false } = {}) {
+async function profile(t, { more = false, pending = false, accepted = false, noButton = false, noteLimit = 200, warning = '', redirected = false, heading = 'h1' } = {}) {
   const context = await browser.newContext();
   t.after(() => context.close());
   const page = await context.newPage();
   await context.route('**/*', (route) => {
     const action = pending ? '<button>Pending</button>' : accepted ? '<span>1st</span><button>Message</button>' : noButton ? '' : more ? '<button id="more">More</button>' : '<button id="connect">Connect</button>';
     return route.fulfill({ contentType: 'text/html', body: `<!doctype html><html><body>
-      ${warning}<main><section><h1>Person One</h1><div id="actions">${action}</div></section>
+      ${warning}<main><section><${heading}>Person One</${heading}><div id="actions">${action}</div></section>
       <aside><h2>Other Person</h2><button id="wrong">Connect</button></aside></main>
       <script>
       window.sent = []; window.wrongClicks = 0;
@@ -49,6 +49,29 @@ async function profile(t, { more = false, pending = false, accepted = false, noB
   });
   return page;
 }
+
+/**
+ * 08.10.2026: a live profile had no `h1` anywhere and carried the name in an
+ * `h2`. The card was never found, so every queued invitation came back
+ * `no_button` — ten people in one visit, with nothing on screen saying why.
+ * The header is found by the name now, so the shape of the page can change
+ * again without taking the warm-up with it.
+ */
+test('a profile whose name is in an h2, with no h1 on the page, still gets its request', async (t) => {
+  const page = await profile(t, { heading: 'h2' });
+  assert.equal(await page.evaluate(() => document.querySelectorAll('h1').length), 0);
+  assert.equal(await sendInvitation(page, { ...queued, note: '' }, { sleep }), 'sent');
+  assert.deepEqual(await page.evaluate(() => window.sent), ['']);
+  // The suggestion beside it is another person's card and stays untouched.
+  assert.equal(await page.evaluate(() => window.wrongClicks), 0);
+});
+
+test('a request behind «Більше» is sent on a page with no h1 either', async (t) => {
+  const page = await profile(t, { heading: 'h2', more: true });
+  assert.equal(await sendInvitation(page, { ...queued, note: '' }, { sleep }), 'sent');
+  assert.deepEqual(await page.evaluate(() => window.sent), ['']);
+  assert.equal(await page.evaluate(() => window.wrongClicks), 0);
+});
 
 test('a bare request and a request with an approved note reach only the queued profile', async (t) => {
   for (const note of ['', 'Радий знайомству']) {
