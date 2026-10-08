@@ -80,49 +80,17 @@
                 </div>
                 <span class="pill" id="accountRolePill">seller</span>
               </div>
-              <div class="profile-model">
-                <label>
-                  <span>Модель цього користувача</span>
-                  <select id="profileModelSelect" aria-label="Модель цього користувача"></select>
-                </label>
-                <p class="profile-model-note" id="profileModelNote">—</p>
-              </div>
             </section>
 
-            <section class="panel profile-spend">
-              <div class="panel-heading">
-                <div>
-                  <h2>Витрачено кредитів</h2>
-                  <p>За день, останні 30 днів</p>
-                </div>
-                <strong class="profile-figure" id="profileSpendTotal">$0</strong>
-              </div>
-              <div class="profile-chart" id="profileSpendChart"></div>
-              <p class="profile-chart-note" id="profileSpendNote">—</p>
-            </section>
-
-            <section class="panel profile-time">
-              <div class="panel-heading">
-                <div>
-                  <h2>Час у застосунку</h2>
-                  <p>За день, останні 30 днів</p>
-                </div>
-                <strong class="profile-figure" id="profileTimeTotal">0 год</strong>
-              </div>
-              <div class="profile-chart" id="profileTimeChart"></div>
-              <p class="profile-chart-note" id="profileTimeNote">—</p>
-            </section>
-
-            <section class="panel users-panel span-2">
+            <section class="panel users-panel span-2" id="teamPanel" hidden>
               <div class="panel-heading">
                 <div>
                   <h2>Команда</h2>
                   <p id="teamUserNote">База користувачів одна — та, що в CRM.</p>
                 </div>
-                <button class="danger-button" id="logoutBtn" type="button"><i data-lucide="log-out"></i><span>Вийти</span></button>
               </div>
               <div class="team-list" id="teamUserList"></div>
-              <details class="profile-details" id="teamCreatePanel" hidden>
+              <details class="profile-details" id="teamCreatePanel">
                 <summary><span>Створити новий акаунт</span><i data-lucide="chevron-down"></i></summary>
                 <div class="profile-details-body">
                   <p class="profile-chart-note">Потрібно лише тому, кого ще немає в CRM — решта входить своїм акаунтом CRM.</p>
