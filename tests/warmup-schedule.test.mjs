@@ -341,3 +341,48 @@ test("an empty strategy has no days and no phases", () => {
   assert.deepEqual(toDays({ phases: [] }), []);
   assert.deepEqual(fromDays([]), []);
 });
+
+/**
+ * Вікно сесій — те, що тримає акаунт від активності о 04:00. Воно лишається
+ * жорстким у тому сенсі, що має значення: під час роботи його ніщо не рухає, і
+ * агент повз нього не проговориться. Але самі години належать дню оператора, і
+ * 08.10.2026 показати власнику живий прогін означало правити цей файл і
+ * деплоїти двічі. Тож години читаються з середовища — з типовим 9–13 і з
+ * відмовою на все, що не схоже на дві цілі години по порядку.
+ */
+async function windowWith(env) {
+  const before = { ...process.env };
+  Object.assign(process.env, env);
+  try {
+    // Запит у шляху — щоб модуль перечитався: SESSION_WINDOW обчислюється раз,
+    // при завантаженні, рівно як на сервері.
+    const fresh = await import(`../warmup/schedule.mjs?${encodeURIComponent(JSON.stringify(env))}`);
+    return fresh.SESSION_WINDOW;
+  } finally {
+    for (const key of Object.keys(env)) {
+      if (before[key] === undefined) delete process.env[key];
+      else process.env[key] = before[key];
+    }
+  }
+}
+
+test("вікно сесій типово 9–13, і середовище може його посунути", async () => {
+  assert.deepEqual(SESSION_WINDOW, { startHour: 9, endHour: 13 });
+  assert.deepEqual(await windowWith({}), { startHour: 9, endHour: 13 });
+  assert.deepEqual(await windowWith({ WARMUP_SESSION_END_HOUR: "23" }), { startHour: 9, endHour: 23 });
+  assert.deepEqual(
+    await windowWith({ WARMUP_SESSION_START_HOUR: "14", WARMUP_SESSION_END_HOUR: "20" }),
+    { startHour: 14, endHour: 20 }
+  );
+});
+
+test("вікно, яке не схоже на дві години по порядку, ігнорується, а не слухається", async () => {
+  // Ніч не відкривається через одруківку в змінній.
+  assert.deepEqual(await windowWith({ WARMUP_SESSION_START_HOUR: "23", WARMUP_SESSION_END_HOUR: "9" }), { startHour: 9, endHour: 13 });
+  assert.deepEqual(await windowWith({ WARMUP_SESSION_START_HOUR: "пів на десяту" }), { startHour: 9, endHour: 13 });
+  assert.deepEqual(await windowWith({ WARMUP_SESSION_END_HOUR: "25" }), { startHour: 9, endHour: 13 });
+  assert.deepEqual(await windowWith({ WARMUP_SESSION_END_HOUR: "13.5" }), { startHour: 9, endHour: 13 });
+  assert.deepEqual(await windowWith({ WARMUP_SESSION_START_HOUR: "9", WARMUP_SESSION_END_HOUR: "9" }), { startHour: 9, endHour: 13 });
+  // Порожнє — це «не задано», а не нуль.
+  assert.deepEqual(await windowWith({ WARMUP_SESSION_START_HOUR: "  " }), { startHour: 9, endHour: 13 });
+});

@@ -13,8 +13,30 @@
  *
  * `endHour` is the first hour a session may no longer start: 9–13 means the
  * last slot is 12:55.
+ *
+ * Nine to one unless the deployment says otherwise. It is a constant in the
+ * sense that matters — nothing moves it at runtime, and the agent cannot talk
+ * its way past it — but the hours themselves belong to the operator's day, and
+ * on 08.10.2026 showing the owner a live run meant editing this file and
+ * deploying twice. A window that can only be changed by a release is not
+ * safer, it is only harder to use honestly. Values that are not two whole
+ * hours with the start before the end are ignored rather than obeyed: a typo
+ * in an environment variable must not open the night.
  */
-export const SESSION_WINDOW = { startHour: 9, endHour: 13 };
+function windowHour(name, fallback) {
+  const raw = process.env[name];
+  if (raw === undefined || String(raw).trim() === "") return fallback;
+  const hour = Number(raw);
+  return Number.isInteger(hour) && hour >= 0 && hour <= 24 ? hour : fallback;
+}
+
+function configuredWindow() {
+  const startHour = windowHour("WARMUP_SESSION_START_HOUR", 9);
+  const endHour = windowHour("WARMUP_SESSION_END_HOUR", 13);
+  return startHour < endHour ? { startHour, endHour } : { startHour: 9, endHour: 13 };
+}
+
+export const SESSION_WINDOW = configuredWindow();
 
 /** Local time, because the window is the operator's day. */
 export function insideWindow(date = new Date()) {
