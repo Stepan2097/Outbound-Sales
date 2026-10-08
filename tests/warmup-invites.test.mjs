@@ -441,6 +441,69 @@ async function queueOne() {
   return rows.wl_outreach[0].id;
 }
 
+/**
+ * Відповідь на посилання з групи («вже залогінився») живе тут, а не в
+ * tests/warmup-login-check.test.mjs, бо їй потрібен саме цей стуб: підпис
+ * перевіряється без бази, а вердикт — ні. Перший варіант цієї дії поїхав на
+ * прод із `cleanText` із server.mjs, якого в warmup/api.mjs немає, і впав
+ * п'ятисоткою на першому ж натисканні. Тести на дію не було — тепер є.
+ */
+test("вердикт за посиланням із групи пишеться один раз, а повтор відповідає тим самим", async () => {
+  rows.wl_events = [{
+    id: "ev-ask", account_id: "acc-1", type: "login.recheck_requested", level: "info",
+    message: "Попросили перевірити вхід", meta: { nonce: "n-1", issuedAt: Date.now() },
+    created_at: new Date().toISOString()
+  }];
+
+  const first = await call({
+    method: "POST", path: "/api/warmup/agent",
+    body: { action: "login.recheck", accountId: "acc-1", nonce: "n-1", signedIn: false, reason: "сторінка входу" }
+  });
+  assert.equal(first.status, 200);
+  assert.deepEqual(first.payload, { success: true, signedIn: false });
+  const done = rows.wl_events.filter((event) => event.type === "login.recheck_done");
+  assert.equal(done.length, 1);
+  assert.equal(done[0].meta.nonce, "n-1");
+  assert.equal(done[0].meta.signedIn, false);
+  assert.equal(done[0].level, "warn", "«входу не видно» — це рядок, який людина має побачити");
+
+  // Агент повторює звіт, якого не дочекався: відповідь та сама, другого
+  // вердикту не з'являється.
+  const again = await call({
+    method: "POST", path: "/api/warmup/agent",
+    body: { action: "login.recheck", accountId: "acc-1", nonce: "n-1", signedIn: true, reason: "" }
+  });
+  assert.equal(again.status, 200);
+  assert.deepEqual(again.payload, { success: true, already: true, signedIn: false });
+  assert.equal(rows.wl_events.filter((event) => event.type === "login.recheck_done").length, 1);
+});
+
+test("вердикт без запиту і вердикт на чужий акаунт відмовляються, а не пишуться", async () => {
+  rows.wl_events = [{
+    id: "ev-ask-2", account_id: "acc-2", type: "login.recheck_requested", level: "info",
+    message: "Попросили перевірити вхід", meta: { nonce: "n-2" }, created_at: new Date().toISOString()
+  }];
+
+  const unknown = await call({
+    method: "POST", path: "/api/warmup/agent",
+    body: { action: "login.recheck", accountId: "acc-1", nonce: "нема-такого", signedIn: true }
+  });
+  assert.equal(unknown.status, 404);
+
+  const foreign = await call({
+    method: "POST", path: "/api/warmup/agent",
+    body: { action: "login.recheck", accountId: "acc-1", nonce: "n-2", signedIn: true }
+  });
+  assert.equal(foreign.status, 409, "запит належить іншому акаунту");
+
+  const nameless = await call({
+    method: "POST", path: "/api/warmup/agent",
+    body: { action: "login.recheck", accountId: "acc-1", signedIn: true }
+  });
+  assert.equal(nameless.status, 400);
+  assert.equal(rows.wl_events.filter((event) => event.type === "login.recheck_done").length, 0);
+});
+
 test("the allowance moves when the agent says a request really went out", async () => {
   const outreachId = await queueOne();
   const answer = await call({

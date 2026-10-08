@@ -3125,7 +3125,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
        * show a verdict instead of a promise.
        */
       if (action === "login.recheck") {
-        const nonce = cleanText(body.nonce || "");
+        const nonce = String(body.nonce || "").trim();
         if (!nonce) return fail(response, sendJson, 400, "Which request?");
         const { requested, done } = await recheckState(nonce);
         if (!requested) return fail(response, sendJson, 404, "No such login check");
