@@ -62,6 +62,16 @@ export class Portal {
   record(kind, detail, count) { return this.#post({ action: 'record', kind, detail, count }); }
   log(type, message, meta, level) { return this.#post({ action: 'log', type, message, meta, level }); }
   health(health, note) { return this.#post({ action: 'health', health, note }); }
+  /** What somebody asked to have looked at, by opening the link in the group. */
+  async loginChecks() {
+    const answer = await this.#json(`${this.prefix}/login-checks`);
+    if (!answer.success) throw new Error(answer.error || 'Could not read login checks');
+    return Array.isArray(answer.checks) ? answer.checks : [];
+  }
+  /** The verdict for one of them, so the page can stop promising. */
+  loginRecheck(nonce, signedIn, reason = '') {
+    return this.#post({ action: 'login.recheck', nonce, signedIn, reason });
+  }
   warning(note) { return this.#post({ action: 'warning', note }); }
   prepareInvite(outreachId) { return this.#post({ action: 'invite.prepare', outreachId }); }
   inviteSent(outreachId, outcome, leaseId = this.leaseId) { return this.#post({ action: 'invite.sent', outreachId, outcome, leaseId }); }

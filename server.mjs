@@ -600,6 +600,11 @@ async function handleApi(request, response, url) {
       sendJson(response, 401, { success: false, error: "Agent authentication failed." });
       return;
     }
+  } else if (request.method === "GET" && url.pathname === "/api/warmup/login-check") {
+    // Authorised by the signature in its own query, and by nothing else: this
+    // is the link in the warm-up's Telegram group, opened from a phone that
+    // may never have signed in here. The warm-up API holds the key and
+    // refuses anything it did not sign — see warmup/login-check.mjs.
   } else if (url.pathname.startsWith("/api/webhooks/")) {
     const suppliedToken = cleanText(request.headers["x-webhook-token"] || String(request.headers.authorization || "").replace(/^Bearer\s+/i, ""));
     if (!state.transcriptVault || suppliedToken !== decryptSecret(state.transcriptVault)) {

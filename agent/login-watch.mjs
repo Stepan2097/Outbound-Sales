@@ -32,7 +32,7 @@ import { Portal } from './lib/portal.mjs';
 import { AntyApi } from './lib/anty-api.mjs';
 import { Telegram } from './lib/telegram.mjs';
 import { probeLogin } from './lib/login-probe.mjs';
-import { checkParked, normalizeState, RECHECK_MS } from './lib/login-watch.mjs';
+import { answerAsks, checkParked, normalizeState, RECHECK_MS } from './lib/login-watch.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -94,12 +94,16 @@ log(`токен: ${process.env.WARMUP_AGENT_TOKEN?.trim() ? 'є' : 'НЕМА —
 log(telegram.configured
   ? 'Telegram: налаштований (лише надсилання — getUpdates цей вартовий не кличе)'
   : 'Telegram: не налаштований (TELEGRAM_BOT_TOKEN / TELEGRAM_LOGIN_CHAT_ID) — перевіряю молча');
-log(`перевірка акаунтів на паузі: кожні ${Math.round(RECHECK_MS / 60000)} хв, повідомлення в групу — раз на день`);
+log(`перевірка акаунтів на паузі: кожні ${Math.round(RECHECK_MS / 60000)} хв, повідомлення в групу — раз на день;`
+  + ` посилання з групи відповідаю щохвилини`);
 
 let lastReason = null;
 do {
   const state = readState();
   try {
+    // The asks first: somebody is holding a phone with a refreshing page.
+    const asked = await answerAsks({ portal, telegram, probe, log });
+    if (asked.asks) log(`запитів із групи: ${asked.asks}, відновлено ${asked.restored}`);
     const checked = await checkParked({
       portal, telegram, probe, state, today: today(), nowMs: Date.now(), portalUrl: PORTAL, log
     });

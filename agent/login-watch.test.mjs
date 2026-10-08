@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { checkParked, normalizeState, RECHECK_MS } from './lib/login-watch.mjs';
+import { answerAsks, BUTTON_TEXT, checkParked, normalizeState, RECHECK_MS } from './lib/login-watch.mjs';
 import { Telegram } from './lib/telegram.mjs';
 
 // The watch is about two promises to a person: you will be told when a login
@@ -12,15 +12,21 @@ import { Telegram } from './lib/telegram.mjs';
 // the owner's replies to another chat on the same bot. The last test here is
 // the fence around that.
 
-const parked = { id: 'acc-47', label: 'Profile 47 - linkedin', health: 'needs_login', status: 'warming', profileRemoteId: 'remote-47' };
+const parked = { id: 'acc-47', label: 'Profile 47 - linkedin', health: 'needs_login', status: 'warming', profileRemoteId: 'remote-47', loginCheckPath: '/api/warmup/login-check?t=signed' };
 const healthy = { id: 'acc-48', label: 'Profile 48- linkedin', health: 'ok', status: 'warming', profileRemoteId: 'remote-48' };
 const PORTAL = 'https://outbound.example';
 
-function fakePortal(accounts) {
+function fakePortal(accounts, { checks = [] } = {}) {
   return {
     accountId: null,
     written: [],
+    verdicts: [],
     async accounts() { return accounts.map((account) => ({ ...account })); },
+    async loginChecks() { return checks.map((check) => ({ ...check })); },
+    async loginRecheck(nonce, signedIn, reason) {
+      this.verdicts.push({ accountId: this.accountId, nonce, signedIn, reason });
+      return { success: true };
+    },
     async health(health, note) {
       this.written.push({ accountId: this.accountId, health, note });
       return { success: true };
@@ -55,7 +61,7 @@ test('розлогінений акаунт отримує одне повідо
   assert.match(telegram.sent[0].text, /вийшов із LinkedIn/);
   assert.match(telegram.sent[0].text, /кожні 30 хвилин/);
   // Кнопка лише відкриває сторінку: callback_data тут не буває.
-  assert.deepEqual(telegram.sent[0].button, { text: 'Відкрити Outbound', url: PORTAL });
+  assert.deepEqual(telegram.sent[0].button, { text: BUTTON_TEXT, url: `${PORTAL}/api/warmup/login-check?t=signed` });
   // Акаунт, у якого все добре, не чіпаємо взагалі.
   assert.equal(portal.written.length, 0);
 });
@@ -132,6 +138,65 @@ test('стан від старої версії не ламає вартовог
   assert.deepEqual(normalizeState(null), { lastCheck: {}, lastTold: {} });
   assert.deepEqual(normalizeState({ offset: 12, lastCheck: { 'acc-47': '2026-10-08' } }), { lastCheck: {}, lastTold: {} });
   assert.deepEqual(normalizeState({ lastCheck: { a: AT }, lastTold: { a: '2026-10-08' } }), { lastCheck: { a: AT }, lastTold: { a: '2026-10-08' } });
+});
+
+
+// ── посилання з групи ──────────────────────────────────────────────────────
+//
+// Кнопка веде на наш же ендпоінт, він записує запит, а відповідає на нього
+// вартовий — бо браузер є лише в нього. Людина при цьому тримає телефон із
+// сторінкою, яка обновлюється, тож кожен запит мусить отримати вердикт.
+
+test('запит із групи перевіряється одразу, і вердикт повертається порталу', async () => {
+  const portal = fakePortal([parked], { checks: [{ nonce: 'n1', accountId: 'acc-47', requestedAt: '2026-10-08T09:00:00Z' }] });
+  const telegram = fakeTelegram();
+
+  const result = await answerAsks({ portal, telegram, probe: signedIn });
+  assert.deepEqual(result, { asks: 1, restored: 1 });
+  assert.deepEqual(portal.written, [{ accountId: 'acc-47', health: 'ok', note: 'Вхід підтверджено за посиланням із групи.' }]);
+  assert.deepEqual(portal.verdicts, [{ accountId: 'acc-47', nonce: 'n1', signedIn: true, reason: 'feed' }]);
+  assert.match(telegram.sent[0].text, /вхід відновлено/i);
+});
+
+test('натиснули, а входу немає: вердикт усе одно повертається, з паузи нічого не знімається', async () => {
+  const portal = fakePortal([parked], { checks: [{ nonce: 'n2', accountId: 'acc-47' }] });
+  const telegram = fakeTelegram();
+
+  const result = await answerAsks({ portal, telegram, probe: signedOut });
+  assert.deepEqual(result, { asks: 1, restored: 0 });
+  assert.equal(portal.written.length, 0, 'мертву сесію в ротацію не повертаємо');
+  assert.deepEqual(portal.verdicts, [{ accountId: 'acc-47', nonce: 'n2', signedIn: false, reason: 'сторінка входу' }]);
+  assert.match(telegram.sent[0].text, /входу ще не видно/i);
+});
+
+test('профіль, який не відкрився, теж отримує вердикт — із причиною, а не тишею', async () => {
+  const portal = fakePortal([parked], { checks: [{ nonce: 'n3', accountId: 'acc-47' }] });
+  const telegram = fakeTelegram();
+  const broken = async () => { throw new Error('рантайм не відповів'); };
+
+  await answerAsks({ portal, telegram, probe: broken });
+  assert.equal(portal.verdicts.length, 1);
+  assert.equal(portal.verdicts[0].signedIn, false);
+  assert.match(portal.verdicts[0].reason, /рантайм не відповів/);
+});
+
+test('запит на акаунт, якого вже немає, закривається, а не висить вічно', async () => {
+  const portal = fakePortal([healthy], { checks: [{ nonce: 'n4', accountId: 'acc-зник' }] });
+  const telegram = fakeTelegram();
+
+  await answerAsks({ portal, telegram, probe: signedIn });
+  assert.deepEqual(portal.verdicts, [{ accountId: 'acc-зник', nonce: 'n4', signedIn: false, reason: 'акаунта вже немає в прогріві' }]);
+  assert.equal(telegram.sent.length, 0);
+});
+
+test('портал, який не відповів про запити, не ламає коло перевірок', async () => {
+  const portal = fakePortal([parked]);
+  portal.loginChecks = async () => { throw new Error('портал не відповів'); };
+  const telegram = fakeTelegram();
+  const lines = [];
+  const result = await answerAsks({ portal, telegram, probe: signedIn, log: (line) => lines.push(line) });
+  assert.deepEqual(result, { asks: 0, restored: 0 });
+  assert.match(lines.join(' '), /не зміг прочитати запити/);
 });
 
 test('клієнт Telegram уміє лише надсилати: читати оновлення бота нічим', () => {

@@ -14,15 +14,17 @@
  *
  * The decisions, said out loud:
  *
- * - **There is no button that reports back.** There was one, for a day: an
- *   inline callback button, which needs `getUpdates` on the bot. That polling
- *   is exclusive and acknowledges every update up to its offset, so it
- *   swallowed the owner's own replies to a different chat on the same bot.
- *   Telegram offers no way to read only part of a bot's updates — the rest are
- *   dropped, not queued. So the group message carries a **link** button (which
- *   reports nothing to anybody) and the half-hourly check is what resumes the
- *   warm-up: log in, and within thirty minutes the account is back by itself.
- *   A one-tap button can come back the day this has a bot of its own.
+ * - **The button is a link, never a callback.** A Telegram callback needs
+ *   `getUpdates` on the bot; that reading is exclusive and acknowledges every
+ *   update up to its offset, so for half a day it swallowed the owner's own
+ *   replies to another chat on the same bot. A link button tells Telegram
+ *   nothing, so one bot carries both. The link is signed and single-use, the
+ *   portal issues it (`warmup/login-check.mjs`), and opening it records an ask
+ *   that this watch collects within the minute — so "I have logged in" still
+ *   works in one tap, it just travels through our own server instead of
+ *   through the bot.
+ * - **The half-hourly check stands behind the link.** Somebody who logs in and
+ *   taps nothing is noticed anyway, within thirty minutes.
  * - **A recovered account is announced out of turn.** The once-a-day limit is
  *   about nagging, and "it works again" is not nagging.
  * - **Health is written through the portal**, like the agent writes it, so the
@@ -33,6 +35,8 @@
 
 /** How often a parked account is looked at. */
 export const RECHECK_MS = 30 * 60 * 1000;
+
+export const BUTTON_TEXT = 'Вже залогінився — продовжити прогрів';
 
 /** The health values that mean "a person has to go and do something". */
 export const NEEDS_PERSON = ['needs_login', 'captcha'];
@@ -66,15 +70,65 @@ function parkedAmong(accounts) {
   return accounts.filter((account) => NEEDS_PERSON.includes(account.health) && account.profileRemoteId);
 }
 
-async function restore({ portal, telegram, account, who = null, log = () => {} }) {
+async function restore({ portal, telegram, account, asked = false, log = () => {} }) {
   portal.accountId = account.id;
-  const note = who
-    ? `Вхід підтверджено після кнопки в групі (${who}).`
+  const note = asked
+    ? 'Вхід підтверджено за посиланням із групи.'
     : 'Вхід підтверджено щоденною перевіркою.';
   const answer = await portal.health('ok', note);
   if (!answer?.success) throw new Error(`Портал не прийняв health: ${answer?.error || 'без пояснення'}`);
   log(`${account.label}: вхід відновлено — знято з паузи`);
   if (telegram.configured) await telegram.send(`${account.label}: вхід відновлено, прогрів продовжено.`);
+}
+
+
+/**
+ * The asks somebody made by opening the link in the group, answered one at a
+ * time.
+ *
+ * Each one is answered whatever it finds — the page is refreshing while this
+ * runs, and a request left unanswered turns into "перевірка затягнулась" on
+ * somebody's phone. A probe that throws is reported as "no login seen" with
+ * its reason rather than left silent: the person tapped, they get a verdict.
+ */
+export async function answerAsks({ portal, telegram, probe, log = () => {} }) {
+  let asks;
+  try {
+    asks = await portal.loginChecks();
+  } catch (error) {
+    log(`не зміг прочитати запити з групи: ${error.message}`);
+    return { asks: 0, restored: 0 };
+  }
+  if (!asks.length) return { asks: 0, restored: 0 };
+
+  const accounts = await portal.accounts();
+  let restored = 0;
+  for (const ask of asks) {
+    const account = accounts.find((item) => item.id === ask.accountId);
+    if (!account) {
+      portal.accountId = ask.accountId;
+      await portal.loginRecheck(ask.nonce, false, 'акаунта вже немає в прогріві').catch(() => {});
+      continue;
+    }
+    let result;
+    try {
+      result = await probe(account);
+    } catch (error) {
+      result = { signedIn: false, reason: `не вдалося відкрити профіль: ${error.message}` };
+    }
+    if (result.signedIn) {
+      await restore({ portal, telegram, account, asked: true, log });
+      restored += 1;
+    } else {
+      log(`${account.label}: за посиланням із групи входу не видно (${result.reason})`);
+      if (telegram.configured) {
+        await telegram.send(`${account.label}: входу ще не видно (${result.reason}). Перевір, що залогінився саме в цьому профілі.`);
+      }
+    }
+    portal.accountId = account.id;
+    await portal.loginRecheck(ask.nonce, result.signedIn === true, result.reason || '');
+  }
+  return { asks: asks.length, restored };
 }
 
 /**
@@ -113,9 +167,9 @@ export async function checkParked({
     if (telegram.configured) {
       await telegram.send(
         `⚠️ ${account.label}: акаунт вийшов із LinkedIn — прогрів по ньому стоїть.\n`
-        + `Відкрий профіль в Anty і залогінься. Тиснути нічого не треба: перевіряю кожні 30 хвилин `
-        + `і сам продовжу прогрів, коли побачу вхід.`,
-        portalUrl ? { text: 'Відкрити Outbound', url: portalUrl } : null
+        + `Відкрий профіль в Anty, залогінься — і натисни кнопку нижче, щоб я перевірив одразу.\n`
+        + `Можна й не тиснути: перевіряю кожні 30 хвилин і сам продовжу прогрів, коли побачу вхід.`,
+        account.loginCheckPath ? { text: BUTTON_TEXT, url: `${portalUrl}${account.loginCheckPath}` } : null
       );
       announced += 1;
     }

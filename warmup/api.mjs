@@ -19,6 +19,7 @@ import {
 } from "./invites.mjs";
 import { antyTimestampToIso, describeSession, durationMin } from "./sessions.mjs";
 import { encryptSecret, secretsConfigured } from "./secretbox.mjs";
+import { RECHECK_DONE, RECHECK_REQUESTED, issueLoginCheck, readLoginCheck } from "./login-check.mjs";
 import {
   activeRun, checkQuota, commitAction, connectQuotaToday, describeAccount, ensureDefaultStrategy, heldUntil,
   logEvent, loadAccount, loginIdentities, newestRun, openSession, pauseForWarning, probeEventWriteAccess, recordAction,
@@ -829,9 +830,110 @@ function describeThread(thread, { labels, identities, outreach }) {
   };
 }
 
+
+/* ── the link in the group: "I have logged in, carry on" ──────────────────── */
+
+/**
+ * How long a request waits for the watch to answer it. The watch looks every
+ * minute, and one look costs about a minute of browser; past this the page
+ * stops promising and says so.
+ */
+const RECHECK_PATIENCE_MS = 10 * 60_000;
+
+function sendPage(response, status, title, lines, { refresh = 0 } = {}) {
+  const escape = (text) => String(text).replace(/[&<>]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[ch]));
+  const body = `<!doctype html><html lang="uk"><head><meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+${refresh ? `<meta http-equiv="refresh" content="${refresh}" />` : ""}
+<title>${escape(title)}</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center;
+         font: 16px/1.5 -apple-system, "Segoe UI", system-ui, sans-serif; padding: 24px; }
+  main { max-width: 32rem; }
+  h1 { font-size: 1.35rem; margin: 0 0 .75rem; }
+  p { margin: .5rem 0; }
+  small { opacity: .65; }
+</style></head><body><main><h1>${escape(title)}</h1>
+${lines.map((line) => `<p>${escape(line)}</p>`).join("\n")}
+</main></body></html>`;
+  response.writeHead(status, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+  response.end(body);
+}
+
+/** The request this nonce stands for, and the answer if one was written. */
+async function recheckState(nonce) {
+  const [requested, done] = await Promise.all([
+    anty.from("wl_events").select("id,account_id,meta,created_at")
+      .eq("type", RECHECK_REQUESTED).eq("meta->>nonce", nonce).maybeSingle(),
+    anty.from("wl_events").select("id,account_id,meta,created_at")
+      .eq("type", RECHECK_DONE).eq("meta->>nonce", nonce).maybeSingle()
+  ]);
+  return { requested, done };
+}
+
+const RECHECK_REFUSALS = {
+  not_configured: "Сервер не налаштований перевіряти ці посилання.",
+  malformed: "Посилання неповне — скопіюй його з повідомлення цілим.",
+  bad_signature: "Це посилання не наше.",
+  expired: "Посилання застаріло — дочекайся наступного повідомлення в групі."
+};
+
 export async function handleWarmupApi({ request, response, url, sendJson, readJson, campaigns: campaignStore }) {
   const path = url.pathname.replace(/^\/api\/warmup/, "") || "/";
   const method = request.method;
+
+  /**
+   * The link from the group message. No session: the signature is the
+   * authorisation, and the page is for a phone, not for the dashboard.
+   *
+   * It does not check the login itself — nothing here owns a browser. It
+   * records the ask, the watch picks it up within a minute, and this page
+   * shows the answer when it lands. Opening the same link twice is the same
+   * ask, not a second one: the nonce is recorded once.
+   */
+  if (method === "GET" && path === "/login-check") {
+    const read = readLoginCheck(url.searchParams.get("t"));
+    if (!read.ok) {
+      sendPage(response, read.why === "not_configured" ? 503 : 400, "Не можу прийняти посилання",
+        [RECHECK_REFUSALS[read.why] ?? "Посилання не підходить."]);
+      return true;
+    }
+    const account = await loadAccount(read.accountId);
+    if (!account) {
+      sendPage(response, 404, "Акаунта вже немає", ["Цей акаунт прибрали з прогріву."]);
+      return true;
+    }
+
+    const { requested, done } = await recheckState(read.nonce);
+    if (done) {
+      const ok = done.meta?.signedIn === true;
+      sendPage(response, 200, ok ? "Вхід відновлено" : "Входу ще не видно",
+        ok
+          ? [`${account.label}: вхід перевірений, прогрів продовжено.`, "Нічого більше робити не треба."]
+          : [`${account.label}: ${done.meta?.reason || "браузер не побачив входу"}.`,
+             "Перевір, що залогінився саме в цьому профілі в Anty, і відкрий посилання з наступного повідомлення в групі."]);
+      return true;
+    }
+
+    if (!requested) {
+      await logEvent({
+        accountId: account.id, type: RECHECK_REQUESTED,
+        message: `Попросили перевірити вхід за посиланням із групи — ${account.label}`,
+        meta: { nonce: read.nonce, issuedAt: read.issuedAt }
+      });
+    }
+    const waitingSince = Date.parse(requested?.created_at ?? "") || Date.now();
+    const tooLong = Date.now() - waitingSince > RECHECK_PATIENCE_MS;
+    sendPage(response, 200, tooLong ? "Перевірка затягнулась" : "Прийняв — перевіряю вхід",
+      tooLong
+        ? [`${account.label}: запит прийнятий, але відповіді від агента досі немає.`,
+           "Схоже, агент прогріву не працює. Скажи про це в чаті розробки."]
+        : [`${account.label}: відкриваю профіль і дивлюсь, чи є вхід.`,
+           "Це займає до хвилини. Сторінка обновиться сама, а відповідь прийде і в групу."],
+      { refresh: tooLong ? 0 : 10 });
+    return true;
+  }
 
   /**
    * The campaigns, migrating Phase 1's single targeting on the first read.
@@ -2601,8 +2703,52 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
     // agent token reaches it, and deliberately thin — ids, names and the linked
     // profile, nothing about proxies, no secrets and nothing from the CRM. A
     // token sitting on somebody's laptop is not a copy of the workspace.
+    /**
+     * What somebody asked to have looked at, by opening the link in the group.
+     *
+     * The page cannot check a login — it owns no browser — so it records the
+     * ask and this is where the watch collects it. Only the unanswered ones,
+     * and only from today: a request nobody got to in a day is stale, and the
+     * daily check covers that account anyway.
+     */
+    if (method === "GET" && path === "/agent/login-checks") {
+      const since = new Date(Date.now() - 24 * 60 * 60_000).toISOString();
+      const asked = await anty.from("wl_events").select("id,account_id,meta,created_at")
+        .eq("type", RECHECK_REQUESTED).gte("created_at", since)
+        .order("created_at", { ascending: true }).limit(50).rows();
+      const answered = new Set((await anty.from("wl_events").select("meta")
+        .eq("type", RECHECK_DONE).gte("created_at", since).limit(200).rows())
+        .map((row) => String(row.meta?.nonce ?? "")));
+      sendJson(response, 200, {
+        success: true,
+        checks: asked
+          .filter((row) => row.meta?.nonce && !answered.has(String(row.meta.nonce)))
+          .map((row) => ({ nonce: String(row.meta.nonce), accountId: row.account_id, requestedAt: row.created_at }))
+      });
+      return true;
+    }
+
     if (method === "GET" && path === "/agent/accounts") {
       const rows = await anty.from("wl_accounts").select("id,label,login,profile_remote_id,status,health").rows();
+      /**
+       * The signed link for an account that needs a person, made here rather
+       * than by the agent: the key is the portal's, and the agent image does
+       * not carry this folder at all. A path, not a URL — the watch knows
+       * which address of this portal it is allowed to publish.
+       *
+       * A fresh nonce on every read is deliberate: each message carries its
+       * own single-use link, so yesterday's link in the chat cannot be the one
+       * that answers today's question.
+       */
+      const linkFor = (row) => {
+        if (!["needs_login", "captcha"].includes(row.health)) return null;
+        try {
+          return `/api/warmup/login-check?t=${encodeURIComponent(issueLoginCheck(row.id))}`;
+        } catch {
+          // No token configured to sign with: the watch simply sends no button.
+          return null;
+        }
+      };
       sendJson(response, 200, {
         success: true,
         accounts: rows.map((row) => ({
@@ -2611,7 +2757,8 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           login: row.login,
           profileRemoteId: row.profile_remote_id,
           status: row.status,
-          health: row.health
+          health: row.health,
+          loginCheckPath: linkFor(row)
         }))
       });
       return true;
@@ -2971,6 +3118,39 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
 
       // The agent is the only thing that ever sees a checkpoint or a sign-out at
       // the moment it happens, so it is the only thing that can set this honestly.
+      /**
+       * The answer to a link somebody opened in the group. Health itself is
+       * reported by the `health` action, like any other look at an account —
+       * this only closes the request, so the page can stop refreshing and
+       * show a verdict instead of a promise.
+       */
+      if (action === "login.recheck") {
+        const nonce = cleanText(body.nonce || "");
+        if (!nonce) return fail(response, sendJson, 400, "Which request?");
+        const { requested, done } = await recheckState(nonce);
+        if (!requested) return fail(response, sendJson, 404, "No such login check");
+        if (requested.account_id !== account.id) return fail(response, sendJson, 409, "That login check belongs to another account");
+        // Answered already: say so rather than writing a second verdict, so a
+        // retried report reads the same as the first.
+        if (done) {
+          sendJson(response, 200, { success: true, already: true, signedIn: done.meta?.signedIn === true });
+          return true;
+        }
+        const signedIn = body.signedIn === true;
+        const reason = typeof body.reason === "string" ? body.reason.slice(0, 200) : "";
+        await logEvent({
+          accountId: account.id,
+          level: signedIn ? "info" : "warn",
+          type: RECHECK_DONE,
+          message: signedIn
+            ? `Вхід підтверджено за посиланням із групи — ${account.label}`
+            : `За посиланням із групи входу не видно (${reason || "без причини"}) — ${account.label}`,
+          meta: { nonce, signedIn, reason }
+        });
+        sendJson(response, 200, { success: true, signedIn });
+        return true;
+      }
+
       if (action === "health") {
         if (!isHealth(body.health)) return fail(response, sendJson, 400, "Unknown health value");
         const note = typeof body.note === "string" ? body.note.slice(0, 300) : null;
