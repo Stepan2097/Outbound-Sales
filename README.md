@@ -1,16 +1,33 @@
 # Outbound Sales OS
 
-A workspace for warming LinkedIn accounts and sending connection requests to
-people from CRM folders, reading what they answer, and keeping one history per
-person — in the CRM as well as here.
+## Що це і навіщо
+
+Головна ціль — **холодна розсилка**, і все тут збудоване навколо неї, щоб
+спростити цей процес від початку до кінця:
+
+1. **Вибрати базу контактів** — це має бути легко: кампанія бере людей із
+   папки в CRM.
+2. **ШІ допомагає написати листи** — у картці контакту чернетки повідомлень
+   для LinkedIn, пошти й Telegram, під продукт і мову.
+3. **Скрипт гріє LinkedIn-акаунти** — щодня, за розкладом, щоб акаунти жили
+   як люди і їм можна було довіряти розсилку.
+4. **Скрипт розсилає** — запити в друзі людям із папки, у межах денної норми
+   кожного акаунта.
+5. **Показує, що відповіли** — усі відповіді з усіх акаунтів в одному місці,
+   на екрані «Вхідні».
+6. **Усе записується у відомість про контакт** — кожен запит (і записка, якщо
+   була), кожне наше повідомлення і кожна відповідь лягають рядком у картку
+   людини в CRM.
+
+Що не допомагає цьому процесу, в інтерфейсі не тримається.
 
 ## Інтерфейс — чотири екрани
 
 **Прогрів** (where it opens) — the accounts, what each did today and does next,
 and the campaign that feeds them people from a CRM folder. **Вхідні** — the
 replies from every account, unread first. **Контакти** — the CRM: folders, a
-page of people, one person's card with their LinkedIn history. **Налаштування**
-— users, your password.
+page of people, one person's card with their LinkedIn history and the drafts the
+model writes for them. **Налаштування** — users, your password.
 
 That is the whole menu, on purpose. On 08.10.2026 the owner asked for
 everything superfluous to go (task 87001c96), and it went: the lead workspace

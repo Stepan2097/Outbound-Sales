@@ -512,7 +512,7 @@ function openWarmupCampaignForm(campaignId = null) {
   // «Редагувати» on another campaign selects it, and the open account's queue
   // has to follow — whether the folder feeds it was read for the one before.
   if (moved) refreshWarmupAccountQueue();
-  document.getElementById("warmupCampaignName")?.focus();
+  document.getElementById("warmupFolderSelect")?.focus();
 }
 
 function closeWarmupCampaignForm() {
