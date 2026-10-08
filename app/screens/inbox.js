@@ -1,26 +1,33 @@
-// Вхідні — the replies from every warm-up account, unread first, and the
-// unread count on the menu item.
+// Вхідні — the replies from every warm-up account on one screen: unread first,
+// then the newest, each row saying who wrote, which account it reached and the
+// last thing said. A row opens the conversation, and the conversation opens
+// the person's card in «Контакти». The unread count sits on the menu item.
 
 import {
-  authState, escapeAttr, escapeHtml, onScreen, refreshIcons, state, uaPlural
+  authState, escapeAttr, escapeHtml, onScreen, onWorkspaceEnter, refreshIcons, uaPlural
 } from "../core.js";
+import {
+  showContactCard
+} from "../screens/contacts.js";
 import {
   WARMUP_OUTREACH_LABEL, WARMUP_OUTREACH_TONE, renderWarmupProfiles, warmupApi, warmupCount, warmupState
 } from "../screens/warmup-accounts.js";
 
 onScreen("inbox", { open: () => loadWarmupInbox() });
 
+// The count is wanted the moment somebody is inside, on whatever screen they
+// landed — not only when this one is opened.
+onWorkspaceEnter(() => refreshWarmupBadge());
+
 /** A run is roughly daily, so a gap longer than this is a stopped agent. */
 const WARMUP_SYNC_STALE_HOURS = 36;
 
 /**
- * How many threads the panel shows before it offers the rest. The inbox leads
- * this screen; it is not supposed to swallow it. Twenty-two conversations at
- * full height push the campaigns panel and its forecast off the bottom of the
- * page, which is the same harm as shrinking them by a different route. Unread
- * sorts first, so the ones above the fold are the ones that were waiting.
+ * The one account the list is narrowed to, set when somebody follows the
+ * "new replies" badge on that account's row in «Прогрів». Null is every account,
+ * and is what the screen opens on.
  */
-const WARMUP_INBOX_PREVIEW = 8;
+let inboxAccountFilter = null;
 
 /** How long ago, said the way a person would say it. */
 function warmupAgo(iso) {
@@ -116,19 +123,19 @@ function warmupParticipantUnnamed(participant) {
 
 /** Who wrote, or an honest admission that nobody here knows. */
 function warmupParticipantName(participant) {
-  if (warmupParticipantUnnamed(participant)) return "Хтось, кого цей тред не називає";
+  if (warmupParticipantUnnamed(participant)) return "Без імені";
   return String(participant.name).trim();
 }
 
 /**
- * Why there is no name, which has two ordinary causes that look identical by
- * the time they reach this screen: LinkedIn withholding it on a restricted or
- * out-of-network profile, and the agent failing to read it. Worth saying,
- * because only the second one is a fault.
+ * Why there is no name: LinkedIn withholds it on a restricted or out-of-network
+ * profile, or the agent failed to read it. Worth saying, because only the
+ * second one is a fault — and that this thread is deliberately not matched to
+ * anybody in the CRM.
  */
 function warmupParticipantNameAttr(participant) {
   return warmupParticipantUnnamed(participant)
-    ? ' title="LinkedIn не показав імені цієї людини — зазвичай це закритий профіль або профіль поза мережею, іноді невдале зчитування. Цей тред навмисно не зіставлено ні з ким у CRM."'
+    ? ' title="LinkedIn не показав імені: зазвичай це закритий профіль, іноді невдале зчитування. Цей тред навмисно не зіставлено ні з ким у CRM."'
     : "";
 }
 
@@ -145,6 +152,12 @@ function warmupThreadAccount(thread) {
   const label = String(thread?.accountLabel || "").trim();
   if (label) return { name: label, exact: false };
   return { name: "акаунт, який цей портал не може назвати", exact: false };
+}
+
+function warmupAccountTitle(account) {
+  return account.exact
+    ? "Особа, під якою залогінений цей акаунт"
+    : "Назва профілю в Anty — цей портал не знає, під ким залогінений цей акаунт";
 }
 
 /**
@@ -186,56 +199,59 @@ function warmupInboxSync() {
   };
 }
 
-/** The accounts that have never been read, said as a sentence or not at all. */
-function warmupSyncGapHtml(sync) {
-  if (sync.accountsTotal === null || sync.accountsSynced === null) return "";
-  if (sync.accountsSynced >= sync.accountsTotal) return "";
-  const missing = sync.accountsTotal - sync.accountsSynced;
-  return `<div class="warmup-inbox-note is-warn">
-    <strong>${warmupCount(missing)} з ${warmupCount(sync.accountsTotal)} ${uaPlural(sync.accountsTotal, "акаунта", "акаунтів", "акаунтів")} ще не читали — їхніх відповідей тут немає</strong>
-  </div>`;
-}
-
 /**
- * The empty inbox, which is the screen this panel will show most often until
- * the agent runs against real LinkedIn — so it is the part that has to be
- * right. Each branch says which of the two empties this is.
+ * The one thing about the reading that a seller has to know, or nothing. The
+ * list is only as good as the last time somebody read the inboxes, so the three
+ * ways it can be wrong — never read, read long ago, some accounts never read —
+ * are one sentence each, and at most one of them is shown: the worst.
  */
-function warmupInboxEmptyHtml() {
-  const inbox = warmupState.inbox;
-
-  if (inbox.unreadOnly) {
-    return `<div class="warmup-inbox-note is-calm">
-      <strong>Непрочитаного немає.</strong>
-      <span>Усе, що надійшло, уже відкривали. <button class="warmup-inbox-link" type="button" data-warmup-inbox-showall>Показати всі треди</button>, щоб перечитати.</span>
-    </div>`;
-  }
-
-  const sync = warmupInboxSync();
-
-  if (!sync.known) {
-    return `<div class="warmup-inbox-note is-warn">
-      <strong>Відповідей немає, але невідомо, коли вхідні читали востаннє.</strong>
-    </div>`;
-  }
-
-  if (!sync.lastSyncedAt) {
+function warmupInboxNoteHtml(sync) {
+  if (sync.known && !sync.lastSyncedAt) {
     return `<div class="warmup-inbox-note is-bad">
       <strong>Вхідні ще жодного разу не читали.</strong>
       <span>Перевір, що агент працює і його токен заданий.</span>
     </div>`;
   }
-
   if (sync.stale) {
     return `<div class="warmup-inbox-note is-warn">
       <strong>Вхідні не читали ${escapeHtml(warmupAgo(sync.lastSyncedAt))} — схоже, агент зупинився.</strong>
     </div>`;
   }
+  if (sync.accountsTotal !== null && sync.accountsSynced !== null && sync.accountsSynced < sync.accountsTotal) {
+    const missing = sync.accountsTotal - sync.accountsSynced;
+    return `<div class="warmup-inbox-note is-warn">
+      <strong>${warmupCount(missing)} з ${warmupCount(sync.accountsTotal)} ${uaPlural(sync.accountsTotal, "акаунта", "акаунтів", "акаунтів")} ще не читали — їхніх відповідей тут немає.</strong>
+    </div>`;
+  }
+  return "";
+}
 
+/** The empty inbox, which says which of its two empties this is. */
+function warmupInboxEmptyHtml(sync) {
+  const note = warmupInboxNoteHtml(sync);
+  if (note) return note;
+  if (!sync.known) {
+    return `<div class="warmup-inbox-note is-warn">
+      <strong>Відповідей немає, але невідомо, коли вхідні читали востаннє.</strong>
+    </div>`;
+  }
   return `<div class="warmup-inbox-note is-calm">
-    <strong>Нових відповідей немає.</strong>
+    <strong>Відповідей поки немає.</strong>
     <span>Читали ${escapeHtml(warmupAgo(sync.lastSyncedAt))}.</span>
   </div>`;
+}
+
+/**
+ * The list as it is drawn: unread first, then the newest, and — when somebody
+ * followed a badge from one account's row — only that account's. A reply that
+ * is waiting must be the first thing on the screen whichever account it reached,
+ * which is why this is one list and not one list per account.
+ */
+function warmupInboxRows() {
+  const sentAt = (thread) => Date.parse(thread?.lastMessage?.sentAt || "") || 0;
+  return warmupState.inbox.threads
+    .filter((thread) => !inboxAccountFilter || thread.accountId === inboxAccountFilter)
+    .sort((left, right) => Number(Boolean(right.unread)) - Number(Boolean(left.unread)) || sentAt(right) - sentAt(left));
 }
 
 function warmupThreadRowHtml(thread) {
@@ -244,9 +260,6 @@ function warmupThreadRowHtml(thread) {
   const account = warmupThreadAccount(thread);
   const last = thread.lastMessage || {};
   const inbound = last.direction !== "out";
-  // No "на <account>" here any more: the rows sit under a heading that names
-  // the account, and repeating it on every row is what made a thread look like
-  // it belonged to whoever was printed last.
   return `
     <button class="warmup-thread ${thread.unread ? "is-unread" : ""}" type="button"
       data-warmup-thread="${escapeAttr(thread.threadKey || "")}"
@@ -256,6 +269,10 @@ function warmupThreadRowHtml(thread) {
       <span class="warmup-thread-who">
         <strong${warmupParticipantNameAttr(participant)}>${escapeHtml(name)}</strong>
         ${participant.headline ? `<span class="warmup-subtle">${escapeHtml(participant.headline)}</span>` : ""}
+        <span class="warmup-identity" title="${escapeAttr(warmupAccountTitle(account))}">
+          <i data-lucide="${account.exact ? "badge-check" : "circle-help"}"></i>
+          <span>${escapeHtml(account.name)}</span>
+        </span>
       </span>
       <span class="warmup-thread-preview">
         <span class="warmup-thread-from">${inbound ? "Написали нам" : "Писали ми"}:</span>
@@ -267,72 +284,30 @@ function warmupThreadRowHtml(thread) {
     </button>`;
 }
 
-/**
- * The account a group of threads arrived on, taken from the server's summary
- * when it is there and from the threads themselves when it is not — an older
- * server that answers without the summary still groups correctly.
- */
-function warmupInboxAccount(accountId, threads) {
-  const summary = warmupState.inbox.accounts.find((account) => account.accountId === accountId);
-  if (summary?.identity) return { name: summary.identity, exact: true };
-  if (summary?.label) return { name: summary.label, exact: false };
-  return warmupThreadAccount(threads[0] || { accountId });
+/** The name an account goes by on this screen, from the server's summary or a thread of its own. */
+function warmupInboxAccountName(accountId) {
+  const inbox = warmupState.inbox;
+  const summary = inbox.accounts.find((account) => account.accountId === accountId);
+  if (summary?.identity) return summary.identity;
+  if (summary?.label) return summary.label;
+  const thread = inbox.threads.find((row) => row.accountId === accountId);
+  return thread ? warmupThreadAccount(thread).name : "цей акаунт";
 }
 
-/** How many of this account's threads are unread, whatever the list is filtering. */
+/** How many of this account's threads are unread — the number on its row in «Прогрів». */
 export function warmupInboxUnreadFor(accountId) {
   const summary = warmupState.inbox.accounts.find((account) => account.accountId === accountId);
   if (summary) return Number(summary.unread) || 0;
   return warmupState.inbox.threads.filter((thread) => thread.accountId === accountId && thread.unread).length;
 }
 
-/**
- * The list, grouped by the account each reply arrived on.
- *
- * Which login somebody answered is the first thing a seller needs and the last
- * thing the flat list gave them: five accounts' conversations interleaved by
- * time, each naming its account in small print under a stranger's name. A
- * heading per account says it once, and carries that account's unread count so
- * the fresh reply is visible before any row is read.
- */
-function warmupThreadGroupsHtml(threads) {
-  const order = [];
-  const byAccount = new Map();
-  for (const thread of threads) {
-    const id = thread.accountId || "";
-    if (!byAccount.has(id)) {
-      byAccount.set(id, []);
-      order.push(id);
-    }
-    byAccount.get(id).push(thread);
-  }
-
-  return order.map((accountId) => {
-    const held = byAccount.get(accountId);
-    const account = warmupInboxAccount(accountId, held);
-    const unread = warmupInboxUnreadFor(accountId);
-    const title = account.exact
-      ? "Особа, під якою залогінений цей акаунт"
-      : "Назва профілю в Anty — цей портал не знає, під ким залогінений цей акаунт";
-
-    return `<section class="warmup-thread-group" id="${escapeAttr(warmupInboxAnchor(accountId))}">
-      <h3 class="warmup-thread-group-head">
-        <span class="warmup-identity" title="${escapeAttr(title)}">
-          <i data-lucide="${account.exact ? "badge-check" : "circle-help"}"></i>
-          <span>${escapeHtml(account.name)}</span>
-        </span>
-        ${unread
-          ? `<span class="warmup-group-unread">${warmupCount(unread)} ${uaPlural(unread, "нова відповідь", "нові відповіді", "нових відповідей")}</span>`
-          : '<span class="warmup-subtle">усе прочитано</span>'}
-      </h3>
-      <div class="warmup-threads">${held.map((thread) => warmupThreadRowHtml(thread)).join("")}</div>
-    </section>`;
-  }).join("");
-}
-
-/** The id a group heading carries, so the accounts table can jump to it. */
-function warmupInboxAnchor(accountId) {
-  return `warmupInboxAccount-${String(accountId || "none").replace(/[^A-Za-z0-9_-]/g, "")}`;
+/** Said while the list is narrowed to one account, with the way back to all of them. */
+function warmupInboxFilterHtml() {
+  if (!inboxAccountFilter) return "";
+  return `<div class="warmup-inbox-filter">
+    <span>Тільки відповіді, що надійшли на <strong>${escapeHtml(warmupInboxAccountName(inboxAccountFilter))}</strong></span>
+    <button class="warmup-inbox-link" type="button" data-warmup-inbox-allaccounts>Показати всі акаунти</button>
+  </div>`;
 }
 
 function warmupMessageHtml(message, participantName, accountName) {
@@ -349,8 +324,9 @@ function warmupMessageHtml(message, participantName, accountName) {
 
 /**
  * One conversation, oldest first. Above it the things that make a reply
- * actionable: who wrote, where to find them, which account holds the thread,
- * and where that person stands in the outreach they were part of.
+ * actionable: who wrote, the card of that person in «Контакти», where to find
+ * them on LinkedIn, which account holds the thread, and where that person stands
+ * in the outreach they were part of.
  */
 function warmupThreadViewHtml() {
   const inbox = warmupState.inbox;
@@ -372,10 +348,8 @@ function warmupThreadViewHtml() {
   const account = warmupThreadAccount(thread);
   const link = warmupProfileUrl(participant.slug);
   const status = String(thread.outreachStatus || "").trim();
+  const contactId = thread.crmContactId ? String(thread.crmContactId) : "";
   const messages = Array.isArray(inbox.open.messages) ? inbox.open.messages : [];
-  const accountTitle = account.exact
-    ? "Особа, під якою залогінений цей акаунт"
-    : "Назва профілю в Anty — цей портал не знає, під ким залогінений цей акаунт";
 
   const head = `
     <div class="warmup-thread-head">
@@ -383,18 +357,21 @@ function warmupThreadViewHtml() {
       <div class="warmup-thread-head-who">
         <strong${warmupParticipantNameAttr(participant)}>${escapeHtml(name)}</strong>
         ${participant.headline ? `<span class="warmup-subtle">${escapeHtml(participant.headline)}</span>` : ""}
+        ${contactId
+          ? `<button class="text-button" type="button" data-warmup-contact="${escapeAttr(contactId)}"><i data-lucide="contact"></i><span>Картка контакту</span></button>`
+          : '<span class="warmup-subtle">у CRM цієї людини не знайдено</span>'}
         ${link
           ? `<a href="${escapeAttr(link)}" target="_blank" rel="noreferrer noopener"><i data-lucide="external-link"></i><span>їхній LinkedIn</span></a>`
-          : '<span class="warmup-subtle">з цим тредом не прийшло посилання на профіль</span>'}
+          : ""}
       </div>
       <div class="warmup-thread-head-meta">
-        <span class="warmup-identity" title="${escapeAttr(accountTitle)}">
+        <span class="warmup-identity" title="${escapeAttr(warmupAccountTitle(account))}">
           <i data-lucide="${account.exact ? "badge-check" : "circle-help"}"></i>
           <span>надійшло на ${escapeHtml(account.name)}</span>
         </span>
         ${status
           ? `<span class="pill ${WARMUP_OUTREACH_TONE[status] || "tone-muted"}">${escapeHtml(WARMUP_OUTREACH_LABEL[status] || status)}</span>`
-          : '<span class="warmup-subtle">не зіставлено ні з ким, до кого цей акаунт звертався</span>'}
+          : ""}
       </div>
     </div>`;
 
@@ -407,29 +384,25 @@ function warmupThreadViewHtml() {
 
   return `${head}
     <ol class="warmup-messages">${messages.map((message) => warmupMessageHtml(message, name, account.name)).join("")}</ol>
-    <p class="warmup-thread-foot">Тут можна тільки читати. Відповідь іде з живого акаунта живій людині, тож потребує власного поводження з квотою — у цій фазі її немає, відповідай із самого акаунта.</p>`;
+    <p class="warmup-thread-foot">Тут можна тільки читати: відповідь іде з самого акаунта.</p>`;
 }
 
 export function renderWarmupInbox() {
   const title = document.getElementById("warmupInboxTitle");
   const subtitle = document.getElementById("warmupInboxSubtitle");
   const pill = document.getElementById("warmupInboxPill");
-  const toggleLabel = document.getElementById("warmupInboxUnreadLabel");
-  const toggle = document.getElementById("warmupInboxUnreadOnly");
   const body = document.getElementById("warmupInboxBody");
   if (!body || !title || !subtitle) return;
 
   const inbox = warmupState.inbox;
-  if (toggle) toggle.checked = inbox.unreadOnly;
   renderWarmupNavBadge();
 
-  // A thread is open: the panel becomes that conversation, and the controls
-  // that belong to the list step out of the way rather than filter nothing.
+  // A thread is open: the panel becomes that conversation, and the pill that
+  // belongs to the list steps out of the way.
   if (inbox.openThreadKey !== null) {
     const open = inbox.open?.thread?.participant;
     title.textContent = open ? `Вхідні · ${warmupParticipantName(open)}` : "Вхідні · одна розмова";
     subtitle.textContent = "Розмова такою, як її прочитав агент, від найстарішого";
-    if (toggleLabel) toggleLabel.hidden = true;
     if (pill) pill.hidden = true;
     body.innerHTML = warmupThreadViewHtml();
     refreshIcons();
@@ -437,7 +410,6 @@ export function renderWarmupInbox() {
   }
 
   title.textContent = "Вхідні";
-  if (toggleLabel) toggleLabel.hidden = false;
   if (pill) pill.hidden = false;
 
   if (pill) {
@@ -454,23 +426,8 @@ export function renderWarmupInbox() {
       pill.className = "pill tone-live";
       pill.textContent = `${warmupCount(inbox.unread)} ${uaPlural(inbox.unread, "непрочитана", "непрочитані", "непрочитаних")}`;
     } else {
-      // With nothing unread the pill stops counting and starts reporting on the
-      // reading, because "nothing yet" beside a panel saying nothing has ever
-      // looked is the calm half of the very distinction this panel exists for.
-      const state = warmupInboxSync();
-      if (state.known && !state.lastSyncedAt) {
-        pill.className = "pill tone-bad";
-        pill.textContent = "жодного разу не читали";
-      } else if (state.stale) {
-        pill.className = "pill tone-warn";
-        pill.textContent = "давно не читали";
-      } else if (!state.known && !inbox.threads.length) {
-        pill.className = "pill tone-warn";
-        pill.textContent = "невідомо, чи читали";
-      } else {
-        pill.className = "pill tone-muted";
-        pill.textContent = inbox.threads.length ? "усе прочитано" : "поки нічого";
-      }
+      pill.className = "pill tone-muted";
+      pill.textContent = inbox.threads.length ? "усе прочитано" : "поки нічого";
     }
   }
 
@@ -503,37 +460,21 @@ export function renderWarmupInbox() {
   const sync = warmupInboxSync();
   // Three answers, not two: read at a time, never read, and not reported. The
   // subtitle must not turn the third into the second.
-  const read = sync.lastSyncedAt
+  subtitle.textContent = sync.lastSyncedAt
     ? `читали ${warmupAgo(sync.lastSyncedAt)}`
     : (sync.known ? "ще не читали" : "");
 
-  if (!inbox.threads.length) {
-    subtitle.textContent = inbox.unreadOnly ? "Тільки непрочитані" : read;
-    body.innerHTML = warmupInboxEmptyHtml();
+  const rows = warmupInboxRows();
+  if (!rows.length) {
+    body.innerHTML = `${warmupInboxFilterHtml()}${inboxAccountFilter
+      ? '<div class="warmup-inbox-note is-calm"><strong>Від цього акаунта відповідей немає.</strong></div>'
+      : warmupInboxEmptyHtml(sync)}`;
     refreshIcons();
     return;
   }
 
-  // The groups below already name each account and count what is new; the
-  // subtitle only says when the inbox was last read.
-  subtitle.textContent = read;
-
-  const shown = inbox.showAll ? inbox.threads : inbox.threads.slice(0, WARMUP_INBOX_PREVIEW);
-  const hidden = inbox.threads.length - shown.length;
-  // Collapsing must never hide a waiting reply quietly, so the button says how
-  // many of what it is holding back are still unread.
-  const hiddenUnread = hidden > 0
-    ? inbox.threads.slice(shown.length).filter((thread) => thread.unread).length
-    : 0;
-  const more = hidden > 0
-    ? `<button class="warmup-inbox-more" type="button" data-warmup-inbox-expand>Показати ще ${warmupCount(hidden)} ${uaPlural(hidden, "розмову", "розмови", "розмов")}${hiddenUnread ? ` · ${warmupCount(hiddenUnread)} досі непрочитаних` : ""}</button>`
-    : (inbox.showAll && inbox.threads.length > WARMUP_INBOX_PREVIEW
-      ? '<button class="warmup-inbox-more" type="button" data-warmup-inbox-collapse>Показати менше</button>'
-      : "");
-
-  body.innerHTML = `${warmupSyncGapHtml(sync)}
-    ${warmupThreadGroupsHtml(shown)}
-    ${more}`;
+  body.innerHTML = `${warmupInboxNoteHtml(sync)}${warmupInboxFilterHtml()}
+    <div class="warmup-threads">${rows.map((thread) => warmupThreadRowHtml(thread)).join("")}</div>`;
   refreshIcons();
 }
 
@@ -594,12 +535,9 @@ export function startWarmupBadge() {
 
 export async function loadWarmupInbox() {
   const inbox = warmupState.inbox;
-  const params = new URLSearchParams();
-  if (inbox.unreadOnly) params.set("unread", "1");
-  const query = params.toString();
 
   try {
-    const payload = await warmupApi(`/inbox${query ? `?${query}` : ""}`);
+    const payload = await warmupApi("/inbox");
     inbox.threads = Array.isArray(payload.threads) ? payload.threads : [];
     inbox.accounts = Array.isArray(payload.accounts) ? payload.accounts : [];
     inbox.unread = Number.isFinite(payload.unread) ? payload.unread : 0;
@@ -657,8 +595,8 @@ async function markWarmupThreadRead(accountId, threadKey) {
 
   if (thread) thread.unread = false;
   warmupState.inbox.unread = Math.max(0, (warmupState.inbox.unread || 0) - 1);
-  // The account this thread arrived on is one reply less busy, on the heading
-  // above it and on its row in the table alike.
+  // The account this thread arrived on is one reply less busy, on the accounts
+  // table's row as well as here.
   const summary = warmupState.inbox.accounts.find((account) => account.accountId === accountId);
   if (summary) summary.unread = Math.max(0, (Number(summary.unread) || 0) - 1);
   if (warmupState.profiles.length) renderWarmupProfiles();
@@ -723,27 +661,18 @@ function closeWarmupThread() {
 }
 
 /**
- * Show one account's replies in the inbox below, from the badge on its row.
+ * Show one account's replies, from the badge on its row in «Прогрів».
  *
- * Nothing is filtered away: the other accounts stay where they are, the list is
- * expanded so the group cannot be one of the ones collapsing hid, and the page
- * is moved to it. A seller who clicks "2 нові відповіді" should land on those
- * two threads without losing the rest of the screen.
+ * The badge says "2 нові відповіді" for that account; following it lands on this
+ * screen narrowed to that account, with a line saying so and the way back to all
+ * of them. Opening the screen loads the list, and the narrowing is applied to it.
  */
 export function showWarmupInboxAccount(accountId) {
   if (!accountId) return;
-  const inbox = warmupState.inbox;
-  if (inbox.openThreadKey !== null) closeWarmupThread();
-  inbox.showAll = true;
+  if (warmupState.inbox.openThreadKey !== null) closeWarmupThread();
+  inboxAccountFilter = accountId;
+  document.querySelector('.nav-item[data-view="inbox"]')?.click();
   renderWarmupInbox();
-
-  const group = document.getElementById(warmupInboxAnchor(accountId));
-  if (!group) return;
-  group.scrollIntoView({ behavior: "smooth", block: "start" });
-  // A brief mark, because a smooth scroll ending on one of several headings
-  // does not by itself say which one was asked for.
-  group.classList.add("is-called");
-  setTimeout(() => group.classList.remove("is-called"), 2000);
 }
 
 document.getElementById("warmupInboxRefreshBtn")?.addEventListener("click", () => {
@@ -755,33 +684,19 @@ document.getElementById("warmupInboxRefreshBtn")?.addEventListener("click", () =
   loadWarmupInbox();
 });
 
-document.getElementById("warmupInboxUnreadOnly")?.addEventListener("change", (event) => {
-  warmupState.inbox.unreadOnly = Boolean(event.target.checked);
-  warmupState.inbox.ready = false;
-  renderWarmupInbox();
-  loadWarmupInbox();
-});
-
 document.getElementById("warmupInboxBody")?.addEventListener("click", (event) => {
   if (event.target.closest("[data-warmup-inbox-back]")) {
     closeWarmupThread();
     return;
   }
-  if (event.target.closest("[data-warmup-inbox-expand]")) {
-    warmupState.inbox.showAll = true;
+  if (event.target.closest("[data-warmup-inbox-allaccounts]")) {
+    inboxAccountFilter = null;
     renderWarmupInbox();
     return;
   }
-  if (event.target.closest("[data-warmup-inbox-collapse]")) {
-    warmupState.inbox.showAll = false;
-    renderWarmupInbox();
-    return;
-  }
-  if (event.target.closest("[data-warmup-inbox-showall]")) {
-    warmupState.inbox.unreadOnly = false;
-    warmupState.inbox.ready = false;
-    renderWarmupInbox();
-    loadWarmupInbox();
+  const contact = event.target.closest("[data-warmup-contact]");
+  if (contact) {
+    showContactCard(contact.dataset.warmupContact);
     return;
   }
   // A link inside a row is the link, not the row.
