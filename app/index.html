@@ -176,22 +176,42 @@
 
         <section class="view" id="view-warmup">
           <div class="warmup-layout">
-            <section class="panel span-2">
+            <section class="panel warmup-list-panel span-2">
               <div class="panel-heading">
                 <div>
-                  <h2>Прогрів LinkedIn</h2>
+                  <h2>Акаунти</h2>
+                  <p id="warmupSummary"></p>
                 </div>
-                <div class="warmup-header-actions">
-                  <button class="text-button" id="warmupProbeBtn" type="button" title="Перевірити, чи ключ цього середовища може писати, оновлювати і прибирати рядок у wl_events"><i data-lucide="database-zap"></i><span>Перевірити права на запис</span></button>
-                  <button class="text-button" id="warmupRefreshBtn" type="button"><i data-lucide="refresh-cw"></i><span>Оновити</span></button>
-                </div>
+                <button class="text-button" id="warmupRefreshBtn" type="button"><i data-lucide="refresh-cw"></i><span>Оновити</span></button>
               </div>
               <div class="warmup-config-note" id="warmupConfigNote" hidden></div>
-              <div class="warmup-probe-note" id="warmupProbeNote" hidden></div>
-              <div class="warmup-stats-strip" id="warmupStatsStrip"></div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th class="warmup-tick-head" title="Відмічені акаунти ведуть вибрану кампанію">Веде</th>
+                      <th>Акаунт</th>
+                      <th>Статус</th>
+                      <th>День</th>
+                      <th>Запити сьогодні</th>
+                      <th>Наступна сесія</th>
+                    </tr>
+                  </thead>
+                  <tbody id="warmupProfileTableBody"></tbody>
+                </table>
+              </div>
             </section>
-
-
+            <section class="panel warmup-detail-panel span-2">
+              <div class="panel-heading">
+                <div>
+                  <h2 id="warmupDetailTitle">Акаунт</h2>
+                  <p id="warmupDetailSubtitle"></p>
+                </div>
+              </div>
+              <div id="warmupDetailBody">
+                <div class="empty-state">Вибери акаунт у таблиці.</div>
+              </div>
+            </section>
             <section class="panel warmup-campaigns-panel span-2">
               <div class="panel-heading">
                 <div>
@@ -272,74 +292,6 @@
                 </div>
                 <div id="warmupStrategyBody" hidden></div>
               </section>
-            </section>
-
-            <section class="panel warmup-queue-panel span-2">
-              <div class="panel-heading">
-                <div>
-                  <h2 id="warmupQueueTitle">Черга</h2>
-                  <p id="warmupQueueSubtitle"></p>
-                </div>
-                <button class="text-button" id="warmupQueueRefreshBtn" type="button"><i data-lucide="refresh-cw"></i><span>Оновити чергу</span></button>
-              </div>
-              <div id="warmupQueueBody"></div>
-            </section>
-
-            <section class="panel warmup-list-panel">
-              <div class="panel-heading">
-                <div>
-                  <h2>Профілі</h2>
-                </div>
-                <div class="warmup-list-controls">
-                  <input id="warmupSearchInput" type="search" placeholder="Пошук за назвою профілю" aria-label="Пошук профілів" />
-                  <select id="warmupPlatformSelect" aria-label="Платформа">
-                    <option value="linkedin">LinkedIn</option>
-                    <option value="all">Усі типи</option>
-                    <option value="facebook">Facebook</option>
-                    <option value="instagram">Instagram</option>
-                    <option value="other">Інше</option>
-                  </select>
-                </div>
-              </div>
-              <div class="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th class="warmup-tick-head" title="Відмічені акаунти ведуть вибрану кампанію">Веде</th>
-                      <th>Профіль</th>
-                      <th>Статус</th>
-                      <th>День</th>
-                      <th>Контакти</th>
-                      <th>Наступна сесія</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody id="warmupProfileTableBody"></tbody>
-                </table>
-              </div>
-            </section>
-
-            <section class="panel warmup-detail-panel">
-              <div class="panel-heading">
-                <div>
-                  <h2 id="warmupDetailTitle">Профіль</h2>
-                  <p id="warmupDetailSubtitle"></p>
-                </div>
-              </div>
-              <div id="warmupDetailBody">
-                <div class="empty-state">Вибери профіль зі списку.</div>
-              </div>
-            </section>
-
-            <section class="panel warmup-leads-panel span-2">
-              <div class="panel-heading">
-                <div>
-                  <h2 id="warmupLeadsTitle">Черга лідів</h2>
-                  <p id="warmupLeadsSubtitle">Пул, з якого кампанія бере лідів, ще до закріплення за акаунтом. Тих, до кого вже зверталися з будь-якого акаунта, тут немає.</p>
-                </div>
-                <button class="text-button" id="warmupLeadsRefreshBtn" type="button"><i data-lucide="refresh-cw"></i><span>Оновити чергу</span></button>
-              </div>
-              <div id="warmupLeadsBody"></div>
             </section>
           </div>
         </section>

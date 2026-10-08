@@ -33,39 +33,6 @@ export function queueAnswerIsCurrent(askedFor, selectedNow) {
 }
 
 /**
- * An account's queue entry after «Закріпити зараз» failed: the error, and
- * everything the card already showed.
- *
- * The success branch keeps the rest of the entry; the failure branch used to
- * build a new one from the claims alone, so the auto-feed line and the list
- * of people waiting for the agent vanished — and a 409 on a paused account,
- * exactly when that line explains why, read as "the folder is off and nobody
- * is waiting".
- */
-export function queueAfterFailedClaim(existing, error) {
-  return {
-    ...(existing || {}),
-    rows: existing?.rows || [],
-    reason: "",
-    error: error?.status === 404 ? "Цей сервер ще не вміє закріплювати." : error?.message || "Не вдалося закріпити",
-    unavailable: ""
-  };
-}
-
-/**
- * What a seller is asked before an invitation is cancelled.
- *
- * Cancelling somebody the folder added also takes them out of the folder's
- * feed for good (the server writes `campaign.skipped`), so the question says
- * so. "Back to the pool" alone reads as "the folder may take them again",
- * which it will not: from then on only a person can queue them.
- */
-export function inviteCancelQuestion(invite) {
-  if (!invite?.fromCampaign) return "Скасувати запит і повернути людину в пул?";
-  return "Скасувати запит? Автопідбір більше не братиме цю людину (вручну поставити можна).";
-}
-
-/**
  * Why a waiting invitation needs a person, or "" when it does not.
  *
  * A block page on the request pauses the account and parks the request at

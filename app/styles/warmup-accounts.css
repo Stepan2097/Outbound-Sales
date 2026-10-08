@@ -1,38 +1,4 @@
 /* Перевірка прав на запис у базу прогріву. */
-.warmup-header-actions {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-.warmup-probe-note {
-  display: grid;
-  gap: 6px;
-  margin-top: 10px;
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--surface-sunk);
-  font-size: 13px;
-}
-.warmup-probe-note.is-ok {
-  border-color: color-mix(in srgb, var(--teal) 45%, var(--line));
-}
-.warmup-probe-note.is-bad {
-  border-color: color-mix(in srgb, #f87171 45%, var(--line));
-}
-.warmup-probe-note ul {
-  margin: 0;
-  padding-left: 18px;
-  display: grid;
-  gap: 2px;
-  color: var(--muted);
-}
-.warmup-probe-note li.is-skipped { color: var(--muted); }
-.warmup-probe-note li.is-ok { color: var(--teal); }
-.warmup-probe-note li.is-bad { color: #f87171; }
-.warmup-probe-note code {
-  font-size: 12px;
-}
 .warmup-config-note {
   margin: 0 0 14px;
   padding: 12px 14px;
@@ -49,51 +15,11 @@
 .warmup-config-note p:last-child {
   margin-bottom: 0;
 }
-.warmup-stats-strip {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 12px;
-}
-@media (max-width: 1100px) {
-  .warmup-stats-strip {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-@media (max-width: 640px) {
-  .warmup-stats-strip {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-.warmup-stat {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 10px 14px;
-  border-radius: 12px;
-  background: var(--surface-strong);
-  min-width: 108px;
-}
-.warmup-stat span {
-  font-size: 12px;
-  color: var(--muted);
-  font-weight: 700;
-}
-.warmup-stat strong {
-  font-size: 18px;
-}
-.warmup-list-controls {
-  display: flex;
-  gap: 8px;
-}
 .warmup-list-panel tbody tr {
   cursor: pointer;
 }
 .warmup-list-panel tbody tr.is-selected {
   background: var(--teal-weak);
-}
-.warmup-row-actions {
-  text-align: right;
-  white-space: nowrap;
 }
 /* The one cell that has to be read across the room: today's work is still
    outstanding and its planned time has gone. */
@@ -287,15 +213,6 @@
   .warmup-list-panel .panel-heading {
     flex-wrap: wrap;
   }
-
-  .warmup-list-controls {
-    flex: 1 1 100%;
-  }
-
-  .warmup-list-controls input,
-  .warmup-list-controls select {
-    min-width: 0;
-  }
 }
 /* ── The claim queue ───────────────────────────────────────────────────────
  *
@@ -304,47 +221,8 @@
  * That sentence is the answer somebody opened this panel for, so it is styled
  * as content rather than as an empty state.
  */
-.warmup-queue-accounts {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  gap: 10px;
-}
-.warmup-queue-account {
-  min-width: 0;
-  display: grid;
-  gap: 8px;
-  align-content: start;
-  padding: 12px 14px;
-  border-radius: 12px;
-  border: 1px solid var(--line);
-  background: var(--surface-strong);
-}
 /* The button keeps its corner whatever the name and the signed-in identity do
    to the width, so two accounts side by side do not sit at different heights. */
-.warmup-queue-account > header {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 8px;
-}
-.warmup-queue-account > header > button {
-  min-height: 30px;
-  padding: 0 10px;
-  font-size: 12.5px;
-}
-.warmup-queue-who {
-  min-width: 0;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 2px 8px;
-}
-.warmup-queue-who strong {
-  font-size: 14px;
-}
-.warmup-queue-who .warmup-identity {
-  margin-top: 0;
-}
 .warmup-queue-reason {
   margin: 0;
   padding: 11px 13px;
@@ -373,18 +251,6 @@
 }
 /* Permanent, against a real person, once. It should not look like the button
    next to it. */
-.warmup-queue-send {
-  min-height: 30px;
-  padding: 0 10px;
-  font-size: 12.5px;
-  font-weight: 700;
-  border-color: color-mix(in srgb, var(--teal) 40%, transparent);
-  color: var(--teal);
-}
-.warmup-queue-send:hover {
-  border-color: var(--teal);
-  background: var(--teal-weak);
-}
 .warmup-queue-list a {
   color: var(--teal);
   font-weight: 700;
@@ -392,13 +258,6 @@
   white-space: nowrap;
 }
 @media (max-width: 640px) {
-  .warmup-queue-accounts {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .warmup-queue-account {
-    padding: 11px 12px;
-  }
   .warmup-queue-list li {
     grid-template-columns: auto minmax(0, 1fr);
   }
@@ -406,27 +265,11 @@
   .warmup-queue-list .warmup-lead-who {
     grid-column: 1 / -1;
   }
-
-  .warmup-queue-send {
-    justify-self: end;
-  }
 }
 /* A queue belongs to the account, so a person claimed by a different campaign
    the same account works says so rather than passing for this one's. */
-.warmup-queue-elsewhere {
-  font-size: 11.5px;
-  font-weight: 700;
-  color: var(--violet);
-  cursor: help;
-}
 /* Claiming releases expired claims first, so a queue can shrink without anyone
    touching it. Said once, quietly, where it happened. */
-.warmup-queue-released {
-  margin: 0;
-  font-size: 12px;
-  font-weight: 650;
-  color: var(--violet);
-}
 /* The agent's list, not a person's: folded by default, no buttons. */
 .warmup-queue-waiting summary {
   cursor: pointer;
@@ -450,4 +293,28 @@
 .warmup-account-unread svg {
   width: 12px;
   height: 12px;
+}
+
+/* Shown only when it is a problem: LinkedIn sees this profile's real address. */
+.warmup-no-proxy {
+  color: var(--amber);
+}
+
+/* The whole row opens the account's card; there is no separate button for it. */
+#warmupProfileTableBody tr[data-warmup-profile] {
+  cursor: pointer;
+}
+
+/* Six columns fit a narrower table than the shared 860px minimum, which was
+   written for the old lead tables and cut «Наступна сесія» off on a laptop. */
+.warmup-list-panel table {
+  min-width: 520px;
+}
+
+/* Who waits on the account, inside its card: a block of its own, set off from
+   the health form below it. */
+.warmup-card-queue {
+  display: grid;
+  gap: 6px;
+  margin: 4px 0 14px;
 }

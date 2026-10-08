@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  autoFeedFor, autoFeedLine, campaignStateNote, inviteAttentionText, queueAfterFailedClaim, queueAnswerIsCurrent
+  autoFeedFor, autoFeedLine, campaignStateNote, inviteAttentionText, queueAnswerIsCurrent
 } from "../app/warmup-view.js";
 import { loadMain } from "./app-main-excerpt.mjs";
 
@@ -27,30 +27,39 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-// ── the queue card ──────────────────────────────────────────────────────────
+// ── the account's queue, in its card ──────────────────────────────────────
 
 const CARD = [
   "uaPlural", "escapeHtml", "escapeAttr", "WARMUP_DEFAULT_FROM_DAY", "warmupCount", "warmupLeadLink",
-  "warmupQueueState", "warmupQueueRowHtml", "warmupAutoFeedHtml", "warmupQueueWaitingHtml", "warmupQueueAccountHtml"
+  "warmupQueueState", "warmupAutoFeedHtml", "warmupQueueWaitingHtml", "warmupAccountQueueHtml"
 ];
 
-test("the queue card says what the campaign on screen is doing, and nothing about another that ticks the account", () => {
+test("an account's card says what the campaign on screen is doing, and nothing about another that ticks the account", () => {
   const feedA = { campaignId: "camp-a", running: true, ticked: true, on: true, day: 9, connectsLeft: 3 };
   const warmupState = {
+    selectedCampaignId: "camp-a",
     profiles: [{ account: { id: "acc-1" }, name: "Chloe Stewart", day: 9, connections: { quota: 4, today: 1 } }],
     // The cache is keyed by account: this is what campaign A's queue answer left.
-    queues: { "acc-1": { rows: [], reason: "", waiting: [], autoFeed: feedA, error: "", unavailable: "" } },
-    queueBusy: {}
+    queues: { "acc-1": { rows: [], reason: "", waiting: [], autoFeed: feedA, error: "", unavailable: "" } }
   };
   const card = loadMain(CARD, { warmupState, autoFeedFor, autoFeedLine, inviteAttentionText });
-  const html = card.get("warmupQueueAccountHtml");
+  const html = card.get("warmupAccountQueueHtml");
 
-  const underA = html("acc-1", "camp-a");
+  const underA = html("acc-1");
   assert.match(underA, /warmup-queue-feed/);
   assert.ok(underA.includes(card.get("escapeHtml")(autoFeedLine(feedA, 7).text)));
 
-  const underB = html("acc-1", "camp-b");
-  assert.doesNotMatch(underB, /warmup-queue-feed/, "«Черга · B» must not say what A is doing");
+  warmupState.selectedCampaignId = "camp-b";
+  assert.doesNotMatch(html("acc-1"), /warmup-queue-feed/, "under campaign B the card must not say what A is doing");
+});
+
+test("an account with nobody waiting and no feed today shows no queue block at all", () => {
+  const warmupState = { selectedCampaignId: "", queues: { "acc-1": { rows: [], reason: "", waiting: [], autoFeed: null, error: "", unavailable: "" } } };
+  const card = loadMain(CARD, { warmupState, autoFeedFor, autoFeedLine, inviteAttentionText });
+  assert.equal(card.get("warmupAccountQueueHtml")("acc-1"), "");
+  // And who is waiting, when somebody is.
+  warmupState.queues["acc-1"].waiting = [{ name: "Ajay Manger", fromFolder: true, linkedin: "https://www.linkedin.com/in/ajay/" }];
+  assert.match(card.get("warmupAccountQueueHtml")("acc-1"), /Чекають агента: 1/);
 });
 
 // ── loading a queue ─────────────────────────────────────────────────────────
@@ -105,7 +114,7 @@ test("a queue answer for a campaign somebody clicked away from does not land on 
 
 // ── «Редагувати» on another campaign ────────────────────────────────────────
 
-test("opening the form on another campaign reloads the queue and the pool for it; on the same one it does not", async () => {
+test("opening the form on another campaign reads the open account's queue again; on the same one it does not", async () => {
   const loads = [];
   const warmupState = { selectedCampaignId: "camp-a", formOpen: false, formCampaignId: null, campaignNotice: "" };
   const form = loadMain(["openWarmupCampaignForm"], {
@@ -113,50 +122,19 @@ test("opening the form on another campaign reloads the queue and the pool for it
     document: { getElementById: () => null },
     renderWarmupCampaigns: () => {},
     renderWarmupProfiles: () => {},
-    renderWarmupQueue: () => {},
-    loadWarmupQueues: async () => { loads.push(`queues:${warmupState.selectedCampaignId}`); },
-    loadWarmupLeads: async () => { loads.push(`leads:${warmupState.selectedCampaignId}`); }
+    refreshWarmupAccountQueue: async () => { loads.push(`queue:${warmupState.selectedCampaignId}`); }
   });
   const open = form.get("openWarmupCampaignForm");
 
   open("camp-b");
   await settle();
   assert.equal(warmupState.selectedCampaignId, "camp-b");
-  assert.deepEqual(loads.sort(), ["leads:camp-b", "queues:camp-b"]);
+  assert.deepEqual(loads, ["queue:camp-b"]);
 
   open("camp-b");
   open(null);
   await settle();
-  assert.equal(loads.length, 2, "nothing moved, so nothing is read again");
-});
-
-// ── «Закріпити зараз» ────────────────────────────────────────────────────────
-
-test("a claim that fails keeps the card's auto-feed line and who is waiting", async () => {
-  const existing = {
-    rows: [{ outreachId: "o-1" }],
-    reason: "",
-    waiting: [{ outreachId: "o-2", fromFolder: true }],
-    autoFeed: { campaignId: "camp-a", running: true, ticked: true, on: false, blocked: "Paused until 2026-09-27" },
-    error: "",
-    unavailable: ""
-  };
-  const warmupState = { queues: { "acc-1": existing }, queueBusy: {} };
-  const claim = loadMain(["claimWarmupQueue"], {
-    warmupState,
-    queueAfterFailedClaim,
-    renderWarmupQueue: () => {},
-    loadWarmupCampaigns: async () => {},
-    warmupApi: async () => { throw Object.assign(new Error("Paused until 2026-09-27"), { status: 409 }); }
-  });
-
-  await claim.get("claimWarmupQueue")("acc-1");
-  const after = warmupState.queues["acc-1"];
-  assert.equal(after.error, "Paused until 2026-09-27");
-  assert.deepEqual(after.autoFeed, existing.autoFeed, "the line that explains the refusal stays");
-  assert.deepEqual(after.waiting, existing.waiting);
-  assert.deepEqual(after.rows, existing.rows);
-  assert.equal(warmupState.queueBusy["acc-1"], false);
+  assert.equal(loads.length, 1, "nothing moved, so nothing is read again");
 });
 
 // ── the campaign's note ─────────────────────────────────────────────────────

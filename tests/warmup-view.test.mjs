@@ -2,17 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  autoFeedFor, autoFeedLine, campaignFeedStart, campaignStateNote, inviteAttentionText, inviteCancelQuestion,
-  queueAfterFailedClaim, queueAnswerIsCurrent
+  autoFeedFor, autoFeedLine, campaignFeedStart, campaignStateNote, inviteAttentionText, queueAnswerIsCurrent
 } from "../app/warmup-view.js";
 
 /**
  * The warm-up screens' decisions, without a browser.
  *
  * Each of these was a bug on screen: a card under one campaign saying what
- * another was doing, a failed claim wiping what the card showed, and a cancel
- * that took a person out of the folder for good while the question promised
- * "back to the pool".
+ * another was doing, and a queue answer for a campaign somebody had already
+ * clicked away from landing on the new one.
  */
 
 test("a card shows the auto-feed of the campaign on screen, and nothing about another", () => {
@@ -29,34 +27,6 @@ test("a queue answer for a campaign somebody clicked away from is dropped", () =
   assert.equal(queueAnswerIsCurrent("camp-a", "camp-a"), true);
   assert.equal(queueAnswerIsCurrent("camp-a", "camp-b"), false);
   assert.equal(queueAnswerIsCurrent("", null), true, "nothing selected then and now is the same nothing");
-});
-
-test("a claim that fails keeps what the card already showed", () => {
-  const existing = {
-    rows: [{ outreachId: "o-1" }],
-    reason: "",
-    waiting: [{ outreachId: "o-2", fromFolder: true }],
-    autoFeed: { campaignId: "camp-a", on: false, blocked: "Paused until 2026-09-27" },
-    error: "",
-    unavailable: ""
-  };
-  const failed = queueAfterFailedClaim(existing, Object.assign(new Error("Paused until 2026-09-27"), { status: 409 }));
-  assert.equal(failed.error, "Paused until 2026-09-27");
-  assert.deepEqual(failed.rows, existing.rows);
-  assert.deepEqual(failed.waiting, existing.waiting, "who is waiting for the agent is still true");
-  assert.deepEqual(failed.autoFeed, existing.autoFeed, "and the line that explains why nothing is claimed");
-
-  assert.equal(queueAfterFailedClaim(undefined, { status: 404 }).error, "Цей сервер ще не вміє закріплювати.");
-  assert.deepEqual(queueAfterFailedClaim(undefined, { status: 500, message: "boom" }).rows, []);
-});
-
-test("cancelling a person the folder added says the folder will not take them again", () => {
-  assert.equal(inviteCancelQuestion({ fromCampaign: null }), "Скасувати запит і повернути людину в пул?");
-  const fed = inviteCancelQuestion({ fromCampaign: { id: "camp-1", name: "LinkedIn2" } });
-  assert.match(fed, /більше не братиме/);
-  assert.match(fed, /вручну/, "and that a person still can");
-  assert.doesNotMatch(fed, /в пул/);
-  assert.match(inviteCancelQuestion({ fromCampaign: { id: "camp-1", name: null } }), /більше не братиме/);
 });
 
 test("a parked invitation says it needs a person, and what to do", () => {

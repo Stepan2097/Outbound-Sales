@@ -29,9 +29,13 @@ test("розмітка панелі лежить усередині «Кампа
   const campaigns = INDEX.indexOf("warmup-campaigns-panel");
   const detail = INDEX.indexOf('id="warmupCampaignDetail"');
   const section = INDEX.indexOf("warmup-strategy-section");
-  const queue = INDEX.indexOf("warmup-queue-panel");
   assert.ok(campaigns > 0 && campaigns < detail, "панель кампаній зникла або зсунулась");
-  assert.ok(detail < section && section < queue, "розклад мусить стояти після деталей кампанії й до черги, в одному блоці з кампаніями");
+  assert.ok(detail < section, "розклад мусить стояти після деталей кампанії");
+  // In one block with the campaigns: the campaigns panel is still open where
+  // the schedule starts.
+  const between = INDEX.slice(campaigns, section);
+  const open = (between.match(/<section\b/g) || []).length - (between.match(/<\/section>/g) || []).length;
+  assert.ok(open >= 0, "розклад мусить лежати всередині панелі кампаній, а не після неї");
   assert.match(INDEX, /<h3>Стратегія прогріву<\/h3>/);
 });
 

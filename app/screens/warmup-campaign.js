@@ -6,11 +6,11 @@ import {
   autoFeedLine, campaignFeedStart, campaignStateNote
 } from "../warmup-view.js";
 import {
-  WARMUP_CAMPAIGN_STATE_LABEL, WARMUP_CAMPAIGN_TONE, WARMUP_DEFAULT_FROM_DAY, WARMUP_EDITABLE_KINDS, WARMUP_EMPTY_FILTERS, WARMUP_KIND_LABEL, loadWarmupLeads, loadWarmupQueues, renderWarmupProfiles, renderWarmupQueue, warmupApi, warmupCount, warmupDuration, warmupState
-} from "../screens/warmup-accounts.js";
-import {
   escapeAttr, escapeHtml, refreshIcons, state, uaPlural
 } from "../core.js";
+import {
+  WARMUP_CAMPAIGN_STATE_LABEL, WARMUP_CAMPAIGN_TONE, WARMUP_DEFAULT_FROM_DAY, WARMUP_EDITABLE_KINDS, WARMUP_EMPTY_FILTERS, WARMUP_KIND_LABEL, refreshWarmupAccountQueue, renderWarmupProfiles, warmupApi, warmupCount, warmupDuration, warmupState
+} from "./warmup-accounts.js";
 
 /** День із поля форми, як рядок: перевіряє його сервер і каже реченням, що не так. */
 function warmupFromDayValue() {
@@ -524,13 +524,9 @@ function openWarmupCampaignForm(campaignId = null) {
   if (campaignId) warmupState.selectedCampaignId = campaignId;
   renderWarmupCampaigns({ resetForm: true });
   renderWarmupProfiles();
-  renderWarmupQueue();
-  // «Редагувати» on another campaign selects it, and the queue and the pool
-  // below have to follow — they were loaded for the one selected before.
-  if (moved) {
-    loadWarmupQueues();
-    loadWarmupLeads();
-  }
+  // «Редагувати» on another campaign selects it, and the open account's queue
+  // has to follow — whether the folder feeds it was read for the one before.
+  if (moved) refreshWarmupAccountQueue();
   document.getElementById("warmupCampaignName")?.focus();
 }
 
@@ -596,8 +592,7 @@ async function saveWarmupCampaignForm() {
   renderWarmupCampaigns({ resetForm: true });
   renderWarmupProfiles();
   if (saved) await loadWarmupCampaigns({ resetForm: false });
-  await loadWarmupQueues();
-  if (saved) await loadWarmupLeads();
+  await refreshWarmupAccountQueue();
 }
 
 /** Start, pause, reopen, mark done — all one PATCH of `state`. */
@@ -616,8 +611,7 @@ async function setWarmupCampaignState(campaignId, nextState) {
   }
   // The order ranks are relative, so one campaign starting renumbers the rest.
   await loadWarmupCampaigns({ resetForm: false });
-  await loadWarmupQueues();
-  await loadWarmupLeads();
+  await refreshWarmupAccountQueue();
 }
 
 /**
@@ -654,8 +648,7 @@ async function moveWarmupCampaign(campaignId, direction) {
   }
 
   await loadWarmupCampaigns({ resetForm: false });
-  await loadWarmupQueues();
-  await loadWarmupLeads();
+  await refreshWarmupAccountQueue();
 }
 
 /**
@@ -694,8 +687,7 @@ async function deleteWarmupCampaign(campaignId) {
   renderWarmupCampaigns();
   renderWarmupProfiles();
   await loadWarmupCampaigns({ resetForm: false });
-  await loadWarmupQueues();
-  await loadWarmupLeads();
+  await refreshWarmupAccountQueue();
 }
 
 function selectWarmupCampaign(campaignId) {
@@ -710,8 +702,7 @@ function selectWarmupCampaign(campaignId) {
   }
   renderWarmupCampaigns();
   renderWarmupProfiles();
-  loadWarmupQueues();
-  loadWarmupLeads();
+  refreshWarmupAccountQueue();
 }
 
 /** Ticking an account is itself a save: the forecast has to follow the tick. */
@@ -777,7 +768,7 @@ async function saveWarmupCampaignAccounts(campaignId, accountIds) {
   // An account joining a campaign can make another campaign's count
   // approximate, so the whole list is re-read once the ticks have settled.
   await loadWarmupCampaigns({ resetForm: false });
-  await loadWarmupQueues();
+  await refreshWarmupAccountQueue();
 }
 
 function warmupStrategyDays() {
