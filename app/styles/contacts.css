@@ -244,3 +244,94 @@
 .contacts-sidebar > .panel, .contacts-detail > .panel { min-width: 0; }
 
 @media (max-width: 900px) { .contacts-layout { grid-template-columns: minmax(0, 1fr); } }
+
+/* ── Повідомлення, які модель написала людині ──────────────────────────────
+   Одна кнопка в шапці блоку, під нею — те, що з неї вийшло. Текст не йде сам:
+   його копіюють, а надсилає людина. */
+
+.contact-messages {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 10px;
+}
+
+.contact-messages-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+
+.contact-messages-hint,
+.contact-messages-problem {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.contact-messages-problem {
+  color: var(--red);
+  font-weight: 650;
+}
+
+.contact-draft-list {
+  display: grid;
+  gap: 10px;
+}
+
+.contact-draft {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-strong);
+  padding: 12px;
+}
+
+.contact-draft header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.contact-draft header span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.contact-draft pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: inherit;
+  line-height: 1.55;
+}
+
+.contact-draft small {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.contact-draft-meta {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.contact-draft-meta ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.contact-draft-warning strong {
+  color: var(--amber);
+}

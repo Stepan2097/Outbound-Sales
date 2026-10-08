@@ -1,6 +1,7 @@
-// Контакти — the CRM and nothing else: pick a folder, find a person in it, open
-// their card. The card is what the CRM says about them and what the warm-up has
-// done with them on LinkedIn: where their request stands, and the conversation.
+// Контакти — the CRM and one helper: pick a folder, find a person in it, open
+// their card. The card is what the CRM says about them, what the warm-up has done
+// with them on LinkedIn (where their request stands, and the conversation), and
+// one button that has the model write them a message.
 
 import {
   HISTORY_EVENT_LABEL, INVITE_NOTE_DROPPED, api, escapeAttr, escapeHtml, linkIfUrl, onScreen, refreshIcons, relativeTime, setHtml, setText, uaPlural
@@ -57,6 +58,15 @@ let contactHistoryNotice = "";
 // Де ця людина в запрошеннях LinkedIn: рядок підходу, який віддає історія. Null —
 // запитів із цього простору їй не було.
 let contactOutreach = null;
+
+// Повідомлення, які модель написала цій людині: лист, Telegram і два тексти для
+// LinkedIn. Сервер зберігає їх на людину, тож вони чекають на картці, поки їх
+// не напишуть наново.
+let contactDrafts = null;
+
+let contactDraftsBusy = false;
+
+let contactDraftsError = "";
 
 // Коли CRM читали востаннє; нуль — ще ні.
 let contactsLoadedAt = 0;
@@ -254,8 +264,104 @@ function renderContactCard() {
     <dl class="contact-fields">${rows || `<div><dt>Порожньо</dt><dd>CRM не знає про цю людину нічого, крім імені</dd></div>`}</dl>
     ${contact.description ? `<div class="contact-note"><strong>Нотатка з CRM</strong><p>${escapeHtml(contact.description)}</p></div>` : ""}
     ${custom}
+    ${contactMessagesHtml()}
     ${contactHistoryFor && contactHistoryFor === String(contact.id) ? contactConversationHtml() : ""}
   `);
+}
+
+/**
+ * Мова, якою писати людині: українською, коли вона з України, і англійською
+ * в решті випадків. Вибору на екрані нема навмисно — одна дія, одна кнопка — тож
+ * мова названа в підписі під текстом, і її видно одразу, а не вгадується.
+ */
+function contactDraftLanguage(contact) {
+  return /^(ua|ukr|україн|украин)/i.test(String(contact?.country || "").trim()) ? "uk" : "en";
+}
+
+const CONTACT_DRAFT_LANGUAGE_LABEL = { uk: "українською", en: "English", ru: "російською" };
+
+function wordCountLabel(value) {
+  const words = String(value || "").trim().split(/\s+/).filter(Boolean).length;
+  return `${words} ${uaPlural(words, "слово", "слова", "слів")}`;
+}
+
+function contactDraftHtml({ title, hint, text, copyText, count, label }) {
+  return `
+    <article class="contact-draft">
+      <header>
+        <div><strong>${escapeHtml(title)}</strong><span>${escapeHtml(hint)}</span></div>
+        <button type="button" data-copy-text="${escapeAttr(copyText ?? text)}" data-copy-label="${escapeAttr(label)}"><i data-lucide="copy"></i><span>Копіювати</span></button>
+      </header>
+      <pre>${escapeHtml(text)}</pre>
+      <small>${escapeHtml(count)}</small>
+    </article>`;
+}
+
+/**
+ * Повідомлення людині: одна кнопка «Згенерувати» і те, що з неї вийшло. Зміст
+ * тримається на картці й описі продукту — про це сервер, а тут лише показ. Текст
+ * ніколи не йде сам: він копіюється, а надсилає його людина.
+ */
+function contactMessagesHtml() {
+  const drafts = contactDrafts;
+  const button = `<button class="primary-button" type="button" data-contact-generate${contactDraftsBusy ? " disabled" : ""}><i data-lucide="sparkles"></i><span>${contactDraftsBusy ? "Пишемо..." : "Згенерувати"}</span></button>`;
+  const problem = contactDraftsError ? `<p class="contact-messages-problem">${escapeHtml(contactDraftsError)}</p>` : "";
+
+  if (!drafts) {
+    return `<section class="contact-messages">
+      <div class="contact-messages-head"><strong>Повідомлення</strong>${button}</div>
+      <p class="contact-messages-hint">Модель прочитає цю картку й опис продукту та напише лист, повідомлення в Telegram і два тексти для LinkedIn.</p>
+      ${problem}
+    </section>`;
+  }
+
+  const emailText = [drafts.email?.subject ? `Тема: ${drafts.email.subject}` : "", drafts.email?.body || ""].filter(Boolean).join("\n\n");
+  const made = [
+    CONTACT_DRAFT_LANGUAGE_LABEL[drafts.language] || drafts.language || "",
+    drafts.provider === "local" ? "складено без моделі, за описом продукту" : (drafts.modelUsed || ""),
+    drafts.generatedAt ? relativeTime(drafts.generatedAt) : ""
+  ].filter(Boolean).join(" · ");
+  const verify = (drafts.verifyBeforeSending || []).length
+    ? `<div class="contact-draft-warning"><strong>Перевір перед відправкою</strong><ul>${drafts.verifyBeforeSending.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>`
+    : "";
+
+  return `<section class="contact-messages">
+    <div class="contact-messages-head"><strong>Повідомлення</strong>${button}</div>
+    ${problem}
+    <div class="contact-draft-list">
+      ${contactDraftHtml({ title: "Пошта", hint: drafts.email?.subject || "без теми", text: drafts.email?.body || "", copyText: emailText, count: wordCountLabel(drafts.email?.body), label: "Лист" })}
+      ${contactDraftHtml({ title: "Telegram", hint: contactRecord?.telegram || "юзернейм невідомий", text: drafts.telegram?.body || "", count: wordCountLabel(drafts.telegram?.body), label: "Telegram" })}
+      ${contactDraftHtml({ title: "LinkedIn · запрошення", hint: "до 300 символів, без пропозиції", text: drafts.linkedin?.invite || "", count: `${String(drafts.linkedin?.invite || "").length} символів`, label: "Запрошення в LinkedIn" })}
+      ${contactDraftHtml({ title: "LinkedIn · перше повідомлення", hint: "після прийняття запрошення", text: drafts.linkedin?.body || "", count: wordCountLabel(drafts.linkedin?.body), label: "Повідомлення в LinkedIn" })}
+    </div>
+    <div class="contact-draft-meta"><span>${escapeHtml(made)}</span>${verify}</div>
+  </section>`;
+}
+
+async function generateContactMessages() {
+  const contactId = selectedContactId;
+  if (!contactId || !contactRecord || contactDraftsBusy) return;
+  contactDraftsBusy = true;
+  contactDraftsError = "";
+  renderContactCard();
+  try {
+    const payload = await api(`/api/contacts/${encodeURIComponent(contactId)}/messages`, {
+      method: "POST",
+      body: JSON.stringify({ language: contactDraftLanguage(contactRecord) })
+    });
+    // Людину могли перемкнути, поки модель писала: чужі тексти на чужій картці
+    // гірші за відсутні.
+    if (selectedContactId !== contactId) return;
+    contactDrafts = payload.drafts || null;
+  } catch (error) {
+    if (selectedContactId === contactId) contactDraftsError = error.message || "Не вдалося написати повідомлення.";
+  } finally {
+    contactDraftsBusy = false;
+    if (selectedContactId === contactId) {
+      renderContactCard();
+      refreshIcons();
+    }
+  }
 }
 
 /**
@@ -345,11 +451,15 @@ export function showContactCard(contactId) {
 async function openContact(contactId) {
   selectedContactId = contactId;
   contactRecord = null;
+  contactDrafts = null;
+  contactDraftsBusy = false;
+  contactDraftsError = "";
   void loadContactHistory(contactId);
   renderContacts();
   try {
     const payload = await api(`/api/contacts/${encodeURIComponent(contactId)}`);
     contactRecord = payload.contact;
+    contactDrafts = payload.drafts || null;
   } catch (error) {
     contactsError = error.message || "Не вдалося прочитати контакт.";
   }
@@ -429,4 +539,25 @@ document.getElementById("contactSearchInput").addEventListener("input", (event) 
     contactOffset = 0;
     await loadContactPage();
   }, 350);
+});
+
+// «Згенерувати» і «Копіювати» живуть на самій картці, яка перемальовується, тож
+// слухач стоїть на її контейнері, а не на кнопках.
+document.getElementById("contactCardBody").addEventListener("click", async (event) => {
+  if (event.target.closest("[data-contact-generate]")) {
+    await generateContactMessages();
+    return;
+  }
+  const copy = event.target.closest("[data-copy-text]");
+  if (!copy) return;
+  const label = copy.querySelector("span");
+  try {
+    await navigator.clipboard.writeText(copy.dataset.copyText);
+    if (label) {
+      label.textContent = "Скопійовано";
+      window.setTimeout(() => { label.textContent = "Копіювати"; }, 1500);
+    }
+  } catch {
+    if (label) label.textContent = "Не вдалося скопіювати";
+  }
 });

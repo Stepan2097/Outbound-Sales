@@ -25,9 +25,11 @@
 
 **Прогрів** (where it opens) — the accounts, what each did today and does next,
 and the campaign that feeds them people from a CRM folder. **Вхідні** — the
-replies from every account, unread first. **Контакти** — the CRM: folders, a
-page of people, one person's card with their LinkedIn history and the drafts the
-model writes for them. **Налаштування** — users, your password.
+replies from every account, unread first. **Контакти** — the CRM: a folder, its
+people, one person's card with where their LinkedIn request stands, the whole
+conversation, and one button that has the model write them a letter, a Telegram
+message and two LinkedIn texts to copy (nothing is sent by itself).
+**Налаштування** — users, your password.
 
 That is the whole menu, on purpose. On 08.10.2026 the owner asked for
 everything superfluous to go (task 87001c96), and it went: the lead workspace
