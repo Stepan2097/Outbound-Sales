@@ -7293,7 +7293,12 @@ function publicSignalConfidence(type, url, publishedAt) {
   return clampNumber(48 + (publishedAt ? 12 : 0) + (firstParty ? 8 : 0) + (type !== "company_development" ? 6 : 0), 35, 82, 55);
 }
 
-function publicCandidatesFromResearch(companyResearch = {}, socialResearch = {}) {
+function publicCandidatesFromResearch(companyInput, socialInput) {
+  // Дослідження, якого ще не було, normalizeProspect зберігає як `null`, а
+  // значення параметра за замовчуванням на `null` не діє — лід без пошуку по
+  // соцмережах валив «Збагатити» 500-кою саме на шляху з кешу.
+  const companyResearch = companyInput || {};
+  const socialResearch = socialInput || {};
   const candidates = [];
   if (companyResearch.url) {
     candidates.push({
