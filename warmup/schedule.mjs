@@ -86,7 +86,6 @@ export function sessionTimeOn(accountId, date) {
  * still there.
  */
 export function nextSession(accountId, options = {}) {
-  const outstanding = options.outstanding !== false;
   const now = options.now || new Date();
   const todaySlot = sessionTimeOn(accountId, now);
 
@@ -95,6 +94,17 @@ export function nextSession(accountId, options = {}) {
   // an account the scheduler will not hand out for an hour read "time has
   // come", which is the one answer that sends an operator looking for a fault.
   const notBefore = Number(options.notBefore) || 0;
+
+  // What is left of today stops being owed when the window closes: no session
+  // starts after it (`insideWindow`), and tomorrow's quota does not carry
+  // today's over. On 08.10.2026 at 19:50 an account with one request left read
+  // «час настав» — the one answer that says something is late and should be
+  // looked into, at an hour when nothing could happen until 09:00. The same
+  // goes for a hold that ends after the window: the morning is over for it.
+  const windowEnd = new Date(now);
+  windowEnd.setHours(SESSION_WINDOW.endHour, 0, 0, 0);
+  const todayIsOver = now.getTime() >= windowEnd.getTime() || notBefore >= windowEnd.getTime();
+  const outstanding = options.outstanding !== false && !todayIsOver;
   if (outstanding && notBefore > now.getTime() && notBefore > todaySlot.getTime()) {
     const held = new Date(notBefore);
     return {
@@ -117,8 +127,8 @@ export function nextSession(accountId, options = {}) {
     return { at: now.toISOString(), today: true, overdue: true, inMinutes: 0 };
   }
 
-  // Nothing left today, so the next session is tomorrow's — even when today's
-  // planned time has not arrived yet. An account that finished at 09:04 was
+  // Nothing left today, or no window left to do it in, so the next session is
+  // tomorrow's — even when today's planned time has not arrived yet. An account that finished at 09:04 was
   // otherwise told its next session was at 09:35 today, which would do nothing.
   const tomorrow = new Date(now);
   tomorrow.setDate(tomorrow.getDate() + 1);

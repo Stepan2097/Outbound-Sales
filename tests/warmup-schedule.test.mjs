@@ -221,6 +221,39 @@ test("an account the scheduler is holding back shows when the hold ends, not 'ti
   assert.equal(doneForToday.today, false, "nothing owed today still points at tomorrow, whatever the hold");
 });
 
+/**
+ * 08.10.2026, 19:50: Profile 48 had one request of two left and its row read
+ * «час настав». Nothing could start before 09:00 — no session starts after the
+ * window closes, and tomorrow's quota does not carry today's over — so the
+ * honest answer was tomorrow's slot, not a red flag.
+ */
+test("after the window closes, work left today points at tomorrow, not at 'time has come'", () => {
+  const account = "account-d";
+  const day = new Date("2026-09-16T00:00:00");
+  const tomorrowSlot = sessionTimeOn(account, new Date("2026-09-17T00:00:00"));
+
+  const evening = nextSession(account, { outstanding: true, now: new Date("2026-09-16T19:50:00") });
+  assert.equal(evening.overdue, false, "nothing is late: nothing could start now");
+  assert.equal(evening.today, false);
+  assert.equal(evening.at, tomorrowSlot.toISOString());
+
+  const closing = new Date(day);
+  closing.setHours(SESSION_WINDOW.endHour, 0, 0, 0);
+  const atClose = nextSession(account, { outstanding: true, now: closing });
+  assert.equal(atClose.today, false, "the end hour is the first hour a session may not start");
+
+  // A minute before the close, the day's work is still owed today.
+  const lastMinute = new Date(closing.getTime() - 60_000);
+  const late = nextSession(account, { outstanding: true, now: lastMinute });
+  assert.equal(late.overdue, true, "the planned slot is always inside the window, so it has passed");
+  assert.equal(late.today, true);
+
+  // A rest between sessions that ends after the close leaves nothing for today.
+  const held = nextSession(account, { outstanding: true, now: lastMinute, notBefore: closing.getTime() + 30 * 60_000 });
+  assert.equal(held.today, false, "a hold past the window is tomorrow, not 13:30 today");
+  assert.equal(held.at, tomorrowSlot.toISOString());
+});
+
 test("a finished day points at tomorrow even before today's slot has passed", () => {
   const account = "account-b";
   const slot = sessionTimeOn(account, new Date("2026-09-16T00:00:00"));
