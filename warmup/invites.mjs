@@ -49,7 +49,8 @@ export const INVITE_FAILED = "invite.failed";
  * silently answered "pending, and free".
  */
 export const INVITE_OUTCOMES = [
-  "sent", "already_pending", "already_connected", "no_button", "no_note", "profile_gone", "blocked"
+  "sent", "already_pending", "already_connected",
+  "no_button", "cannot_connect", "no_note", "profile_gone", "blocked"
 ];
 
 /**
@@ -75,7 +76,10 @@ export const INVITE_OUTCOMES = [
  * whether the folder may offer the person again depends on what the report
  * says about *them*:
  *
- * - `no_button`, `profile_gone` — about the profile: never again.
+ * - `cannot_connect`, `profile_gone` — about the profile: never again.
+ * - `no_button` — about *us*: the browser never found the card to look at.
+ *   Back to the pool unmarked, so a page LinkedIn redesigned cannot empty the
+ *   folder (08.10.2026 it emptied eleven people out of one).
  * - `blocked` — never again as well, and deliberately. The page may have been
  *   about the account (a rate limit) rather than the person, but it may have
  *   been about the person, and offering them again risks a second two-day
@@ -93,7 +97,7 @@ export const INVITE_OUTCOMES = [
  * `blocked` one is parked at once (`waitingFacts`) — unless the account was
  * already paused when it came.
  */
-export const INVITE_HELD_OUTCOMES = ["no_button", "no_note", "profile_gone", "blocked"];
+export const INVITE_HELD_OUTCOMES = ["no_button", "cannot_connect", "no_note", "profile_gone", "blocked"];
 
 export const INVITE_TYPES = [
   INVITE_REQUESTED, INVITE_SENT, INVITE_CHECKED, INVITE_CANCELLED, INVITE_REASSIGNED, INVITE_FAILED
@@ -124,17 +128,28 @@ export const INVITE_TYPES = [
  * sentence is this person's Connect — and when the note was never there, the
  * `mismatch` branch already keeps the row unmarked.
  *
- * `no_button` is the one that is about **us**: our selectors did not find the
- * control. On 08.10.2026 that cost eleven people out of a folder in one
- * morning — a profile page moved the name out of its `h1`, ten requests in a
- * visit came back `no_button`, and each was written off as if LinkedIn had
- * refused them. Such a row still goes back to the pool (it has no seller to
- * wait for, and waiting it would hold a slot of the day's allowance); it is
- * simply not marked, so the folder may offer them again once the browser
- * works. What keeps a broken agent from walking the whole folder is the daily
- * cap in `folderRoom`, not a write-off.
+ * `cannot_connect` is theirs as well, and it is the half of the old
+ * `no_button` that LinkedIn really answered: the card was on screen, it was
+ * the right person's, and there was no Connect in the header, none under
+ * «More», or the dialog demanded their email. Tomorrow it will say the same,
+ * so the folder is told not to offer them again.
+ *
+ * `no_button` is what is left, and it is about **us**: the browser never
+ * found the card to look at. On 08.10.2026 that cost eleven people out of a
+ * folder in one morning — a profile page moved the name out of its `h1`, ten
+ * requests in a visit came back `no_button`, and each was written off as if
+ * LinkedIn had refused them. Such a row still goes back to the pool (it has
+ * no seller to wait for, and waiting it would hold a slot of the day's
+ * allowance); it is simply not marked, so the folder may offer them again
+ * once the browser works. What keeps a broken agent from walking the whole
+ * folder is the daily cap in `folderRoom`, not a write-off.
+ *
+ * The split matters in both directions: before it, every unreachable profile
+ * came back every single day and ate a slot of the account's allowance, and
+ * every redesign wrote people off. An agent built before the split reports
+ * `no_button` for both, and nothing is written off — the cautious half.
  */
-export const INVITE_PERSON_OUTCOMES = ["no_note", "profile_gone", "blocked"];
+export const INVITE_PERSON_OUTCOMES = ["cannot_connect", "no_note", "profile_gone", "blocked"];
 
 export const FEED_SKIPPED = "campaign.skipped";
 

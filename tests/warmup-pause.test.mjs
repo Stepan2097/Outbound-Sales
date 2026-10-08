@@ -511,7 +511,7 @@ test("the other held outcomes and a health report start no pause", async (t) => 
   // Every held outcome but `blocked`. A dead link is routine with folder-fed
   // people, and a pause on each one would stop an account for two days at a
   // time for nothing LinkedIn said.
-  for (const outcome of ["no_button", "no_note", "profile_gone"]) {
+  for (const outcome of ["no_button", "cannot_connect", "no_note", "profile_gone"]) {
     rows.wl_outreach.find((row) => row.id === "o-wait").status = "waiting";
     const held = await call({
       method: "POST", path: "/api/warmup/agent",
@@ -527,7 +527,7 @@ test("the other held outcomes and a health report start no pause", async (t) => 
     assert.equal(rows.wl_accounts[0].status, "warming", outcome);
     assert.equal(events("run.warning").length, 0, outcome);
   }
-  assert.equal(events("invite.failed").length, 3, "each one is on the record all the same");
+  assert.equal(events("invite.failed").length, 4, "each one is on the record all the same");
 
   // A captcha needs a person, and says nothing about leaving the account alone
   // for two days. It keeps meaning exactly what it meant.

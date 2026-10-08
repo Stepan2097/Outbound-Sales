@@ -770,8 +770,10 @@ function secondAccount(day = 8) {
 test("a held outcome about the person lets a folder person go, and the folder never offers them again", async (t) => {
   // `blocked` is here on purpose: the page may have been about the account,
   // not the person, but offering them again risks a second two-day pause.
+  // `cannot_connect` is here too: the card was on screen and the right
+  // person's, and offered no way to connect — tomorrow it will say the same.
   // `no_button` is deliberately NOT here — see the test below it.
-  for (const outcome of ["profile_gone", "blocked"]) {
+  for (const outcome of ["profile_gone", "blocked", "cannot_connect"]) {
     t.mock.timers.setTime(MORNING.getTime());
     resetScheduler();
     resetFeedHints();
@@ -823,6 +825,11 @@ test("a held outcome about the person lets a folder person go, and the folder ne
  * because of our selectors. A row like that still goes back to the pool: it has
  * no seller waiting for it, and left waiting it would hold a slot of the day's
  * allowance. It simply must not be marked.
+ *
+ * The other half of that outcome is `cannot_connect`, tested above: a card
+ * that was found and offers no Connect is about the person, and writing those
+ * off is the whole point — otherwise an unreachable profile comes back every
+ * day and eats a slot of the account's allowance forever.
  */
 test("a request our own browser could not send puts the person back in the pool unmarked", async (t) => {
   for (const outcome of ["no_button"]) {

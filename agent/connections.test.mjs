@@ -14,7 +14,7 @@ const sleep = async () => {};
 const queued = { outreachId: 'invite-1', name: 'Person One', linkedin: 'https://www.linkedin.com/in/person-one/', note: '' };
 
 /** All LinkedIn URLs are intercepted. These are local synthetic pages. */
-async function profile(t, { more = false, pending = false, accepted = false, noButton = false, noteLimit = 200, warning = '', redirected = false, heading = 'h1', confirms = true, sentList = [] } = {}) {
+async function profile(t, { more = false, pending = false, accepted = false, noButton = false, emailWall = false, nameless = false, noteLimit = 200, warning = '', redirected = false, heading = 'h1', confirms = true, sentList = [] } = {}) {
   const context = await browser.newContext();
   t.after(() => context.close());
   const page = await context.newPage();
@@ -28,7 +28,7 @@ async function profile(t, { more = false, pending = false, accepted = false, noB
     }
     const action = pending ? '<button>Pending</button>' : accepted ? '<span>1st</span><button>Message</button>' : noButton ? '' : more ? '<button id="more">More</button>' : '<button id="connect">Connect</button>';
     return route.fulfill({ contentType: 'text/html', body: `<!doctype html><html><body>
-      ${warning}<main><section><${heading}>Person One</${heading}><div id="actions">${action}</div></section>
+      ${warning}<main><section><${heading}>${nameless ? 'Hidden Behind A Redesign' : 'Person One'}</${heading}><div id="actions">${action}</div></section>
       <aside><h2>Other Person</h2><button id="wrong">Connect</button></aside></main>
       <script>
       window.sent = []; window.wrongClicks = 0;
@@ -37,7 +37,8 @@ async function profile(t, { more = false, pending = false, accepted = false, noB
       const dialog = () => {
         document.querySelector('[role="menu"]')?.remove();
         const el = document.createElement('div'); el.setAttribute('role','dialog');
-        el.innerHTML = '<button id="add">Add a note</button><button id="bare">Send without a note</button>';
+        el.innerHTML = ${emailWall} ? '<input type="email"><button id="verify">Continue</button>'
+          : '<button id="add">Add a note</button><button id="bare">Send without a note</button>';
         document.body.append(el);
         const send = (note) => {
           window.sent.push(note);
@@ -47,6 +48,7 @@ async function profile(t, { more = false, pending = false, accepted = false, noB
           el.remove();
           ${confirms ? "document.querySelector('#actions').innerHTML = '<button>Pending</button>';" : ''}
         };
+        if (!el.querySelector('#bare')) return;
         el.querySelector('#bare').onclick = () => send('');
         el.querySelector('#add').onclick = () => {
           el.innerHTML = '<textarea maxlength="${noteLimit}"></textarea><button id="send">Send</button>';
@@ -139,8 +141,32 @@ test('Connect inside More is sent; suggestions are never used as a fallback', as
   const menu = await profile(t, { more: true });
   assert.equal(await sendInvitation(menu, queued, { sleep }), 'sent');
   const missing = await profile(t, { noButton: true });
-  assert.equal(await sendInvitation(missing, queued, { sleep }), 'no_button');
+  assert.equal(await sendInvitation(missing, queued, { sleep }), 'cannot_connect');
   assert.equal(await missing.evaluate(() => window.wrongClicks), 0);
+});
+
+/**
+ * Two different failures used to share one word, and the portal could only
+ * treat both the cautious way: an unreachable profile came back every day and
+ * held a slot of the account's allowance, because writing it off would have
+ * written off everybody a redesign hid as well. They are told apart by the
+ * card: found and silent is about them, never found is about us.
+ */
+test('профіль без жодного Connect — це про людину, а зникла картка — про нас', async (t) => {
+  const silent = await profile(t, { noButton: true });
+  assert.equal(await sendInvitation(silent, queued, { sleep }), 'cannot_connect');
+
+  const walled = await profile(t, { emailWall: true });
+  assert.equal(await sendInvitation(walled, queued, { sleep }), 'cannot_connect',
+    'пошта, якої ми не знаємо, завтра буде такою самою');
+  assert.deepEqual(await walled.evaluate(() => window.sent), [], 'нічого не надіслано');
+
+  // Сторінку перемалювали так, як 08.10: ні h1, ні імені людини в заголовку —
+  // картки не знайти взагалі, і дивитись на кнопки нема де.
+  const redesigned = await profile(t, { nameless: true, heading: 'h2' });
+  assert.equal(await sendInvitation(redesigned, queued, { sleep }), 'no_button',
+    'це наші селектори, і за це людину не списують');
+  assert.equal(await redesigned.evaluate(() => window.wrongClicks), 0);
 });
 
 test('an existing connection or pending request is reconciled without another click', async (t) => {

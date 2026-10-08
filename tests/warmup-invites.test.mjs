@@ -535,7 +535,7 @@ test("a request the agent finds already pending costs no allowance", async () =>
 });
 
 test("a request the browser could not send leaves the person held, with the reason", async () => {
-  for (const outcome of ["no_button", "no_note", "profile_gone", "blocked"]) {
+  for (const outcome of ["no_button", "cannot_connect", "no_note", "profile_gone", "blocked"]) {
     rows.wl_outreach = [];
     rows.wl_events = [];
     const outreachId = await queueOne();

@@ -215,7 +215,12 @@ export async function sendInvitation(page, invite, { sleep = wait, guard = async
       }
     }
   }
-  if (!connect) return 'no_button';
+  // The card is on screen and it is the right person's: no Connect in the
+  // header and none under «More» means this profile offers us no way to
+  // connect at all. That is about them, not about our selectors, and the
+  // portal may let them go (`INVITE_PERSON_OUTCOMES`). A card we never found
+  // stays `no_button` above — that one is ours.
+  if (!connect) return 'cannot_connect';
   await guard();
   await connect.click();
   await sleep(800);
@@ -224,7 +229,9 @@ export async function sendInvitation(page, invite, { sleep = wait, guard = async
   const hasDialog = await dialog.isVisible();
   const note = typeof invite.note === 'string' ? invite.note : '';
   if (hasDialog) {
-    if (await dialog.locator('input[type="email"]').count()) return 'no_button';
+    // LinkedIn asks for their email before it will carry the request: we do
+    // not have it and will not guess it, and tomorrow it will ask again.
+    if (await dialog.locator('input[type="email"]').count()) return 'cannot_connect';
     let send;
     if (note) {
       const add = await visibleButton(dialog, /^(add a note|додати нотатку|додати примітку|добавить заметку)$/i);

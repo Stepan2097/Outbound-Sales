@@ -486,8 +486,8 @@ async function pausedByThisReport(run, { outreachId, leaseId }) {
 }
 
 /**
- * The browser could not send this invitation — `no_button`, `no_note`,
- * `profile_gone` or `blocked` — and what that does. Answers what the route
+ * The browser could not send this invitation — `no_button`, `cannot_connect`,
+ * `no_note`, `profile_gone` or `blocked` — and what that does. Answers what the route
  * sends back, or `{ refused, error }` — an HTTP status and why — for a refusal.
  *
  * - **A seller's row** stays `waiting` for that seller: it rests until
@@ -495,8 +495,10 @@ async function pausedByThisReport(run, { outreachId, leaseId }) {
  * - **A folder's row** is let go (`releaseFedInvite`) — it has no seller to
  *   wait for it — and the folder is told never to offer them again only when
  *   the outcome was about the person (`INVITE_PERSON_OUTCOMES`). `no_button`
- *   and `no_note` are about our browser, so the person goes back to the pool
- *   unmarked: a page LinkedIn redesigned must not empty the folder.
+ *   — the card itself was never found — and a bare request's `no_note` are
+ *   about our browser, so the person goes back to the pool unmarked: a page
+ *   LinkedIn redesigned must not empty the folder. `cannot_connect` is the
+ *   other half: the card was there and offered no way to connect.
  * - **`blocked`** also pauses the account for two days, whoever picked the
  *   row: a block page on Connect is LinkedIn's warning arriving mid-send.
  *   Its answer says `overQuota` beside `stopSending`, which is what an agent
