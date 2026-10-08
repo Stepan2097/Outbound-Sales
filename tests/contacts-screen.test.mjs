@@ -9,11 +9,12 @@ import { loadMain } from "./app-main-excerpt.mjs";
  * LinkedIn і статусом запиту. Код екрана береться з app/screens/contacts.js і
  * запускається проти заглушок DOM.
  *
- * Окрема панель чернеток (три чернетки під три канали з вибором продукту й мови)
- * не давала нічого: за весь час жодної не було згенеровано. Вона прибрана, а
- * стан «уже в лідах» на картці замінила відповідь прогріву: де ця людина в
- * запрошеннях LinkedIn. Допомога моделі з написанням лишилась — як одна дія,
- * «Згенерувати», на самій картці: власник сказав, що це частина суті (08.10).
+ * Стан «уже в лідах» на картці замінила відповідь прогріву: де ця людина в
+ * запрошеннях LinkedIn. Допомога моделі з написанням — частина суті (власник,
+ * 08.10), тож вона лишилась на самій картці, а не окремою панеллю: продукт, мова,
+ * «що врахувати» і кнопка «Згенерувати три чернетки» (LinkedIn, лист, Telegram).
+ * Спрощувати її можна, прибирати поля — ні (Outbound-Sales, 08.10): тому тут є
+ * і вибір, і значення за замовчуванням, і те, що вже написано людині.
  */
 
 const INDEX = readFileSync(new URL("../app/index.html", import.meta.url), "utf8");
@@ -29,11 +30,15 @@ const NAMES = [
   "fetchContactFolders", "loadContactFolders", "loadContactPage", "selectContactFolder", "openContact",
   "loadContactHistory", "openContactsScreen",
   "contactDrafts", "contactDraftsBusy", "contactDraftsError", "contactDraftLanguage", "CONTACT_DRAFT_LANGUAGE_LABEL",
+  "contactDraftForm", "CONTACT_DRAFT_LANGUAGES", "contactDraftChoice", "renderKeepingFocus", "rememberContactDraftField",
   "wordCountLabel", "contactDraftHtml", "contactMessagesHtml", "generateContactMessages"
 ];
 
 const LISTENERS = [
   'document.getElementById("contactFolderSelect").addEventListener("change"',
+  'document.getElementById("contactCardBody").addEventListener("submit"',
+  'document.getElementById("contactCardBody").addEventListener("input"',
+  'document.getElementById("contactCardBody").addEventListener("change"',
   'document.getElementById("contactCardBody").addEventListener("click"'
 ];
 
@@ -51,6 +56,8 @@ function screen({ api, warmupApi } = {}) {
   const calls = [];
   const globals = {
     document: { getElementById: byId },
+    // Як у core.js: робочий простір, поки його не прочитано, — null.
+    state: null,
     api: async (path) => { calls.push(path); return api(path); },
     warmupApi: async (path) => { calls.push(`warmup:${path}`); return (warmupApi || (async () => { throw new Error("мав не питати"); }))(path); },
     escapeHtml: (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch])),
@@ -180,7 +187,7 @@ test("статус запиту на картці — відповідь про�
   assert.equal(odd.textContent, "mystery");
 });
 
-test("картка людини: поля CRM, листування LinkedIn і жодних чернеток чи «в лідах»", () => {
+test("картка людини: поля CRM, листування LinkedIn і жодного «в лідах»", () => {
   const s = screen();
   s.set("contactRecord", { id: 7, name: "Taras Bondar", position: "UA lead", company: "Northwind", email: "t@x.example", linkedin: "https://www.linkedin.com/in/t", description: "Зустрілись на конфі" });
   s.set("contactHistoryFor", "7");
@@ -197,7 +204,7 @@ test("картка людини: поля CRM, листування LinkedIn і 
   assert.match(body, /Прийшло у відповідь/);
   assert.match(body, /надіслав агент/);
   assert.equal(s.ids.contactCardPill.textContent, "запит надіслано");
-  assert.doesNotMatch(body + s.ids.contactCardPill.textContent, /уже в лідах|тільки в CRM|чернетк/i);
+  assert.doesNotMatch(body + s.ids.contactCardPill.textContent, /уже в лідах|тільки в CRM/i);
 });
 
 test("історію й статус запиту картка бере з одного запиту до прогріву, і чужа відповідь не затирає свою", async () => {
@@ -241,51 +248,145 @@ test("CRM, що не відповіла при поверненні на екр�
   assert.match(s.ids.crmContactList.innerHTML, /CRM не відповіла/);
 });
 
-// ── «Згенерувати»: одна дія на картці ───────────────────────────────────────
+// ── «Згенерувати три чернетки»: форма на картці ─────────────────────────────
 
 const DRAFTS = {
   language: "en",
   provider: "openrouter",
   modelUsed: "anthropic/claude-sonnet-5",
+  productId: "p-course",
+  productName: "advantage-course",
+  instruction: "",
   generatedAt: "2026-10-08T10:00:00Z",
   email: { subject: "Quick question about Northwind", body: "Hi Taras, saw your launch. Worth a short call?" },
   telegram: { body: "Hi Taras! Short note about your launch." },
   linkedin: { invite: "Hi Taras, would love to connect.", body: "Thanks for connecting, Taras." },
+  grounding: ["Компанія з картки CRM: Northwind"],
   verifyBeforeSending: ["Перевір, що запуск справді був минулого тижня"]
 };
 
-test("на картці є одна кнопка «Згенерувати», і без неї текстів нема; вибору продукту, мови й інструкції нема", () => {
+const PRODUCTS = [{ id: "p-ad", name: "AdAction" }, { id: "p-course", name: "advantage-course" }];
+
+/** Картка з продуктами робочого простору: обрано другий. */
+function openCardWithProducts(s, contact) {
+  s.set("state", { products: PRODUCTS, selectedProductId: "p-course" });
+  openCard(s, contact);
+}
+
+/** Людина змінила поле форми: так її бачить слухач на контейнері картки. */
+async function edit(s, event, field, value) {
+  const control = { dataset: { draftField: field }, value };
+  await s.handlers[`contactCardBody:${event}`]({ target: { closest: (selector) => (selector === "[data-draft-field]" ? control : null) } });
+}
+
+test("на картці є форма: продукт, мова, «що врахувати» і кнопка «Згенерувати три чернетки»", () => {
   const s = screen();
-  openCard(s);
+  openCardWithProducts(s, { country: "Ukraine" });
   s.get("renderContactCard")();
   const body = s.ids.contactCardBody.innerHTML;
-  assert.match(body, /<button class="primary-button" type="button" data-contact-generate><i data-lucide="sparkles"><\/i><span>Згенерувати<\/span>/);
-  assert.match(body, /Модель прочитає цю картку/);
-  assert.equal((body.match(/data-contact-generate/g) || []).length, 1, "кнопка одна");
-  assert.doesNotMatch(body, /<select|<input|contactLanguageSelect|contactProductSelect|contactInstructionInput/);
-  assert.doesNotMatch(body, /class="contact-draft"/);
+  assert.match(body, /<form class="contact-draft-form" id="contactDraftForm" data-contact-draft-form>/);
+  assert.match(body, /<select id="contactProductSelect"[^>]*>.*<option value="p-ad">AdAction<\/option><option value="p-course" selected>advantage-course<\/option>/s, "продукт, обраний у просторі, вибраний і тут");
+  assert.match(body, /<select id="contactLanguageSelect"[^>]*>.*<option value="en">English<\/option><option value="uk" selected>Українською<\/option><option value="ru">Русский<\/option>/s, "для контакту з України мова за замовчуванням українська");
+  assert.match(body, /<input id="contactInstructionInput" type="text" data-draft-field="instruction" value=""/);
+  assert.match(body, /Що врахувати \(необов'язково\)/);
+  assert.match(body, /<button class="primary-button" type="submit" id="contactGenerateBtn"><i data-lucide="sparkles"><\/i><span>Згенерувати три чернетки<\/span>/);
+  assert.equal((body.match(/type="submit"/g) || []).length, 1, "кнопка одна");
+  assert.match(body, /Нічого не надсилається саме/);
+  assert.doesNotMatch(body, /class="contact-draft"/, "поки не писали — текстів нема");
+  assert.match(body, /id="contactDraftsPill">немає</);
 });
 
-test("«Згенерувати» просить у сервера тексти українською для контакту з України, англійською для решти", async () => {
+test("форма живе в картці, а не повертається окремою панеллю в розмітці", () => {
+  for (const gone of ["contact-drafts-panel", "contactDraftForm", "contactProductSelect", "contactInstructionInput"]) {
+    assert.equal(INDEX.includes(gone), false, `«${gone}» у розмітці — форма малюється всередині картки`);
+  }
+});
+
+test("мова за замовчуванням: українська для контакту з України, англійська для решти", async () => {
   for (const [country, language] of [["Ukraine", "uk"], ["UA", "uk"], ["Україна", "uk"], ["Poland", "en"], ["", "en"], [undefined, "en"]]) {
-    const requests = [];
-    const s = screen({ api: async (path) => { requests.push(path); return { drafts: { ...DRAFTS, language } }; } });
-    s.set("contactRecord", null);
-    openCard(s, { country });
+    const s = screen();
+    openCardWithProducts(s, { country });
     const sent = [];
     s.main.context.api = async (path, options) => { sent.push({ path, body: JSON.parse(options.body) }); return { drafts: { ...DRAFTS, language } }; };
     await s.get("generateContactMessages")();
-    assert.deepEqual(sent, [{ path: "/api/contacts/7/messages", body: { language } }], `країна «${country}»`);
+    assert.deepEqual(sent, [{ path: "/api/contacts/7/messages", body: { productId: "p-course", language, instruction: "" } }], `країна «${country}»`);
   }
+});
+
+test("у запит іде те, що вибрано у формі: продукт, мова й «що врахувати»", async () => {
+  const s = screen();
+  openCardWithProducts(s, { country: "Poland" });
+  const sent = [];
+  s.main.context.api = async (path, options) => { sent.push(JSON.parse(options.body)); return { drafts: DRAFTS }; };
+  await edit(s, "change", "productId", "p-ad");
+  await edit(s, "change", "language", "ru");
+  await edit(s, "input", "instruction", "коротше, без ціни");
+  await s.get("generateContactMessages")();
+  assert.deepEqual(sent, [{ productId: "p-ad", language: "ru", instruction: "коротше, без ціни" }]);
+});
+
+test("вибране у формі переживає перемальовування картки, а чужий продукт у ній не з'являється", async () => {
+  const s = screen();
+  openCardWithProducts(s, { country: "Poland" });
+  await edit(s, "change", "productId", "p-ad");
+  await edit(s, "change", "language", "ru");
+  await edit(s, "input", "instruction", `з "лапками" та <тегами>`);
+  s.get("renderContactCard")();
+  const body = s.ids.contactCardBody.innerHTML;
+  assert.match(body, /<option value="p-ad" selected>AdAction</);
+  assert.match(body, /<option value="ru" selected>Русский</);
+  assert.match(body, /value="з &quot;лапками&quot; та &lt;тегами&gt;"/, "значення поля екрановане");
+  assert.doesNotMatch(body, /<option value="uk" selected>/);
+
+  // Продукт, якого вже нема в просторі, не лишається вибраним: береться обраний у просторі.
+  s.set("state", { products: [PRODUCTS[1]], selectedProductId: "p-course" });
+  assert.equal(s.get("contactDraftChoice")({ country: "Poland" }).productId, "p-course");
+});
+
+test("перемальовування не відбирає фокус у поля «що врахувати»: курсор лишається там, де був", () => {
+  const s = screen();
+  openCardWithProducts(s);
+  const input = s.byId("contactInstructionInput");
+  Object.assign(input, {
+    id: "contactInstructionInput",
+    selectionStart: 5,
+    selectionEnd: 5,
+    focus: () => s.calls.push("focus"),
+    setSelectionRange: (from, to) => s.calls.push({ caret: [from, to] })
+  });
+  s.byId("contactCardBody").contains = (node) => node === input;
+  s.main.context.document.activeElement = input;
+  s.get("renderContactCard")();
+  assert.ok(s.calls.includes("focus"), "фокус не повернувся");
+  assert.deepEqual(s.calls.find((call) => call.caret), { caret: [5, 5] });
+
+  // Фокус був деінде — нічого не чіпаємо.
+  s.calls.length = 0;
+  s.main.context.document.activeElement = { id: "somewhereElse" };
+  s.get("renderContactCard")();
+  assert.deepEqual(s.calls, []);
+});
+
+test("відправка форми запускає генерацію, а відправка чогось іншого на картці — ні", async () => {
+  const sent = [];
+  const s = screen({ api: async (path) => { sent.push(path); return { drafts: DRAFTS }; } });
+  openCardWithProducts(s);
+  const prevented = [];
+  await s.handlers["contactCardBody:submit"]({ target: { closest: () => null }, preventDefault: () => prevented.push("other") });
+  assert.deepEqual(sent, []);
+  assert.deepEqual(prevented, [], "чужу форму не чіпаємо");
+  await s.handlers["contactCardBody:submit"]({ target: { closest: (selector) => (selector === "[data-contact-draft-form]" ? {} : null) }, preventDefault: () => prevented.push("draft") });
+  assert.deepEqual(sent, ["/api/contacts/7/messages"]);
+  assert.deepEqual(prevented, ["draft"], "сторінка не перезавантажується від submit");
 });
 
 test("поки модель пише, кнопка каже «Пишемо...» і заблокована; після відповіді — чотири тексти з копіюванням", async () => {
   let release;
   const s = screen({ api: () => new Promise((resolve) => { release = () => resolve({ drafts: DRAFTS }); }) });
-  openCard(s);
+  openCardWithProducts(s);
   const pending = s.get("generateContactMessages")();
   const during = s.ids.contactCardBody.innerHTML;
-  assert.match(during, /data-contact-generate disabled/);
+  assert.match(during, /id="contactGenerateBtn" disabled/);
   assert.match(during, /Пишемо\.\.\./);
 
   release();
@@ -294,43 +395,75 @@ test("поки модель пише, кнопка каже «Пишемо...» 
   assert.equal((after.match(/class="contact-draft"/g) || []).length, 4);
   for (const title of ["Пошта", "Telegram", "LinkedIn · запрошення", "LinkedIn · перше повідомлення"]) assert.match(after, new RegExp(title));
   assert.match(after, /Hi Taras, saw your launch/);
-  assert.match(after, /data-copy-text="Тема: Quick question about Northwind&#10;|data-copy-text="Тема: Quick question about Northwind/);
+  assert.match(after, /data-copy-text="Тема: Quick question about Northwind/);
   assert.match(after, /@taras/, "юзернейм Telegram стоїть у підписі блоку");
   assert.match(after, /Перевір перед відправкою/);
-  assert.match(after, /English · anthropic\/claude-sonnet-5/);
-  assert.doesNotMatch(after, /data-contact-generate disabled/);
+  assert.match(after, /На чому тримається/);
+  assert.match(after, /advantage-course · English · anthropic\/claude-sonnet-5/);
+  assert.match(after, /id="contactDraftsPill">AI</);
+  assert.doesNotMatch(after, /id="contactGenerateBtn" disabled/);
+  assert.match(after, /Згенерувати три чернетки/, "після відповіді кнопка знову пропонує згенерувати");
 });
 
 test("текст, складений без моделі, так і підписаний, а не видає себе за модельний", () => {
   const s = screen();
-  openCard(s);
+  openCardWithProducts(s);
   s.set("contactDrafts", { ...DRAFTS, provider: "local", modelUsed: "local-draft" });
   s.get("renderContactCard")();
-  assert.match(s.ids.contactCardBody.innerHTML, /складено без моделі, за описом продукту/);
-  assert.doesNotMatch(s.ids.contactCardBody.innerHTML, /local-draft/);
+  const body = s.ids.contactCardBody.innerHTML;
+  assert.match(body, /складено без моделі, за описом продукту/);
+  assert.match(body, /id="contactDraftsPill">чернетка з брифу</);
+  assert.doesNotMatch(body, /local-draft/);
 });
 
-test("тексти, що вже є на людині, чекають на картці одразу, а не лише після нової генерації", async () => {
+test("тексти, що вже є на людині, чекають на картці одразу, і форма стоїть так, як їх писали", async () => {
+  const saved = { ...DRAFTS, productId: "p-ad", productName: "AdAction", language: "ru", instruction: "без згадки ціни" };
   const s = screen({
-    api: async () => ({ contact: { id: 7, name: "Taras Bondar" }, drafts: DRAFTS }),
+    api: async () => ({ contact: { id: 7, name: "Taras Bondar", country: "Poland" }, drafts: saved }),
     warmupApi: async () => ({ entries: [], outreach: null })
   });
+  s.set("state", { products: PRODUCTS, selectedProductId: "p-course" });
   await s.get("openContact")("7");
-  assert.equal((s.ids.contactCardBody.innerHTML.match(/class="contact-draft"/g) || []).length, 4);
-  // Інша людина — чужих текстів нема.
+  const body = s.ids.contactCardBody.innerHTML;
+  assert.equal((body.match(/class="contact-draft"/g) || []).length, 4);
+  assert.match(body, /<option value="p-ad" selected>AdAction</, "продукт — той, для якого писали, а не обраний у просторі");
+  assert.match(body, /<option value="ru" selected>Русский</);
+  assert.match(body, /value="без згадки ціни"/);
+
+  // Інша людина — чужих текстів і чужих налаштувань нема.
   const other = screen({
-    api: async () => ({ contact: { id: 8, name: "Iryna" }, drafts: null }),
+    api: async () => ({ contact: { id: 8, name: "Iryna", country: "Ukraine" }, drafts: null }),
     warmupApi: async () => ({ entries: [], outreach: null })
   });
-  other.set("contactDrafts", DRAFTS);
+  other.set("state", { products: PRODUCTS, selectedProductId: "p-course" });
+  other.set("contactDrafts", saved);
+  other.set("contactDraftForm", { productId: "p-ad", language: "ru", instruction: "чуже" });
   await other.get("openContact")("8");
-  assert.doesNotMatch(other.ids.contactCardBody.innerHTML, /class="contact-draft"/);
+  const fresh = other.ids.contactCardBody.innerHTML;
+  assert.doesNotMatch(fresh, /class="contact-draft"/);
+  assert.match(fresh, /<option value="p-course" selected>/);
+  assert.match(fresh, /<option value="uk" selected>/);
+  assert.doesNotMatch(fresh, /чуже/);
+});
+
+test("відповідь CRM, що прийшла після перемикання на іншу людину, не лягає на чужу картку", async () => {
+  let release;
+  const s = screen({
+    api: () => new Promise((resolve) => { release = () => resolve({ contact: { id: 7, name: "Taras" }, drafts: DRAFTS }); }),
+    warmupApi: async () => ({ entries: [], outreach: null })
+  });
+  const opening = s.get("openContact")("7");
+  s.set("selectedContactId", "8");
+  release();
+  await opening;
+  assert.equal(s.get("contactRecord"), null, "картка Тараса лягла на Ірину");
+  assert.equal(s.get("contactDrafts"), null);
 });
 
 test("людину перемкнули, поки модель писала: тексти не лягають на чужу картку", async () => {
   let release;
   const s = screen({ api: () => new Promise((resolve) => { release = () => resolve({ drafts: DRAFTS }); }) });
-  openCard(s);
+  openCardWithProducts(s);
   const pending = s.get("generateContactMessages")();
   // Поки чекаємо, відкрили іншу людину.
   s.set("selectedContactId", "8");
@@ -343,17 +476,17 @@ test("людину перемкнули, поки модель писала: т�
 
 test("помилка моделі показана на картці, а кнопка знову доступна", async () => {
   const s = screen({ api: async () => { throw new Error("Модель не відповіла"); } });
-  openCard(s);
+  openCardWithProducts(s);
   await s.get("generateContactMessages")();
   const body = s.ids.contactCardBody.innerHTML;
   assert.match(body, /Модель не відповіла/);
-  assert.doesNotMatch(body, /data-contact-generate disabled/);
+  assert.doesNotMatch(body, /id="contactGenerateBtn" disabled/);
   assert.doesNotMatch(body, /class="contact-draft"/);
 });
 
 test("«Копіювати» кладе текст у буфер і на мить каже «Скопійовано»", async () => {
   const s = screen();
-  openCard(s);
+  openCardWithProducts(s);
   s.set("contactDrafts", DRAFTS);
   const label = { textContent: "Копіювати" };
   const button = { dataset: { copyText: "Hi Taras!" }, querySelector: () => label };
@@ -364,12 +497,11 @@ test("«Копіювати» кладе текст у буфер і на мит�
   assert.equal(label.textContent, "Копіювати");
 });
 
-test("клік по «Згенерувати» на картці запускає генерацію, клік повз кнопки — ні", async () => {
+test("клік повз «Копіювати» нічого не копіює і нічого не генерує", async () => {
   const sent = [];
   const s = screen({ api: async (path) => { sent.push(path); return { drafts: DRAFTS }; } });
-  openCard(s);
+  openCardWithProducts(s);
   await s.handlers["contactCardBody:click"]({ target: { closest: () => null } });
   assert.deepEqual(sent, []);
-  await s.handlers["contactCardBody:click"]({ target: { closest: (selector) => (selector === "[data-contact-generate]" ? {} : null) } });
-  assert.deepEqual(sent, ["/api/contacts/7/messages"]);
+  assert.equal(s.calls.some((call) => call.copied !== undefined), false);
 });

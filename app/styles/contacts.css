@@ -278,6 +278,46 @@
   font-weight: 650;
 }
 
+/* Форма чернеток: продукт і мова в один ряд, «що врахувати» нижче, кнопка під
+   ними. На телефоні все в одну колонку, а кнопка на всю ширину. */
+
+.contact-draft-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  gap: 10px;
+}
+
+.contact-draft-form label,
+.contact-draft-form input,
+.contact-draft-form select {
+  min-width: 0;
+}
+
+.contact-draft-form .split-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.contact-draft-form .button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+@media (max-width: 650px) {
+  .contact-draft-form .split-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .contact-draft-form .button-row button {
+    flex: 1 1 100%;
+    min-width: 0;
+    white-space: normal;
+  }
+}
+
 .contact-draft-list {
   display: grid;
   gap: 10px;

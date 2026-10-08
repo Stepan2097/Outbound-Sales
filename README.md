@@ -107,7 +107,12 @@ conversation under it. The contact itself is never edited from here — the CRM
 is somebody else's system of record; the only thing written to it is the
 append-only activity line per message and per request described above.
 
-With a contact open, one call writes three drafts for three channels: an email
+With a contact open, the card has a small form: the product, the language, an
+optional note (`Що врахувати`) and the button «Згенерувати три чернетки». The
+language starts as Ukrainian for a contact from Ukraine and English for the rest,
+and once somebody has been written to, the form comes back set as it was then.
+The OpenRouter key is the server's (`OPENROUTER_API_KEY`); the card has no key
+field. One call writes three drafts for three channels: an email
 (subject and body), a Telegram message, and LinkedIn (an invitation note plus
 the first message after it is accepted). The model is given the contact record,
 the product's eight answers and passages from that product's knowledge files,

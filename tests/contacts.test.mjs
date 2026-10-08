@@ -144,7 +144,9 @@ test("contacts are read from the CRM, and three drafts are written for one of th
 
     // No OpenRouter key in a test, so this is the fallback path: it still has
     // to answer with three usable drafts rather than an error.
-    const { drafts } = await postJson("/api/contacts/22222222-2222-4222-8222-222222222221/messages", { language: "uk" });
+    // The card's form sends the product, the language and the seller's note.
+    const asked = { language: "uk", productId: "adaction-value-exchange-ua", instruction: "коротше, без згадки ціни" };
+    const { drafts } = await postJson("/api/contacts/22222222-2222-4222-8222-222222222221/messages", asked);
     assert.equal(drafts.provider, "local");
     assert.ok(drafts.email.subject, "an email needs a subject");
     assert.match(drafts.email.body, /Marta/, "the person's name reaches the draft");
@@ -152,10 +154,17 @@ test("contacts are read from the CRM, and three drafts are written for one of th
     assert.ok(drafts.linkedin.invite.length <= 300, "LinkedIn cuts an invitation note at 300 characters");
     assert.ok(drafts.linkedin.body.length > 0);
     assert.equal(drafts.language, "uk");
+    assert.equal(drafts.productId, asked.productId, "the drafts name the product they were written for");
+    assert.equal(drafts.instruction, asked.instruction, "and keep the seller's note");
     assert.ok(drafts.verifyBeforeSending.length, "a draft written without a model says so");
 
     const reopened = await getJson("/api/contacts/22222222-2222-4222-8222-222222222221");
     assert.equal(reopened.drafts.email.subject, drafts.email.subject, "reopening shows what was already written");
+    // The form on the card is set from these when the card is opened again.
+    assert.deepEqual(
+      { language: reopened.drafts.language, productId: reopened.drafts.productId, instruction: reopened.drafts.instruction },
+      asked
+    );
 
     const imported = await postJson("/api/contacts/22222222-2222-4222-8222-222222222221/import", {});
     const prospect = imported.prospects.find((item) => item.id === imported.prospectId);

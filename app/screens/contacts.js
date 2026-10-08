@@ -1,10 +1,11 @@
 // Контакти — the CRM and one helper: pick a folder, find a person in it, open
 // their card. The card is what the CRM says about them, what the warm-up has done
 // with them on LinkedIn (where their request stands, and the conversation), and
-// one button that has the model write them a message.
+// a small form that has the model write them three drafts: LinkedIn, email and
+// Telegram.
 
 import {
-  HISTORY_EVENT_LABEL, INVITE_NOTE_DROPPED, api, escapeAttr, escapeHtml, linkIfUrl, onScreen, refreshIcons, relativeTime, setHtml, setText, uaPlural
+  HISTORY_EVENT_LABEL, INVITE_NOTE_DROPPED, api, escapeAttr, escapeHtml, linkIfUrl, onScreen, refreshIcons, relativeTime, setHtml, setText, state, uaPlural
 } from "../core.js";
 import {
   WARMUP_OUTREACH_LABEL, WARMUP_OUTREACH_TONE, warmupApi
@@ -67,6 +68,12 @@ let contactDrafts = null;
 let contactDraftsBusy = false;
 
 let contactDraftsError = "";
+
+// Що вибрано у формі чернеток для відкритої людини. Картка перемальовується, коли
+// приходить листування чи статус запиту, тож значення полів тримаються тут, а не
+// в елементах: інакше напівнаписане «що врахувати» зникало б посеред речення.
+// Порожнє поле означає «ще не вибирали» — тоді діє значення за замовчуванням.
+let contactDraftForm = { productId: "", language: "", instruction: "" };
 
 // Коли CRM читали востаннє; нуль — ще ні.
 let contactsLoadedAt = 0;
@@ -260,25 +267,61 @@ function renderContactCard() {
     ? `<details class="contact-custom"><summary>Додаткові поля CRM</summary><pre>${escapeHtml(JSON.stringify(contact.custom_fields, null, 2))}</pre></details>`
     : "";
 
-  setHtml("contactCardBody", `
+  renderKeepingFocus(() => setHtml("contactCardBody", `
     <dl class="contact-fields">${rows || `<div><dt>Порожньо</dt><dd>CRM не знає про цю людину нічого, крім імені</dd></div>`}</dl>
     ${contact.description ? `<div class="contact-note"><strong>Нотатка з CRM</strong><p>${escapeHtml(contact.description)}</p></div>` : ""}
     ${custom}
     ${contactMessagesHtml()}
     ${contactHistoryFor && contactHistoryFor === String(contact.id) ? contactConversationHtml() : ""}
-  `);
+  `));
 }
 
 /**
- * Мова, якою писати людині: українською, коли вона з України, і англійською
- * в решті випадків. Вибору на екрані нема навмисно — одна дія, одна кнопка — тож
- * мова названа в підписі під текстом, і її видно одразу, а не вгадується.
+ * Картка перемальовується цілком, а людина може саме писати в «що врахувати»: без
+ * цього курсор зникав би щоразу, коли дочитується листування. Фокус і місце
+ * курсору повертаються на поле з тим самим id.
+ */
+function renderKeepingFocus(render) {
+  const body = document.getElementById("contactCardBody");
+  const active = document.activeElement;
+  const id = active && body?.contains?.(active) ? active.id : "";
+  const caret = id && typeof active.selectionStart === "number" ? [active.selectionStart, active.selectionEnd] : null;
+  render();
+  if (!id) return;
+  const next = document.getElementById(id);
+  if (!next || typeof next.focus !== "function") return;
+  next.focus();
+  if (caret && typeof next.setSelectionRange === "function") next.setSelectionRange(caret[0], caret[1]);
+}
+
+/**
+ * Мова за замовчуванням: українською, коли людина з України, і англійською в
+ * решті випадків. Це лише початкове значення в списку мов — його можна змінити, а
+ * коли людині вже писали, форма бере те, що було вибрано тоді.
  */
 function contactDraftLanguage(contact) {
   return /^(ua|ukr|україн|украин)/i.test(String(contact?.country || "").trim()) ? "uk" : "en";
 }
 
+const CONTACT_DRAFT_LANGUAGES = [["en", "English"], ["uk", "Українською"], ["ru", "Русский"]];
+
 const CONTACT_DRAFT_LANGUAGE_LABEL = { uk: "українською", en: "English", ru: "російською" };
+
+/**
+ * Продукт, мова й «що врахувати», з якими піде запит: вибране у формі, а де не
+ * вибрано — продукт, який зараз обрано в просторі, і мова за країною людини.
+ */
+function contactDraftChoice(contact) {
+  const products = state?.products || [];
+  const has = (id) => products.some((product) => product.id === id);
+  const productId = has(contactDraftForm.productId)
+    ? contactDraftForm.productId
+    : has(state?.selectedProductId) ? state.selectedProductId : (products[0]?.id || "");
+  const language = CONTACT_DRAFT_LANGUAGES.some(([code]) => code === contactDraftForm.language)
+    ? contactDraftForm.language
+    : contactDraftLanguage(contact);
+  return { productId, language, instruction: contactDraftForm.instruction };
+}
 
 function wordCountLabel(value) {
   const words = String(value || "").trim().split(/\s+/).filter(Boolean).length;
@@ -298,35 +341,71 @@ function contactDraftHtml({ title, hint, text, copyText, count, label }) {
 }
 
 /**
- * Повідомлення людині: одна кнопка «Згенерувати» і те, що з неї вийшло. Зміст
- * тримається на картці й описі продукту — про це сервер, а тут лише показ. Текст
- * ніколи не йде сам: він копіюється, а надсилає його людина.
+ * Повідомлення людині: форма з продуктом, мовою й «що врахувати», кнопка «Згенерувати
+ * три чернетки» і те, що з неї вийшло. Зміст тримається на картці й описі продукту —
+ * про це сервер, а тут лише показ. Текст ніколи не йде сам: він копіюється, а
+ * надсилає його людина.
  */
 function contactMessagesHtml() {
   const drafts = contactDrafts;
-  const button = `<button class="primary-button" type="button" data-contact-generate${contactDraftsBusy ? " disabled" : ""}><i data-lucide="sparkles"></i><span>${contactDraftsBusy ? "Пишемо..." : "Згенерувати"}</span></button>`;
+  const choice = contactDraftChoice(contactRecord);
+  const products = state?.products || [];
+  const productOptions = products.length
+    ? products.map((product) => `<option value="${escapeAttr(product.id)}"${product.id === choice.productId ? " selected" : ""}>${escapeHtml(product.name)}</option>`).join("")
+    : `<option value="">Продукт за замовчуванням</option>`;
+  const languageOptions = CONTACT_DRAFT_LANGUAGES
+    .map(([code, label]) => `<option value="${code}"${code === choice.language ? " selected" : ""}>${escapeHtml(label)}</option>`)
+    .join("");
+  const pill = drafts ? (drafts.provider === "local" ? "чернетка з брифу" : "AI") : "немає";
+  const form = `
+    <form class="contact-draft-form" id="contactDraftForm" data-contact-draft-form>
+      <div class="split-fields">
+        <label>
+          <span>Продукт</span>
+          <select id="contactProductSelect" data-draft-field="productId"${products.length ? "" : " disabled"}>${productOptions}</select>
+        </label>
+        <label>
+          <span>Мова</span>
+          <select id="contactLanguageSelect" data-draft-field="language">${languageOptions}</select>
+        </label>
+      </div>
+      <label>
+        <span>Що врахувати (необов'язково)</span>
+        <input id="contactInstructionInput" type="text" data-draft-field="instruction" value="${escapeAttr(choice.instruction)}" placeholder="Наприклад: коротше, без згадки ціни, зайти через їхній новий застосунок" />
+      </label>
+      <div class="button-row">
+        <button class="primary-button" type="submit" id="contactGenerateBtn"${contactDraftsBusy ? " disabled" : ""}><i data-lucide="sparkles"></i><span>${contactDraftsBusy ? "Пишемо..." : "Згенерувати три чернетки"}</span></button>
+      </div>
+    </form>`;
   const problem = contactDraftsError ? `<p class="contact-messages-problem">${escapeHtml(contactDraftsError)}</p>` : "";
+  const head = `<div class="contact-messages-head"><strong>Повідомлення</strong><span class="pill tone-muted" id="contactDraftsPill">${pill}</span></div>`;
 
   if (!drafts) {
     return `<section class="contact-messages">
-      <div class="contact-messages-head"><strong>Повідомлення</strong>${button}</div>
-      <p class="contact-messages-hint">Модель прочитає цю картку й опис продукту та напише лист, повідомлення в Telegram і два тексти для LinkedIn.</p>
+      ${head}
+      ${form}
       ${problem}
+      <p class="contact-messages-hint">Модель прочитає цю картку й опис продукту та напише чернетки: лист, повідомлення в Telegram і два тексти для LinkedIn — запрошення й перше повідомлення. Нічого не надсилається саме.</p>
     </section>`;
   }
 
   const emailText = [drafts.email?.subject ? `Тема: ${drafts.email.subject}` : "", drafts.email?.body || ""].filter(Boolean).join("\n\n");
   const made = [
+    drafts.productName || "",
     CONTACT_DRAFT_LANGUAGE_LABEL[drafts.language] || drafts.language || "",
     drafts.provider === "local" ? "складено без моделі, за описом продукту" : (drafts.modelUsed || ""),
     drafts.generatedAt ? relativeTime(drafts.generatedAt) : ""
   ].filter(Boolean).join(" · ");
+  const grounding = (drafts.grounding || []).length
+    ? `<div><strong>На чому тримається</strong><ul>${drafts.grounding.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>`
+    : "";
   const verify = (drafts.verifyBeforeSending || []).length
     ? `<div class="contact-draft-warning"><strong>Перевір перед відправкою</strong><ul>${drafts.verifyBeforeSending.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>`
     : "";
 
   return `<section class="contact-messages">
-    <div class="contact-messages-head"><strong>Повідомлення</strong>${button}</div>
+    ${head}
+    ${form}
     ${problem}
     <div class="contact-draft-list">
       ${contactDraftHtml({ title: "Пошта", hint: drafts.email?.subject || "без теми", text: drafts.email?.body || "", copyText: emailText, count: wordCountLabel(drafts.email?.body), label: "Лист" })}
@@ -334,7 +413,7 @@ function contactMessagesHtml() {
       ${contactDraftHtml({ title: "LinkedIn · запрошення", hint: "до 300 символів, без пропозиції", text: drafts.linkedin?.invite || "", count: `${String(drafts.linkedin?.invite || "").length} символів`, label: "Запрошення в LinkedIn" })}
       ${contactDraftHtml({ title: "LinkedIn · перше повідомлення", hint: "після прийняття запрошення", text: drafts.linkedin?.body || "", count: wordCountLabel(drafts.linkedin?.body), label: "Повідомлення в LinkedIn" })}
     </div>
-    <div class="contact-draft-meta"><span>${escapeHtml(made)}</span>${verify}</div>
+    <div class="contact-draft-meta"><span>${escapeHtml(made)}</span>${grounding}${verify}</div>
   </section>`;
 }
 
@@ -347,7 +426,7 @@ async function generateContactMessages() {
   try {
     const payload = await api(`/api/contacts/${encodeURIComponent(contactId)}/messages`, {
       method: "POST",
-      body: JSON.stringify({ language: contactDraftLanguage(contactRecord) })
+      body: JSON.stringify(contactDraftChoice(contactRecord))
     });
     // Людину могли перемкнути, поки модель писала: чужі тексти на чужій картці
     // гірші за відсутні.
@@ -454,13 +533,27 @@ async function openContact(contactId) {
   contactDrafts = null;
   contactDraftsBusy = false;
   contactDraftsError = "";
+  contactDraftForm = { productId: "", language: "", instruction: "" };
   void loadContactHistory(contactId);
   renderContacts();
   try {
     const payload = await api(`/api/contacts/${encodeURIComponent(contactId)}`);
+    // Людину могли перемкнути, поки відповідь ішла: чужа картка з чужими текстами
+    // гірша за порожню.
+    if (selectedContactId !== contactId) return;
     contactRecord = payload.contact;
     contactDrafts = payload.drafts || null;
+    // Продукт, мова й побажання беруться з того, що вже писали цій людині, щоб
+    // повтор не починався з чужих налаштувань.
+    if (contactDrafts) {
+      contactDraftForm = {
+        productId: contactDrafts.productId || "",
+        language: contactDrafts.language || "",
+        instruction: contactDrafts.instruction || ""
+      };
+    }
   } catch (error) {
+    if (selectedContactId !== contactId) return;
     contactsError = error.message || "Не вдалося прочитати контакт.";
   }
   renderContacts();
@@ -541,13 +634,24 @@ document.getElementById("contactSearchInput").addEventListener("input", (event) 
   }, 350);
 });
 
-// «Згенерувати» і «Копіювати» живуть на самій картці, яка перемальовується, тож
-// слухач стоїть на її контейнері, а не на кнопках.
+// Форма чернеток і «Копіювати» живуть на самій картці, яка перемальовується, тож
+// слухачі стоять на її контейнері, а не на елементах.
+document.getElementById("contactCardBody").addEventListener("submit", async (event) => {
+  if (!event.target.closest("[data-contact-draft-form]")) return;
+  event.preventDefault();
+  await generateContactMessages();
+});
+
+function rememberContactDraftField(event) {
+  const field = event.target.closest?.("[data-draft-field]");
+  if (field) contactDraftForm = { ...contactDraftForm, [field.dataset.draftField]: field.value };
+}
+
+document.getElementById("contactCardBody").addEventListener("input", rememberContactDraftField);
+
+document.getElementById("contactCardBody").addEventListener("change", rememberContactDraftField);
+
 document.getElementById("contactCardBody").addEventListener("click", async (event) => {
-  if (event.target.closest("[data-contact-generate]")) {
-    await generateContactMessages();
-    return;
-  }
   const copy = event.target.closest("[data-copy-text]");
   if (!copy) return;
   const label = copy.querySelector("span");
