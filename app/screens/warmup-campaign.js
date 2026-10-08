@@ -35,7 +35,6 @@ function warmupFormValues() {
   return {
     name: (document.getElementById("warmupCampaignName")?.value || "").trim(),
     folderId: document.getElementById("warmupFolderSelect")?.value || "",
-    productId: document.getElementById("warmupCampaignProduct")?.value || "",
     fromDay: warmupFromDayValue(),
     filters
   };
@@ -58,7 +57,6 @@ function warmupCampaignSaved(campaign) {
   return {
     name: campaign?.name || "",
     folderId: campaign?.folderId || "",
-    productId: campaign?.productId || "",
     fromDay: String(campaign?.fromDay || WARMUP_DEFAULT_FROM_DAY),
     filters: { ...WARMUP_EMPTY_FILTERS, ...(campaign?.filters || {}) }
   };
@@ -71,7 +69,7 @@ function warmupFormDirty() {
   if (!editing) return true;
   const form = warmupFormValues();
   const saved = warmupCampaignSaved(editing);
-  if (form.name !== saved.name || form.folderId !== saved.folderId || form.productId !== saved.productId) return true;
+  if (form.name !== saved.name || form.folderId !== saved.folderId) return true;
   if (form.fromDay !== saved.fromDay) return true;
   return Object.keys(WARMUP_EMPTY_FILTERS).some((key) => form.filters[key] !== saved.filters[key]);
 }
@@ -88,11 +86,6 @@ export function warmupFolderName(folderId) {
   // A folder the CRM no longer lists is still the folder a campaign is pointed
   // at, and the name stored with the campaign is what answers for it.
   return warmupState.campaigns.find((campaign) => campaign.folderId === folderId && campaign.folderName)?.folderName || null;
-}
-
-function warmupProductName(productId) {
-  if (!productId) return null;
-  return (state?.products || []).find((product) => product.id === productId)?.name || null;
 }
 
 function renderWarmupFolderOptions(selectedId) {
@@ -123,27 +116,6 @@ function renderWarmupFolderOptions(selectedId) {
   if (selectedId && !known.has(selectedId)) {
     const name = warmupEditingCampaign()?.folderName || warmupFolderName(selectedId) || selectedId;
     options.splice(1, 0, `<option value="${escapeAttr(selectedId)}" selected>${escapeHtml(name)} · немає в списку папок</option>`);
-  }
-  select.innerHTML = options.join("");
-}
-
-/** Products are the workspace's own — one list, not a second copy of it. */
-function renderWarmupProductOptions(selectedId) {
-  const select = document.getElementById("warmupCampaignProduct");
-  if (!select) return;
-  const products = state?.products || [];
-  const signature = `${products.length}|${selectedId || ""}`;
-  if (select.dataset.signature === signature) return;
-  select.dataset.signature = signature;
-
-  const options = [`<option value="" ${selectedId ? "" : "selected"}>Без продукту</option>`];
-  const known = new Set();
-  for (const product of products) {
-    known.add(product.id);
-    options.push(`<option value="${escapeAttr(product.id)}" ${product.id === selectedId ? "selected" : ""}>${escapeHtml(product.name)}</option>`);
-  }
-  if (selectedId && !known.has(selectedId)) {
-    options.push(`<option value="${escapeAttr(selectedId)}" selected>${escapeHtml(selectedId)} · немає в цьому робочому просторі</option>`);
   }
   select.innerHTML = options.join("");
 }
@@ -250,26 +222,23 @@ function warmupCampaignRowHtml(campaign, rank) {
   const remaining = campaign.forecast ? Number(campaign.forecast.remaining) || 0 : null;
   const accounts = (campaign.accountIds || []).length;
   const folder = campaign.folderName || warmupFolderName(campaign.folderId) || (campaign.folderId ? "папка, якої CRM не показує" : "без папки");
-  const product = warmupProductName(campaign.productId);
 
   const feedStart = campaignFeedStart(campaign, WARMUP_DEFAULT_FROM_DAY);
   const meta = [
     escapeHtml(folder),
     `${accounts} ${uaPlural(accounts, "акаунт", "акаунти", "акаунтів")}`,
-    product ? escapeHtml(product) : "",
     feedStart ? `<span title="${escapeAttr(feedStart.title)}">${escapeHtml(feedStart.text)}</span>` : ""
   ].filter(Boolean);
 
   const controls = [];
   // The order is the only thing deciding which campaign an account actually
-  // serves — the first running one with work takes the whole quota. So the rank
-  // is not a tooltip on a label somebody cannot change; it is the readout of
-  // the two arrows that set it.
+  // serves — the first running one with work takes the whole quota. With one
+  // campaign there is no order to set, so there are no arrows.
   const index = warmupState.campaigns.indexOf(campaign);
   const rankLabel = rank
     ? `<strong title="Порядок: спільні акаунти першою заповнює кампанія вище">#${rank}</strong>`
     : `<em title="Стане в порядок після запуску">—</em>`;
-  controls.push(`<span class="warmup-campaign-move">
+  if (warmupState.campaigns.length > 1) controls.push(`<span class="warmup-campaign-move">
     <button class="text-button" type="button" data-warmup-campaign-move="up" ${index <= 0 ? "disabled" : ""} title="Вище" aria-label="Підняти ${escapeAttr(campaign.name || "цю кампанію")} вище в порядку"><i data-lucide="chevron-up"></i></button>
     ${rankLabel}
     <button class="text-button" type="button" data-warmup-campaign-move="down" ${index < 0 || index >= warmupState.campaigns.length - 1 ? "disabled" : ""} title="Нижче" aria-label="Опустити ${escapeAttr(campaign.name || "цю кампанію")} нижче в порядку"><i data-lucide="chevron-down"></i></button>
@@ -279,13 +248,10 @@ function warmupCampaignRowHtml(campaign, rank) {
   } else if (campaign.state !== "done") {
     controls.push(`<button class="text-button" type="button" data-warmup-campaign-state="running" title="Запустити: акаунти почнуть брати людей із папки"><i data-lucide="play"></i><span>Старт</span></button>`);
   }
-  if (campaign.state !== "done") {
-    controls.push(`<button class="text-button" type="button" data-warmup-campaign-state="done" title="Більше нікого не брати"><i data-lucide="check"></i><span>Завершити</span></button>`);
-  } else {
+  if (campaign.state === "done") {
     controls.push(`<button class="text-button" type="button" data-warmup-campaign-state="running" title="Запустити знову"><i data-lucide="rotate-ccw"></i><span>Відкрити знову</span></button>`);
   }
   controls.push(`<button class="text-button" type="button" data-warmup-campaign-edit><i data-lucide="pencil"></i><span>Редагувати</span></button>`);
-  controls.push(`<button class="text-button warmup-campaign-delete" type="button" data-warmup-campaign-delete><i data-lucide="trash-2"></i><span>Видалити</span></button>`);
 
   const count = remaining === null
     ? `<span class="warmup-campaign-count-unknown">${warmupCount(sent)} надіслано</span>`
@@ -396,17 +362,19 @@ function renderWarmupCampaignForm({ resetForm = false } = {}) {
     }
     const fromDayInput = document.getElementById("warmupCampaignFromDay");
     if (fromDayInput) fromDayInput.value = saved.fromDay;
-    // A new campaign starts on the product this workspace is already working.
-    renderWarmupProductOptions(editing ? saved.productId : (state?.selectedProductId || ""));
     renderWarmupFolderOptions(saved.folderId);
   } else {
-    renderWarmupProductOptions(document.getElementById("warmupCampaignProduct")?.value || saved.productId);
     renderWarmupFolderOptions(document.getElementById("warmupFolderSelect")?.value || saved.folderId);
   }
 
   for (const input of Object.values(warmupFilterInputs())) {
     if (input) input.disabled = !warmupState.foldersReady;
   }
+  renderWarmupFiltersSummary();
+  const finish = document.getElementById("warmupCampaignFinishBtn");
+  if (finish) finish.hidden = !editing || editing.state === "done";
+  const remove = document.getElementById("warmupCampaignDeleteBtn");
+  if (remove) remove.hidden = !editing;
   const fromDayInput = document.getElementById("warmupCampaignFromDay");
   if (fromDayInput) fromDayInput.disabled = !warmupState.foldersReady;
 
@@ -419,9 +387,26 @@ function renderWarmupCampaignForm({ resetForm = false } = {}) {
     note.innerHTML = warmupState.campaignNotice
       ? `<em class="warmup-campaign-problem">${escapeHtml(warmupState.campaignNotice)}</em>`
       : (editing
-        ? escapeHtml(`Редагуємо: ${editing.name || "ця кампанія"}. Які акаунти її ведуть — позначається нижче, у Профілях, а не тут.`)
-        : "Нова кампанія починається як чернетка, останньою в черзі. Познач унизу, у Профілях, акаунти, які її ведуть, і запусти її.");
+        ? escapeHtml(`Редагуємо: ${editing.name || "ця кампанія"}. Які акаунти її ведуть — позначається галочками в таблиці акаунтів вище.`)
+        : "Нова кампанія починається як чернетка. Познач галочками в таблиці акаунтів вище, які акаунти її ведуть, і запусти її.");
   }
+}
+
+/**
+ * The filters narrow the folder and are set rarely, so they sit folded — but
+ * a folded filter that is set must still say so: the live campaign takes only
+ * status «new» of one owner, and a closed box hiding that would read as «the
+ * whole folder».
+ */
+function renderWarmupFiltersSummary() {
+  const summary = document.getElementById("warmupCampaignFiltersSummary");
+  if (!summary) return;
+  const labels = { country: "країна", position: "посада", leadStatus: "статус", ownerId: "власник" };
+  const set = Object.entries(warmupFilterInputs())
+    .map(([key, input]) => [key, (input?.value || "").trim()])
+    .filter(([, value]) => value)
+    .map(([key, value]) => `${labels[key] || key} ${key === "ownerId" ? `${value.slice(0, 8)}…` : value}`);
+  summary.textContent = set.length ? `Звузити папку: ${set.join(" · ")}` : "Звузити папку";
 }
 
 export function renderWarmupCampaigns({ resetForm = false } = {}) {
@@ -563,7 +548,6 @@ async function saveWarmupCampaignForm() {
       name: form.name,
       folderId: form.folderId,
       filters: form.filters,
-      productId: form.productId || null,
       // Порожнє поле — це «як було» для збереженої кампанії і сім для нової;
       // решту перевіряє сервер і відповідає реченням, яке видно у формі.
       ...(form.fromDay === "" ? {} : { fromDay: form.fromDay })
@@ -1029,8 +1013,6 @@ function warmupCampaignFormTouched() {
 
 document.getElementById("warmupFolderSelect")?.addEventListener("change", warmupCampaignFormTouched);
 
-document.getElementById("warmupCampaignProduct")?.addEventListener("change", warmupCampaignFormTouched);
-
 document.getElementById("warmupCampaignName")?.addEventListener("input", warmupCampaignFormTouched);
 
 for (const id of ["warmupFilterCountry", "warmupFilterPosition", "warmupFilterStatus", "warmupFilterOwner", "warmupCampaignFromDay"]) {
@@ -1045,6 +1027,16 @@ document.getElementById("warmupCampaignForm")?.addEventListener("submit", (event
   event.preventDefault();
   saveWarmupCampaignForm();
 });
+
+document.getElementById("warmupCampaignFinishBtn")?.addEventListener("click", () => {
+  if (warmupState.formCampaignId) setWarmupCampaignState(warmupState.formCampaignId, "done");
+});
+
+document.getElementById("warmupCampaignDeleteBtn")?.addEventListener("click", () => {
+  if (warmupState.formCampaignId) deleteWarmupCampaign(warmupState.formCampaignId);
+});
+
+for (const input of Object.values(warmupFilterInputs())) input?.addEventListener("input", renderWarmupFiltersSummary);
 
 document.getElementById("warmupCampaignList")?.addEventListener("click", (event) => {
   const row = event.target.closest("[data-warmup-campaign]");

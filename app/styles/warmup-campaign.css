@@ -39,8 +39,6 @@
 
 .warmup-field-folder { grid-column: span 5; }
 
-.warmup-field-product { grid-column: span 3; }
-
 .warmup-field-filter { grid-column: span 3; }
 
 .warmup-campaign-form-footer {
@@ -190,8 +188,7 @@
   }
 
   .warmup-field-name,
-  .warmup-field-folder,
-  .warmup-field-product {
+  .warmup-field-folder {
     grid-column: span 6;
   }
 
@@ -207,7 +204,6 @@
 
   .warmup-field-name,
   .warmup-field-folder,
-  .warmup-field-product,
   .warmup-field-filter {
     grid-column: 1 / -1;
   }
@@ -651,4 +647,21 @@
 .warmup-campaign-move svg {
   width: 15px;
   height: 15px;
+}
+
+/* The folder's filters, folded: set rarely, but the summary line says what is
+   set, so a narrowed folder never reads as the whole one. */
+.warmup-campaign-filters {
+  margin-top: 10px;
+}
+
+.warmup-campaign-filters > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 13px;
+  padding: 4px 0;
+}
+
+.warmup-campaign-filters[open] > summary {
+  margin-bottom: 8px;
 }
