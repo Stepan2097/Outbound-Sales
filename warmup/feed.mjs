@@ -2,7 +2,7 @@ import { anty, crm, CONTACT_ID_BATCH, queueLeads, queuePage, slugLikeForms, toda
 import { RestError } from "./rest.mjs";
 import { CONNECT_HARD_MAX, dayOfRun, pausedOn } from "./strategy.mjs";
 import { DEFAULT_FROM_DAY, targetingOf } from "./campaigns.mjs";
-import { isPlainSlug, skippedAmong } from "./invites.mjs";
+import { INVITE_FAILED, isPlainSlug, skippedAmong } from "./invites.mjs";
 import { linkedinSlug } from "./outreach.mjs";
 
 /**
@@ -65,9 +65,10 @@ export function resetFeedHints() {
 
 /**
  * Which of these contacts somebody has already approached, held or asked for —
- * or the folder has let go and must not offer again.
+ * or the folder has let go and must not offer again, or our own browser
+ * failed on today (`restingToday`).
  */
-async function approachedAmong(contactIds) {
+async function approachedAmong(contactIds, { todayIso = today() } = {}) {
   const approached = new Set();
   for (let start = 0; start < contactIds.length; start += CONTACT_ID_BATCH) {
     const rows = await anty.from("wl_outreach").select("crm_contact_id")
@@ -75,7 +76,48 @@ async function approachedAmong(contactIds) {
     for (const row of rows) approached.add(row.crm_contact_id);
   }
   for (const id of (await skippedAmong({ contactIds })).ids) approached.add(id);
+  for (const id of await restingToday(contactIds, todayIso)) approached.add(id);
   return approached;
+}
+
+/**
+ * The outcomes that put a person back in the pool unmarked — about our
+ * browser, not about them — and so must not bring them straight back.
+ */
+const RESTING_OUTCOMES = ["no_button"];
+
+/**
+ * Which of these contacts our own browser could not send to today.
+ *
+ * `no_button` is not written off (see `INVITE_PERSON_OUTCOMES`): the row is
+ * let go and the person goes back to the pool unmarked, so a page LinkedIn
+ * redesigned does not empty the folder. But unmarked and still at the head of
+ * the folder, they were the very next person the top-up queued — on 08.10.2026
+ * Ajay Manger came back `no_button` on one account in the morning and was
+ * queued, failed and queued again on another in the evening. On day 6 an
+ * account sends one or two a day, so one such profile was the whole day's
+ * allowance, every session, every day.
+ *
+ * Resting them until tomorrow keeps both halves: nobody is written off for our
+ * fault, and the place goes to the next person in the folder. Tomorrow the
+ * walk starts from the front again (the hint is a day long), and an agent that
+ * works by then sends to them.
+ */
+async function restingToday(contactIds, todayIso) {
+  const resting = new Set();
+  const since = `${todayIso}T00:00:00.000Z`;
+  for (let start = 0; start < contactIds.length; start += CONTACT_ID_BATCH) {
+    const rows = await anty.from("wl_events").select("type,meta")
+      .eq("type", INVITE_FAILED).gte("created_at", since)
+      .in("meta->>outcome", RESTING_OUTCOMES)
+      .in("meta->>crmContactId", contactIds.slice(start, start + CONTACT_ID_BATCH).map(String)).rows();
+    for (const row of rows) {
+      if (row.type === INVITE_FAILED && RESTING_OUTCOMES.includes(row.meta?.outcome) && row.meta?.crmContactId) {
+        resting.add(String(row.meta.crmContactId));
+      }
+    }
+  }
+  return resting;
 }
 
 /** How many slugs go into one `or=(…)` against `wl_outreach`. Two spellings each, well inside a URL. */
@@ -141,7 +183,7 @@ async function nextCandidateIds(limit, targeting, { todayIso = today() } = {}) {
   for (let page = 0; page < PAGES_PER_CALL && found.length < limit; page += 1) {
     const batch = await queuePage({ targeting, offset, limit: size });
     if (!batch.length) break;
-    const approached = await approachedAmong(batch.map((row) => row.id));
+    const approached = await approachedAmong(batch.map((row) => row.id), { todayIso });
     const open = batch.map((row, index) => ({ row, index, slug: linkedinSlug(row.linkedin) }))
       .filter(({ row }) => !approached.has(row.id));
 

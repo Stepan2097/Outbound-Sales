@@ -859,6 +859,45 @@ test("a request our own browser could not send puts the person back in the pool 
   }
 });
 
+/**
+ * 08.10.2026: Ajay Manger came back `no_button` on Profile 48 in the morning,
+ * and in the evening the folder queued him on Chloe Stewart, he failed again,
+ * and the top-up queued him on Chloe once more — he is unmarked, so he was
+ * still the head of the folder. On day 6 the account had one request to send,
+ * and that one profile was all of it.
+ *
+ * Not written off — that stays the rule for our browser's failures — but not
+ * offered again today either: the place goes to the next person, and tomorrow
+ * the walk starts from the front and finds them again.
+ */
+test("a person our browser failed on today is not the next one queued, and is back tomorrow", async (t) => {
+  t.mock.timers.setTime(MORNING.getTime());
+  resetScheduler();
+  resetFeedHints();
+  onDay(8);
+  rows.wl_outreach = [];
+  rows.wl_events = [];
+  rows.wl_accounts[0].status = "warming";
+
+  await lease();
+  const before = waitingRows().map((row) => row.crm_contact_id);
+  const [broken] = waitingRows();
+  const answer = await report(broken.id, "no_button");
+  assert.equal(answer.payload.skipped, false, "not written off: it was our browser");
+
+  // The room it freed is filled — by somebody else.
+  await agentWork();
+  const after = waitingRows().map((row) => row.crm_contact_id);
+  assert.equal(after.includes(broken.crm_contact_id), false, "not queued straight back");
+  assert.ok(after.some((id) => !before.includes(id)), "the next person in the folder takes the place");
+  assert.equal((await pool()).includes(broken.crm_contact_id), false, "and the walk does not offer them today");
+
+  // Tomorrow the walk starts from the front and they are there again.
+  resetFeedHints();
+  t.mock.timers.setTime(MORNING.getTime() + DAY_MS);
+  assert.equal((await pool()).includes(broken.crm_contact_id), true, "back in the pool the next day");
+});
+
 test("an agent that reports no_note for a bare request is named on the log as out of date", async () => {
   onDay(8);
   await lease();
