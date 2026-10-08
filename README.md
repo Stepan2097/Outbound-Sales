@@ -111,6 +111,9 @@ With a contact open, the card has a small form: the product, the language, an
 optional note (`Що врахувати`) and the button «Згенерувати три чернетки». The
 language starts as Ukrainian for a contact from Ukraine and English for the rest,
 and once somebody has been written to, the form comes back set as it was then.
+The product starts as the one picked last time in this browser (the workspace's
+own product only when nothing was picked), and the caption under the drafts names
+the product they were written for.
 The OpenRouter key is the server's (`OPENROUTER_API_KEY`); the card has no key
 field. One call writes three drafts for three channels: an email
 (subject and body), a Telegram message, and LinkedIn (an invitation note plus

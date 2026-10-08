@@ -31,6 +31,7 @@ const NAMES = [
   "loadContactHistory", "openContactsScreen",
   "contactDrafts", "contactDraftsBusy", "contactDraftsError", "contactDraftLanguage", "CONTACT_DRAFT_LANGUAGE_LABEL",
   "contactDraftForm", "CONTACT_DRAFT_LANGUAGES", "contactDraftChoice", "renderKeepingFocus", "rememberContactDraftField",
+  "CONTACT_PRODUCT_KEY", "rememberedContactProduct", "rememberContactProduct",
   "wordCountLabel", "contactDraftHtml", "contactMessagesHtml", "generateContactMessages"
 ];
 
@@ -54,6 +55,9 @@ function screen({ api, warmupApi } = {}) {
     return ids[id];
   };
   const calls = [];
+  // Сховище браузера: пам'ять останнього вибраного продукту.
+  const stored = new Map();
+  const localStorage = { getItem: (key) => (stored.has(key) ? stored.get(key) : null), setItem: (key, value) => { stored.set(key, String(value)); } };
   const globals = {
     document: { getElementById: byId },
     // Як у core.js: робочий простір, поки його не прочитано, — null.
@@ -70,14 +74,14 @@ function screen({ api, warmupApi } = {}) {
     refreshIcons: () => {},
     HISTORY_EVENT_LABEL: { "invite.sent": "Запит надіслано" },
     INVITE_NOTE_DROPPED: {},
-    window: { clearTimeout: () => {}, setTimeout: (fn) => { calls.push({ timer: fn }); return 0; } },
+    window: { localStorage, clearTimeout: () => {}, setTimeout: (fn) => { calls.push({ timer: fn }); return 0; } },
     URLSearchParams,
     navigator: { clipboard: { writeText: async (text) => { calls.push({ copied: text }); } } },
     WARMUP_OUTREACH_LABEL: { pending: "запит надіслано", accepted: "прийняв(ла)", declined: "не прийняв(ла)" },
     WARMUP_OUTREACH_TONE: { pending: "tone-muted", accepted: "tone-live", declined: "tone-bad" }
   };
   const main = loadMain(NAMES.filter((name) => !["WARMUP_OUTREACH_LABEL", "WARMUP_OUTREACH_TONE"].includes(name)), globals, LISTENERS);
-  return { ids, byId, handlers, calls, main, get: main.get, set: (name, value) => main.context && vm_set(main, name, value) };
+  return { ids, byId, handlers, calls, stored, main, get: main.get, set: (name, value) => main.context && vm_set(main, name, value) };
 }
 
 /** Картка людини з готовими полями; решта стану — як у тесті. */
@@ -504,4 +508,75 @@ test("клік повз «Копіювати» нічого не копіює і
   await s.handlers["contactCardBody:click"]({ target: { closest: () => null } });
   assert.deepEqual(sent, []);
   assert.equal(s.calls.some((call) => call.copied !== undefined), false);
+});
+
+// ── Продукт: пам'ять вибору й назва під чернетками ──────────────────────────
+
+test("продукт за замовчуванням — той, що людина вибирала востаннє в цьому браузері, а не застиглий у просторі", () => {
+  const s = screen();
+  openCardWithProducts(s); // у просторі обрано p-course
+  s.stored.set("outbound.contact.product", "p-ad");
+  assert.equal(s.get("contactDraftChoice")({ country: "Poland" }).productId, "p-ad");
+  s.get("renderContactCard")();
+  assert.match(s.ids.contactCardBody.innerHTML, /<option value="p-ad" selected>AdAction</);
+
+  // Запам'ятований продукт, якого вже нема в списку, не лишається вибраним.
+  s.stored.set("outbound.contact.product", "p-gone");
+  assert.equal(s.get("contactDraftChoice")({ country: "Poland" }).productId, "p-course");
+  // А вибір, який уже зроблено у формі цієї картки, сильніший за пам'ять.
+  s.stored.set("outbound.contact.product", "p-ad");
+  s.set("contactDraftForm", { productId: "p-course", language: "", instruction: "" });
+  assert.equal(s.get("contactDraftChoice")({ country: "Poland" }).productId, "p-course");
+});
+
+test("вибір продукту запам'ятовується, а вибір мови чи побажання — ні", async () => {
+  const s = screen();
+  openCardWithProducts(s);
+  await edit(s, "change", "productId", "p-ad");
+  assert.equal(s.stored.get("outbound.contact.product"), "p-ad");
+  s.stored.clear();
+  await edit(s, "change", "language", "ru");
+  await edit(s, "input", "instruction", "коротше");
+  assert.equal(s.stored.size, 0, "у пам'ять потрапив не продукт");
+});
+
+test("сховище браузера закрите — картка працює без пам'яті, а не падає", async () => {
+  const s = screen();
+  openCardWithProducts(s);
+  const closed = { getItem: () => { throw new Error("SecurityError"); }, setItem: () => { throw new Error("SecurityError"); } };
+  s.main.context.window.localStorage = closed;
+  assert.equal(s.get("contactDraftChoice")({ country: "Poland" }).productId, "p-course");
+  await edit(s, "change", "productId", "p-ad");
+  assert.equal(s.get("contactDraftChoice")({ country: "Poland" }).productId, "p-ad", "вибір у формі діє й без сховища");
+});
+
+test("під чернетками названо продукт — і для старих чернеток, у яких назви не збережено", () => {
+  const s = screen();
+  openCardWithProducts(s);
+  // Старі чернетки: є id продукту, назви нема.
+  const { productName, ...old } = DRAFTS;
+  s.set("contactDrafts", { ...old, productId: "p-ad" });
+  s.get("renderContactCard")();
+  assert.match(s.ids.contactCardBody.innerHTML, /<span>AdAction · English · anthropic\/claude-sonnet-5/);
+
+  // Продукт, якого вже нема в списку, лишає назву, з якою чернетки писали.
+  s.set("contactDrafts", { ...DRAFTS, productId: "p-gone", productName: "Старий продукт" });
+  s.get("renderContactCard")();
+  assert.match(s.ids.contactCardBody.innerHTML, /<span>Старий продукт · English/);
+
+  // Назва зі списку сильніша за збережену: продукт могли перейменувати.
+  s.set("contactDrafts", { ...DRAFTS, productId: "p-ad", productName: "AdAction (стара назва)" });
+  s.get("renderContactCard")();
+  assert.match(s.ids.contactCardBody.innerHTML, /<span>AdAction · English/);
+});
+
+test("запит несе вибраний productId, і без нього тест червоніє", async () => {
+  const s = screen();
+  openCardWithProducts(s);
+  s.stored.set("outbound.contact.product", "p-ad");
+  const sent = [];
+  s.main.context.api = async (path, options) => { sent.push(JSON.parse(options.body)); return { drafts: { ...DRAFTS, productId: "p-ad" } }; };
+  await s.get("generateContactMessages")();
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].productId, "p-ad", "сервер інакше візьме застиглий state.selectedProductId");
 });

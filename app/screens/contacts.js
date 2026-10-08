@@ -307,16 +307,33 @@ const CONTACT_DRAFT_LANGUAGES = [["en", "English"], ["uk", "Українсько
 
 const CONTACT_DRAFT_LANGUAGE_LABEL = { uk: "українською", en: "English", ru: "російською" };
 
+// Продукт, який людина вибрала востаннє в цьому браузері. Продукт, обраний у
+// просторі, ставила шапка, якої вже нема, тож він застиг на одному значенні, а лід
+// кампанії може бути для іншого продукту: без пам'яті кожна нова картка починалась
+// би з нього. Сховище може бути закрите (приватне вікно) — тоді просто без пам'яті.
+const CONTACT_PRODUCT_KEY = "outbound.contact.product";
+
+function rememberedContactProduct() {
+  try { return window.localStorage.getItem(CONTACT_PRODUCT_KEY) || ""; } catch { return ""; }
+}
+
+function rememberContactProduct(productId) {
+  try { window.localStorage.setItem(CONTACT_PRODUCT_KEY, productId); } catch { /* без пам'яті */ }
+}
+
 /**
  * Продукт, мова й «що врахувати», з якими піде запит: вибране у формі, а де не
- * вибрано — продукт, який зараз обрано в просторі, і мова за країною людини.
+ * вибрано — продукт, який людина вибирала востаннє тут, потім обраний у просторі,
+ * і мова за країною людини.
  */
 function contactDraftChoice(contact) {
   const products = state?.products || [];
   const has = (id) => products.some((product) => product.id === id);
   const productId = has(contactDraftForm.productId)
     ? contactDraftForm.productId
-    : has(state?.selectedProductId) ? state.selectedProductId : (products[0]?.id || "");
+    : has(rememberedContactProduct())
+      ? rememberedContactProduct()
+      : has(state?.selectedProductId) ? state.selectedProductId : (products[0]?.id || "");
   const language = CONTACT_DRAFT_LANGUAGES.some(([code]) => code === contactDraftForm.language)
     ? contactDraftForm.language
     : contactDraftLanguage(contact);
@@ -390,8 +407,11 @@ function contactMessagesHtml() {
   }
 
   const emailText = [drafts.email?.subject ? `Тема: ${drafts.email.subject}` : "", drafts.email?.body || ""].filter(Boolean).join("\n\n");
+  // Назва береться зі списку продуктів за id, щоб і чернетки, написані раніше,
+  // казали, для чого вони; а продукт, якого вже нема в списку, лишає свою назву.
+  const productName = products.find((product) => product.id === drafts.productId)?.name || drafts.productName || "";
   const made = [
-    drafts.productName || "",
+    productName,
     CONTACT_DRAFT_LANGUAGE_LABEL[drafts.language] || drafts.language || "",
     drafts.provider === "local" ? "складено без моделі, за описом продукту" : (drafts.modelUsed || ""),
     drafts.generatedAt ? relativeTime(drafts.generatedAt) : ""
@@ -644,7 +664,9 @@ document.getElementById("contactCardBody").addEventListener("submit", async (eve
 
 function rememberContactDraftField(event) {
   const field = event.target.closest?.("[data-draft-field]");
-  if (field) contactDraftForm = { ...contactDraftForm, [field.dataset.draftField]: field.value };
+  if (!field) return;
+  contactDraftForm = { ...contactDraftForm, [field.dataset.draftField]: field.value };
+  if (field.dataset.draftField === "productId" && field.value) rememberContactProduct(field.value);
 }
 
 document.getElementById("contactCardBody").addEventListener("input", rememberContactDraftField);
