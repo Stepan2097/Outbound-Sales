@@ -1,111 +1,45 @@
 # Outbound Sales OS
 
-Local outbound workspace for researching prospects, generating product-specific outreach, analyzing calls, and tracking follow-ups.
+A workspace for warming LinkedIn accounts and sending connection requests to
+people from CRM folders, reading what they answer, and keeping one history per
+person — in the CRM as well as here.
 
-## Sales Workflow
+## Інтерфейс — чотири екрани
 
-- Upload or paste people profiles as CSV or JSON.
-- Select the product being sold so outreach changes by product.
-- Describe each product with the eight answers on the Products page, and keep its knowledge files beside them.
-- Paste a LinkedIn profile URL to create a target, find contact candidates, and generate LinkedIn message variations.
-- Sync product positioning, ICP, use cases, proof points, objection handling, and approved context from the MCP Product Context Portal.
-- Save MCP, Apify, CRM, transcript, and follow-up notification settings in one Settings area.
-- Connect OpenRouter directly from Settings, with `anthropic/claude-haiku-4.5` for analysis/coaching and `anthropic/claude-sonnet-5` for outreach writing.
-- Check Supabase REST and Postgres reachability from Settings.
-- Review prospect fit, title, company, location, notes, and account context.
-- Open the Account Strategy tab for the complete A-M AdAction brief: recent signals, title analysis, growth hypotheses, stakeholder-specific routes, first touch, conversation tree, consultation CTA, multi-thread sequence, risks, and deterministic 1-10 scores.
-- Generate public contact-discovery candidates, including business email patterns, LinkedIn search links, Facebook people-search links, and web search links.
-- Prepare AI-generated outreach messages across email, LinkedIn, and call opener.
-- Paste call transcripts or connect a transcript webhook to get call-quality analysis, coaching tips, follow-up templates, and a next task.
-- Create and log next actions for review, connection, email approval, follow-up, replies, and booked meetings.
-- Track historical lead interactions and use them to estimate chance of reaching the lead and chance of closing.
-- Use the AI Operator tab for bulk sales actions such as sorting leads, changing statuses, logging interactions, preparing outreach, refreshing contact discovery, and pulling LinkedIn-heavy leads from CRM/Supabase.
-- Configure one primary Apify lead database actor plus optional specialist actors for LinkedIn profile enrichment, email/phone discovery, Facebook/person matching, Apollo/ZoomInfo, and WhatsApp/Telegram phone presence checks.
-- Use a cost-capped Apify waterfall for company people, work-email, and phone enrichment. It stops when verified email and phone are found, limits actors per lead, and reuses recent verified results.
-- Keep email, phone, WhatsApp, Telegram, and SMS locked until the seller approves the matched contact and channel.
+**Прогрів** (where it opens) — the accounts, what each did today and does next,
+and the campaign that feeds them people from a CRM folder. **Вхідні** — the
+replies from every account, unread first. **Контакти** — the CRM: folders, a
+page of people, one person's card with their LinkedIn history. **Налаштування**
+— users, your password.
 
-## The Panel
+That is the whole menu, on purpose. On 08.10.2026 the owner asked for
+everything superfluous to go (task 87001c96), and it went: the lead workspace
+(«Панель»: enrichment, scoring, drafts, follow-ups), the AI operator,
+«Продукти», and six hidden screens of an OpenRouter gateway. None of it was in
+use — the lead workspace had not changed since 02.10 and the model had been
+called once, ever. Only the interface went: the saved state, the server routes
+and their tests are untouched, so nothing anybody entered is lost.
 
-The Panel is the seller's working screen: pick a product and a CRM folder, and
-the folder is worked from the top down. There is no browsing it — the queue
-hands over one person at a time, oldest first, full screen, with everything the
-workspace knows about them, and the only navigation is **Назад** / **Далі**. The
-position is kept per browser, so somebody who stopped on contact 37 yesterday
-opens on contact 37 today. Each person walked past is taken into the lead queue
-carrying their CRM id, which is what the research, the drafts and the CRM
-activity hang off; the same person opened twice is still one lead.
+**Removed screens must not come back by a merge.** They did once — the merge
+`f20ee6d` on 02.10 brought a long-lived branch's screens back with it.
+`tests/ui-screens-fence.test.mjs` now fails when the menu is anything but these
+four, or when a removed screen's markup or code reappears under `app/`. If a
+screen really has to return, change that test in the same commit and say why.
 
-**Збагатити** runs the whole pipeline on the person in front of you: the
-company and its products, the people in it, verified contacts, the fit score,
-then a description of the client and ways to open the conversation, then the
-message angles and the CRM activity. Each stage says what it found while it
-runs.
+## Connection requests
 
-The company half is done once per company, not once per contact. What the web
-research found is written to `accountDossiers` in the workspace's saved state,
-keyed by CRM account id, domain, or company name — so the second person from a
-company already researched starts from that dossier instead of searching again,
-and the stage says so on screen. The dossier is good for thirty days; its news
-signals for seven, after which only that one search is repeated. **Перешукати
-компанію** ignores the dossier and searches from scratch.
+Writing to a stranger on LinkedIn means connecting first. The campaign on
+**Прогрів** takes people from a CRM folder and puts each into one warmed
+account's queue. The note follows the warm-up: none on days 4–10, at most three
+words and no link from day 11 and in working mode. A note that breaks the rule
+on the day the request goes out is dropped, never the request.
 
-The description and the approaches are written by the model from the new
-findings plus whatever the workspace already had — and, with no OpenRouter key
-or a provider that is down, by the workspace itself from the same facts, marked
-as written without a model.
-
-### The texts
-
-The **Повідомлення** tab holds the drafts themselves: the LinkedIn invitation
-and first message, the email with its subject, and Telegram, each with a copy
-button that logs the touch against the lead. They are written in the seller's
-language — Ukrainian unless the language select says otherwise — and they expand
-the approach chosen in the description rather than inventing a fresh reason to
-write, because the prompt now carries `clientProfile`, the person's open
-channels and the cached company facts. Channel rules (a 300-character
-invitation, an email under 90 words, a Telegram message under 60) come from
-`contacts/drafts.mjs`, the same file the Контакти tab writes by, so the two
-screens cannot drift apart. **Переписати тексти** re-runs only the writing —
-one model call, not the seven research stages.
-
-An unconfirmed product fit no longer means no text. It used to short-circuit
-before the model and leave an English "Do not send yet" template in every
-channel; now it is a constraint the model writes under — no pitch, no offer, no
-claimed outcome, one question that would tell the seller whether this is even
-the right kind of company — and the panel says on screen what is unverified.
-The lead still stays in `review`: writing a first touch and clearing it to be
-sent are different things, and this workspace never sends anything by itself.
-
-A Telegram username on a CRM card is now a contact candidate a seller can
-approve. It was not one before, so the channel could never be unlocked, which
-for a good part of this market is the only channel that answers. Approval is
-still a human decision; until it is given, the copy button is locked and says
-why.
-
-### Connection requests, and what came of them
-
-Writing to a stranger on LinkedIn means connecting first, so the **Запрошення**
-tab turns the account list into something a seller can use without leaving the
-person they are reading about: pick one of the warmed logins, add a note if
-the account's phase allows one, and the request goes into that account's queue.
-The note follows the warm-up: none on days 4–10, at most three words and no
-link from day 11 and in working mode. A note that breaks the rule on the day the
-request goes out is dropped, never the request — the form says so as you type.
-
-Into the queue, not out the door. **The daily allowance belongs to the account,
-not to whoever is feeling productive** — an account with nothing left today
-takes the request anyway and the screen says it goes out at the next session,
-naming the account it is waiting on. Nothing is sent by this app in any case:
-the agent on somebody's Mac does the clicking, and until it learns to, **Я
-надіслав сам** records a request the seller sent in their own browser. That one
-is never refused for want of allowance: the request already exists on LinkedIn,
-and refusing to write it down would only make our own record false. The quota
-governs what we cause, not what we observe.
+Into the queue, not out the door. **The daily allowance belongs to the account**
+— the folder adds no more people to an account than its day allows. Nothing is
+sent by this app itself: the agent does the clicking, and reports each result.
 
 **One person gets one approach, from every account and every campaign.** A
-unique index says so, so choosing an account is a decision, not a preference —
-and when somebody is already taken, the panel says which login has them, since
-when, and how it ended, instead of failing.
+unique index says so, and the folder steps over anybody already approached.
 
 Then the account looks, once a day, at everything it has sent and reports what
 LinkedIn shows: accepted, still pending, or gone. **It opens for this even after
@@ -119,15 +53,14 @@ its markup will change, and when it does, the record has to keep moving on the
 evidence that matters more — that the person wrote back.
 
 Accepted and silent is its own state, separate from "they replied". The first
-message after acceptance is then written **by a person**, from a draft the panel
-prepares. That is a decision about where judgement belongs, not a missing
+message after acceptance is then written **by a person**. That is a decision about where judgement belongs, not a missing
 feature: the mechanical half — sending, checking, recording — is the machine's,
 and the conversation is not.
 
 ### One history per person
 
-The **Історія** tab answers the question a seller actually has in front of a
-lead: what has anybody here ever said to this person, and what came back. It is
+The contact card in **Контакти** answers the question somebody actually has in
+front of a person: what has anybody here ever said to them, and what came back. It is
 keyed by the contact, not by the conversation — a thread is one exchange on one
 login, and the request, the messages and (when email lands) the letters are all
 the same story.
@@ -153,10 +86,7 @@ The Contacts tab reads the CRM directly: its folders, one page of a folder at a
 time, and everything the CRM knows about one person, with the person's LinkedIn
 conversation under it. The contact itself is never edited from here — the CRM
 is somebody else's system of record; the only thing written to it is the
-append-only activity line per message and per request described above — and
-nothing lands in this workspace until somebody presses **Додати в ліди**, which
-takes the contact into the lead queue carrying its CRM id, so importing the same
-person twice is still one lead.
+append-only activity line per message and per request described above.
 
 With a contact open, one call writes three drafts for three channels: an email
 (subject and body), a Telegram message, and LinkedIn (an invitation note plus
@@ -171,32 +101,6 @@ product brief and marked as such. Reading `WARMUP_CRM_SUPABASE_URL` /
 `WARMUP_CRM_SERVICE_ROLE_KEY` (falling back to `SUPABASE_URL` /
 `SUPABASE_API_KEY`); with neither set the tab says which variables are missing
 rather than looking broken.
-
-## Products and Knowledge Base
-
-The workspace sells two things — **AdAction** and **advantage-course** — and one
-page holds both what they are and what the agents read about them.
-
-A product is described by eight answers, and nothing else: what we sell and what
-the buyer gets, who it fits, who decides and what they care about, the pain and
-when it gets loud, the proof we may use, the first small step we ask for, the
-objections and our honest answer, and who we never sell to or claim to. Saving
-them derives everything the rest of the app already reads — positioning,
-personas, use cases, proof, objections and the memory segments scoring runs on —
-so the answers are the source and the derived record is never edited by hand.
-
-Below the answers sits that product's file library. Files are plain Markdown on
-the server, beside the workspace state file
-(`<STATE_FILE_PATH dir>/knowledge/`), with a small `index.json` recording which
-file belongs to which product. They can be created, edited and deleted from the
-page. One file can belong to several products: the outbound playbook ships that
-way, shared by both, because a copy per product is two documents that disagree
-within a month.
-
-Every agent that writes for a product reads that product's brief and files
-before it writes. Whole documents do not go into prompts: passages are selected
-against the lead in front of the model, one file never takes the whole budget,
-and a product with no files gets nothing rather than somebody else's rules.
 
 ## LinkedIn Warm-up
 
