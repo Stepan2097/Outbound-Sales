@@ -213,6 +213,8 @@ POST /api/webhooks/call-transcript
 
 Supported matching fields: `prospectId`, `linkedinUrl`, `email`, or `name` + `company`. Include `transcript` or `text` in the payload.
 
+The webhook is closed until it has a token. Set `TRANSCRIPT_WEBHOOK_TOKEN` in the environment (and `TRANSCRIPT_PROVIDER`, optionally) to keep it open across deploys: a token entered in Settings is held in memory only and is gone at the next restart.
+
 ## Optional FullEnrich Webhook
 
 Verified contact results are accepted at:

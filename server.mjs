@@ -139,6 +139,13 @@ const taskTypes = [
   "MCP_CONTEXT_SYNTHESIS"
 ];
 
+// What the AI operator did, newest first. The trail of a bulk action is the only
+// record of who changed which leads, so it is kept — but not whole: each entry
+// carries its per-lead results, and fifty of them are already a long history.
+// Declared up here because the saved state is read while the module is still
+// loading, before any `const` further down has been reached.
+const AI_ACTIONS_KEPT = 50;
+
 const state = {
   workspaceId: "workspace-demo",
   environment: "development",
@@ -164,6 +171,10 @@ const state = {
   },
   aiModelDefaults: { ...openRouterDefaults },
   models: seedModels(),
+  // What a person switched on or off by hand, model id → boolean. The catalog
+  // itself is read again from OpenRouter at every boot, so only the choice is
+  // kept; it is applied last, after the sync that would otherwise undo it.
+  modelToggles: {},
   tasks: seedTasks(),
   agents: seedOutboundAgents(),
   agentRuns: [],
@@ -1015,6 +1026,9 @@ async function handleApi(request, response, url) {
       rotatedAt: new Date().toISOString()
     };
     addEvent("security", `OpenRouter key ${state.keyMetadata.keyVersion === 1 ? "configured" : "rotated"} for ${state.environment}.`);
+    // The key itself stays in memory by design; the model choice that came with
+    // it is a setting, and is kept.
+    await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
   }
@@ -1038,6 +1052,9 @@ async function handleApi(request, response, url) {
 
     updateOpenRouterDefaults(body);
     if (!state.vault) {
+      // The choice of models was applied above even though the request is
+      // refused for want of a key, so it is saved rather than left half-done.
+      await writePersistentWorkspaceState();
       sendJson(response, 400, { error: "Спочатку додай API-ключ OpenRouter, потім синхронізуй моделі." });
       return;
     }
@@ -1049,6 +1066,7 @@ async function handleApi(request, response, url) {
       enablePreferredOpenRouterModels();
       addEvent("provider", `OpenRouter connected. Analysis uses ${state.aiModelDefaults.analysisModel}; writing uses ${state.aiModelDefaults.writingModel}.`);
     }
+    await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
   }
@@ -1092,6 +1110,7 @@ async function handleApi(request, response, url) {
 
     await syncOpenRouterModels(decryptSecret(state.vault));
     enablePreferredOpenRouterModels();
+    await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
   }
@@ -1104,7 +1123,9 @@ async function handleApi(request, response, url) {
       return;
     }
     model.enabled = Boolean(body.enabled);
+    state.modelToggles[model.id] = model.enabled;
     addEvent("registry", `${model.displayName} ${model.enabled ? "enabled" : "disabled"}.`);
+    await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
   }
@@ -1123,6 +1144,7 @@ async function handleApi(request, response, url) {
     task.maxLatencyMs = clampNumber(body.maxLatencyMs, 500, 120000, task.maxLatencyMs);
     task.privacyLevel = body.privacyLevel || task.privacyLevel;
     addEvent("routing", `${task.taskType} routing updated.`);
+    await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
   }
@@ -1135,6 +1157,9 @@ async function handleApi(request, response, url) {
     state.budgets.hardLimitEnabled = Boolean(body.hardLimitEnabled);
     state.budgets.warningThresholdPercent = clampNumber(body.warningThresholdPercent, 1, 100, state.budgets.warningThresholdPercent);
     addEvent("budget", "Workspace AI budgets updated.");
+    // The hard limit is a spending cap: one that lives only in memory is lifted
+    // by the next deploy without anybody having decided to lift it.
+    await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
   }
@@ -1829,6 +1854,7 @@ async function handleApi(request, response, url) {
     const body = await readJson(request);
     buildPipelineLabsActorPayload(clampNumber(body.totalResults, 1, 50000, state.icp.lookalikeSearch.totalResults || 1000));
     addEvent("icp", "PipelineLabs Apify JSON generated from ICP seed leads.");
+    await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
   }
@@ -3639,6 +3665,21 @@ function applyPersistentWorkspaceState(saved = {}) {
     state.warmupCampaigns = saved.warmupCampaigns;
   }
   state.providerRule = restoreProviderRule(saved.providerRule, state.providerRule);
+  state.budgets = restoreBudgets(saved.budgets, state.budgets);
+  state.aiModelDefaults = restoreAiModelDefaults(saved.aiModelDefaults, state.aiModelDefaults);
+  restoreTaskRouting(saved.taskRouting, state.tasks);
+  if (saved.modelToggles && typeof saved.modelToggles === "object" && !Array.isArray(saved.modelToggles)) {
+    state.modelToggles = Object.fromEntries(
+      Object.entries(saved.modelToggles).filter(([id, enabled]) => id && typeof enabled === "boolean").slice(0, 2000)
+    );
+    applyModelToggles();
+  }
+  if (Array.isArray(saved.aiActions)) {
+    state.aiActions = saved.aiActions
+      .filter((action) => action && typeof action === "object" && !Array.isArray(action))
+      .slice(0, AI_ACTIONS_KEPT);
+  }
+  restoreIcp(saved.icp);
   for (const key of ["contactEnrichment", "crm", "transcripts", "notifications", "supabase", "postgres", "knowledgeDatabase"]) {
     if (saved.integrationSettings?.[key] && typeof saved.integrationSettings[key] === "object") {
       state.integrations[key] = { ...state.integrations[key], ...saved.integrationSettings[key] };
@@ -3670,6 +3711,89 @@ function restoreProviderRule(saved, current) {
     requireNoTraining: flag(saved.requireNoTraining, current.requireNoTraining),
     requireZeroRetention: flag(saved.requireZeroRetention, current.requireZeroRetention)
   };
+}
+
+// The budgets, field by field and with the bounds the update route applies. The
+// hard limit is a spending cap: a file that lacks it must leave the one this
+// boot started with in force, never an absent one.
+function restoreBudgets(saved, current) {
+  if (!saved || typeof saved !== "object" || Array.isArray(saved)) return current;
+  return {
+    ...current,
+    monthlyWorkspaceBudgetUsd: clampNumber(saved.monthlyWorkspaceBudgetUsd, 1, 100000, current.monthlyWorkspaceBudgetUsd),
+    dailyWorkspaceBudgetUsd: clampNumber(saved.dailyWorkspaceBudgetUsd, 1, 100000, current.dailyWorkspaceBudgetUsd),
+    perUserMonthlyBudgetUsd: clampNumber(saved.perUserMonthlyBudgetUsd, 1, 100000, current.perUserMonthlyBudgetUsd),
+    hardLimitEnabled: typeof saved.hardLimitEnabled === "boolean" ? saved.hardLimitEnabled : current.hardLimitEnabled,
+    warningThresholdPercent: clampNumber(saved.warningThresholdPercent, 1, 100, current.warningThresholdPercent)
+  };
+}
+
+// The models picked for analysis and for writing. The environment is still read
+// after this and wins when it names a model — that precedence is deliberate (see
+// the comment above initializeRuntimeConfigFromEnv's call) — so a choice made in
+// the app is what a deployment without those variables comes back to.
+function restoreAiModelDefaults(saved, current) {
+  if (!saved || typeof saved !== "object" || Array.isArray(saved)) return current;
+  const pick = (value, fallback) => (typeof value === "string" && cleanText(value) ? cleanText(value) : fallback);
+  return {
+    analysisModel: pick(saved.analysisModel, current.analysisModel),
+    writingModel: pick(saved.writingModel, current.writingModel)
+  };
+}
+
+// A task's routing is what a person can edit about it; the rest of the task is
+// the code's. Saved by task type and put back onto the tasks this boot seeded,
+// so a task type added later still appears and a retired one is dropped.
+function taskRoutingRecord(task) {
+  return {
+    taskType: task.taskType,
+    primaryModel: task.primaryModel,
+    fallbackModels: task.fallbackModels,
+    qualityTier: task.qualityTier,
+    maxCostUsd: task.maxCostUsd,
+    maxLatencyMs: task.maxLatencyMs,
+    privacyLevel: task.privacyLevel
+  };
+}
+
+function restoreTaskRouting(saved, tasks) {
+  if (!Array.isArray(saved)) return;
+  const text = (value) => (typeof value === "string" && cleanText(value) ? cleanText(value) : "");
+  for (const record of saved) {
+    const task = record && typeof record === "object" ? tasks.find((item) => item.taskType === record.taskType) : null;
+    if (!task) continue;
+    task.primaryModel = text(record.primaryModel) || task.primaryModel;
+    if (Array.isArray(record.fallbackModels)) task.fallbackModels = record.fallbackModels.map(text).filter(Boolean).slice(0, 4);
+    task.qualityTier = text(record.qualityTier) || task.qualityTier;
+    task.maxCostUsd = clampNumber(record.maxCostUsd, 0.001, 20, task.maxCostUsd);
+    task.maxLatencyMs = clampNumber(record.maxLatencyMs, 500, 120000, task.maxLatencyMs);
+    task.privacyLevel = text(record.privacyLevel) || task.privacyLevel;
+  }
+}
+
+// A hand-made choice is the last word: the sync that follows every boot turns
+// the preferred models back on, and without this it would also undo a person
+// who had turned one of them off.
+function applyModelToggles() {
+  const toggles = state.modelToggles;
+  state.models = state.models.map((model) =>
+    typeof toggles[model.id] === "boolean" && model.enabled !== toggles[model.id] ? { ...model, enabled: toggles[model.id] } : model);
+}
+
+// The lookalike search remembers when it last ran and how many people it
+// brought in; that is what tells somebody whether another paid run is needed.
+// Seed ids go back only for people still in the queue, and the profile built
+// from them is rebuilt here rather than left reading «empty» over a full seed list.
+function restoreIcp(saved) {
+  if (!saved || typeof saved !== "object" || Array.isArray(saved)) return;
+  if (Array.isArray(saved.seedLeadIds)) {
+    const known = new Set(state.prospects.map((prospect) => prospect.id));
+    state.icp.seedLeadIds = saved.seedLeadIds.filter((id) => typeof id === "string" && known.has(id));
+  }
+  if (saved.lookalikeSearch && typeof saved.lookalikeSearch === "object" && !Array.isArray(saved.lookalikeSearch)) {
+    state.icp.lookalikeSearch = { ...state.icp.lookalikeSearch, ...saved.lookalikeSearch };
+  }
+  if (state.icp.seedLeadIds.length || state.prospects.some((prospect) => prospect.isIcpSeed)) rebuildIcpProfile();
 }
 
 // Seconds per user per day, taken back from the file with the same shape the
@@ -3776,6 +3900,12 @@ async function writeWorkspaceStateNow() {
       warmupCampaigns: state.warmupCampaigns,
       warmupTargeting: state.warmupTargeting,
       providerRule: state.providerRule,
+      budgets: state.budgets,
+      aiModelDefaults: state.aiModelDefaults,
+      modelToggles: state.modelToggles,
+      taskRouting: state.tasks.map(taskRoutingRecord),
+      aiActions: state.aiActions.slice(0, AI_ACTIONS_KEPT),
+      icp: { seedLeadIds: state.icp.seedLeadIds, lookalikeSearch: state.icp.lookalikeSearch },
       learning: {
         examples: state.learning.examples.slice(0, 500),
         playbook: state.learning.playbook,
@@ -13950,6 +14080,25 @@ function initializeRuntimeConfigFromEnv() {
     addEvent("integration", "FullEnrich configuration loaded from server environment.");
   }
 
+  // The webhook token lives in a vault that is never written to disk, and until
+  // this had an environment variable the call-transcript webhook answered 401 to
+  // every provider after every deploy, until somebody typed the token into the
+  // settings again. Optional: with the variable unset nothing changes.
+  const transcriptWebhookToken = process.env.TRANSCRIPT_WEBHOOK_TOKEN || "";
+  if (transcriptWebhookToken.trim()) {
+    const provider = cleanText(process.env.TRANSCRIPT_PROVIDER || "")
+      || (state.integrations.transcripts.provider !== "manual" ? state.integrations.transcripts.provider : "webhook");
+    state.transcriptVault = encryptSecret(transcriptWebhookToken.trim());
+    state.integrations.transcripts = {
+      ...state.integrations.transcripts,
+      provider,
+      configured: true,
+      status: "configured",
+      keyMetadata: { provider, keyVersion: 1, configuredAt: now, source: "server_environment" }
+    };
+    addEvent("integration", "Call transcript webhook token loaded from server environment.");
+  }
+
   const mcpBaseUrl = normalizeUrl(process.env.MCP_PORTAL_BASE_URL || "");
   if (mcpBaseUrl || process.env.MCP_API_TOKEN) {
     state.mcpSync.baseUrl = mcpBaseUrl;
@@ -14128,6 +14277,7 @@ function enablePreferredOpenRouterModels() {
       task.fallbackModels = [state.aiModelDefaults.analysisModel, "mock/balanced"];
     }
   }
+  applyModelToggles();
 }
 
 function ensureOpenRouterModel(id, displayName, tier, inputPrice, outputPrice) {
