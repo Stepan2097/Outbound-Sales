@@ -1,0 +1,1179 @@
+:root {
+  color-scheme: light;
+  --bg: #f5f7f9;
+  --surface: #ffffff;
+  --surface-strong: #f0f4f6;
+  --ink: #172026;
+  --muted: #66727c;
+  --line: #d8e0e5;
+  --teal: #087f7a;
+  --teal-weak: #dff3f1;
+  --blue: #2563eb;
+  --green: #1b8a4b;
+  --amber: #b7791f;
+  --red: #c24135;
+  --violet: #6d5bd0;
+  --shadow: 0 14px 34px rgba(31, 47, 58, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  min-height: 36px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+button:hover {
+  border-color: #9fb1bd;
+  background: #f9fbfc;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+}
+
+input,
+select {
+  min-height: 38px;
+  padding: 0 10px;
+}
+
+textarea {
+  resize: vertical;
+  min-height: 148px;
+  padding: 10px;
+  line-height: 1.45;
+}
+
+select[multiple] {
+  padding: 6px;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+label span {
+  font-weight: 700;
+  color: #40505a;
+}
+
+svg {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+}
+
+/* Сайдбар тримається екрана, а не довжини сторінки. Інакше на довгих екранах
+   — «Користувачі», довгий лід — підпис із поштою і вихід опинялися внизу
+   документа, тобто за межами вікна: щоб вийти, треба було скролити сторінку до
+   кінця. Навігація всередині гортається сама, якщо пунктів колись стане більше. */
+
+.sidebar {
+  background: #102225;
+  color: #edf7f5;
+  padding: 20px 14px;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 24px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  height: 100dvh;
+  /* Одна колонка по ширині сайдбара. Без цього неявна колонка сітки росла під
+     найдовший підпис — пункти виходили 247px у 218-піксельному сайдбарі й
+     активний рядок вилазив на робочу область. */
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.sidebar .nav-list {
+  overflow-y: auto;
+}
+
+/* Кнопки не переносять текст, тож довгий підпис має обрізатися трьома
+   крапками, а не розсувати меню. */
+
+.nav-item {
+  min-width: 0;
+}
+
+.nav-item > span:not(.nav-badge) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 0 6px;
+}
+
+.brand-mark {
+  width: 42px;
+  height: 42px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: #d7f065;
+  color: #102225;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
+/* Знак малюється маскою, а не картинкою: так він бере колір плитки з теми —
+   один файл на вкладку, сайдбар і екран входу, і жодної копії контуру в
+   розмітці. Ширина знака більша за висоту, тож частку від плитки задає вона. */
+
+.brand-mark::before {
+  content: "";
+  width: 68%;
+  height: 100%;
+  background: currentColor;
+  -webkit-mask: url("/brand-glyph.svg") center / contain no-repeat;
+  mask: url("/brand-glyph.svg") center / contain no-repeat;
+}
+
+.brand strong,
+.brand span {
+  display: block;
+}
+
+.brand span {
+  color: #a7c4c1;
+  font-size: 13px;
+}
+
+.nav-list {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+}
+
+.nav-item {
+  justify-content: flex-start;
+  border-color: transparent;
+  background: transparent;
+  color: #bdd5d2;
+  width: 100%;
+}
+
+.nav-item.active,
+.nav-item:hover {
+  background: #20383b;
+  color: #fff;
+  border-color: #2f4f52;
+}
+
+.sidebar-footer {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #b8d4d0;
+  font-size: 13px;
+  padding: 0 2px;
+}
+
+/* Хто увійшов. Кнопка, бо веде на свою картку, але виглядає як підпис: у
+   сайдбарі й так сім кнопок, і восьма, схожа на них, читалась би як пункт меню. */
+
+.sidebar-user {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  padding: 5px 7px;
+  border: 1px solid transparent;
+  background: none;
+  text-align: left;
+  min-height: 38px;
+}
+
+.sidebar-user:hover {
+  border-color: var(--line);
+  background: var(--surface-strong);
+}
+
+/* Пошта займає всю ширину, яку лишає кнопка виходу, і переноситься щонайбільше
+   на два рядки: підпис, який росте від довжини чужої адреси, штовхав би меню.
+   Ім'я і роль живуть у title кнопки. */
+
+.sidebar-user-text {
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1.35;
+  color: #cfe3e0;
+  word-break: break-all;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Вихід поруч із поштою — рівно настільки помітний, щоб його знайти. */
+
+.sidebar-footer .icon-button {
+  flex: 0 0 auto;
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
+  border-color: transparent;
+  color: #9fbcb8;
+}
+
+.sidebar-footer .icon-button:hover {
+  border-color: var(--line);
+  color: var(--red);
+}
+
+.workspace {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
+  padding: 24px;
+}
+
+.topbar {
+  min-height: 70px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 28px;
+  line-height: 1.1;
+  letter-spacing: 0;
+}
+
+.topbar p,
+.panel-heading p {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+
+.primary-button {
+  border-color: var(--teal);
+  background: var(--teal);
+  color: white;
+}
+
+.primary-button:hover {
+  background: #066b67;
+  border-color: #066b67;
+}
+
+.icon-button {
+  width: 38px;
+  padding: 0;
+}
+
+.view {
+  display: none;
+}
+
+.view.active {
+  display: grid;
+  gap: 18px;
+}
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
+.panel {
+  min-width: 0;
+  padding: 18px;
+}
+
+.span-2 {
+  grid-column: span 1;
+}
+
+.panel-heading {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.panel h2 {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.15;
+  letter-spacing: 0;
+}
+
+canvas {
+  width: 100%;
+  height: 280px;
+  display: block;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: linear-gradient(180deg, #fbfcfd, #f6f9fa);
+}
+
+.pill {
+  min-height: 26px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 99px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 800;
+  color: #0d5552;
+  background: var(--teal-weak);
+}
+
+.event {
+  min-height: 44px;
+  display: grid;
+  grid-template-columns: 96px 110px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.event time,
+.event span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.event strong {
+  color: #40505a;
+  text-transform: uppercase;
+  font-size: 12px;
+  letter-spacing: 0;
+}
+
+.table-wrap {
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+table {
+  width: 100%;
+  min-width: 860px;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 12px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+  font-size: 14px;
+}
+
+th {
+  color: #53636d;
+  background: #f7fafb;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+td strong,
+td span {
+  display: block;
+}
+
+td span {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.toggle {
+  justify-self: end;
+}
+
+.empty-state {
+  min-height: 76px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  text-align: center;
+  padding: 16px;
+}
+
+dialog {
+  border: 0;
+  border-radius: 8px;
+  padding: 0;
+  box-shadow: 0 28px 80px rgba(16, 34, 37, 0.26);
+  width: min(520px, calc(100vw - 32px));
+}
+
+dialog::backdrop {
+  background: rgba(16, 34, 37, 0.32);
+}
+
+output {
+  min-height: 62px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f7fafb;
+  padding: 10px;
+  color: #40505a;
+}
+
+@media (max-width: 1080px) {
+  .app-shell {
+    grid-template-columns: 82px minmax(0, 1fr);
+  }
+
+  .brand div:last-child,
+  .nav-item span,
+  .sidebar-user-text {
+    display: none;
+  }
+
+  /* Вузький сайдбар: лишаються ініціали і вихід, і вони стоять поруч
+     посередині, а не по різних краях порожньої колонки. */
+  .sidebar-footer {
+    justify-content: center;
+    gap: 4px;
+  }
+
+  .sidebar-user {
+    flex: 0 0 auto;
+  }
+}
+
+@media (max-width: 720px) {
+  .app-shell {
+    display: block;
+  }
+
+  .sidebar {
+    min-height: auto;
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .nav-list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .nav-item {
+    min-width: 0;
+    padding: 0 8px;
+  }
+
+  .nav-item span {
+    display: inline;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .workspace {
+    padding: 16px;
+  }
+
+  .topbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .event {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.auth-gate {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(260px, 0.72fr) minmax(360px, 1fr);
+  align-items: stretch;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+.auth-brand {
+  padding: 48px;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  /* The one place a gradient earns its keep: half a screen with nothing on
+      it. Kept inside the palette rather than reaching for a second hue. */
+  background: linear-gradient(160deg, var(--surface) 0%, var(--surface-sunk) 55%, #0d2a27 100%);
+  border-right: 1px solid rgba(143, 177, 207, 0.18);
+}
+
+.auth-brand strong,
+.auth-brand span {
+  display: block;
+}
+
+.auth-brand span {
+  margin-top: 4px;
+  color: #9fb9ce;
+}
+
+.auth-card {
+  width: min(440px, calc(100% - 40px));
+  align-self: center;
+  justify-self: center;
+  display: grid;
+  gap: 16px;
+  padding: 32px;
+  border: 1px solid rgba(143, 177, 207, 0.22);
+  border-radius: 8px;
+  background: rgba(8, 26, 46, 0.94);
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.32);
+}
+
+.auth-card h1 {
+  margin: 5px 0 6px;
+  font-size: 28px;
+}
+
+.auth-card p {
+  margin: 0;
+  color: #9fb2c5;
+}
+
+.auth-card .form-note {
+  min-height: 20px;
+  color: #ffd381;
+}
+
+.text-button {
+  border: 0;
+  background: transparent;
+  color: #65f0db;
+}
+
+.eyebrow {
+  color: #65f0db;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 720px) {
+  .auth-gate {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-brand {
+    padding: 20px;
+    min-height: 92px;
+  }
+
+  .auth-card {
+    margin: 24px auto;
+    padding: 22px;
+  }
+
+  .sidebar {
+    position: fixed;
+    inset: auto 0 0 0;
+    z-index: 60;
+    display: block;
+    height: auto;
+    padding: 7px 8px max(7px, env(safe-area-inset-bottom));
+    border-right: 0;
+    border-top: 1px solid rgba(143, 177, 207, 0.22);
+  }
+
+  .sidebar .brand,
+  .sidebar-footer {
+    display: none;
+  }
+
+  .nav-list {
+    display: flex;
+    gap: 4px;
+    overflow-x: auto;
+  }
+
+  .nav-item {
+    flex: 0 0 76px;
+    min-height: 50px;
+    display: grid;
+    place-items: center;
+    gap: 2px;
+    padding: 4px;
+    font-size: 10px;
+  }
+
+  .nav-item span {
+    display: block;
+    width: 100%;
+    text-align: center;
+  }
+
+  .workspace {
+    padding-bottom: 88px;
+  }
+
+  /* На вузькому екрані модель і роль ідуть під іменем, а не тиснуть його. */
+}
+
+/* Dark sales workspace.
+ *
+ * This block is unconditional and overrides the light palette above it, so the
+ * workspace is always dark and these are the only colours that reach a screen.
+ * color-scheme says so too: it was declaring light while painting dark, which
+ * is why selects, scrollbars and every other native control came back pale.
+ *
+ * The ground carries a faint green rather than navy so the teal accent sits
+ * inside the palette instead of against it, and the three steps — ground,
+ * surface, raised — are opaque and far enough apart to carry the hierarchy on
+ * their own. They used to be translucent over a four-stop page gradient, so
+ * the same panel was a different colour at the top of a page and the bottom.
+ *
+ * Teal is the accent. Blue is for links and information and is not a second
+ * one: two accents of equal weight means neither is the accent.
+ */
+
+:root {
+  color-scheme: dark;
+  --bg: #091211;
+  --surface: #111c1b;
+  --surface-strong: #182524;
+  --surface-sunk: #0b1413;
+  --ink: #e9f1ef;
+  --muted: #90a5a1;
+  --line: rgba(150, 178, 173, 0.16);
+  --teal: #34d6bd;
+  --teal-weak: rgba(52, 214, 189, 0.13);
+  --blue: #6aa5ff;
+  --green: #5ec98a;
+  --amber: #e0b25e;
+  --red: #ef7c72;
+  --violet: #a996f0;
+  --shadow: 0 18px 44px rgba(0, 0, 0, 0.44);
+}
+
+html {
+  overflow-x: clip;
+}
+
+body {
+  font-size: 13px;
+  overflow-x: clip;
+  background:
+    var(--bg);
+  color: var(--ink);
+}
+
+button {
+  min-height: 32px;
+  padding: 0 10px;
+  border-color: var(--line);
+  background: var(--surface-strong);
+  color: #edf7ff;
+}
+
+button:hover {
+  border-color: rgba(52, 214, 189, 0.55);
+  background: var(--surface-strong);
+}
+
+input,
+select,
+textarea {
+  min-height: 34px;
+  border-color: var(--line);
+  background: var(--surface-sunk);
+  color: #eef6ff;
+}
+
+textarea {
+  min-height: 112px;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #6f8499;
+}
+
+label span {
+  color: #e9f3ff;
+}
+
+.app-shell {
+  grid-template-columns: 218px minmax(0, 1fr);
+}
+
+.sidebar {
+  background: var(--bg);
+  border-right: 1px solid var(--line);
+  padding: 16px 10px;
+}
+
+.brand-mark {
+  background: var(--teal);
+  color: #06201c;
+}
+
+.brand span,
+.sidebar-footer,
+.topbar p,
+.panel-heading p,
+td span,
+.event time,
+.event span {
+  color: var(--muted);
+}
+
+.nav-item {
+  min-height: 34px;
+  color: #a9bed2;
+}
+
+.nav-item.active,
+.nav-item:hover {
+  background: var(--teal-weak);
+  color: #f6fbff;
+  border-color: rgba(52, 214, 189, 0.34);
+}
+
+.workspace {
+  padding: 22px;
+  overflow: visible;
+}
+
+.topbar {
+  min-height: 52px;
+  margin-bottom: 12px;
+}
+
+.topbar h1 {
+  font-size: 22px;
+}
+
+.primary-button {
+  background: var(--teal);
+  border-color: var(--teal);
+  /* Dark ink on the accent: white on teal is the weaker pair at this
+     lightness, and the button is the one thing on the page that should not
+     have to be squinted at. */
+  color: #06201c;
+}
+
+.primary-button:hover {
+  background: #46e2cb;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Three steps, not one: the ground, a panel on it, a card inside the panel.
+   These all shared a single background before, so depth was carried by
+   hairlines alone and the page read flat. */
+
+.panel {
+  background: var(--surface);
+  border-color: var(--line);
+  box-shadow: var(--shadow);
+}
+
+.panel {
+  padding: 16px;
+}
+
+.panel-heading {
+  min-height: 34px;
+  margin-bottom: 10px;
+}
+
+.panel h2 {
+  font-size: 15px;
+}
+
+.danger-button {
+  border-color: rgba(255, 107, 97, 0.26);
+  color: #ffaaa3;
+  background: rgba(255, 107, 97, 0.08);
+}
+
+.danger-button:hover {
+  border-color: rgba(255, 107, 97, 0.52);
+  background: rgba(255, 107, 97, 0.14);
+}
+
+.pill {
+  background: rgba(52, 214, 189, 0.14);
+  color: #65f0db;
+}
+
+.empty-state {
+  min-height: 54px;
+  border-color: var(--line);
+}
+
+.table-wrap {
+  border-color: var(--line);
+}
+
+table {
+  background: var(--surface-sunk);
+}
+
+th {
+  background: var(--surface-strong);
+  color: #aac2d8;
+}
+
+td {
+  border-color: var(--line);
+}
+
+canvas {
+  border-color: var(--line);
+  background: var(--surface-sunk);
+}
+
+dialog {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+@media (max-width: 720px) {
+  .workspace {
+    padding: 12px;
+  }
+
+  .nav-list {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .nav-item,
+  .nav-item span,
+  .integration-form * {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 1080px) {
+
+  /* Кнопка лишається в першому рядку поруч із селектами: прогрес під ними
+     розтягнутий на всю ширину і інакше зіпхнув би її в окремий рядок. */
+}
+
+@media (max-width: 720px) {
+
+  .nav-list {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .sidebar {
+    position: fixed;
+    inset: auto 0 0 0;
+    z-index: 60;
+    display: block;
+    height: auto;
+    min-height: auto;
+    padding: 7px 8px max(7px, env(safe-area-inset-bottom));
+    border-right: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .sidebar .brand,
+  .sidebar-footer {
+    display: none;
+  }
+
+  .nav-list {
+    display: flex;
+    grid-template-columns: none;
+    gap: 4px;
+    overflow-x: auto;
+  }
+
+  .nav-item {
+    flex: 0 0 76px;
+    min-height: 50px;
+    display: grid;
+    place-items: center;
+    gap: 2px;
+    padding: 4px;
+    font-size: 10px;
+  }
+
+  .workspace {
+    padding-bottom: 88px;
+  }
+}
+
+/* ── LinkedIn warm-up ───────────────────────────────────────────────────── */
+
+.warmup-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(320px, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.warmup-layout .span-2 {
+  grid-column: 1 / -1;
+}
+
+.warmup-subtle {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* The colour comes from the theme variables rather than fixed hexes: the
+   base .pill is written for the light palette, and a status nobody can read in
+   the dark theme is a status column that does not work. */
+
+.pill.tone-live { background: var(--teal-weak); color: var(--teal); }
+
+.pill.tone-warn { background: rgba(183, 121, 31, 0.16); color: var(--amber); }
+
+.pill.tone-bad { background: rgba(194, 65, 53, 0.14); color: var(--red); }
+
+.pill.tone-muted { background: var(--surface-strong); color: var(--muted); }
+
+@media (max-width: 1100px) {
+  .warmup-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Who the browser is actually signed in as, which is not the profile label. */
+
+.warmup-identity {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--teal);
+}
+
+.warmup-identity svg {
+  width: 13px;
+  height: 13px;
+  flex: none;
+}
+
+/* An unconfigured queue and an empty one are different answers, so this is a
+   prompt rather than an error. */
+
+.warmup-leads-prompt {
+  display: grid;
+  gap: 4px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px dashed color-mix(in srgb, var(--amber) 45%, transparent);
+  background: color-mix(in srgb, var(--amber) 8%, transparent);
+  font-size: 13px;
+}
+
+.warmup-leads-prompt strong {
+  color: var(--amber);
+  font-size: 14px;
+}
+
+.warmup-leads-prompt span {
+  color: var(--muted);
+}
+
+.warmup-leads-prompt.is-bad {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--red) 45%, transparent);
+  background: color-mix(in srgb, var(--red) 9%, transparent);
+}
+
+.warmup-leads-prompt.is-bad strong {
+  color: var(--red);
+}
+
+@media (max-width: 640px) {
+
+  /* The line still has to be the loudest thing on a phone, but each clause
+     gets its own row so none of them is cut in half. */
+}
+
+@media (max-width: 640px) {
+  /* Search and the platform filter each collapsed to a thumbnail when the
+     heading took the width; they get their own row instead. */
+}
+
+@media (max-width: 640px) {
+
+  /* Name over the two controls, so neither the profile link nor the button
+     that marks a real person is clipped. */
+}
+
+/* ── The inbox ─────────────────────────────────────────────────────────────
+ *
+ * Colours here are the two :root palettes and nothing else — every tint is a
+ * colour-mix of a palette variable, so the panel follows light and dark without
+ * a single literal of its own.
+ *
+ * The one rule with teeth: a message body is text a stranger typed, so
+ * `.warmup-message-body` keeps its line breaks with `pre-wrap` rather than
+ * anything turning newlines into markup, and every text that came off the wire
+ * gets `overflow-wrap: anywhere` so a 400-character word cannot push the
+ * campaigns panel off the side of the screen.
+ */
+
+/* The count on the nav item is the whole notification, so it has to survive the
+   sidebar collapsing into a row of icons at the bottom of a phone. */
+
+.nav-item {
+  position: relative;
+}
+
+/* `.nav-item span` is styled to fill the item once the sidebar collapses into a
+   row of icons, and the badge is a span inside a nav item — so it has to be
+   named with the item to keep its own size instead of stretching to the width
+   of the button. */
+
+.nav-item .nav-badge {
+  margin-left: auto;
+  flex: none;
+  width: auto;
+  min-width: 19px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 99px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--red);
+  color: var(--bg);
+  font-size: 11px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+@media (max-width: 720px) {
+  .nav-item .nav-badge {
+    position: absolute;
+    top: 3px;
+    right: 8px;
+    margin-left: 0;
+    text-align: center;
+  }
+}
+
+.warmup-group-unread,
+.warmup-account-unread {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 99px;
+  border: 1px solid color-mix(in srgb, var(--teal) 45%, var(--line));
+  background: color-mix(in srgb, var(--teal) 14%, transparent);
+  color: var(--teal);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+
+  /* On a phone the metadata reads as a line under the message, not as a column
+     pinned to an edge that is no longer there. */
+}
+
+#view-ai .panel-heading { margin-bottom: 14px; gap: 12px; }
+
+#view-ai textarea { font-family: inherit; font-size: 13px; }
+
+.auth-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  justify-content: space-between;
+}

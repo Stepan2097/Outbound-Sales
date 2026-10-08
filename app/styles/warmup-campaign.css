@@ -1,0 +1,654 @@
+/* ── Warm-up campaigns ───────────────────────────────────────────────────────
+ *
+ * The panel is built around the forecast line, not the list: a folder of
+ * 22 088 contacts at ~22 requests a day is three years of work, and the screen
+ * has to say that before it offers to run it. A list of campaigns is a table's
+ * worth of pressure to shrink that into a cell, so the rows stay quiet and the
+ * sentence under the selected one keeps the full width it had when this panel
+ * was a single form.
+ */
+
+.warmup-campaigns-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.warmup-campaign-form {
+  margin: 0 0 14px;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px dashed var(--line);
+  background: var(--surface-strong);
+  display: grid;
+  gap: 12px;
+}
+
+/* Twelve columns so what the campaign IS sits on one line and what narrows it
+   sits on the next, rather than the four filters dragging a ragged tail. */
+
+.warmup-campaign-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 10px;
+  align-items: end;
+}
+
+.warmup-field-name { grid-column: span 4; }
+
+.warmup-field-folder { grid-column: span 5; }
+
+.warmup-field-product { grid-column: span 3; }
+
+.warmup-field-filter { grid-column: span 3; }
+
+.warmup-campaign-form-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.warmup-campaign-form-note {
+  margin: 0;
+  flex: 1 1 240px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.warmup-field {
+  min-width: 0;
+  gap: 4px;
+}
+
+.warmup-field > span {
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.warmup-forecast {
+  margin: 14px 0 12px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--surface-strong);
+  display: grid;
+  gap: 7px;
+}
+
+.warmup-forecast-line {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.5;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The rate is the number everything else follows from, so it is the one the
+   eye lands on first. */
+
+.warmup-forecast-line strong {
+  font-size: 20px;
+  font-weight: 850;
+}
+
+.warmup-forecast-dot {
+  color: var(--muted);
+  margin: 0 7px;
+}
+
+.warmup-forecast-hint {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 650;
+  line-height: 1.55;
+}
+
+.warmup-forecast-stale {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* Tones are mixed from the palette tokens rather than written as hexes: the
+   amber that reads as a warning on the light theme is a different amber in the
+   dark one, and a fixed value would be legible in exactly one of them. The
+   plain background above stays as the fallback where color-mix is missing. */
+
+.warmup-forecast.is-ok {
+  border-color: color-mix(in srgb, var(--teal) 34%, transparent);
+  background: color-mix(in srgb, var(--teal) 9%, transparent);
+}
+
+.warmup-forecast.is-ok .warmup-forecast-hint {
+  color: var(--teal);
+}
+
+.warmup-forecast.is-warn {
+  border-color: color-mix(in srgb, var(--amber) 42%, transparent);
+  background: color-mix(in srgb, var(--amber) 10%, transparent);
+}
+
+.warmup-forecast.is-warn .warmup-forecast-hint {
+  color: var(--amber);
+}
+
+/* The folder nobody can finish. It gets the loudest treatment on the screen
+   because agreeing to it costs months before anything looks wrong. */
+
+.warmup-forecast.is-bad {
+  border-color: color-mix(in srgb, var(--red) 46%, transparent);
+  background: color-mix(in srgb, var(--red) 11%, transparent);
+}
+
+.warmup-forecast.is-bad .warmup-forecast-hint {
+  color: var(--red);
+}
+
+.warmup-forecast.is-muted .warmup-forecast-line {
+  font-size: 15px;
+  color: var(--muted);
+}
+
+.warmup-campaign-detail-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 14px;
+  margin-bottom: 2px;
+}
+
+.warmup-campaign-state-note {
+  margin: 0;
+  flex: 1 1 260px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.warmup-campaign-accounts {
+  margin: 0;
+  flex: 1 1 240px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.warmup-campaign-problem {
+  font-style: normal;
+  font-weight: 750;
+  color: var(--red);
+}
+
+@media (max-width: 1100px) {
+  .warmup-campaign-grid {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+
+  .warmup-field-name,
+  .warmup-field-folder,
+  .warmup-field-product {
+    grid-column: span 6;
+  }
+
+  .warmup-field-filter {
+    grid-column: span 3;
+  }
+}
+
+@media (max-width: 640px) {
+  .warmup-campaign-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .warmup-field-name,
+  .warmup-field-folder,
+  .warmup-field-product,
+  .warmup-field-filter {
+    grid-column: 1 / -1;
+  }
+
+  .warmup-forecast {
+    padding: 12px 13px;
+  }
+  .warmup-forecast-line {
+    font-size: 15px;
+  }
+
+  .warmup-forecast-line strong {
+    font-size: 17px;
+  }
+
+  .warmup-forecast-dot {
+    margin: 0 5px;
+  }
+
+  .warmup-campaign-form-footer {
+    align-items: stretch;
+  }
+}
+
+/* ── The campaign list ─────────────────────────────────────────────────────
+ *
+ * Rows are deliberately quiet. The scale of a campaign is not something a row
+ * can carry — "0 of 22 088" in a table cell reads as a progress bar with a long
+ * way to go, not as three years — so a row carries the tone of its forecast as
+ * a bar down its edge and leaves the sentence to the panel below it.
+ */
+
+.warmup-campaign-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.warmup-campaign-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 0.9fr) auto;
+  align-items: center;
+  gap: 10px 16px;
+  padding: 11px 14px 11px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line);
+  background: var(--surface-strong);
+  cursor: pointer;
+}
+
+.warmup-campaign-row:hover {
+  border-color: color-mix(in srgb, var(--teal) 32%, var(--line));
+}
+
+.warmup-campaign-row.is-selected {
+  border-color: color-mix(in srgb, var(--teal) 45%, transparent);
+  background: var(--teal-weak);
+}
+
+/* The same verdict the forecast reaches, on the edge of the row, so a campaign
+   nobody can finish is visible without selecting it. */
+
+.warmup-campaign-row.is-ok {
+  border-left-color: var(--teal);
+}
+
+.warmup-campaign-row.is-warn {
+  border-left-color: var(--amber);
+}
+
+.warmup-campaign-row.is-bad {
+  border-left-color: var(--red);
+}
+
+.warmup-campaign-row.is-muted {
+  border-left-color: var(--muted);
+}
+
+.warmup-campaign-who {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.warmup-campaign-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+/* The name is the control that selects the campaign, so the row keeps one
+   keyboard stop for choosing and the rest for acting. */
+
+.warmup-campaign-select {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font-size: 14.5px;
+  font-weight: 700;
+  text-align: left;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+}
+
+.warmup-campaign-select:hover {
+  border: 0;
+  background: none;
+  color: var(--teal);
+}
+
+.warmup-campaign-select:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.warmup-campaign-meta {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.warmup-campaign-count {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 7px;
+  font-size: 12.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.warmup-campaign-count strong {
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.warmup-campaign-claimed {
+  flex: 1 1 100%;
+  color: var(--teal);
+  font-weight: 700;
+}
+
+.warmup-campaign-count-unknown {
+  font-weight: 650;
+}
+
+/* A caveat about counting, not a problem with the campaign — so it is a note,
+   not a badge. */
+
+.warmup-campaign-approx {
+  flex: 1 1 100%;
+  font-size: 11.5px;
+  font-weight: 600;
+  font-style: italic;
+  color: var(--muted);
+  cursor: help;
+}
+
+.warmup-campaign-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.warmup-campaign-actions button {
+  min-height: 30px;
+  padding: 0 9px;
+  font-size: 12.5px;
+}
+
+.warmup-campaign-delete:hover {
+  border-color: color-mix(in srgb, var(--red) 50%, transparent);
+  color: var(--red);
+}
+
+.warmup-campaign-detail:empty {
+  display: none;
+}
+
+/* ── The schedule ──────────────────────────────────────────────────────────
+ *
+ * A table of days, and the thing it must never do is read like a spreadsheet
+ * of unrelated rows: the phases are what a person thinks in, so the day a
+ * phase opens gets a line above it and carries the phase's name, while the
+ * days inside it are quiet. */
+
+/* Inside the campaigns panel, not beside it: who a campaign works and how fast
+   its accounts may work are two halves of one decision, and two panels made
+   them read as two subjects. The rule above is the seam. */
+
+.warmup-strategy-section {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.warmup-strategy-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 14px;
+}
+
+.warmup-strategy-head h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.warmup-strategy-head p {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.warmup-strategy-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.warmup-strategy-lead {
+  margin: 12px 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.warmup-strategy-table {
+  width: 100%;
+  /* Загальне `table { min-width: 860px }` розтягувало її за межі панелі, і
+     «Нотатка до запиту» ховалась за горизонтальним скролом. */
+  min-width: 0;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.warmup-strategy-table th,
+.warmup-strategy-table td {
+  padding: 7px 10px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.warmup-strategy-table thead th {
+  font-size: 11.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.warmup-strategy-table tbody th {
+  min-width: 120px;
+  font-weight: 700;
+}
+
+.warmup-strategy-table tbody th strong {
+  display: block;
+  font-size: 13.5px;
+}
+
+.warmup-strategy-table tbody th .warmup-subtle {
+  display: block;
+  font-size: 11.5px;
+  line-height: 1.3;
+}
+
+/* The seam between two phases, which is the only structure in the table. */
+
+.warmup-strategy-table tbody tr.is-phase-start > * {
+  border-top: 1px solid var(--line);
+}
+
+.warmup-strategy-table tbody tr.is-phase-start > th {
+  padding-top: 11px;
+}
+
+.warmup-day-quota {
+  white-space: nowrap;
+}
+
+.warmup-day-quota input {
+  width: 54px;
+  padding: 5px 6px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* `td span` у загальних стилях робить кожен span блоком, і тире між «від» і «до»
+   скидало друге число на новий рядок: клітинка виростала вдвічі, а таблиця —
+   за межі панелі. */
+
+.warmup-day-quota span {
+  display: inline;
+  margin: 0 4px;
+  color: var(--muted);
+}
+
+.warmup-day-note label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.warmup-day-note input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--teal);
+}
+
+.warmup-strategy-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.warmup-strategy-warning {
+  flex: 1 1 260px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.warmup-strategy-notice,
+.warmup-strategy-problem {
+  margin: 10px 0 0;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.5;
+}
+
+.warmup-strategy-notice {
+  color: var(--teal);
+}
+
+.warmup-strategy-problem {
+  color: var(--red);
+}
+
+@media (max-width: 720px) {
+  .warmup-strategy-table th,
+  .warmup-strategy-table td {
+    padding: 6px 7px;
+  }
+
+  .warmup-day-quota input {
+    width: 44px;
+  }
+}
+
+@media (max-width: 900px) {
+  .warmup-campaign-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .warmup-campaign-actions {
+    justify-content: flex-start;
+  }
+}
+
+/* Whether the campaign feeds this account by itself. Quiet when it does not
+   yet, teal when it does: the one line that says a running campaign is sending. */
+
+.warmup-queue-feed {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 650;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.warmup-queue-feed svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+}
+
+.warmup-queue-feed.is-live {
+  color: var(--teal);
+}
+
+/* The claiming rule says a seller who puts a campaign first means it, which is
+   only true if putting it first is something they can do. */
+
+.warmup-campaign-move {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-right: 4px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.warmup-campaign-move strong {
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.warmup-campaign-move em {
+  font-style: normal;
+  font-weight: 650;
+  color: var(--muted);
+}
+
+.warmup-campaign-move button {
+  min-height: 30px;
+  width: 28px;
+  padding: 0;
+}
+
+.warmup-campaign-move button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.warmup-campaign-move svg {
+  width: 15px;
+  height: 15px;
+}

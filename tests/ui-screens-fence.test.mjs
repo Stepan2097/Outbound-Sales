@@ -73,3 +73,62 @@ test("the workspace opens on the warm-up", () => {
   assert.match(all, /setView\(saved \|\| "warmup"\)/, "a first visit lands on Прогрів");
   assert.match(html, /<button class="nav-item active" data-view="warmup"/);
 });
+
+/**
+ * One file per screen, so that two people — or two chats — can change two
+ * screens at once without editing the same file. The shell in `core.js` knows
+ * the screens only by name; each screen module registers itself (`onScreen`)
+ * and `main.js` does nothing but load them and start.
+ */
+const SCREEN_FILES = {
+  warmup: ["screens/warmup-accounts.js", "screens/warmup-campaign.js"],
+  inbox: ["screens/inbox.js"],
+  contacts: ["screens/contacts.js"],
+  account: ["screens/settings.js"]
+};
+
+test("each screen has its own module and stylesheet, and registers itself", () => {
+  for (const [view, files] of Object.entries(SCREEN_FILES)) {
+    const code = files.map((file) => readFileSync(new URL(file, APP), "utf8")).join("\n");
+    assert.match(code, new RegExp(`onScreen\\("${view}"`), `${view} registers itself`);
+    for (const file of files) {
+      const sheet = file.replace(/^screens\//, "styles/").replace(/\.js$/, ".css");
+      assert.ok(html.includes(`href="/${sheet}"`), `${sheet} is linked from index.html`);
+    }
+  }
+  assert.ok(html.includes('href="/styles/base.css"'), "the shared styles come first");
+  const core = readFileSync(new URL("core.js", APP), "utf8");
+  assert.equal(/from "\.\/screens\//.test(core), false, "the shell imports no screen");
+});
+
+test("main.js only loads the screens and starts", () => {
+  const entry = readFileSync(new URL("main.js", APP), "utf8");
+  const code = entry.split("\n").filter((line) => line.trim() && !line.trim().startsWith("//"));
+  assert.ok(code.length <= 10, `main.js grew to ${code.length} lines of code — screen code belongs in screens/`);
+  assert.equal(/function /.test(entry), false, "no functions in the entry");
+});
+
+/**
+ * Every name a page module imports is exported by the module it names. A
+ * missing export is a SyntaxError in the browser before anything runs — the
+ * page shows the sign-in form and nothing else — and node never loads these
+ * files, so nothing else here would notice. It happened once while the page
+ * was being split into screens.
+ */
+test("every import in the page's modules is exported by its target", () => {
+  const exportsOf = (url) => {
+    const text = readFileSync(url, "utf8");
+    return new Set([...text.matchAll(/^export (?:async )?(?:function|let|const|class) ([A-Za-z0-9_$]+)/gm)].map((match) => match[1]));
+  };
+  const modules = sources().filter(({ path }) => path.endsWith(".js"));
+  assert.ok(modules.length >= 7, "the shell, the entry and the screens are all read");
+  for (const { path, text } of modules) {
+    for (const match of text.matchAll(/import \{([^}]*)\} from "([^"]+)";/g)) {
+      const target = new URL(match[2], `file://${path}`);
+      const exported = exportsOf(target);
+      for (const name of match[1].split(",").map((part) => part.trim()).filter(Boolean)) {
+        assert.ok(exported.has(name), `${path.replace(APP.pathname, "app/")} imports ${name}, which ${match[2]} does not export`);
+      }
+    }
+  }
+});

@@ -1,0 +1,453 @@
+/* Перевірка прав на запис у базу прогріву. */
+.warmup-header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.warmup-probe-note {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-sunk);
+  font-size: 13px;
+}
+.warmup-probe-note.is-ok {
+  border-color: color-mix(in srgb, var(--teal) 45%, var(--line));
+}
+.warmup-probe-note.is-bad {
+  border-color: color-mix(in srgb, #f87171 45%, var(--line));
+}
+.warmup-probe-note ul {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 2px;
+  color: var(--muted);
+}
+.warmup-probe-note li.is-skipped { color: var(--muted); }
+.warmup-probe-note li.is-ok { color: var(--teal); }
+.warmup-probe-note li.is-bad { color: #f87171; }
+.warmup-probe-note code {
+  font-size: 12px;
+}
+.warmup-config-note {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(183, 121, 31, 0.32);
+  background: rgba(183, 121, 31, 0.08);
+  color: var(--amber);
+  font-size: 13px;
+  font-weight: 600;
+}
+.warmup-config-note p {
+  margin: 0 0 6px;
+}
+.warmup-config-note p:last-child {
+  margin-bottom: 0;
+}
+.warmup-stats-strip {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
+}
+@media (max-width: 1100px) {
+  .warmup-stats-strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (max-width: 640px) {
+  .warmup-stats-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.warmup-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--surface-strong);
+  min-width: 108px;
+}
+.warmup-stat span {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 700;
+}
+.warmup-stat strong {
+  font-size: 18px;
+}
+.warmup-list-controls {
+  display: flex;
+  gap: 8px;
+}
+.warmup-list-panel tbody tr {
+  cursor: pointer;
+}
+.warmup-list-panel tbody tr.is-selected {
+  background: var(--teal-weak);
+}
+.warmup-row-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+/* The one cell that has to be read across the room: today's work is still
+   outstanding and its planned time has gone. */
+.warmup-due {
+  color: var(--amber);
+  font-weight: 800;
+}
+.pill.tone-done { background: rgba(37, 99, 235, 0.12); color: var(--blue); }
+.warmup-detail-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.warmup-paused {
+  margin: 0 0 12px;
+  color: var(--amber);
+  font-weight: 700;
+  font-size: 13px;
+}
+.warmup-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.warmup-action {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--surface-strong);
+  font-size: 13px;
+}
+.warmup-action strong {
+  font-variant-numeric: tabular-nums;
+}
+/* A quota that is spent reads as spent. The button stays in place rather than
+   disappearing, so the row does not reflow the moment the last one lands. */
+.warmup-action button[disabled] {
+  opacity: 0.4;
+  cursor: default;
+}
+.warmup-action.is-off {
+  grid-template-columns: 1fr auto;
+  color: var(--muted);
+}
+.warmup-action.is-off em {
+  font-style: normal;
+  font-size: 12px;
+}
+.warmup-rules {
+  margin: 0 0 14px;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.warmup-rules li {
+  margin-bottom: 4px;
+}
+.warmup-health {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.warmup-health label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.warmup-health input {
+  flex: 1 1 160px;
+}
+.warmup-detail-panel h3 {
+  margin: 16px 0 8px;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.warmup-sessions,
+.warmup-events {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12.5px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.warmup-sessions li,
+.warmup-events li {
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: var(--surface-strong);
+  color: var(--ink);
+}
+.warmup-events li span {
+  color: var(--muted);
+  margin-right: 6px;
+}
+.warmup-events li.level-warn {
+  background: rgba(183, 121, 31, 0.1);
+}
+.warmup-events li.level-error {
+  background: rgba(194, 65, 53, 0.1);
+}
+/* ── The tick column and the identity line ─────────────────────────────────*/
+.warmup-tick-head,
+.warmup-tick {
+  width: 1%;
+  white-space: nowrap;
+  text-align: center;
+}
+.warmup-tick-head {
+  font-size: 11px;
+}
+/* The global input rule stretches every input to the full cell; a checkbox is
+   the one control that has to keep its own size. */
+.warmup-tick input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  accent-color: var(--teal);
+  cursor: pointer;
+}
+.warmup-tick input[type="checkbox"]:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+/* ── The lead queue ────────────────────────────────────────────────────────*/
+.warmup-leads {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.warmup-leads li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: var(--surface-strong);
+  font-size: 13px;
+}
+.warmup-lead-who {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.warmup-lead-who strong,
+.warmup-lead-who span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 640px) {
+
+  .warmup-leads li {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .warmup-lead-who {
+    grid-column: 1 / -1;
+  }
+}
+/* The app styles its links per context, and an unstyled one lands on the
+   browser's default blue — unreadable on either of these palettes. */
+.warmup-leads a {
+  color: var(--teal);
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.warmup-leads a:hover {
+  text-decoration: underline;
+}
+@media (max-width: 640px) {
+  .warmup-list-panel .panel-heading {
+    flex-wrap: wrap;
+  }
+
+  .warmup-list-controls {
+    flex: 1 1 100%;
+  }
+
+  .warmup-list-controls input,
+  .warmup-list-controls select {
+    min-width: 0;
+  }
+}
+/* ── The claim queue ───────────────────────────────────────────────────────
+ *
+ * An account whose connection quota has not opened yet gets no rows and a
+ * sentence saying why — "Day 2 of 14 — connection requests start on day 4".
+ * That sentence is the answer somebody opened this panel for, so it is styled
+ * as content rather than as an empty state.
+ */
+.warmup-queue-accounts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 10px;
+}
+.warmup-queue-account {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--surface-strong);
+}
+/* The button keeps its corner whatever the name and the signed-in identity do
+   to the width, so two accounts side by side do not sit at different heights. */
+.warmup-queue-account > header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+}
+.warmup-queue-account > header > button {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 12.5px;
+}
+.warmup-queue-who {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+}
+.warmup-queue-who strong {
+  font-size: 14px;
+}
+.warmup-queue-who .warmup-identity {
+  margin-top: 0;
+}
+.warmup-queue-reason {
+  margin: 0;
+  padding: 11px 13px;
+  border-radius: 10px;
+  border: 1px dashed color-mix(in srgb, var(--amber) 45%, transparent);
+  background: color-mix(in srgb, var(--amber) 8%, transparent);
+  color: var(--amber);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+.warmup-queue-reason.is-bad {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--red) 45%, transparent);
+  background: color-mix(in srgb, var(--red) 9%, transparent);
+  color: var(--red);
+}
+.warmup-queue-reason.is-muted {
+  border-color: var(--line);
+  background: transparent;
+  color: var(--muted);
+}
+.warmup-queue-list li {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  background: var(--surface);
+}
+/* Permanent, against a real person, once. It should not look like the button
+   next to it. */
+.warmup-queue-send {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 12.5px;
+  font-weight: 700;
+  border-color: color-mix(in srgb, var(--teal) 40%, transparent);
+  color: var(--teal);
+}
+.warmup-queue-send:hover {
+  border-color: var(--teal);
+  background: var(--teal-weak);
+}
+.warmup-queue-list a {
+  color: var(--teal);
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+@media (max-width: 640px) {
+  .warmup-queue-accounts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .warmup-queue-account {
+    padding: 11px 12px;
+  }
+  .warmup-queue-list li {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .warmup-queue-list .warmup-lead-who {
+    grid-column: 1 / -1;
+  }
+
+  .warmup-queue-send {
+    justify-self: end;
+  }
+}
+/* A queue belongs to the account, so a person claimed by a different campaign
+   the same account works says so rather than passing for this one's. */
+.warmup-queue-elsewhere {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--violet);
+  cursor: help;
+}
+/* Claiming releases expired claims first, so a queue can shrink without anyone
+   touching it. Said once, quietly, where it happened. */
+.warmup-queue-released {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--violet);
+}
+/* The agent's list, not a person's: folded by default, no buttons. */
+.warmup-queue-waiting summary {
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.warmup-queue-waiting .warmup-queue-list {
+  margin-top: 8px;
+}
+.warmup-account-unread {
+  margin-top: 3px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 900;
+  cursor: pointer;
+}
+.warmup-account-unread:hover {
+  background: color-mix(in srgb, var(--teal) 24%, transparent);
+}
+.warmup-account-unread svg {
+  width: 12px;
+  height: 12px;
+}

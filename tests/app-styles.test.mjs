@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 /**
@@ -12,7 +12,11 @@ import test from "node:test";
  * card on the Контакти page and in Історія.
  */
 
-const css = readFileSync(new URL("../app/styles.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+// Every stylesheet of the page, read as one: shared rules in base.css, each
+// screen's in its own file.
+const STYLES = new URL("../app/styles/", import.meta.url);
+const css = readdirSync(STYLES).filter((name) => name.endsWith(".css")).sort()
+  .map((name) => readFileSync(new URL(name, STYLES), "utf8")).join("\n").replace(/\/\*[\s\S]*?\*\//g, "");
 
 function rules() {
   const found = [];

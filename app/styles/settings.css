@@ -1,0 +1,253 @@
+.integration-form {
+  display: grid;
+  gap: 12px;
+}
+
+.team-who {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.team-who strong,
+.team-who span {
+  overflow-wrap: anywhere;
+}
+
+.team-row-outside strong {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.team-access {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 150px;
+}
+
+.team-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.team-list,
+.account-layout {
+  display: grid;
+  gap: 12px;
+}
+
+.team-row {
+  border: 1px solid rgba(143, 177, 207, 0.18);
+  border-radius: 8px;
+  background: rgba(4, 16, 29, 0.5);
+  padding: 12px;
+}
+
+.team-row strong,
+.team-row span {
+  display: block;
+}
+
+.team-row span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.account-layout {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (max-width: 720px) {
+
+  .account-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .team-row {
+    align-items: stretch;
+  }
+  .team-row {
+    flex-wrap: wrap;
+  }
+
+  .team-model {
+    max-width: none;
+    text-align: left;
+  }
+}
+
+.integration-form {
+  gap: 9px;
+}
+
+@media (max-width: 720px) {
+
+  .account-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Профіль ───────────────────────────────────────────────────────────── */
+
+.account-layout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  align-items: start;
+}
+
+.account-layout .span-2 {
+  grid-column: 1 / -1;
+}
+
+.profile-model {
+  display: grid;
+  gap: 8px;
+  max-width: 560px;
+}
+
+.profile-model-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.profile-figure {
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+  color: var(--teal);
+}
+
+/* Thirty bars, one per day, empty days included — the gap between working
+   days is the shape of the month and must stay visible. */
+
+.profile-chart {
+  display: grid;
+  grid-template-columns: repeat(30, minmax(0, 1fr));
+  align-items: end;
+  gap: 3px;
+  height: 128px;
+  padding-top: 8px;
+}
+
+.profile-bar {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: stretch;
+  height: 100%;
+  min-width: 0;
+}
+
+.profile-bar span {
+  display: block;
+  background: var(--surface-strong);
+  border-radius: 2px 2px 0 0;
+  min-height: 2px;
+}
+
+.profile-bar.has-value span {
+  background: var(--teal);
+}
+
+.profile-bar small {
+  margin-top: 4px;
+  font-size: 9px;
+  color: var(--muted);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Only every fifth day is labelled; thirty numbers in a row is a smear. */
+
+.profile-bar:not(:nth-child(5n)) small {
+  visibility: hidden;
+}
+
+.profile-chart-note {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.profile-details summary {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.profile-details-body {
+  display: grid;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+/* Рядок списку — це двері в картку, тож він поводиться як кнопка, а відкритий
+   лишається підсвіченим: інакше графіки внизу невідомо про кого. */
+
+.team-row[data-team-user] {
+  cursor: pointer;
+}
+
+.team-row[data-team-user]:hover,
+.team-row[data-team-user]:focus-visible {
+  border-color: rgba(101, 240, 219, 0.45);
+}
+
+.team-row-open {
+  border-color: var(--teal);
+  background: rgba(101, 240, 219, 0.08);
+}
+
+/* Дві цифри в рядку: витрачено і пробуто. Табличні цифри, щоб стовпчик читався
+   згори вниз, а не стрибав від рядка до рядка. */
+
+.team-stats {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 18px;
+}
+
+.team-stat {
+  display: grid;
+  gap: 2px;
+  min-width: 72px;
+  text-align: right;
+}
+
+.team-stat strong {
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.team-stat small {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* Нуль — це нуль, а не досягнення: підсвічується лише те, за чим щось стоїть. */
+
+.team-stat.has-value strong {
+  color: var(--teal);
+}
+
+.team-model {
+  flex: 0 0 auto;
+  max-width: 220px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 900px) {
+  .account-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

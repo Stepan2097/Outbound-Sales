@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import test from "node:test";
 
 import { loadMain, mainSource, declaration } from "./app-main-excerpt.mjs";
@@ -18,7 +18,9 @@ import { loadMain, mainSource, declaration } from "./app-main-excerpt.mjs";
  */
 
 const INDEX = readFileSync(new URL("../app/index.html", import.meta.url), "utf8");
-const STYLES = readFileSync(new URL("../app/styles.css", import.meta.url), "utf8");
+const STYLES_DIR = new URL("../app/styles/", import.meta.url);
+const STYLES = readdirSync(STYLES_DIR).filter((name) => name.endsWith(".css"))
+  .map((name) => readFileSync(new URL(name, STYLES_DIR), "utf8")).join("\n");
 
 test("розмітка панелі лежить усередині «Кампаній», під деталями кампанії", () => {
   for (const id of ["warmupStrategyPill", "warmupStrategySubtitle", "warmupStrategyToggleBtn", "warmupStrategyBody"]) {
@@ -35,7 +37,7 @@ test("розмітка панелі лежить усередині «Кампа
 
 test("стилі таблиці розкладу на місці", () => {
   for (const selector of [".warmup-strategy-section", ".warmup-strategy-table", ".warmup-day-quota input", ".warmup-strategy-foot"]) {
-    assert.ok(STYLES.includes(selector), `у styles.css немає ${selector}`);
+    assert.ok(STYLES.includes(selector), `у стилях немає ${selector}`);
   }
   // Межа між фазами — єдина структура таблиці; без неї дні читаються як каша.
   assert.match(STYLES, /tr\.is-phase-start/);

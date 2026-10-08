@@ -1,28 +1,33 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import vm from "node:vm";
 
 /**
- * Pieces of `app/main.js`, run in a sandbox.
+ * Pieces of the page's code, run in a sandbox.
  *
- * `main.js` reads `window` and `document` the moment it loads, and imports a
- * module, so node cannot import it. Its top-level declarations can still be
- * read out by name and run together against stubs. That is how the invite
- * form is tested without a browser — and how the form's copy of the note rule
- * is held to the server's (`tests/warmup-note-parity.test.mjs`).
+ * The page is ES modules under `app/` — the shell in `core.js`, one file per
+ * screen in `screens/` — that read `window` and `document` the moment they
+ * load, so node cannot import them. Their top-level declarations can still be
+ * read out by name and run together against stubs, wherever they live: the
+ * source below is every module of the page read as one, with its `import`
+ * lines dropped and `export` taken off the front of a declaration.
  *
  * A declaration is found by its first line (`function name`, `async function
  * name`, `const name` or `let name` at the start of a line) and runs to the
- * first later line that starts with `}` or `]` — the file's own formatting. A
+ * first later line that starts with `}` or `]` — the files' own formatting. A
  * one-line declaration ends on its own line. Not a parser, and it does not
  * need to be one: a declaration it cannot find throws, and a missing
  * dependency throws a ReferenceError when the test runs it, so a change that
  * breaks the excerpt fails loudly rather than testing something else.
  */
 
-const MAIN = new URL("../app/main.js", import.meta.url);
+const APP = new URL("../app/", import.meta.url);
+const MODULES = ["core.js", ...readdirSync(new URL("screens/", APP)).filter((name) => name.endsWith(".js")).sort().map((name) => `screens/${name}`)];
 
 export function mainSource() {
-  return readFileSync(MAIN, "utf8");
+  return MODULES.map((file) => readFileSync(new URL(file, APP), "utf8"))
+    .join("\n")
+    .replace(/^import \{[^}]*\} from "[^"]+";\n/gm, "")
+    .replace(/^export (?=(?:async function|function|const|let) )/gm, "");
 }
 
 function throughEnd(source, index, what) {
