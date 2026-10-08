@@ -17,10 +17,11 @@
  *   node scripts/remove-workspace-users.mjs --list
  */
 
-import { copyFile, readFile, writeFile } from "node:fs/promises";
+import { copyFile, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { writeFileAtomic } from "../state/atomic-write.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const statePath = process.env.STATE_FILE_PATH || join(root, ".data", "outbound-state.json");
@@ -67,7 +68,7 @@ state.users = remaining;
 const activity = state.userActivity && typeof state.userActivity === "object" ? state.userActivity : {};
 for (const user of removed) delete activity[user.id];
 state.userActivity = activity;
-await writeFile(statePath, JSON.stringify(state), "utf8");
+await writeFileAtomic(statePath, JSON.stringify(state));
 
 for (const user of removed) console.log(`прибрано: ${describe(user)}`);
 console.log(`лишилось: ${remaining.map((user) => user.email).join(", ") || "нікого"}`);

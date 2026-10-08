@@ -1,7 +1,8 @@
 import { randomBytes } from "node:crypto";
-import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { writeFileAtomic } from "../state/atomic-write.mjs";
 
 /**
  * The knowledge library: the files an agent reads before it writes anything.
@@ -186,7 +187,7 @@ async function seedLibrary() {
       updatedAt: nowIso(),
       updatedBy: "seed"
     });
-    await writeFile(join(filesDir, `${id}.md`), text, "utf8");
+    await writeFileAtomic(join(filesDir, `${id}.md`), text);
   }
   await persistIndex();
 }
@@ -195,11 +196,16 @@ async function seedLibrary() {
  * Index writes are serialized. Two people saving different files at the same
  * second would otherwise race on one JSON and one of the saves would vanish
  * with no error anywhere.
+ *
+ * Every write here is atomic (state/atomic-write.mjs). It matters more for the
+ * index than for the documents: an index cut in half does not parse, the loader
+ * then takes it for a fresh workspace and seeds over it, and every file the
+ * team wrote is left on disk with nothing pointing at it.
  */
 function persistIndex() {
   writeQueue = writeQueue.then(async () => {
     await mkdir(filesDir, { recursive: true });
-    await writeFile(indexPath, JSON.stringify(library, null, 2), "utf8");
+    await writeFileAtomic(indexPath, JSON.stringify(library, null, 2));
   }).catch((error) => {
     console.error("Could not persist knowledge library index:", error instanceof Error ? error.message : error);
   });
@@ -242,7 +248,7 @@ export async function createKnowledgeFile({ name, productIds = [], content = "",
   };
   contents.set(id, text);
   library.files.push(file);
-  await writeFile(join(filesDir, `${id}.md`), text, "utf8");
+  await writeFileAtomic(join(filesDir, `${id}.md`), text);
   await persistIndex();
   return readKnowledgeFile(id);
 }
@@ -263,7 +269,7 @@ export async function updateKnowledgeFile(id, patch = {}) {
     }
     contents.set(id, text);
     file.bytes = Buffer.byteLength(text, "utf8");
-    await writeFile(join(filesDir, `${id}.md`), text, "utf8");
+    await writeFileAtomic(join(filesDir, `${id}.md`), text);
   }
   if (patch.updatedBy) file.updatedBy = cleanLine(patch.updatedBy, 120);
   file.updatedAt = nowIso();

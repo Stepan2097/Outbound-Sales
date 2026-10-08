@@ -33,6 +33,7 @@ import { AntyApi } from './lib/anty-api.mjs';
 import { Telegram } from './lib/telegram.mjs';
 import { probeLogin } from './lib/login-probe.mjs';
 import { answerAsks, checkParked, normalizeState, RECHECK_MS } from './lib/login-watch.mjs';
+import { writeFileAtomicSync } from './lib/atomic-write.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -59,7 +60,7 @@ function readState() {
 function writeState(state) {
   try {
     fs.mkdirSync(path.dirname(STATE_PATH), { recursive: true });
-    fs.writeFileSync(STATE_PATH, JSON.stringify(state));
+    writeFileAtomicSync(STATE_PATH, JSON.stringify(state));
   } catch (error) {
     log(`не зміг зберегти стан вартового: ${error.message}`);
   }
