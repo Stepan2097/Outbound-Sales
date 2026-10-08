@@ -361,6 +361,16 @@ async function selectContactFolder(folderId) {
   await loadContactPage();
 }
 
+/**
+ * A person's card from another screen — the conversation in «Вхідні» names who
+ * wrote, and the card is where that person's history and status already are.
+ * Goes through the menu item so the shell does what it always does on a switch.
+ */
+export function showContactCard(contactId) {
+  document.querySelector('.nav-item[data-view="contacts"]')?.click();
+  return openContact(String(contactId));
+}
+
 async function openContact(contactId) {
   selectedContactId = contactId;
   contactRecord = null;

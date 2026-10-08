@@ -108,6 +108,21 @@ async function enterWorkspace() {
   startActivityHeartbeat();
   const saved = rememberedView();
   setView(saved || "warmup");
+  for (const hook of enterHooks) {
+    try { hook(); } catch { /* a counter that cannot be read must not stop anybody entering */ }
+  }
+}
+
+/**
+ * What to do the moment somebody is inside, whatever screen they land on. The
+ * menu item with a counter on it cannot wait until its own screen is opened:
+ * a seller who comes back on «Контакти» is exactly the one who needs to see
+ * that a reply is waiting.
+ */
+const enterHooks = [];
+
+export function onWorkspaceEnter(hook) {
+  enterHooks.push(hook);
 }
 
 function renderAuthForm() {
