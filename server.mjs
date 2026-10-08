@@ -1149,6 +1149,9 @@ async function handleApi(request, response, url) {
       requireZeroRetention: Boolean(body.requireZeroRetention)
     };
     addEvent("privacy", "Provider routing policy updated.");
+    // This rule decides whether data may go to a model that trains on it or
+    // keeps it; a change that lives only in memory is undone by the next deploy.
+    await writePersistentWorkspaceState();
     sendJson(response, 200, publicState());
     return;
   }
@@ -3635,6 +3638,7 @@ function applyPersistentWorkspaceState(saved = {}) {
   if (Array.isArray(saved.warmupCampaigns)) {
     state.warmupCampaigns = saved.warmupCampaigns;
   }
+  state.providerRule = restoreProviderRule(saved.providerRule, state.providerRule);
   for (const key of ["contactEnrichment", "crm", "transcripts", "notifications", "supabase", "postgres", "knowledgeDatabase"]) {
     if (saved.integrationSettings?.[key] && typeof saved.integrationSettings[key] === "object") {
       state.integrations[key] = { ...state.integrations[key], ...saved.integrationSettings[key] };
@@ -3649,6 +3653,23 @@ function applyPersistentWorkspaceState(saved = {}) {
       ? "configured"
       : "needs_webhook_secret_or_url";
   }
+}
+
+// The provider rule, field by field. A file from before the rule was saved has
+// none, and one that was damaged may have half of it: whatever does not parse
+// keeps the value this boot started with rather than discarding what did.
+// The policy is any non-empty string because the route that sets it accepts
+// any, and a value it let through must not be dropped by the next restart.
+function restoreProviderRule(saved, current) {
+  if (!saved || typeof saved !== "object" || Array.isArray(saved)) return current;
+  const flag = (value, fallback) => (typeof value === "boolean" ? value : fallback);
+  return {
+    ...current,
+    policy: typeof saved.policy === "string" && saved.policy.trim() ? saved.policy.trim() : current.policy,
+    allowProviderFallbacks: flag(saved.allowProviderFallbacks, current.allowProviderFallbacks),
+    requireNoTraining: flag(saved.requireNoTraining, current.requireNoTraining),
+    requireZeroRetention: flag(saved.requireZeroRetention, current.requireZeroRetention)
+  };
 }
 
 // Seconds per user per day, taken back from the file with the same shape the
@@ -3754,6 +3775,7 @@ async function writeWorkspaceStateNow() {
       accountDossiers: state.accountDossiers,
       warmupCampaigns: state.warmupCampaigns,
       warmupTargeting: state.warmupTargeting,
+      providerRule: state.providerRule,
       learning: {
         examples: state.learning.examples.slice(0, 500),
         playbook: state.learning.playbook,
