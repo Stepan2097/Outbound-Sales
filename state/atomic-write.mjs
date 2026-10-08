@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import * as nodeFs from "node:fs";
 import { open, rename, unlink } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 
@@ -33,5 +34,39 @@ export async function writeFileAtomic(path, data, { fs = { open, rename, unlink 
     await directory.close();
   } catch {
     // Не на всіх ФС теку можна відкрити; файл уже на місці.
+  }
+}
+
+/**
+ * Створити файл, якого ще нема, так, щоб його ніколи не було видно половинним.
+ *
+ * Для ключа шифрування: `writeFileSync(..., { flag: "wx" })` теж виключний, але
+ * пише в сам файл, тож обрив посередині лишав обрізаний ключ, який завантажувач
+ * відкидає, — і сервер не стартував, доки хтось не прибере файл руками. Тут
+ * цілий файл пишеться в тимчасовий, скидається на диск і прив'язується до
+ * потрібного імені через `link`: вона, як `wx`, падає з EEXIST, якщо файл
+ * уже є, — тож «хто перший створив, того й ключ» лишається, як було.
+ *
+ * Файлова система, що не вміє жорстких посилань (деякі мережеві й FAT), не
+ * повинна ламати старт: тоді падаємо назад на звичайний `wx`.
+ */
+export function createFileOnceSync(path, data, { mode = 0o600, fs = nodeFs } = {}) {
+  const temp = join(dirname(path), `.${basename(path)}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`);
+  let fd = null;
+  try {
+    fd = fs.openSync(temp, "w", mode);
+    fs.writeFileSync(fd, data, "utf8");
+    fs.fsyncSync(fd);
+    fs.closeSync(fd);
+    fd = null;
+    try {
+      fs.linkSync(temp, path);
+    } catch (error) {
+      if (error?.code === "EEXIST" || !["EPERM", "ENOTSUP", "EOPNOTSUPP", "EXDEV", "ENOSYS"].includes(error?.code)) throw error;
+      fs.writeFileSync(path, data, { mode, flag: "wx" });
+    }
+  } finally {
+    if (fd !== null) try { fs.closeSync(fd); } catch { /* уже закрито */ }
+    try { fs.unlinkSync(temp); } catch { /* тимчасового файла вже нема */ }
   }
 }

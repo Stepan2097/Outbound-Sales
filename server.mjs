@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createReadStream, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { connect as connectTcp } from "node:net";
@@ -11,7 +11,7 @@ import { contactAsProspect, contactsConfigured, contactsMissingConfig, crmKeyKin
 import { handleKnowledgeLibraryApi } from "./knowledge/api.mjs";
 import { knowledgeExcerptsForPrompt, knowledgeFilesForProduct, loadKnowledgeLibrary } from "./knowledge/library.mjs";
 import { handleWarmupApi } from "./warmup/api.mjs";
-import { writeFileAtomic } from "./state/atomic-write.mjs";
+import { createFileOnceSync, writeFileAtomic } from "./state/atomic-write.mjs";
 import { startScheduler } from "./warmup/scheduler.mjs";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
@@ -3963,7 +3963,7 @@ function loadMasterKey() {
   mkdirSync(dirname(keyPath), { recursive: true });
   const key = randomBytes(32);
   try {
-    writeFileSync(keyPath, key.toString("hex"), { mode: 0o600, flag: "wx" });
+    createFileOnceSync(keyPath, key.toString("hex"), { mode: 0o600 });
     return key;
   } catch (error) {
     // Другий процес встиг створити файл першим — беремо його ключ.
