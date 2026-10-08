@@ -24,6 +24,7 @@ import { Portal } from './lib/portal.mjs';
 import { readProfile, normalizeCookie } from './lib/anty.mjs';
 import { syncInbox } from './lib/inbox.mjs';
 import { AntyApi } from './lib/anty-api.mjs';
+import { settle } from './lib/login-probe.mjs';
 
 // ── arguments ──────────────────────────────────────────────────────────────
 const argv = process.argv.slice(2);
@@ -46,50 +47,6 @@ fs.mkdirSync(SHOTS, { recursive: true });
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 const rand = (lo, hi) => lo + Math.random() * (hi - lo);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-/**
- * Wait for LinkedIn to settle, then say what we are looking at.
- *
- * Asking a fixed few seconds after `domcontentloaded` reads the wrong page: a
- * signed-in profile is sent to /login first and bounced back to the feed once
- * the session cookie checks out, so a snapshot taken mid-bounce reports a
- * healthy account as logged out — which is how the first wired run "failed"
- * while LinkedIn was in fact re-issuing its session cookie. Poll for something
- * conclusive instead: a real password field, a checkpoint, or the feed.
- */
-async function settle(page, timeoutMs = 40000) {
-  const deadline = Date.now() + timeoutMs;
-  let last = null;
-  while (Date.now() < deadline) {
-    const url = page.url();
-    try {
-      if (/\/checkpoint\//.test(url)) return { signedIn: false, url, reason: 'checkpoint' };
-      // Read every marker in one pass and keep it: when this is wrong, the
-      // question is always "which marker missed", and guessing that from a
-      // screenshot after the browser has closed is how an afternoon goes.
-      const seen = await page.evaluate(() => ({
-        loginForm: Boolean(document.querySelector('input#username, input[name="session_key"], input[name="session_password"]')),
-        network: Boolean(document.querySelector('a[href*="/mynetwork"]')),
-        post: Boolean(document.querySelector('button[aria-label^="Reaction button state"]')),
-        search: Boolean(document.querySelector('input[placeholder*="Search" i], .search-global-typeahead__input')),
-        text: (document.body?.innerText ?? '').length,
-      }));
-      if (seen.loginForm) return { signedIn: false, url, reason: 'login form', seen };
-      // The nav, the search box and a post each mean signed in on their own;
-      // LinkedIn's class names are hashes, so no single one of them is safe to
-      // depend on and `main` alone is on the logged-out page too.
-      if (/\/feed/.test(url) && (seen.network || seen.post || seen.search)) {
-        return { signedIn: true, url, reason: 'feed', seen };
-      }
-      last = seen;
-    } catch {
-      // The bounce navigated out from under the query. That is the very thing
-      // being waited for, not a failure — look again on the next page.
-    }
-    await sleep(1500);
-  }
-  return { signedIn: false, url: page.url(), reason: 'timed out waiting for the feed', seen: last };
-}
 
 const portal = new Portal(PORTAL);
 const report = { account: ACCOUNT, shots: SHOTS, actions: [], errors: [], shotFiles: [] };

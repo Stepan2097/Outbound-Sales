@@ -61,6 +61,36 @@ The account must be due inside the server's session window. A manual launch also
 - Existing Pending or first-degree profiles are reconciled instead of receiving another request. The daily check reports `accepted` when the profile shows a first-degree relationship. An uncertain missing request remains `pending`; the agent does not infer withdrawal from a missing selector.
 - Inbox reading follows `inbox.due`; a second session on the same day does not reread it. Both message directions and the entire visible thread are posted oldest first. LinkedIn message URNs are preferred. Fallback IDs use the text, direction, true ISO time when available, and occurrence; aging labels never form the ID. Non-ISO times remain labels, rather than invented dates. With no URN or absolute time, identical messages whose visible history changes can still be ambiguous; the server also reconciles repeated content.
 
+## Акаунт, що вийшов із LinkedIn
+
+Візит, який застав акаунт розлогіненим, пише йому `health: needs_login` — і
+сервер більше не роздає цей акаунт, бо відкривати його щоп'ять хвилин означає
+показувати LinkedIn наш розклад. Ціна в тому, що про поломку ніхто не дізнається
+і про лагодження теж.
+
+Вартовий закриває обидва кінці:
+
+```sh
+node agent/login-watch.mjs            # крутиться, доки не спинити
+node agent/login-watch.mjs --once     # один прохід, для крона або руками
+```
+
+Раз на день він відкриває кожен акаунт на паузі (тільки подивитись: без
+запитів, лайків, повідомлень і без месенджера) і пише один рядок у групу з
+кнопкою «Вже залогінився — продовжити прогрів». Натискання не йде на віру —
+вартовий перевіряє вхід сам, і лише тоді знімає акаунт з паузи через
+`health: ok`. Поки акаунт розлогінений, нагадування йде щодня.
+
+Потрібні `TELEGRAM_BOT_TOKEN` і `TELEGRAM_LOGIN_CHAT_ID` (на сервері — файлом
+600, не в коді й не в аргументах). Без них вартовий усе одно перевіряє й знімає
+з паузи те, що відновилось, — просто молча. Стан (зсув оновлень Telegram і
+дата останньої перевірки по акаунту) лежить у `agent/runs/login-watch.json`.
+
+Запускати окремо від воркера: воркер — це руки розкладу, і його не має
+затримувати профіль, якого ніхто не може відкрити. Рантайм у них один, тож
+профіль одночасно тримає тільько хтось один — тому вартовий і відкриває лише
+ті акаунти, які розклад не роздає.
+
 ## Keep the worker running
 
 Generate a LaunchAgent with paths for the current checkout and Node executable:

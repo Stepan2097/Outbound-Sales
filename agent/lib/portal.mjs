@@ -34,15 +34,18 @@ export class Portal {
   runFinished({ accountId, leaseId = null, ok, note = null }) {
     return this.#post({ action: 'run.finished', accountId, leaseId, ok: Boolean(ok), note });
   }
+  /** Every account the portal knows, health and all — one source for the rest. */
+  async accounts() {
+    const accounts = await this.accounts();
+    return Array.isArray(accounts) ? accounts : [];
+  }
   async warming() {
-    const { accounts, success, error } = await this.#json(`${this.prefix}/accounts`);
-    if (!success) throw new Error(error || 'Could not list accounts');
+    const accounts = await this.accounts();
     return accounts.filter((a) => a.status === 'warming' && a.health === 'ok').map((a) => ({ name: a.label, accountId: a.id }));
   }
   async supportsInbox() { return true; }
   async resolve(query) {
-    const { accounts, success, error } = await this.#json(`${this.prefix}/accounts`);
-    if (!success) throw new Error(error || 'Could not list accounts');
+    const accounts = await this.accounts();
     const needle = String(query).toLowerCase();
     const exact = accounts.filter((a) => a.id === query || a.profileRemoteId === query ||
       String(a.label ?? '').toLowerCase() === needle || String(a.login ?? '').toLowerCase() === needle);
