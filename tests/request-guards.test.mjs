@@ -4,27 +4,20 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { listeningOrigin } from "./server-origin.mjs";
 
 // Вхід, реєстрація й вебхуки відкриті без сесії — тож їх тримають межі:
 // розмір тіла, кількість спроб, токен транскриптів за сталий час.
 
-async function startServer(port, extraEnv = {}) {
+async function startServer(extraEnv = {}) {
   const directory = await mkdtemp(join(tmpdir(), "outbound-guards-"));
   const child = spawn(process.execPath, ["server.mjs"], {
     cwd: new URL("..", import.meta.url),
-    env: { ...process.env, PORT: String(port), STATE_FILE_PATH: join(directory, "state.json"), WARMUP_SCHEDULER_DISABLED: "1", AUTH_DEV_BYPASS: "0", ...extraEnv },
-    stdio: "ignore"
+    env: { ...process.env, PORT: "0", STATE_FILE_PATH: join(directory, "state.json"), WARMUP_SCHEDULER_DISABLED: "1", AUTH_DEV_BYPASS: "0", ...extraEnv },
+    stdio: ["ignore", "pipe", "ignore"]
   });
-  const origin = `http://127.0.0.1:${port}`;
-  const deadline = Date.now() + 8000;
-  while (Date.now() < deadline) {
-    try {
-      if ((await fetch(`${origin}/health`)).ok) break;
-    } catch {
-      // still starting
-    }
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
+  // Порт дає ОС; справжню адресу сервер друкує, коли почав слухати.
+  const origin = await listeningOrigin(child);
   const post = (path, body, headers = {}) => fetch(`${origin}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...headers },
@@ -42,7 +35,7 @@ async function startServer(port, extraEnv = {}) {
 }
 
 test("a body over the limit is refused with 413", async () => {
-  const server = await startServer(43321);
+  const server = await startServer();
   try {
     const huge = JSON.stringify({ email: "a@b.c", password: "x".repeat(6 * 1024 * 1024) });
     const response = await server.post("/api/auth/login", huge);
@@ -53,7 +46,7 @@ test("a body over the limit is refused with 413", async () => {
 });
 
 test("sign-in attempts from one address are capped with 429 and Retry-After", async () => {
-  const server = await startServer(43322);
+  const server = await startServer();
   try {
     const statuses = [];
     for (let i = 0; i < 21; i += 1) {
@@ -69,7 +62,7 @@ test("sign-in attempts from one address are capped with 429 and Retry-After", as
 });
 
 test("registrations from one address are capped with 429", async () => {
-  const server = await startServer(43323);
+  const server = await startServer();
   try {
     for (let i = 0; i < 10; i += 1) {
       assert.notEqual((await server.post("/api/auth/register", { email: `new${i}@example.com`, password: "secret123" })).status, 429);
@@ -82,7 +75,7 @@ test("registrations from one address are capped with 429", async () => {
 
 test("the call-transcript webhook checks its token and still lets the right one in", async () => {
   // Налаштувати токен можна лише з сесією — тут локальний обхід входу.
-  const server = await startServer(43324, { AUTH_DEV_BYPASS: "1" });
+  const server = await startServer({ AUTH_DEV_BYPASS: "1" });
   try {
     const configured = await server.post("/api/integrations/transcripts/configure", { provider: "custom", apiToken: "transcript-secret-123" });
     assert.equal(configured.status, 200);
