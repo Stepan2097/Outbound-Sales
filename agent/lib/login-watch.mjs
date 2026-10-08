@@ -8,44 +8,56 @@
  * told it is broken: the warm-up for that login simply stops, quietly, for as
  * long as nobody opens the dashboard.
  *
- * This closes both ends. Once a day each parked account is looked at — opened,
- * read, closed, nothing else — and the group is told in one line. While it
- * stays signed out it is told again the next day, because a single message at
- * 11:00 on a Tuesday is a message nobody acts on. Under the line sits one
- * button: press it after logging in by hand and the account is checked right
- * then, and the warm-up carries on without waiting for tomorrow.
+ * This closes both ends. A parked account is looked at every half hour —
+ * opened, read, closed, nothing else — and the group is told once a day, in
+ * one line, while it stays signed out.
  *
  * The decisions, said out loud:
  *
- * - **The button never trusts the press.** It checks. "I logged in" from a
- *   person who logged into the wrong profile would otherwise put a dead
- *   session back into rotation, and the next visit would walk an account into
- *   a login wall, which is exactly the thing LinkedIn counts.
- * - **One message a day per account, and one on recovery.** A reminder every
- *   hour is a muted group.
+ * - **There is no button that reports back.** There was one, for a day: an
+ *   inline callback button, which needs `getUpdates` on the bot. That polling
+ *   is exclusive and acknowledges every update up to its offset, so it
+ *   swallowed the owner's own replies to a different chat on the same bot.
+ *   Telegram offers no way to read only part of a bot's updates — the rest are
+ *   dropped, not queued. So the group message carries a **link** button (which
+ *   reports nothing to anybody) and the half-hourly check is what resumes the
+ *   warm-up: log in, and within thirty minutes the account is back by itself.
+ *   A one-tap button can come back the day this has a bot of its own.
+ * - **A recovered account is announced out of turn.** The once-a-day limit is
+ *   about nagging, and "it works again" is not nagging.
  * - **Health is written through the portal**, like the agent writes it, so the
  *   dashboard, the log and the schedule all see one story.
  * - **A silent watch is still useful.** With no bot token configured it keeps
  *   checking and un-pausing recovered accounts; it just cannot say so.
  */
-export const ASK_PREFIX = 'warmup:login:';
-export const BUTTON_TEXT = 'Вже залогінився — продовжити прогрів';
+
+/** How often a parked account is looked at. */
+export const RECHECK_MS = 30 * 60 * 1000;
 
 /** The health values that mean "a person has to go and do something". */
 export const NEEDS_PERSON = ['needs_login', 'captcha'];
 
 export function emptyState() {
-  return { offset: 0, lastCheck: {} };
+  return { lastCheck: {}, lastTold: {} };
 }
 
+/**
+ * The saved state, believed only where it makes sense.
+ *
+ * `lastCheck` is a moment (ms), `lastTold` a day. A file written by the older
+ * version carried a day in `lastCheck` and a Telegram offset beside it; both
+ * are dropped rather than converted — a day cannot be read as a moment, and an
+ * offset belongs to polling this no longer does. The account is simply looked
+ * at once more, which costs one page view.
+ */
 export function normalizeState(input) {
   const state = emptyState();
   if (!input || typeof input !== 'object') return state;
-  state.offset = Number.isSafeInteger(input.offset) && input.offset > 0 ? input.offset : 0;
-  if (input.lastCheck && typeof input.lastCheck === 'object') {
-    for (const [id, day] of Object.entries(input.lastCheck)) {
-      if (typeof day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(day)) state.lastCheck[id] = day;
-    }
+  for (const [id, at] of Object.entries(input.lastCheck ?? {})) {
+    if (Number.isFinite(at) && at > 0) state.lastCheck[id] = Number(at);
+  }
+  for (const [id, day] of Object.entries(input.lastTold ?? {})) {
+    if (typeof day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(day)) state.lastTold[id] = day;
   }
   return state;
 }
@@ -66,55 +78,18 @@ async function restore({ portal, telegram, account, who = null, log = () => {} }
 }
 
 /**
- * The presses since the last look. Each one is answered — the grey toast on
- * the button — whether or not it changed anything, because a button that says
- * nothing back gets pressed again.
+ * The look at every parked account whose turn has come, and the one line a day
+ * about each that is still out.
  */
-export async function handlePresses({ portal, telegram, probe, state, log = () => {} }) {
-  if (!telegram.configured) return { presses: 0, restored: 0 };
-  const { offset, presses } = await telegram.callbacks(state.offset ?? 0);
-  state.offset = offset;
-  let restored = 0;
-  for (const press of presses) {
-    if (!press.data.startsWith(ASK_PREFIX)) continue;
-    const accountId = press.data.slice(ASK_PREFIX.length);
-    const account = (await portal.accounts()).find((item) => item.id === accountId);
-    if (!account) {
-      await telegram.answer(press.id, 'Цього акаунта вже немає в списку прогріву.');
-      continue;
-    }
-    let result;
-    try {
-      result = await probe(account);
-    } catch (error) {
-      await telegram.answer(press.id, `Не вдалося перевірити: ${error.message}`);
-      continue;
-    }
-    if (result.signedIn) {
-      await restore({ portal, telegram, account, who: press.from, log });
-      await telegram.answer(press.id, 'Вхід бачу — прогрів продовжено.');
-      state.lastCheck[account.id] = null;
-      delete state.lastCheck[account.id];
-      restored += 1;
-    } else {
-      await telegram.answer(press.id, 'Входу ще не видно. Перевір, що залогінився саме в цьому профілі.');
-      await telegram.send(`${account.label}: входу ще не видно (${result.reason}).`);
-    }
-  }
-  return { presses: presses.length, restored };
-}
-
-/**
- * Today's look at every parked account: at most one per account per day,
- * whatever it finds.
- */
-export async function checkParked({ portal, telegram, probe, state, today, log = () => {} }) {
+export async function checkParked({
+  portal, telegram, probe, state, today, nowMs = Date.now(), portalUrl = null, log = () => {}
+}) {
   const parked = parkedAmong(await portal.accounts());
   let checked = 0;
   let restored = 0;
   let announced = 0;
   for (const account of parked) {
-    if (state.lastCheck[account.id] === today) continue;
+    if (nowMs - Number(state.lastCheck[account.id] ?? 0) < RECHECK_MS) continue;
     let result;
     try {
       result = await probe(account);
@@ -123,24 +98,28 @@ export async function checkParked({ portal, telegram, probe, state, today, log =
       continue;
     }
     // Written only after a look that finished: a crashed check must not buy
-    // the account a day of silence.
-    state.lastCheck[account.id] = today;
+    // the account half an hour of silence.
+    state.lastCheck[account.id] = nowMs;
     checked += 1;
     if (result.signedIn) {
       await restore({ portal, telegram, account, log });
       delete state.lastCheck[account.id];
+      delete state.lastTold[account.id];
       restored += 1;
       continue;
     }
     log(`${account.label}: досі розлогінений (${result.reason})`);
+    if (state.lastTold[account.id] === today) continue;
     if (telegram.configured) {
       await telegram.send(
         `⚠️ ${account.label}: акаунт вийшов із LinkedIn — прогрів по ньому стоїть.\n`
-        + `Відкрий профіль в Anty, залогінься, і натисни кнопку нижче.`,
-        { text: BUTTON_TEXT, data: `${ASK_PREFIX}${account.id}` }
+        + `Відкрий профіль в Anty і залогінься. Тиснути нічого не треба: перевіряю кожні 30 хвилин `
+        + `і сам продовжу прогрів, коли побачу вхід.`,
+        portalUrl ? { text: 'Відкрити Outbound', url: portalUrl } : null
       );
       announced += 1;
     }
+    state.lastTold[account.id] = today;
   }
   return { parked: parked.length, checked, restored, announced };
 }

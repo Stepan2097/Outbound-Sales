@@ -1,15 +1,20 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {
-  ASK_PREFIX, BUTTON_TEXT, checkParked, handlePresses, normalizeState
-} from './lib/login-watch.mjs';
+import { checkParked, normalizeState, RECHECK_MS } from './lib/login-watch.mjs';
+import { Telegram } from './lib/telegram.mjs';
 
 // The watch is about two promises to a person: you will be told when a login
-// dies, and the button will not lie to you. Both are checked here against
+// dies, and you will not be nagged about it. Both are checked here against
 // fakes — no browser, no network, no Telegram.
+//
+// And one promise to everybody else who shares the bot: this never reads the
+// bot's updates. On 08.10.2026 it did, for a callback button, and swallowed
+// the owner's replies to another chat on the same bot. The last test here is
+// the fence around that.
 
 const parked = { id: 'acc-47', label: 'Profile 47 - linkedin', health: 'needs_login', status: 'warming', profileRemoteId: 'remote-47' };
 const healthy = { id: 'acc-48', label: 'Profile 48- linkedin', health: 'ok', status: 'warming', profileRemoteId: 'remote-48' };
+const PORTAL = 'https://outbound.example';
 
 function fakePortal(accounts) {
   return {
@@ -23,91 +28,78 @@ function fakePortal(accounts) {
   };
 }
 
-function fakeTelegram({ configured = true, presses = [] } = {}) {
+function fakeTelegram({ configured = true } = {}) {
   return {
     configured,
     sent: [],
-    answered: [],
-    askedFrom: null,
-    async callbacks(offset) {
-      this.askedFrom = offset;
-      return { offset: offset + presses.length, presses };
-    },
-    async send(text, button = null) { this.sent.push({ text, button }); },
-    async answer(id, text) { this.answered.push({ id, text }); }
+    async send(text, button = null) {
+      if (button && !button.url) throw new Error('кнопка без url — це callback, якого тут не має бути');
+      this.sent.push({ text, button });
+    }
   };
 }
 
-const signedOut = async () => ({ signedIn: false, reason: 'login form' });
+const signedOut = async () => ({ signedIn: false, reason: 'сторінка входу' });
 const signedIn = async () => ({ signedIn: true, reason: 'feed' });
+const AT = Date.parse('2026-10-08T09:00:00Z');
 
-test('розлогінений акаунт отримує одне нагадування на день — із кнопкою саме на себе', async () => {
+test('розлогінений акаунт отримує одне повідомлення на день, із кнопкою-посиланням', async () => {
   const portal = fakePortal([parked, healthy]);
   const telegram = fakeTelegram();
   const state = normalizeState(null);
 
-  const first = await checkParked({ portal, telegram, probe: signedOut, state, today: '2026-10-08' });
+  const first = await checkParked({ portal, telegram, probe: signedOut, state, today: '2026-10-08', nowMs: AT, portalUrl: PORTAL });
   assert.deepEqual(first, { parked: 1, checked: 1, restored: 0, announced: 1 });
   assert.equal(telegram.sent.length, 1);
   assert.match(telegram.sent[0].text, /Profile 47/);
   assert.match(telegram.sent[0].text, /вийшов із LinkedIn/);
-  assert.deepEqual(telegram.sent[0].button, { text: BUTTON_TEXT, data: `${ASK_PREFIX}acc-47` });
+  assert.match(telegram.sent[0].text, /кожні 30 хвилин/);
+  // Кнопка лише відкриває сторінку: callback_data тут не буває.
+  assert.deepEqual(telegram.sent[0].button, { text: 'Відкрити Outbound', url: PORTAL });
   // Акаунт, у якого все добре, не чіпаємо взагалі.
   assert.equal(portal.written.length, 0);
-
-  // Другий прохід того ж дня — тиша: нагадування щогодини це замучена група.
-  const again = await checkParked({ portal, telegram, probe: signedOut, state, today: '2026-10-08' });
-  assert.deepEqual(again, { parked: 1, checked: 0, restored: 0, announced: 0 });
-  assert.equal(telegram.sent.length, 1);
-
-  // Наступного дня — знову, бо одне повідомлення у вівторок ніхто не чинить.
-  await checkParked({ portal, telegram, probe: signedOut, state, today: '2026-10-09' });
-  assert.equal(telegram.sent.length, 2);
 });
 
-test('акаунт, який залогінили руками, знімається з паузи сам і більше не нагадує', async () => {
+test('перевірка повторюється щопівгодини, а повідомлення — ні', async () => {
   const portal = fakePortal([parked]);
   const telegram = fakeTelegram();
   const state = normalizeState(null);
 
-  const result = await checkParked({ portal, telegram, probe: signedIn, state, today: '2026-10-08' });
-  assert.deepEqual(result, { parked: 1, checked: 1, restored: 1, announced: 0 });
-  assert.deepEqual(portal.written, [{ accountId: 'acc-47', health: 'ok', note: 'Вхід підтверджено щоденною перевіркою.' }]);
-  assert.equal(telegram.sent.length, 1);
-  assert.match(telegram.sent[0].text, /вхід відновлено/i);
-  assert.equal(telegram.sent[0].button, null);
+  await checkParked({ portal, telegram, probe: signedOut, state, today: '2026-10-08', nowMs: AT, portalUrl: PORTAL });
+
+  // Через десять хвилин ще рано навіть дивитись.
+  const tooSoon = await checkParked({ portal, telegram, probe: signedOut, state, today: '2026-10-08', nowMs: AT + 10 * 60_000, portalUrl: PORTAL });
+  assert.deepEqual(tooSoon, { parked: 1, checked: 0, restored: 0, announced: 0 });
+
+  // Через півгодини дивимось знову — але в групу вже не пишемо того ж дня.
+  const again = await checkParked({ portal, telegram, probe: signedOut, state, today: '2026-10-08', nowMs: AT + RECHECK_MS, portalUrl: PORTAL });
+  assert.deepEqual(again, { parked: 1, checked: 1, restored: 0, announced: 0 });
+  assert.equal(telegram.sent.length, 1, 'одне повідомлення за день');
+
+  // Наступного дня — знову одне: одне повідомлення у вівторок ніхто не чинить.
+  await checkParked({ portal, telegram, probe: signedOut, state, today: '2026-10-09', nowMs: AT + 25 * 3600_000, portalUrl: PORTAL });
+  assert.equal(telegram.sent.length, 2);
 });
 
-test('кнопка не вірить натисканню — вона перевіряє', async () => {
-  const press = { id: 'cb-1', data: `${ASK_PREFIX}acc-47`, from: 'Павло' };
-
-  // Натиснули, а входу немає: нічого не знімається з паузи, і людині так і сказано.
-  const stillOut = fakePortal([parked]);
-  const telegramOut = fakeTelegram({ presses: [press] });
-  const stateOut = normalizeState(null);
-  const refused = await handlePresses({ portal: stillOut, telegram: telegramOut, probe: signedOut, state: stateOut });
-  assert.deepEqual(refused, { presses: 1, restored: 0 });
-  assert.equal(stillOut.written.length, 0);
-  assert.match(telegramOut.answered[0].text, /ще не видно/i);
-  assert.equal(stateOut.offset, 1);
-
-  // Натиснули, і вхід є: знімаємо з паузи рівно один раз.
-  const back = fakePortal([parked]);
-  const telegramIn = fakeTelegram({ presses: [press] });
-  const stateIn = normalizeState(null);
-  const accepted = await handlePresses({ portal: back, telegram: telegramIn, probe: signedIn, state: stateIn });
-  assert.deepEqual(accepted, { presses: 1, restored: 1 });
-  assert.deepEqual(back.written, [{ accountId: 'acc-47', health: 'ok', note: 'Вхід підтверджено після кнопки в групі (Павло).' }]);
-  assert.match(telegramIn.answered[0].text, /прогрів продовжено/i);
-});
-
-test('натискання на акаунт, якого вже немає в прогріві, лише відповідає людині', async () => {
-  const portal = fakePortal([healthy]);
-  const telegram = fakeTelegram({ presses: [{ id: 'cb-2', data: `${ASK_PREFIX}acc-gone`, from: 'Марко' }] });
+test('акаунт, який залогінили руками, повертається сам — і про це кажуть поза чергою', async () => {
+  const portal = fakePortal([parked]);
+  const telegram = fakeTelegram();
   const state = normalizeState(null);
-  await handlePresses({ portal, telegram, probe: signedIn, state });
-  assert.equal(portal.written.length, 0);
-  assert.match(telegram.answered[0].text, /немає в списку/i);
+
+  // Спершу розлогінений: сьогодні вже сказали.
+  await checkParked({ portal, telegram, probe: signedOut, state, today: '2026-10-08', nowMs: AT, portalUrl: PORTAL });
+  assert.equal(telegram.sent.length, 1);
+
+  // Людина залогінилась; через півгодини перевірка це бачить.
+  const back = await checkParked({ portal, telegram, probe: signedIn, state, today: '2026-10-08', nowMs: AT + RECHECK_MS, portalUrl: PORTAL });
+  assert.deepEqual(back, { parked: 1, checked: 1, restored: 1, announced: 0 });
+  assert.deepEqual(portal.written, [{ accountId: 'acc-47', health: 'ok', note: 'Вхід підтверджено щоденною перевіркою.' }]);
+  assert.equal(telegram.sent.length, 2, 'про відновлення кажуть, попри денний ліміт');
+  assert.match(telegram.sent[1].text, /вхід відновлено/i);
+  assert.equal(telegram.sent[1].button, null);
+  // І сліду про нього в стані не лишилось — більше не нагадуємо.
+  assert.deepEqual(state.lastCheck, {});
+  assert.deepEqual(state.lastTold, {});
 });
 
 test('без налаштованого бота вартовий усе одно знімає з паузи те, що відновилось', async () => {
@@ -115,33 +107,39 @@ test('без налаштованого бота вартовий усе одн�
   const telegram = fakeTelegram({ configured: false });
   const state = normalizeState(null);
 
-  // Кнопок без бота не буває — і запитувати оновлення нема в кого.
-  assert.deepEqual(await handlePresses({ portal, telegram, probe: signedIn, state }), { presses: 0, restored: 0 });
-  assert.equal(telegram.askedFrom, null);
-
-  const result = await checkParked({ portal, telegram, probe: signedIn, state, today: '2026-10-08' });
+  const result = await checkParked({ portal, telegram, probe: signedIn, state, today: '2026-10-08', nowMs: AT, portalUrl: PORTAL });
   assert.deepEqual(result, { parked: 1, checked: 1, restored: 1, announced: 0 });
   assert.deepEqual(portal.written, [{ accountId: 'acc-47', health: 'ok', note: 'Вхід підтверджено щоденною перевіркою.' }]);
   assert.equal(telegram.sent.length, 0);
 });
 
-test('перевірка, що впала, не купує акаунту день тиші', async () => {
+test('перевірка, що впала, не купує акаунту півгодини тиші', async () => {
   const portal = fakePortal([parked]);
   const telegram = fakeTelegram();
   const state = normalizeState(null);
   const broken = async () => { throw new Error('рантайм не відповів'); };
 
-  const failed = await checkParked({ portal, telegram, probe: broken, state, today: '2026-10-08' });
+  const failed = await checkParked({ portal, telegram, probe: broken, state, today: '2026-10-08', nowMs: AT, portalUrl: PORTAL });
   assert.deepEqual(failed, { parked: 1, checked: 0, restored: 0, announced: 0 });
-  assert.equal(state.lastCheck['acc-47'], undefined);
+  assert.deepEqual(state.lastCheck, {});
 
-  // Той самий день, робочий рантайм — нагадування таки йде.
-  await checkParked({ portal, telegram, probe: signedOut, state, today: '2026-10-08' });
+  const ok = await checkParked({ portal, telegram, probe: signedOut, state, today: '2026-10-08', nowMs: AT + 1000, portalUrl: PORTAL });
+  assert.equal(ok.checked, 1);
   assert.equal(telegram.sent.length, 1);
 });
 
-test('збережений стан, якому не можна вірити, не ламає вартового', () => {
-  assert.deepEqual(normalizeState(null), { offset: 0, lastCheck: {} });
-  assert.deepEqual(normalizeState({ offset: -5, lastCheck: { a: 'колись' } }), { offset: 0, lastCheck: {} });
-  assert.deepEqual(normalizeState({ offset: 12, lastCheck: { a: '2026-10-08' } }), { offset: 12, lastCheck: { a: '2026-10-08' } });
+test('стан від старої версії не ламає вартового: день у lastCheck і offset просто відкидаються', () => {
+  assert.deepEqual(normalizeState(null), { lastCheck: {}, lastTold: {} });
+  assert.deepEqual(normalizeState({ offset: 12, lastCheck: { 'acc-47': '2026-10-08' } }), { lastCheck: {}, lastTold: {} });
+  assert.deepEqual(normalizeState({ lastCheck: { a: AT }, lastTold: { a: '2026-10-08' } }), { lastCheck: { a: AT }, lastTold: { a: '2026-10-08' } });
+});
+
+test('клієнт Telegram уміє лише надсилати: читати оновлення бота нічим', () => {
+  const telegram = new Telegram({ token: 'x', chatId: '-1' });
+  // Поллінг прибраний назовсім, а не просто не викликається.
+  assert.equal(typeof telegram.callbacks, 'undefined', 'getUpdates більше нема чим покликати');
+  assert.equal(typeof telegram.answer, 'undefined', 'answerCallbackQuery теж');
+  assert.equal(typeof telegram.send, 'function');
+  // І кнопка з callback_data не пройде навіть як параметр.
+  assert.throws(() => telegram.send('текст', { text: 'кнопка', data: 'warmup:login:acc-47' }), /callback/i);
 });

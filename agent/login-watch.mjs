@@ -11,6 +11,11 @@
  * still checks and still un-pauses what recovered; it just stays silent, and
  * says so once on startup.
  *
+ * It only ever **sends** to Telegram. Nothing here polls `getUpdates` and
+ * nothing may be given a webhook: that polling is exclusive per bot and would
+ * swallow updates meant for whatever else uses the same bot — which is exactly
+ * what happened on 08.10.2026. See `lib/telegram.mjs`.
+ *
  * Deliberately separate from `worker.mjs`: the worker is the hands of the
  * schedule and must not be delayed by a profile nobody can open, and this one
  * must keep looking at exactly the accounts the schedule refuses to hand out.
@@ -27,7 +32,7 @@ import { Portal } from './lib/portal.mjs';
 import { AntyApi } from './lib/anty-api.mjs';
 import { Telegram } from './lib/telegram.mjs';
 import { probeLogin } from './lib/login-probe.mjs';
-import { checkParked, handlePresses, normalizeState } from './lib/login-watch.mjs';
+import { checkParked, normalizeState, RECHECK_MS } from './lib/login-watch.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -87,16 +92,17 @@ const sleep = (ms) => new Promise((resolve) => {
 log(`вартовий входу — портал ${PORTAL}`);
 log(`токен: ${process.env.WARMUP_AGENT_TOKEN?.trim() ? 'є' : 'НЕМА — портал відповідатиме 401'}`);
 log(telegram.configured
-  ? 'Telegram: налаштований'
+  ? 'Telegram: налаштований (лише надсилання — getUpdates цей вартовий не кличе)'
   : 'Telegram: не налаштований (TELEGRAM_BOT_TOKEN / TELEGRAM_LOGIN_CHAT_ID) — перевіряю молча');
+log(`перевірка акаунтів на паузі: кожні ${Math.round(RECHECK_MS / 60000)} хв, повідомлення в групу — раз на день`);
 
 let lastReason = null;
 do {
   const state = readState();
   try {
-    const pressed = await handlePresses({ portal, telegram, probe, state, log });
-    if (pressed.presses) log(`кнопка: натискань ${pressed.presses}, відновлено ${pressed.restored}`);
-    const checked = await checkParked({ portal, telegram, probe, state, today: today(), log });
+    const checked = await checkParked({
+      portal, telegram, probe, state, today: today(), nowMs: Date.now(), portalUrl: PORTAL, log
+    });
     if (checked.checked || checked.parked !== 0) {
       const line = `на паузі ${checked.parked}, перевірено сьогодні ${checked.checked}, відновлено ${checked.restored}, у групу ${checked.announced}`;
       if (line !== lastReason) { log(line); lastReason = line; }
