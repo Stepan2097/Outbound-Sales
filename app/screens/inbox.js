@@ -29,6 +29,19 @@ const WARMUP_SYNC_STALE_HOURS = 36;
  */
 let inboxAccountFilter = null;
 
+/**
+ * Що вписано в пошук над списком — рівно як вписано, з пробілами. Фільтр живе в
+ * стані, а не в полі: список перемальовується щоразу, коли приходить відповідь чи
+ * прочитано розмову. Обрізати пробіли тут не можна: поле звіряється з цим
+ * значенням, і «UA » ставало б «UA», а пробіл, який людина щойно набрала, зникав.
+ */
+let inboxSearch = "";
+
+/** Слова пошуку: порожньо, коли в полі самі пробіли. */
+function inboxSearchTerms() {
+  return inboxSearch.toLowerCase().split(/\s+/).filter(Boolean);
+}
+
 /** How long ago, said the way a person would say it. */
 function warmupAgo(iso) {
   if (!iso) return "";
@@ -249,9 +262,28 @@ function warmupInboxEmptyHtml(sync) {
  */
 function warmupInboxRows() {
   const sentAt = (thread) => Date.parse(thread?.lastMessage?.sentAt || "") || 0;
+  const terms = inboxSearchTerms();
   return warmupState.inbox.threads
     .filter((thread) => !inboxAccountFilter || thread.accountId === inboxAccountFilter)
+    .filter((thread) => warmupInboxMatches(thread, terms))
     .sort((left, right) => Number(Boolean(right.unread)) - Number(Boolean(left.unread)) || sentAt(right) - sentAt(left));
+}
+
+/**
+ * Чи підходить розмова під пошук: кожне слово запиту має знайтись серед імені,
+ * посади чи компанії людини, акаунта, на який надійшло, і тексту останньої
+ * відповіді. Шукається те, що видно в рядку, — нічого прихованого.
+ */
+function warmupInboxMatches(thread, terms) {
+  if (!terms.length) return true;
+  const participant = thread.participant || {};
+  const haystack = [
+    warmupParticipantName(participant),
+    participant.headline,
+    warmupThreadAccount(thread).name,
+    thread.lastMessage?.body
+  ].join(" ").toLowerCase();
+  return terms.every((term) => haystack.includes(term));
 }
 
 function warmupThreadRowHtml(thread) {
@@ -301,13 +333,77 @@ export function warmupInboxUnreadFor(accountId) {
   return warmupState.inbox.threads.filter((thread) => thread.accountId === accountId && thread.unread).length;
 }
 
-/** Said while the list is narrowed to one account, with the way back to all of them. */
-function warmupInboxFilterHtml() {
-  if (!inboxAccountFilter) return "";
+/**
+ * Said while the list is narrowed — by an account, by a search, or both: how
+ * many of the threads are shown, and the way back to all of them. The count is
+ * what tells a seller that the list is short because of the filter, not because
+ * nobody wrote.
+ */
+function warmupInboxFilterHtml(shown) {
+  if (!inboxAccountFilter && !inboxSearchTerms().length) return "";
   return `<div class="warmup-inbox-filter">
-    <span>Тільки відповіді, що надійшли на <strong>${escapeHtml(warmupInboxAccountName(inboxAccountFilter))}</strong></span>
-    <button class="warmup-inbox-link" type="button" data-warmup-inbox-allaccounts>Показати всі акаунти</button>
+    <span>Розмов: <strong>${warmupCount(shown)}</strong> з ${warmupCount(warmupState.inbox.threads.length)}</span>
+    <button class="warmup-inbox-link" type="button" data-warmup-inbox-reset>Скинути фільтр</button>
   </div>`;
+}
+
+/**
+ * The accounts that have a thread here, for the list above the replies: how many
+ * threads each holds and how many of them are waiting. The account the list is
+ * narrowed to is always among them, even when it holds none, so the field can
+ * say what it is set to.
+ */
+function warmupInboxAccountOptions() {
+  const found = new Map();
+  for (const thread of warmupState.inbox.threads) {
+    if (!thread.accountId) continue;
+    const entry = found.get(thread.accountId) || { accountId: thread.accountId, count: 0, unread: 0 };
+    entry.count += 1;
+    if (thread.unread) entry.unread += 1;
+    found.set(thread.accountId, entry);
+  }
+  if (inboxAccountFilter && !found.has(inboxAccountFilter)) {
+    found.set(inboxAccountFilter, { accountId: inboxAccountFilter, count: 0, unread: 0 });
+  }
+  return [...found.values()]
+    .map((entry) => ({ ...entry, name: warmupInboxAccountName(entry.accountId) }))
+    .sort((left, right) => left.name.localeCompare(right.name, "uk"));
+}
+
+/**
+ * The tools above the list: an account to narrow to and a search. They sit
+ * outside the list, which is drawn again whenever a reply arrives, so what is
+ * being typed is not lost; this only keeps them in step with the state. The
+ * account field is left out while there is only one account to choose.
+ */
+function renderWarmupInboxTools(visible) {
+  const tools = document.getElementById("warmupInboxTools");
+  if (!tools) return;
+  tools.hidden = !visible;
+  if (!visible) return;
+
+  const options = warmupInboxAccountOptions();
+  const pick = document.getElementById("warmupInboxAccountPick");
+  const select = document.getElementById("warmupInboxAccountSelect");
+  const showAccounts = options.length > 1 || Boolean(inboxAccountFilter);
+  if (pick) pick.hidden = !showAccounts;
+  if (select && showAccounts) {
+    const total = warmupState.inbox.threads.length;
+    select.innerHTML = `<option value="">Усі акаунти (${warmupCount(total)})</option>` + options.map((entry) => {
+      const label = `${entry.name} (${warmupCount(entry.count)}${entry.unread ? `, непрочитаних ${warmupCount(entry.unread)}` : ""})`;
+      return `<option value="${escapeAttr(entry.accountId)}"${entry.accountId === inboxAccountFilter ? " selected" : ""}>${escapeHtml(label)}</option>`;
+    }).join("");
+    select.value = inboxAccountFilter || "";
+  }
+  const search = document.getElementById("warmupInboxSearch");
+  if (search && search.value !== inboxSearch) search.value = inboxSearch;
+}
+
+/** The first unread thread in the list as it is drawn, other than the one that is open. */
+function warmupNextUnread() {
+  const inbox = warmupState.inbox;
+  return warmupInboxRows().find((thread) => thread.unread
+    && !(thread.accountId === inbox.openAccountId && thread.threadKey === inbox.openThreadKey)) || null;
 }
 
 function warmupMessageHtml(message, participantName, accountName) {
@@ -382,9 +478,13 @@ function warmupThreadViewHtml() {
     </div>`;
   }
 
+  // The end of a conversation is where somebody who is working through the
+  // replies stops reading, so that is where the way to the next one is.
+  const next = warmupNextUnread();
   return `${head}
     <ol class="warmup-messages">${messages.map((message) => warmupMessageHtml(message, name, account.name)).join("")}</ol>
-    <p class="warmup-thread-foot">Тут можна тільки читати: відповідь іде з самого акаунта.</p>`;
+    <p class="warmup-thread-foot">Тут можна тільки читати: відповідь іде з самого акаунта.</p>
+    ${next ? `<button class="primary-button warmup-thread-next" type="button" data-warmup-inbox-next><span>Наступна непрочитана: ${escapeHtml(warmupParticipantName(next.participant || {}))}</span><i data-lucide="arrow-right"></i></button>` : ""}`;
 }
 
 export function renderWarmupInbox() {
@@ -404,6 +504,7 @@ export function renderWarmupInbox() {
     title.textContent = open ? `Вхідні · ${warmupParticipantName(open)}` : "Вхідні · одна розмова";
     subtitle.textContent = "Розмова такою, як її прочитав агент, від найстарішого";
     if (pill) pill.hidden = true;
+    renderWarmupInboxTools(false);
     body.innerHTML = warmupThreadViewHtml();
     refreshIcons();
     return;
@@ -430,6 +531,8 @@ export function renderWarmupInbox() {
       pill.textContent = inbox.threads.length ? "усе прочитано" : "поки нічого";
     }
   }
+
+  if (!inbox.available || inbox.error || !inbox.ready) renderWarmupInboxTools(false);
 
   if (!inbox.available) {
     subtitle.textContent = "Вхідних на цьому сервері ще немає";
@@ -464,16 +567,20 @@ export function renderWarmupInbox() {
     ? `читали ${warmupAgo(sync.lastSyncedAt)}`
     : (sync.known ? "ще не читали" : "");
 
+  renderWarmupInboxTools(inbox.threads.length > 0);
+
   const rows = warmupInboxRows();
   if (!rows.length) {
-    body.innerHTML = `${warmupInboxFilterHtml()}${inboxAccountFilter
-      ? '<div class="warmup-inbox-note is-calm"><strong>Від цього акаунта відповідей немає.</strong></div>'
-      : warmupInboxEmptyHtml(sync)}`;
+    body.innerHTML = `${warmupInboxFilterHtml(0)}${inboxSearchTerms().length
+      ? '<div class="warmup-inbox-note is-calm"><strong>За цим запитом нічого не знайшлось.</strong><span>Шукається в імені, посаді, акаунті й тексті останньої відповіді.</span></div>'
+      : inboxAccountFilter
+        ? '<div class="warmup-inbox-note is-calm"><strong>Від цього акаунта відповідей немає.</strong></div>'
+        : warmupInboxEmptyHtml(sync)}`;
     refreshIcons();
     return;
   }
 
-  body.innerHTML = `${warmupInboxNoteHtml(sync)}${warmupInboxFilterHtml()}
+  body.innerHTML = `${warmupInboxNoteHtml(sync)}${warmupInboxFilterHtml(rows.length)}
     <div class="warmup-threads">${rows.map((thread) => warmupThreadRowHtml(thread)).join("")}</div>`;
   refreshIcons();
 }
@@ -519,12 +626,25 @@ async function refreshWarmupBadge() {
       stopWarmupBadgePoll();
       return;
     }
-    if (Number.isFinite(config?.unreadReplies)) setWarmupUnread(config.unreadReplies);
+    if (Number.isFinite(config?.unreadReplies)) {
+      const before = warmupState.unreadReplies;
+      setWarmupUnread(config.unreadReplies);
+      // Хтось відповів, поки екран відкритий: список не чекає, поки його
+      // оновлять руками. Розмова, яку читають, не перемальовується з-під очей.
+      if (Number.isFinite(before) && before !== config.unreadReplies && warmupInboxListOnScreen()) void loadWarmupInbox();
+    }
   } catch (error) {
     // A portal without the count is not a portal with a wrong count: leave the
     // badge as it was, and stop pestering a server that has no such route.
     if (error?.status === 404) stopWarmupBadgePoll();
   }
+}
+
+/** Чи видно зараз список вхідних, а не розмову й не інший екран. */
+function warmupInboxListOnScreen() {
+  const inbox = warmupState.inbox;
+  return Boolean(document.getElementById("view-inbox")?.classList.contains("active"))
+    && inbox.ready && inbox.available && inbox.openThreadKey === null;
 }
 
 export function startWarmupBadge() {
@@ -689,9 +809,18 @@ document.getElementById("warmupInboxBody")?.addEventListener("click", (event) =>
     closeWarmupThread();
     return;
   }
-  if (event.target.closest("[data-warmup-inbox-allaccounts]")) {
+  if (event.target.closest("[data-warmup-inbox-reset]")) {
     inboxAccountFilter = null;
+    inboxSearch = "";
     renderWarmupInbox();
+    return;
+  }
+  if (event.target.closest("[data-warmup-inbox-next]")) {
+    const next = warmupNextUnread();
+    if (!next) return;
+    openWarmupThread(next.accountId, next.threadKey);
+    // Кнопка стоїть унизу розмови, а наступна починається зверху.
+    globalThis.scrollTo?.(0, 0);
     return;
   }
   const contact = event.target.closest("[data-warmup-contact]");
@@ -705,3 +834,18 @@ document.getElementById("warmupInboxBody")?.addEventListener("click", (event) =>
   if (!row) return;
   openWarmupThread(row.dataset.warmupThreadAccount, row.dataset.warmupThread);
 });
+
+document.getElementById("warmupInboxAccountSelect")?.addEventListener("change", (event) => {
+  inboxAccountFilter = event.target.value || null;
+  renderWarmupInbox();
+});
+
+document.getElementById("warmupInboxSearch")?.addEventListener("input", (event) => {
+  inboxSearch = event.target.value;
+  renderWarmupInbox();
+});
+
+// Вкладка, що довго була прихована, не опитувала лічильник: при поверненні він
+// береться одразу, а не за дві хвилини. Приховану вкладку refreshWarmupBadge
+// сама не питає.
+document.addEventListener("visibilitychange", () => refreshWarmupBadge());

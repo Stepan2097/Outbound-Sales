@@ -73,6 +73,63 @@
   background: none;
 }
 
+/* Над списком: акаунт, до якого звузити, і пошук. Поза списком, який
+   перемальовується, тож вписане в пошук не губиться. */
+
+.warmup-inbox-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 10px 12px;
+  margin-bottom: 12px;
+}
+
+.warmup-inbox-account {
+  flex: 0 1 300px;
+  min-width: 0;
+}
+
+.warmup-inbox-account select {
+  width: 100%;
+  min-width: 0;
+}
+
+.warmup-inbox-search {
+  flex: 1 1 240px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-strong);
+}
+
+.warmup-inbox-search:focus-within {
+  border-color: color-mix(in srgb, var(--teal) 55%, var(--line));
+}
+
+.warmup-inbox-search input {
+  border: none;
+  background: none;
+  padding: 8px 0;
+  width: 100%;
+  min-width: 0;
+  color: inherit;
+}
+
+.warmup-inbox-search input:focus {
+  outline: none;
+}
+
+.warmup-inbox-search i {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  color: var(--muted);
+}
+
 .warmup-threads {
   display: grid;
   gap: 8px;
@@ -338,6 +395,26 @@
   overflow-wrap: anywhere;
 }
 
+/* Кнопка до наступної непрочитаної стоїть під розмовою, там, де закінчують читати. */
+
+.warmup-thread-next {
+  margin-top: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+}
+
+.warmup-thread-next span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.warmup-thread-next i {
+  flex: none;
+}
+
 .warmup-thread-foot {
   margin: 14px 0 0;
   padding-top: 12px;
@@ -358,6 +435,15 @@
 }
 
 @media (max-width: 640px) {
+  .warmup-inbox-account {
+    flex-basis: 100%;
+  }
+
+  .warmup-thread-next {
+    width: 100%;
+    justify-content: center;
+  }
+
   .warmup-thread {
     grid-template-columns: 10px minmax(0, 1fr);
     gap: 6px 10px;

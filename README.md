@@ -25,9 +25,13 @@
 
 **Прогрів** (where it opens) — the accounts, what each did today and does next,
 and the campaign that feeds them people from a CRM folder. **Вхідні** — the
-replies from every account, unread first. **Контакти** — the CRM: a folder, its
+replies from every account, unread first; narrow them to one account or search
+them (name, position, account, the words of the reply), and at the end of a
+conversation step straight to the next unread one. The list refreshes itself when
+a new reply arrives. **Контакти** — the CRM: a folder, its
 people, one person's card with where their LinkedIn request stands, the whole
-conversation, and one button that has the model write them a letter, a Telegram
+conversation, and a small form (product, language, an optional note) whose
+button «Згенерувати три чернетки» has the model write them a letter, a Telegram
 message and two LinkedIn texts to copy (nothing is sent by itself).
 **Налаштування** — users, your password.
 
