@@ -239,7 +239,6 @@ async function visibleButton(scope, name) {
 
 async function relation(card) {
   if (await visibleButton(card, /^(pending|запрошення надіслано|очікує|ожидает)$/i)) return 'pending';
-  const text = await card.innerText();
   // «1st» in English; in Ukrainian it reads «· 1-й», dot and all — on
   // 09.10.2026 two people already connected to the account were taken for
   // people with no Connect because the dot did not match.

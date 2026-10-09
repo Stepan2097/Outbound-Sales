@@ -14,7 +14,7 @@ const sleep = async () => {};
 const queued = { outreachId: 'invite-1', name: 'Person One', linkedin: 'https://www.linkedin.com/in/person-one/', note: '' };
 
 /** All LinkedIn URLs are intercepted. These are local synthetic pages. */
-async function profile(t, { more = false, pending = false, accepted = false, noButton = false, emailWall = false, nameless = false, connectLink = false, connectLong = false, suggestionInCard = false, acceptedUa = false, dialogDelay = 0, softGone = false, noteLimit = 200, warning = '', redirected = false, heading = 'h1', confirms = true, sentList = [] } = {}) {
+async function profile(t, { more = false, pending = false, accepted = false, noButton = false, emailWall = false, nameless = false, connectLink = false, connectLong = false, suggestionInCard = false, acceptedUa = false, dialogDelay = 0, softGone = false, rerendersAfterSend = false, noteLimit = 200, warning = '', redirected = false, heading = 'h1', confirms = true, sentList = [] } = {}) {
   const context = await browser.newContext();
   t.after(() => context.close());
   const page = await context.newPage();
@@ -74,6 +74,10 @@ async function profile(t, { more = false, pending = false, accepted = false, noB
         menu.innerHTML = '<button role="menuitem">Connect</button>'; document.body.append(menu);
         menu.firstChild.onclick = dialog;
       };
+      ${rerendersAfterSend ? `new MutationObserver(() => {
+        if (!window.sent.length) return;
+        document.querySelectorAll('[data-outbound-profile]').forEach((node) => node.removeAttribute('data-outbound-profile'));
+      }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['data-outbound-profile'] });` : ''}
       ${redirected ? "history.replaceState(null,'','/in/someone-else/');" : ''}
       ${softGone ? "history.replaceState(null,'','/404/');" : ''}
       </script></body></html>` });
@@ -189,6 +193,18 @@ test('діалог запрошення, що з\'являється за кіл
   const page = await profile(t, { heading: 'h2', connectLink: true, dialogDelay: 2500 });
   const realSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   assert.equal(await sendInvitation(page, { ...queued, note: '' }, { sleep: realSleep }), 'sent');
+  assert.deepEqual(await sentNotes(page), ['']);
+});
+
+/**
+ * 09.10.2026, Chloe, a session run by hand: after the Send click LinkedIn
+ * redrew the header, the card the agent had just marked was gone, and reading
+ * its text waited the full 30 s and stopped the visit. The text was never used.
+ */
+test('картка, яку LinkedIn перемалював після відправки, не зупиняє візит — підтвердження береться зі списку надісланих', async (t) => {
+  const page = await profile(t, { heading: 'h2', confirms: false, rerendersAfterSend: true, sentList: ['person-one'] });
+  page.setDefaultTimeout(3000);
+  assert.equal(await sendInvitation(page, { ...queued, note: '' }, { sleep }), 'sent');
   assert.deepEqual(await sentNotes(page), ['']);
 });
 
