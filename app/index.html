@@ -133,17 +133,18 @@
                   <button class="text-button" id="warmupInboxRefreshBtn" type="button"><i data-lucide="refresh-cw"></i><span>Оновити</span></button>
                 </div>
               </div>
-              <div class="warmup-inbox-tools" id="warmupInboxTools" hidden>
-                <label class="warmup-inbox-account" id="warmupInboxAccountPick">
-                  <span>Акаунт</span>
-                  <select id="warmupInboxAccountSelect" aria-label="Акаунт, відповіді якого показати"></select>
-                </label>
-                <label class="warmup-inbox-search">
-                  <i data-lucide="search"></i>
-                  <input id="warmupInboxSearch" type="search" autocomplete="off" aria-label="Пошук по відповідях" placeholder="Ім'я, компанія або слово з відповіді" />
-                </label>
+              <div id="warmupInboxNotice"></div>
+              <div class="inbox-accounts" id="warmupInboxAccounts" hidden></div>
+              <div class="inbox-split" id="warmupInboxLayout" hidden>
+                <div class="inbox-list-pane">
+                  <label class="warmup-inbox-search">
+                    <i data-lucide="search"></i>
+                    <input id="warmupInboxSearch" type="search" autocomplete="off" aria-label="Пошук по відповідях" placeholder="Ім'я, компанія або слово з відповіді" />
+                  </label>
+                  <div class="inbox-list" id="warmupInboxBody"></div>
+                </div>
+                <section class="inbox-thread-pane" id="warmupInboxThread" aria-live="polite"></section>
               </div>
-              <div id="warmupInboxBody"></div>
             </section>
           </div>
         </section>

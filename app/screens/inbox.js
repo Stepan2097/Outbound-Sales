@@ -1,7 +1,10 @@
-// Вхідні — the replies from every warm-up account on one screen: unread first,
-// then the newest, each row saying who wrote, which account it reached and the
-// last thing said. A row opens the conversation, and the conversation opens
-// the person's card in «Контакти». The unread count sits on the menu item.
+// Вхідні — the replies from every warm-up account, laid out like a messenger:
+// the accounts across the top (one tap narrows to one of them), that account's
+// conversations on the left — unread first, then the newest — and on the right
+// the whole conversation with the person who is open, without leaving the
+// screen. On a phone the same thing is a list and, after a tap, the conversation
+// with a way back. The conversation opens the person's card in «Контакти». The
+// unread count sits on the menu item.
 
 import {
   authState, escapeAttr, escapeHtml, onScreen, onWorkspaceEnter, refreshIcons, uaPlural
@@ -73,24 +76,36 @@ function warmupHoursSince(iso) {
 }
 
 /**
+ * Не текст, а мітка агента: повідомлення без тексту (картка профілю, службова
+ * плашка, вкладення) він зберігає як «[no text]» чи «[attachment]». У списку й у
+ * розмові це читається як мітка в дужках, а не як те, що написала людина.
+ */
+const WARMUP_PLACEHOLDERS = { "[no text]": "без тексту", "[attachment]": "вкладення без тексту" };
+
+function warmupPlaceholder(body) {
+  return WARMUP_PLACEHOLDERS[String(body ?? "").trim().toLowerCase()] || null;
+}
+
+/**
  * A stranger's message, escaped. The return value is HTML, so there is no
  * version of this text that reaches the DOM unescaped: newlines survive
  * because `.warmup-message-body` is `white-space: pre-wrap`, not because
  * anything here builds tags out of what was typed.
  */
 function warmupBodyHtml(body) {
+  const placeholder = warmupPlaceholder(body);
+  if (placeholder) return `<em class="warmup-subtle">(${placeholder})</em>`;
   return escapeHtml(String(body ?? ""));
 }
 
-/** The first line of a message, for a list row that has one line to spend. */
+/** The first line of a message, for a list row that has two lines to spend. */
 function warmupPreviewHtml(body, limit = 150) {
+  const placeholder = warmupPlaceholder(body);
+  if (placeholder) return `<em class="warmup-subtle">(${placeholder})</em>`;
   const text = String(body ?? "").replace(/\s+/g, " ").trim();
-  if (!text) return '<em class="warmup-subtle">у цьому повідомленні немає тексту</em>';
+  if (!text) return '<em class="warmup-subtle">(без тексту)</em>';
   const chars = Array.from(text);
-  const clipped = chars.length > limit ? `${chars.slice(0, limit - 1).join("")}…` : text;
-  // Quoted, because the row is half app copy and half somebody's words, and
-  // without the quotes a reply reads as a sentence this screen is saying.
-  return `«${escapeHtml(clipped)}»`;
+  return escapeHtml(chars.length > limit ? `${chars.slice(0, limit - 1).join("")}…` : text);
 }
 
 /**
@@ -125,19 +140,31 @@ const WARMUP_UNNAMED = new Set([
   "member"
 ]);
 
-function warmupParticipantUnnamed(participant) {
-  // Runs of whitespace are collapsed before the comparison: the agent reads
-  // these strings out of the DOM, where "LinkedIn Member" can arrive as
+/**
+ * The name as the agent read it, minus the words LinkedIn puts in front of it
+ * for screen readers: a profile card is labelled "Переглянути профіль Sinan",
+ * and without this the list shows ten rows that all begin with the same three
+ * words and differ only at the end.
+ */
+const WARMUP_NAME_NOISE = /^(?:переглянути\s+профіль|view\s+profile\s+of|view\s+profile)(?:\s+|$)/i;
+
+function warmupCleanName(participant) {
+  // Runs of whitespace are collapsed before anything is compared: the agent
+  // reads these strings out of the DOM, where "LinkedIn Member" can arrive as
   // "LinkedIn\n      Member". Collapsing cannot swallow a real name — "Linda
   // Memberly" is still not in the set however it was spaced.
-  const name = String(participant?.name || "").replace(/\s+/g, " ").trim();
+  return String(participant?.name || "").replace(/\s+/g, " ").trim().replace(WARMUP_NAME_NOISE, "").trim();
+}
+
+function warmupParticipantUnnamed(participant) {
+  const name = warmupCleanName(participant);
   return !name || WARMUP_UNNAMED.has(name.toLowerCase());
 }
 
 /** Who wrote, or an honest admission that nobody here knows. */
 function warmupParticipantName(participant) {
   if (warmupParticipantUnnamed(participant)) return "Без імені";
-  return String(participant.name).trim();
+  return warmupCleanName(participant);
 }
 
 /**
@@ -281,7 +308,7 @@ function warmupInboxMatches(thread, terms) {
     warmupParticipantName(participant),
     participant.headline,
     warmupThreadAccount(thread).name,
-    thread.lastMessage?.body
+    warmupPlaceholder(thread.lastMessage?.body) ? "" : thread.lastMessage?.body
   ].join(" ").toLowerCase();
   return terms.every((term) => haystack.includes(term));
 }
@@ -291,27 +318,28 @@ function warmupThreadRowHtml(thread) {
   const name = warmupParticipantName(participant);
   const account = warmupThreadAccount(thread);
   const last = thread.lastMessage || {};
-  const inbound = last.direction !== "out";
+  const mine = last.direction === "out";
+  const open = warmupThreadIsOpen(thread.accountId, thread.threadKey);
+  // The account is said on the row only while the list holds every account's
+  // threads; once one account is picked, naming it on each row is noise.
+  const showAccount = !inboxAccountFilter;
   return `
-    <button class="warmup-thread ${thread.unread ? "is-unread" : ""}" type="button"
+    <button class="warmup-thread ${thread.unread ? "is-unread" : ""} ${open ? "is-open" : ""}" type="button"
       data-warmup-thread="${escapeAttr(thread.threadKey || "")}"
-      data-warmup-thread-account="${escapeAttr(thread.accountId || "")}"
+      data-warmup-thread-account="${escapeAttr(thread.accountId || "")}"${open ? ' aria-current="true"' : ""}
       aria-label="${escapeAttr(`Розмова з ${name}, акаунт ${account.name}${thread.unread ? ", непрочитане" : ""}`)}">
       <span class="warmup-thread-mark" aria-hidden="true"></span>
-      <span class="warmup-thread-who">
-        <strong${warmupParticipantNameAttr(participant)}>${escapeHtml(name)}</strong>
-        ${participant.headline ? `<span class="warmup-subtle">${escapeHtml(participant.headline)}</span>` : ""}
-        <span class="warmup-identity" title="${escapeAttr(warmupAccountTitle(account))}">
+      <span class="warmup-thread-main">
+        <span class="warmup-thread-top">
+          <strong${warmupParticipantNameAttr(participant)}>${escapeHtml(name)}</strong>
+          <time datetime="${escapeAttr(last.sentAt || "")}" title="${escapeAttr(warmupStamp(last.sentAt))}">${escapeHtml(warmupAgo(last.sentAt) || "—")}</time>
+        </span>
+        ${participant.headline ? `<span class="warmup-thread-headline">${escapeHtml(participant.headline)}</span>` : ""}
+        <span class="warmup-thread-preview">${mine ? '<span class="warmup-thread-from">Ви:</span> ' : ""}${warmupPreviewHtml(last.body)}</span>
+        ${showAccount ? `<span class="warmup-identity" title="${escapeAttr(warmupAccountTitle(account))}">
           <i data-lucide="${account.exact ? "badge-check" : "circle-help"}"></i>
           <span>${escapeHtml(account.name)}</span>
-        </span>
-      </span>
-      <span class="warmup-thread-preview">
-        <span class="warmup-thread-from">${inbound ? "Написали нам" : "Писали ми"}:</span>
-        ${warmupPreviewHtml(last.body)}
-      </span>
-      <span class="warmup-thread-meta">
-        <time datetime="${escapeAttr(last.sentAt || "")}" title="${escapeAttr(warmupStamp(last.sentAt))}">${escapeHtml(warmupAgo(last.sentAt) || "—")}</time>
+        </span>` : ""}
       </span>
     </button>`;
 }
@@ -367,36 +395,37 @@ function warmupInboxAccountOptions() {
   }
   return [...found.values()]
     .map((entry) => ({ ...entry, name: warmupInboxAccountName(entry.accountId) }))
-    .sort((left, right) => left.name.localeCompare(right.name, "uk"));
+    .sort((left, right) => right.unread - left.unread || left.name.localeCompare(right.name, "uk"));
 }
 
 /**
- * The tools above the list: an account to narrow to and a search. They sit
- * outside the list, which is drawn again whenever a reply arrives, so what is
- * being typed is not lost; this only keeps them in step with the state. The
- * account field is left out while there is only one account to choose.
+ * The accounts across the top, one button each: «Усі акаунти» and every account
+ * that has a thread, with the number of replies waiting on it. One tap narrows
+ * the list to that account, which is the whole of "open just one account". With
+ * a single account there is nothing to pick, and the row is not drawn.
  */
-function renderWarmupInboxTools(visible) {
-  const tools = document.getElementById("warmupInboxTools");
-  if (!tools) return;
-  tools.hidden = !visible;
-  if (!visible) return;
-
+function warmupInboxChipsHtml() {
   const options = warmupInboxAccountOptions();
-  const pick = document.getElementById("warmupInboxAccountPick");
-  const select = document.getElementById("warmupInboxAccountSelect");
-  const showAccounts = options.length > 1 || Boolean(inboxAccountFilter);
-  if (pick) pick.hidden = !showAccounts;
-  if (select && showAccounts) {
-    const total = warmupState.inbox.threads.length;
-    select.innerHTML = `<option value="">Усі акаунти (${warmupCount(total)})</option>` + options.map((entry) => {
-      const label = `${entry.name} (${warmupCount(entry.count)}${entry.unread ? `, непрочитаних ${warmupCount(entry.unread)}` : ""})`;
-      return `<option value="${escapeAttr(entry.accountId)}"${entry.accountId === inboxAccountFilter ? " selected" : ""}>${escapeHtml(label)}</option>`;
-    }).join("");
-    select.value = inboxAccountFilter || "";
-  }
-  const search = document.getElementById("warmupInboxSearch");
-  if (search && search.value !== inboxSearch) search.value = inboxSearch;
+  if (options.length < 2 && !inboxAccountFilter) return "";
+  const chip = (accountId, label, unread) => {
+    const active = (inboxAccountFilter || "") === accountId;
+    return `<button class="inbox-chip ${active ? "is-active" : ""}" type="button" data-warmup-account="${escapeAttr(accountId)}" aria-pressed="${active}">
+      <span class="inbox-chip-name">${escapeHtml(label)}</span>${unread ? `<span class="inbox-chip-count" aria-label="непрочитаних: ${unread}">${warmupCount(unread)}</span>` : ""}
+    </button>`;
+  };
+  const unreadAll = warmupState.inbox.threads.filter((thread) => thread.unread).length;
+  return chip("", "Усі акаунти", unreadAll) + options.map((entry) => chip(entry.accountId, entry.name, entry.unread)).join("");
+}
+
+/** Where the conversation goes while none is open: what to do, and the shortest way to start. */
+function warmupThreadPlaceholderHtml() {
+  const next = warmupNextUnread();
+  return `<div class="inbox-thread-empty">
+    <i data-lucide="message-square"></i>
+    <strong>Оберіть розмову зі списку</strong>
+    <span>Тут буде вся переписка з цією людиною, від найстарішого.</span>
+    ${next ? `<button class="primary-button" type="button" data-warmup-inbox-next><span>Почати з непрочитаної: ${escapeHtml(warmupParticipantName(next.participant || {}))}</span><i data-lucide="arrow-right"></i></button>` : ""}
+  </div>`;
 }
 
 /** The first unread thread in the list as it is drawn, other than the one that is open. */
@@ -426,7 +455,7 @@ function warmupMessageHtml(message, participantName, accountName) {
  */
 function warmupThreadViewHtml() {
   const inbox = warmupState.inbox;
-  const back = '<button class="text-button warmup-thread-back" type="button" data-warmup-inbox-back><i data-lucide="arrow-left"></i><span>Усі відповіді</span></button>';
+  const back = '<button class="text-button warmup-thread-back" type="button" data-warmup-inbox-back><i data-lucide="arrow-left"></i><span>Назад до списку</span></button>';
 
   if (inbox.openError) {
     return `${back}<div class="warmup-inbox-note is-bad">
@@ -487,31 +516,24 @@ function warmupThreadViewHtml() {
     ${next ? `<button class="primary-button warmup-thread-next" type="button" data-warmup-inbox-next><span>Наступна непрочитана: ${escapeHtml(warmupParticipantName(next.participant || {}))}</span><i data-lucide="arrow-right"></i></button>` : ""}`;
 }
 
+/** What the conversation pane showed last, so a redraw that changes nothing leaves its scroll alone. */
+let inboxPaneKey = "";
+
 export function renderWarmupInbox() {
   const title = document.getElementById("warmupInboxTitle");
   const subtitle = document.getElementById("warmupInboxSubtitle");
   const pill = document.getElementById("warmupInboxPill");
   const body = document.getElementById("warmupInboxBody");
+  const notice = document.getElementById("warmupInboxNotice");
+  const chips = document.getElementById("warmupInboxAccounts");
+  const layout = document.getElementById("warmupInboxLayout");
+  const pane = document.getElementById("warmupInboxThread");
+  const search = document.getElementById("warmupInboxSearch");
   if (!body || !title || !subtitle) return;
 
   const inbox = warmupState.inbox;
   renderWarmupNavBadge();
-
-  // A thread is open: the panel becomes that conversation, and the pill that
-  // belongs to the list steps out of the way.
-  if (inbox.openThreadKey !== null) {
-    const open = inbox.open?.thread?.participant;
-    title.textContent = open ? `Вхідні · ${warmupParticipantName(open)}` : "Вхідні · одна розмова";
-    subtitle.textContent = "Розмова такою, як її прочитав агент, від найстарішого";
-    if (pill) pill.hidden = true;
-    renderWarmupInboxTools(false);
-    body.innerHTML = warmupThreadViewHtml();
-    refreshIcons();
-    return;
-  }
-
   title.textContent = "Вхідні";
-  if (pill) pill.hidden = false;
 
   if (pill) {
     if (!inbox.available) {
@@ -532,56 +554,99 @@ export function renderWarmupInbox() {
     }
   }
 
-  if (!inbox.available || inbox.error || !inbox.ready) renderWarmupInboxTools(false);
+  // Nothing to pick from: one message across the whole panel, no accounts, no panes.
+  const alone = (html, line) => {
+    subtitle.textContent = line;
+    if (notice) { notice.innerHTML = html; notice.hidden = !html; }
+    if (chips) chips.hidden = true;
+    if (layout) layout.hidden = true;
+    refreshIcons();
+  };
 
   if (!inbox.available) {
-    subtitle.textContent = "Вхідних на цьому сервері ще немає";
-    body.innerHTML = `<div class="warmup-inbox-note is-warn">
+    alone(`<div class="warmup-inbox-note is-warn">
       <strong>На цьому сервері немає ендпоїнта вхідних.</strong>
       <span>З акаунтами все гаразд — просто цей портал старший за вхідні. Нічия відповідь не губиться, але й ніхто її не читає.</span>
-    </div>`;
-    refreshIcons();
+    </div>`, "Вхідних на цьому сервері ще немає");
     return;
   }
 
   if (inbox.error) {
-    subtitle.textContent = "Вхідні не вдалося прочитати";
-    body.innerHTML = `<div class="warmup-inbox-note is-bad">
+    alone(`<div class="warmup-inbox-note is-bad">
       <strong>${escapeHtml(inbox.error)}</strong>
       <span>«Вхідні не відповідають» і «ніхто не написав» — це різні відповіді; тут перша.</span>
-    </div>`;
-    refreshIcons();
+    </div>`, "Вхідні не вдалося прочитати");
     return;
   }
 
   if (!inbox.ready) {
-    subtitle.textContent = "Читаємо, що прийшло";
-    body.innerHTML = '<div class="empty-state">Завантажуємо вхідні...</div>';
+    alone('<div class="empty-state">Завантажуємо вхідні...</div>', "Читаємо, що прийшло");
     return;
   }
 
   const sync = warmupInboxSync();
   // Three answers, not two: read at a time, never read, and not reported. The
   // subtitle must not turn the third into the second.
-  subtitle.textContent = sync.lastSyncedAt
+  const readLine = sync.lastSyncedAt
     ? `читали ${warmupAgo(sync.lastSyncedAt)}`
     : (sync.known ? "ще не читали" : "");
 
-  renderWarmupInboxTools(inbox.threads.length > 0);
-
-  const rows = warmupInboxRows();
-  if (!rows.length) {
-    body.innerHTML = `${warmupInboxFilterHtml(0)}${inboxSearchTerms().length
-      ? '<div class="warmup-inbox-note is-calm"><strong>За цим запитом нічого не знайшлось.</strong><span>Шукається в імені, посаді, акаунті й тексті останньої відповіді.</span></div>'
-      : inboxAccountFilter
-        ? '<div class="warmup-inbox-note is-calm"><strong>Від цього акаунта відповідей немає.</strong></div>'
-        : warmupInboxEmptyHtml(sync)}`;
-    refreshIcons();
+  if (!inbox.threads.length) {
+    alone(warmupInboxEmptyHtml(sync), readLine);
     return;
   }
 
-  body.innerHTML = `${warmupInboxNoteHtml(sync)}${warmupInboxFilterHtml(rows.length)}
-    <div class="warmup-threads">${rows.map((thread) => warmupThreadRowHtml(thread)).join("")}</div>`;
+  subtitle.textContent = readLine;
+  const note = warmupInboxNoteHtml(sync);
+  if (notice) { notice.innerHTML = note; notice.hidden = !note; }
+
+  const chipsHtml = warmupInboxChipsHtml();
+  if (chips) {
+    if (chips.innerHTML !== chipsHtml) chips.innerHTML = chipsHtml;
+    chips.hidden = !chipsHtml;
+  }
+
+  // The search field stands outside what is redrawn, so what is being typed
+  // survives; it is only kept in step with the state, and not rewritten while
+  // it already says the same (a rewrite would move the caret).
+  if (search && search.value !== inboxSearch) search.value = inboxSearch;
+
+  const open = inbox.openThreadKey !== null;
+  if (layout) {
+    layout.hidden = false;
+    layout.classList?.toggle("has-thread", open);
+  }
+  // On a phone the open conversation has the screen to itself: the note and the
+  // accounts above it are hidden by this class and come back with the list.
+  document.getElementById("view-inbox")?.classList?.toggle?.("inbox-has-thread", open);
+
+  // The list.
+  const rows = warmupInboxRows();
+  const filterLine = warmupInboxFilterHtml(rows.length);
+  const listHtml = rows.length
+    ? `${filterLine}<div class="warmup-threads">${rows.map((thread) => warmupThreadRowHtml(thread)).join("")}</div>`
+    : `${filterLine}${inboxSearchTerms().length
+      ? '<div class="warmup-inbox-note is-calm"><strong>За цим запитом нічого не знайшлось.</strong><span>Шукається в імені, посаді, акаунті й тексті останньої відповіді.</span></div>'
+      : '<div class="warmup-inbox-note is-calm"><strong>Від цього акаунта відповідей немає.</strong></div>'}`;
+  if (body.innerHTML !== listHtml) {
+    const scrolled = body.scrollTop;
+    body.innerHTML = listHtml;
+    if (typeof scrolled === "number") body.scrollTop = scrolled;
+  }
+
+  // The conversation, drawn only when it changed, and from the top when it is a
+  // different one — a list that reloads must not throw the reader back to the
+  // first message.
+  if (pane) {
+    const paneHtml = open ? warmupThreadViewHtml() : warmupThreadPlaceholderHtml();
+    const paneKey = open ? `${inbox.openAccountId}|${inbox.openThreadKey}` : "";
+    if (pane.innerHTML !== paneHtml) {
+      const scrolled = pane.scrollTop;
+      pane.innerHTML = paneHtml;
+      pane.scrollTop = paneKey === inboxPaneKey && typeof scrolled === "number" ? scrolled : 0;
+    }
+    inboxPaneKey = paneKey;
+  }
   refreshIcons();
 }
 
@@ -640,11 +705,11 @@ async function refreshWarmupBadge() {
   }
 }
 
-/** Чи видно зараз список вхідних, а не розмову й не інший екран. */
+/** Чи видно зараз вхідні: розмова праворуч від списку не заважає, список оновлюється поруч. */
 function warmupInboxListOnScreen() {
   const inbox = warmupState.inbox;
   return Boolean(document.getElementById("view-inbox")?.classList.contains("active"))
-    && inbox.ready && inbox.available && inbox.openThreadKey === null;
+    && inbox.ready && inbox.available;
 }
 
 export function startWarmupBadge() {
@@ -729,11 +794,13 @@ async function markWarmupThreadRead(accountId, threadKey) {
   }
 }
 
-async function openWarmupThread(accountId, threadKey) {
+async function openWarmupThread(accountId, threadKey, { refresh = false } = {}) {
   const inbox = warmupState.inbox;
   inbox.openAccountId = accountId;
   inbox.openThreadKey = threadKey;
-  inbox.open = null;
+  // Reloading the conversation that is already on the screen keeps showing it
+  // until the new answer comes, instead of flashing «Відкриваємо розмову...».
+  if (!refresh) inbox.open = null;
   inbox.openError = "";
   inbox.openBusy = true;
   renderWarmupInbox();
@@ -795,16 +862,24 @@ export function showWarmupInboxAccount(accountId) {
   renderWarmupInbox();
 }
 
-document.getElementById("warmupInboxRefreshBtn")?.addEventListener("click", () => {
+// «Оновити» перечитує список, а коли відкрита розмова — і її: інакше кнопка
+// оновила б лише те, що збоку.
+document.getElementById("warmupInboxRefreshBtn")?.addEventListener("click", async () => {
   const inbox = warmupState.inbox;
-  if (inbox.openThreadKey !== null) {
-    openWarmupThread(inbox.openAccountId, inbox.openThreadKey);
-    return;
-  }
-  loadWarmupInbox();
+  await loadWarmupInbox();
+  if (inbox.openThreadKey !== null) openWarmupThread(inbox.openAccountId, inbox.openThreadKey, { refresh: true });
 });
 
-document.getElementById("warmupInboxBody")?.addEventListener("click", (event) => {
+// Акаунти зверху: один дотик — і список лише цього акаунта.
+document.getElementById("warmupInboxAccounts")?.addEventListener("click", (event) => {
+  const chip = event.target.closest("[data-warmup-account]");
+  if (!chip) return;
+  inboxAccountFilter = chip.dataset.warmupAccount || null;
+  renderWarmupInbox();
+});
+
+// Список і розмова — обидві живуть у цьому контейнері, тож клік обробляється тут.
+document.getElementById("warmupInboxLayout")?.addEventListener("click", (event) => {
   if (event.target.closest("[data-warmup-inbox-back]")) {
     closeWarmupThread();
     return;
@@ -833,11 +908,6 @@ document.getElementById("warmupInboxBody")?.addEventListener("click", (event) =>
   const row = event.target.closest("[data-warmup-thread]");
   if (!row) return;
   openWarmupThread(row.dataset.warmupThreadAccount, row.dataset.warmupThread);
-});
-
-document.getElementById("warmupInboxAccountSelect")?.addEventListener("change", (event) => {
-  inboxAccountFilter = event.target.value || null;
-  renderWarmupInbox();
 });
 
 document.getElementById("warmupInboxSearch")?.addEventListener("input", (event) => {

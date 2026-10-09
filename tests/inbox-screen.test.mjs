@@ -5,7 +5,8 @@ import vm from "node:vm";
 import { loadMain, mainSource, declaration } from "./app-main-excerpt.mjs";
 
 /**
- * «Вхідні» — відповіді всіх акаунтів прогріву на одному екрані (282569c2).
+ * «Вхідні» — відповіді всіх акаунтів прогріву, розкладені як у месенджері:
+ * акаунти кнопками зверху, зліва розмови, справа уся розмова з людиною.
  *
  * Що має бути видно й що має працювати, без браузера: код екрана береться з
  * app/screens/inbox.js і запускається проти заглушок DOM. Сервер тут не
@@ -16,21 +17,37 @@ import { loadMain, mainSource, declaration } from "./app-main-excerpt.mjs";
 const NAMES = [
   "escapeHtml", "escapeAttr", "uaPlural", "warmupCount",
   "WARMUP_OUTREACH_LABEL", "WARMUP_OUTREACH_TONE",
-  "WARMUP_SYNC_STALE_HOURS", "inboxAccountFilter",
-  "warmupAgo", "warmupStamp", "warmupHoursSince", "warmupBodyHtml", "warmupPreviewHtml", "warmupProfileUrl",
-  "WARMUP_UNNAMED", "warmupParticipantUnnamed", "warmupParticipantName", "warmupParticipantNameAttr",
-  "warmupThreadAccount", "warmupAccountTitle", "warmupInboxSync", "warmupInboxNoteHtml", "warmupInboxEmptyHtml",
-  "warmupInboxRows", "warmupThreadRowHtml", "warmupInboxAccountName", "warmupInboxUnreadFor", "warmupInboxFilterHtml",
-  "warmupMessageHtml", "warmupThreadViewHtml", "renderWarmupInbox", "renderWarmupNavBadge", "setWarmupUnread",
-  "refreshWarmupBadge", "stopWarmupBadgePoll", "warmupThreadIsOpen", "markWarmupThreadRead", "openWarmupThread",
-  "closeWarmupThread", "showWarmupInboxAccount", "loadWarmupInbox",
-  "inboxSearch", "inboxSearchTerms", "warmupInboxMatches", "warmupInboxAccountOptions", "renderWarmupInboxTools", "warmupNextUnread", "warmupInboxListOnScreen"
+  "WARMUP_SYNC_STALE_HOURS", "inboxAccountFilter", "inboxSearch", "inboxSearchTerms", "inboxPaneKey",
+  "warmupAgo", "warmupStamp", "warmupHoursSince", "WARMUP_PLACEHOLDERS", "warmupPlaceholder", "warmupBodyHtml",
+  "warmupPreviewHtml", "warmupProfileUrl",
+  "WARMUP_UNNAMED", "WARMUP_NAME_NOISE", "warmupCleanName", "warmupParticipantUnnamed", "warmupParticipantName",
+  "warmupParticipantNameAttr", "warmupThreadAccount", "warmupAccountTitle", "warmupInboxSync", "warmupInboxNoteHtml",
+  "warmupInboxEmptyHtml", "warmupInboxRows", "warmupInboxMatches", "warmupThreadRowHtml", "warmupInboxAccountName",
+  "warmupInboxUnreadFor", "warmupInboxFilterHtml", "warmupInboxAccountOptions", "warmupInboxChipsHtml",
+  "warmupThreadPlaceholderHtml", "warmupNextUnread", "warmupMessageHtml", "warmupThreadViewHtml",
+  "renderWarmupInbox", "renderWarmupNavBadge", "setWarmupUnread", "refreshWarmupBadge", "stopWarmupBadgePoll",
+  "warmupInboxListOnScreen", "loadWarmupInbox", "warmupThreadIsOpen", "markWarmupThreadRead", "openWarmupThread",
+  "closeWarmupThread", "showWarmupInboxAccount"
+];
+
+/** Слухачі екрана: те, що людина робить руками. Беруться з коду як є. */
+const LISTENERS = [
+  'document.getElementById("warmupInboxRefreshBtn")?.addEventListener("click"',
+  'document.getElementById("warmupInboxAccounts")?.addEventListener("click"',
+  'document.getElementById("warmupInboxLayout")?.addEventListener("click"',
+  'document.getElementById("warmupInboxSearch")?.addEventListener("input"',
+  'document.addEventListener("visibilitychange"'
 ];
 
 const minutesAgo = (minutes) => new Date(Date.now() - minutes * 60000).toISOString();
 
 function element() {
-  return { textContent: "", innerHTML: "", hidden: false, className: "", title: "", attrs: {}, setAttribute(key, value) { this.attrs[key] = value; } };
+  const classes = new Set();
+  return {
+    textContent: "", innerHTML: "", hidden: false, className: "", title: "", value: "", scrollTop: 0, attrs: {},
+    setAttribute(key, value) { this.attrs[key] = value; },
+    classList: { toggle: (name, on) => { if (on) classes.add(name); else classes.delete(name); }, contains: (name) => classes.has(name) }
+  };
 }
 
 function thread(extra) {
@@ -43,7 +60,7 @@ function thread(extra) {
   };
 }
 
-/** Три розмови двох акаунтів: прочитана свіжа, непрочитана давня, непрочитана вчорашня-годинна. */
+/** Три розмови двох акаунтів: прочитана свіжа, непрочитана давня, непрочитана годинна. */
 function threeThreads() {
   return [
     thread({ threadKey: "t-read", unread: false, crmContactId: "c1", lastMessage: { direction: "in", body: "Дякую, я вже бачив.", sentAt: minutesAgo(5) } }),
@@ -60,20 +77,24 @@ function threeThreads() {
   ];
 }
 
-function screen({ threads = threeThreads(), accounts = [], sync = null, api, extra = {}, statements = [], active = true } = {}) {
-  const els = {
-    warmupInboxTitle: element(), warmupInboxSubtitle: element(), warmupInboxPill: element(),
-    warmupInboxBody: element(), warmupNavBadge: element(),
-    // Інструменти над списком і сам екран: пошук, вибір акаунта, чи видно список.
-    warmupInboxTools: element(), warmupInboxAccountPick: element(),
-    warmupInboxAccountSelect: { ...element(), value: "" }, warmupInboxSearch: { ...element(), value: "" },
-    "view-inbox": { classList: { contains: (name) => name === "active" && active } }
-  };
+function screen({ threads = threeThreads(), accounts = [], sync = null, api, extra = {}, active = true } = {}) {
+  const ids = [
+    "warmupInboxTitle", "warmupInboxSubtitle", "warmupInboxPill", "warmupInboxBody", "warmupInboxNotice",
+    "warmupInboxAccounts", "warmupInboxLayout", "warmupInboxThread", "warmupInboxSearch", "warmupNavBadge",
+    "warmupInboxRefreshBtn"
+  ];
+  const els = Object.fromEntries(ids.map((id) => [id, element()]));
+  // Сам екран: видно чи ні, і чи на ньому відкрита розмова (на телефоні вона забирає весь екран).
+  const viewClasses = new Set(active ? ["active"] : []);
+  els["view-inbox"] = { classList: { contains: (name) => viewClasses.has(name), toggle: (name, on) => { if (on) viewClasses.add(name); else viewClasses.delete(name); } } };
+
   const clicks = [];
   const listeners = {};
-  els.warmupInboxBody.addEventListener = (type, fn) => { listeners[type] = fn; };
-  els.warmupInboxAccountSelect.addEventListener = (type, fn) => { listeners[`select:${type}`] = fn; };
+  els.warmupInboxRefreshBtn.addEventListener = (type, fn) => { listeners[`refresh:${type}`] = fn; };
+  els.warmupInboxAccounts.addEventListener = (type, fn) => { listeners[`chips:${type}`] = fn; };
+  els.warmupInboxLayout.addEventListener = (type, fn) => { listeners[`layout:${type}`] = fn; };
   els.warmupInboxSearch.addEventListener = (type, fn) => { listeners[`search:${type}`] = fn; };
+
   const warmupState = {
     unreadReplies: null,
     profiles: [],
@@ -102,13 +123,17 @@ function screen({ threads = threeThreads(), accounts = [], sync = null, api, ext
     refreshIcons: () => {},
     ...extra
   };
-  const main = loadMain(NAMES, globals, statements);
+  const main = loadMain(NAMES, globals, LISTENERS);
   // Змінна модуля, яку людина змінила б на екрані (пошук, звуження), — без самого екрана.
   const set = (name, value) => { main.context.__v = value; vm.runInContext(`${name} = __v`, main.context); };
   return { els, warmupState, clicks, calls, listeners, main, get: main.get, set };
 }
 
 const orderOf = (html) => [...html.matchAll(/data-warmup-thread="([^"]+)"/g)].map((match) => match[1]);
+const rowOf = (html, key) => html.split('<button class="warmup-thread').find((part) => part.includes(`data-warmup-thread="${key}"`));
+const tick = () => new Promise((resolve) => setImmediate(resolve));
+
+// ── Список ────────────────────────────────────────────────────────────────
 
 test("відповіді всіх акаунтів — одним списком: непрочитані зверху, всередині — найновіші першими", () => {
   const { els, get } = screen();
@@ -117,23 +142,65 @@ test("відповіді всіх акаунтів — одним списком
   // Один список, а не по блоку на акаунт: заголовків акаунтів нема.
   assert.doesNotMatch(els.warmupInboxBody.innerHTML, /warmup-thread-group/);
   assert.equal(els.warmupInboxPill.textContent, "2 непрочитані");
+  assert.equal(els.warmupInboxTitle.textContent, "Вхідні");
 });
 
-test("рядок каже, від кого, з якого акаунта і що саме написали, коли", () => {
+test("рядок каже, від кого, яка посада, що саме написали, коли — і акаунт, поки в списку всі акаунти", () => {
   const { els, get } = screen();
   get("renderWarmupInbox")();
-  const row = els.warmupInboxBody.innerHTML.split('<button class="warmup-thread').find((part) => part.includes('data-warmup-thread="t-new-unread"'));
+  const row = rowOf(els.warmupInboxBody.innerHTML, "t-new-unread");
   assert.match(row, /Taras Bondar/);
   assert.match(row, /UA lead/);
   assert.match(row, /Anna Kovalenko/, "акаунт, на який надійшло, не названо");
-  assert.match(row, /«Коли можна поговорити\?»/);
-  assert.match(row, /Написали нам/);
+  assert.match(row, /Коли можна поговорити\?/);
   assert.match(row, /1 год тому/);
   assert.match(row, /is-unread/);
+  assert.doesNotMatch(row, /Ви:/, "це написали нам, а не ми");
   // Акаунт без особи називається за міткою профілю, і це видно з підказки.
-  const second = els.warmupInboxBody.innerHTML.split('<button class="warmup-thread').find((part) => part.includes('data-warmup-thread="t-old-unread"'));
+  const second = rowOf(els.warmupInboxBody.innerHTML, "t-old-unread");
   assert.match(second, /Profile 3/);
   assert.match(second, /Назва профілю в Anty/);
+});
+
+test("коли вибрано один акаунт, на рядках його ім'я не повторюється", () => {
+  const { els, get, set } = screen();
+  set("inboxAccountFilter", "acc-a");
+  get("renderWarmupInbox")();
+  const html = els.warmupInboxBody.innerHTML;
+  assert.deepEqual(orderOf(html), ["t-new-unread", "t-read"]);
+  assert.doesNotMatch(html, /warmup-identity/, "акаунт названо на кожному рядку, хоча він один");
+});
+
+test("останнє слово за нами — «Ви:», а мітки агента читаються як мітки, не як текст людини", () => {
+  const threads = [
+    thread({ threadKey: "ours", lastMessage: { direction: "out", body: "Дякую, напишу завтра.", sentAt: minutesAgo(10) } }),
+    thread({ threadKey: "none", lastMessage: { direction: "in", body: "[no text]", sentAt: minutesAgo(20) } }),
+    thread({ threadKey: "file", lastMessage: { direction: "in", body: "[attachment]", sentAt: minutesAgo(30) } })
+  ];
+  const { els, get } = screen({ threads });
+  get("renderWarmupInbox")();
+  const html = els.warmupInboxBody.innerHTML;
+  assert.match(rowOf(html, "ours"), /warmup-thread-from">Ви:<\/span> Дякую, напишу завтра\./);
+  assert.match(rowOf(html, "none"), /<em class="warmup-subtle">\(без тексту\)<\/em>/);
+  assert.match(rowOf(html, "file"), /<em class="warmup-subtle">\(вкладення без тексту\)<\/em>/);
+  assert.doesNotMatch(html, /\[no text\]|\[attachment\]/);
+  // У самій розмові — те саме.
+  assert.match(get("warmupBodyHtml")("[no text]"), /\(без тексту\)/);
+  assert.equal(get("warmupBodyHtml")("Привіт <b>"), "Привіт &lt;b&gt;", "справжній текст лишається текстом, екранованим");
+});
+
+test("«Переглянути профіль Sinan» — це Sinan: службові слова LinkedIn перед іменем не показуються", () => {
+  const get = screen().get;
+  const name = (value) => get("warmupParticipantName")({ name: value });
+  assert.equal(name("Переглянути профіль Sinan"), "Sinan");
+  assert.equal(name("переглянути   профіль   Edgar Lopez"), "Edgar Lopez");
+  assert.equal(name("View profile of Anna Lee"), "Anna Lee");
+  assert.equal(name("View Profile Luke"), "Luke");
+  // Справжні імена не чіпаємо.
+  assert.equal(name("Viewer Smith"), "Viewer Smith");
+  assert.equal(name("Oleh Petrenko"), "Oleh Petrenko");
+  // Лишились самі службові слова — імені нема.
+  assert.equal(name("Переглянути профіль"), "Без імені");
 });
 
 test("безіменна людина не підписується чужим іменем", () => {
@@ -143,62 +210,173 @@ test("безіменна людина не підписується чужим �
   assert.doesNotMatch(els.warmupInboxBody.innerHTML, /LinkedIn\s+Member/);
 });
 
-test("перехід із бейджа акаунта у «Прогріві» відкриває «Вхідні», звужені до цього акаунта, з дорогою назад", () => {
-  const { els, clicks, get, warmupState } = screen({ accounts: [{ accountId: "acc-a", identity: "Anna Kovalenko", unread: 1 }, { accountId: "acc-b", label: "Profile 7", unread: 1 }] });
+// ── Акаунти зверху ────────────────────────────────────────────────────────
+
+test("зверху — кнопки акаунтів: «Усі акаунти» і кожен акаунт з числом відповідей, що чекають; де чекають — першими", () => {
+  const threads = [
+    ...threeThreads(),
+    thread({ threadKey: "c1", accountId: "acc-c", accountIdentity: "Oksana Melnyk", unread: true }),
+    thread({ threadKey: "c2", accountId: "acc-c", accountIdentity: "Oksana Melnyk", unread: true })
+  ];
+  const { els, get } = screen({ threads });
+  get("renderWarmupInbox")();
+  const html = els.warmupInboxAccounts.innerHTML;
+  assert.equal(els.warmupInboxAccounts.hidden, false);
+  const names = [...html.matchAll(/inbox-chip-name">([^<]+)</g)].map((match) => match[1]);
+  assert.deepEqual(names, ["Усі акаунти", "Oksana Melnyk", "Anna Kovalenko", "Profile 3"], "спершу той, де більше чекає");
+  const counts = [...html.matchAll(/inbox-chip-count" aria-label="непрочитаних: (\d+)"/g)].map((match) => match[1]);
+  assert.deepEqual(counts, ["4", "2", "1", "1"]);
+  assert.match(html, /is-active[^>]*data-warmup-account=""[^>]*aria-pressed="true"/, "«Усі акаунти» не позначено вибраним");
+});
+
+test("один дотик по акаунту лишає тільки його розмови, «Усі акаунти» повертає все", () => {
+  const { els, listeners, get, main } = screen();
+  get("renderWarmupInbox")();
+  const press = (accountId) => listeners["chips:click"]({ target: { closest: (selector) => (selector === "[data-warmup-account]" ? { dataset: { warmupAccount: accountId } } : null) } });
+  press("acc-b");
+  assert.equal(main.get("inboxAccountFilter"), "acc-b");
+  assert.deepEqual(orderOf(els.warmupInboxBody.innerHTML), ["t-old-unread"]);
+  assert.match(els.warmupInboxAccounts.innerHTML, /is-active[^>]*data-warmup-account="acc-b"/);
+  press("");
+  assert.equal(main.get("inboxAccountFilter"), null);
+  assert.deepEqual(orderOf(els.warmupInboxBody.innerHTML), ["t-new-unread", "t-old-unread", "t-read"]);
+  // Дотик повз кнопку нічого не міняє.
+  listeners["chips:click"]({ target: { closest: () => null } });
+  assert.equal(main.get("inboxAccountFilter"), null);
+});
+
+test("з одним акаунтом вибирати нема з чого, і ряду кнопок немає", () => {
+  const { els, get } = screen({ threads: threeThreads().filter((row) => row.accountId === "acc-a") });
+  get("renderWarmupInbox")();
+  assert.equal(els.warmupInboxAccounts.hidden, true);
+  assert.equal(els.warmupInboxAccounts.innerHTML, "");
+});
+
+test("перехід із бейджа акаунта у «Прогріві» відкриває «Вхідні», звужені до цього акаунта, і закриває відкриту розмову", () => {
+  const { els, clicks, get, warmupState, main } = screen({ accounts: [{ accountId: "acc-a", identity: "Anna Kovalenko", unread: 1 }, { accountId: "acc-b", label: "Profile 7", unread: 1 }] });
+  warmupState.inbox.openAccountId = "acc-a";
+  warmupState.inbox.openThreadKey = "t-read";
   get("showWarmupInboxAccount")("acc-b");
   assert.deepEqual(clicks, ['.nav-item[data-view="inbox"]'], "екран «Вхідні» не відкрито через меню");
+  assert.equal(main.get("inboxAccountFilter"), "acc-b");
+  assert.equal(warmupState.inbox.openThreadKey, null, "розмова іншого акаунта лишилась відкритою");
   assert.deepEqual(orderOf(els.warmupInboxBody.innerHTML), ["t-old-unread"]);
-  // Звуження видно у списку акаунтів над відповідями, а під ним — скільки розмов лишилось і як скинути.
-  assert.match(els.warmupInboxAccountSelect.innerHTML, /<option value="acc-b" selected>Profile 7 \(1, непрочитаних 1\)<\/option>/);
-  assert.equal(els.warmupInboxAccountSelect.value, "acc-b");
+  assert.match(els.warmupInboxAccounts.innerHTML, /is-active[^>]*data-warmup-account="acc-b"/);
+  assert.match(els.warmupInboxAccounts.innerHTML, /Profile 7/);
   assert.match(els.warmupInboxBody.innerHTML, /Розмов: <strong>1<\/strong> з 3/);
-  assert.match(els.warmupInboxBody.innerHTML, /data-warmup-inbox-reset/);
   // Номер на рядку акаунта в «Прогріві» лишається тим самим числом.
   assert.equal(get("warmupInboxUnreadFor")("acc-a"), 1);
   assert.equal(get("warmupInboxUnreadFor")("acc-z"), 0);
   assert.equal(warmupState.inbox.threads.length, 3, "звуження не повинно нічого викидати зі стану");
 });
 
-test("акаунт без відповідей кажe це, а не показує порожнечу", () => {
+test("акаунт без відповідей кажe це, а не показує порожнечу, і лишається серед кнопок", () => {
   const { els, get } = screen({ threads: [thread({ threadKey: "only", accountId: "acc-a" })] });
   get("showWarmupInboxAccount")("acc-b");
   assert.match(els.warmupInboxBody.innerHTML, /Від цього акаунта відповідей немає/);
+  assert.match(els.warmupInboxAccounts.innerHTML, /is-active[^>]*data-warmup-account="acc-b"/);
+  assert.equal(els.warmupInboxAccounts.hidden, false);
 });
+
+// ── Про читання вхідних і порожні стани ───────────────────────────────────
 
 test("про читання вхідних скаже одне — найгірше", () => {
   // Час читання екран бере і з відповіді сервера, і з самих розмов — найновіший,
   // тож розмови в кожному наборі несуть той час, який набір має означати.
   const syncedAt = (when) => threeThreads().map((row) => ({ ...row, lastSyncedAt: when }));
-
-  const never = screen({ threads: [], sync: { lastSyncedAt: null } });
-  never.get("renderWarmupInbox")();
-  assert.match(never.els.warmupInboxBody.innerHTML, /ще жодного разу не читали/);
-  assert.match(never.els.warmupInboxBody.innerHTML, /is-bad/);
+  const noteOf = (s) => { s.get("renderWarmupInbox")(); return s.els.warmupInboxNotice; };
 
   const stale = screen({ threads: syncedAt(minutesAgo(60 * 50)), sync: { lastSyncedAt: minutesAgo(60 * 50) } });
-  stale.get("renderWarmupInbox")();
-  assert.match(stale.els.warmupInboxBody.innerHTML, /схоже, агент зупинився/);
-  assert.equal((stale.els.warmupInboxBody.innerHTML.match(/warmup-inbox-note/g) || []).length, 1, "більше однієї примітки про читання");
+  assert.match(noteOf(stale).innerHTML, /схоже, агент зупинився/);
+  assert.equal((stale.els.warmupInboxNotice.innerHTML.match(/warmup-inbox-note/g) || []).length, 1, "більше однієї примітки про читання");
+  assert.equal(stale.els.warmupInboxNotice.hidden, false);
+  assert.equal(stale.els.warmupInboxLayout.hidden, false, "розмови поруч із приміткою мають лишитись");
 
   const partial = screen({ threads: syncedAt(minutesAgo(30)), sync: { lastSyncedAt: minutesAgo(30), accountsTotal: 3, accountsSynced: 2 } });
-  partial.get("renderWarmupInbox")();
-  assert.match(partial.els.warmupInboxBody.innerHTML, /1 з 3 акаунтів ще не читали/);
+  assert.match(noteOf(partial).innerHTML, /1 з 3 акаунтів ще не читали/);
 
   const calm = screen({ threads: syncedAt(minutesAgo(30)), sync: { lastSyncedAt: minutesAgo(30), accountsTotal: 3, accountsSynced: 3 } });
-  calm.get("renderWarmupInbox")();
-  assert.doesNotMatch(calm.els.warmupInboxBody.innerHTML, /warmup-inbox-note/);
+  assert.equal(noteOf(calm).innerHTML, "");
+  assert.equal(calm.els.warmupInboxNotice.hidden, true);
   assert.match(calm.els.warmupInboxSubtitle.textContent, /читали 30 хв тому/);
 });
 
-test("порожня вхідна каже, читали її чи ні", () => {
+test("порожня вхідна каже, читали її чи ні, і не малює ні акаунтів, ні порожніх панелей", () => {
+  const never = screen({ threads: [], sync: { lastSyncedAt: null } });
+  never.get("renderWarmupInbox")();
+  assert.match(never.els.warmupInboxNotice.innerHTML, /ще жодного разу не читали/);
+  assert.match(never.els.warmupInboxNotice.innerHTML, /is-bad/);
+
   const read = screen({ threads: [], sync: { lastSyncedAt: minutesAgo(30) } });
   read.get("renderWarmupInbox")();
-  assert.match(read.els.warmupInboxBody.innerHTML, /Відповідей поки немає/);
-  assert.match(read.els.warmupInboxBody.innerHTML, /Читали 30 хв тому/);
+  assert.match(read.els.warmupInboxNotice.innerHTML, /Відповідей поки немає/);
+  assert.match(read.els.warmupInboxNotice.innerHTML, /Читали 30 хв тому/);
+  assert.equal(read.els.warmupInboxLayout.hidden, true);
+  assert.equal(read.els.warmupInboxAccounts.hidden, true);
+  assert.equal(read.els.warmupInboxPill.textContent, "поки нічого");
 
   const unknown = screen({ threads: [], sync: null });
   unknown.get("renderWarmupInbox")();
-  assert.match(unknown.els.warmupInboxBody.innerHTML, /невідомо, коли вхідні читали востаннє/);
+  assert.match(unknown.els.warmupInboxNotice.innerHTML, /невідомо, коли вхідні читали востаннє/);
+});
+
+test("сервер без вхідних, помилка читання і завантаження кажуть це одним повідомленням на всю панель", () => {
+  const off = screen();
+  off.warmupState.inbox.available = false;
+  off.get("renderWarmupInbox")();
+  assert.match(off.els.warmupInboxNotice.innerHTML, /немає ендпоїнта вхідних/);
+  assert.equal(off.els.warmupInboxLayout.hidden, true);
+  assert.equal(off.els.warmupInboxPill.textContent, "немає на цьому сервері");
+
+  const broken = screen();
+  broken.warmupState.inbox.error = "Сервер мовчить";
+  broken.get("renderWarmupInbox")();
+  assert.match(broken.els.warmupInboxNotice.innerHTML, /Сервер мовчить/);
+  assert.equal(broken.els.warmupInboxLayout.hidden, true);
+  assert.equal(broken.els.warmupInboxAccounts.hidden, true);
+  assert.equal(broken.els.warmupInboxPill.textContent, "недоступно");
+
+  const loading = screen();
+  loading.warmupState.inbox.ready = false;
+  loading.get("renderWarmupInbox")();
+  assert.match(loading.els.warmupInboxNotice.innerHTML, /Завантажуємо вхідні/);
+  assert.equal(loading.els.warmupInboxLayout.hidden, true);
+});
+
+// ── Дві сторони: список і розмова ─────────────────────────────────────────
+
+test("поки розмову не обрано, праворуч підказка і найкоротший шлях почати: перша непрочитана", () => {
+  const { els, get } = screen();
+  get("renderWarmupInbox")();
+  assert.match(els.warmupInboxThread.innerHTML, /Оберіть розмову зі списку/);
+  assert.match(els.warmupInboxThread.innerHTML, /data-warmup-inbox-next/);
+  assert.match(els.warmupInboxThread.innerHTML, /Почати з непрочитаної: Taras Bondar/);
+  assert.equal(els.warmupInboxLayout.classList.contains("has-thread"), false);
+  assert.equal(els["view-inbox"].classList.contains("inbox-has-thread"), false);
+
+  // Усе прочитано — починати нема з чого, лишається підказка.
+  const calm = screen({ threads: threeThreads().map((row) => ({ ...row, unread: false })) });
+  calm.get("renderWarmupInbox")();
+  assert.match(calm.els.warmupInboxThread.innerHTML, /Оберіть розмову зі списку/);
+  assert.doesNotMatch(calm.els.warmupInboxThread.innerHTML, /data-warmup-inbox-next/);
+});
+
+test("відкрита розмова стоїть праворуч, а її рядок у списку позначений; список лишається на місці", () => {
+  const { els, warmupState, get } = screen();
+  warmupState.inbox.openAccountId = "acc-a";
+  warmupState.inbox.openThreadKey = "t-read";
+  warmupState.inbox.open = { thread: thread({ threadKey: "t-read", crmContactId: "c1" }), messages: [{ direction: "in", body: "Дякую, я вже бачив.", sentAt: minutesAgo(5) }] };
+  get("renderWarmupInbox")();
+  assert.equal(els.warmupInboxLayout.classList.contains("has-thread"), true, "на телефоні має показатись розмова, а не список");
+  assert.equal(els["view-inbox"].classList.contains("inbox-has-thread"), true, "над розмовою на телефоні лишились примітка й акаунти");
+  assert.match(els.warmupInboxThread.innerHTML, /Oleh Petrenko/);
+  assert.match(els.warmupInboxThread.innerHTML, /Дякую, я вже бачив\./);
+  assert.match(els.warmupInboxThread.innerHTML, /data-warmup-inbox-back/);
+  assert.match(els.warmupInboxThread.innerHTML, /Назад до списку/);
+  assert.deepEqual(orderOf(els.warmupInboxBody.innerHTML), ["t-new-unread", "t-old-unread", "t-read"], "список не зник");
+  assert.match(rowOf(els.warmupInboxBody.innerHTML, "t-read"), /is-open[\s\S]*aria-current="true"/);
+  assert.doesNotMatch(rowOf(els.warmupInboxBody.innerHTML, "t-new-unread"), /aria-current/);
+  assert.equal(els.warmupInboxTitle.textContent, "Вхідні", "заголовок не міняється на ім'я людини");
 });
 
 test("розмова: з неї є хід до картки контакту, коли контакт відомий, і чесне «не знайдено», коли ні", () => {
@@ -217,20 +395,19 @@ test("розмова: з неї є хід до картки контакту, к
   assert.match(bare, /у CRM цієї людини не знайдено/);
 });
 
-test("клік по кнопці в розмові веде в картку контакту, клік по рядку відкриває розмову, «скинути фільтр» знімає звуження й пошук", async () => {
+test("клік: по кнопці в розмові — картка контакту, по рядку — розмова, «Назад» і «Скинути фільтр» — як сказано", async () => {
   const contacts = [];
-  const { listeners, calls, get, main, set } = screen({
+  const { listeners, calls, get, main, set, warmupState } = screen({
     api: async () => ({ thread: thread({ threadKey: "t-1" }), messages: [] }),
-    extra: { showContactCard: (id) => contacts.push(id) },
-    statements: ['document.getElementById("warmupInboxBody")?.addEventListener("click"']
+    extra: { showContactCard: (id) => contacts.push(id) }
   });
-  const click = (map) => listeners.click({ target: { closest: (selector) => map[selector] || null } });
+  const click = (map) => listeners["layout:click"]({ target: { closest: (selector) => map[selector] || null } });
 
   click({ "[data-warmup-contact]": { dataset: { warmupContact: "4412" } } });
   assert.deepEqual(contacts, ["4412"]);
 
   click({ "[data-warmup-thread]": { dataset: { warmupThreadAccount: "acc-a", warmupThread: "t-1" } } });
-  await new Promise((resolve) => setImmediate(resolve));
+  await tick();
   assert.ok(calls.some((call) => call.path === "/inbox/thread?threadKey=t-1&accountId=acc-a"), "клік по рядку не відкрив розмову");
 
   // Посилання всередині рядка — це посилання, а не рядок.
@@ -238,7 +415,12 @@ test("клік по кнопці в розмові веде в картку ко
   click({ a: {}, "[data-warmup-thread]": { dataset: { warmupThreadAccount: "acc-a", warmupThread: "t-2" } } });
   assert.equal(calls.length, before);
 
-  // «Скинути фільтр» знімає і звуження, поставлене бейджем з «Прогріву», і пошук.
+  // «Назад до списку» закриває розмову.
+  assert.equal(warmupState.inbox.openThreadKey, "t-1");
+  click({ "[data-warmup-inbox-back]": {} });
+  assert.equal(warmupState.inbox.openThreadKey, null);
+
+  // «Скинути фільтр» знімає і звуження акаунта, і пошук.
   get("showWarmupInboxAccount")("acc-b");
   set("inboxSearch", "iryna");
   assert.equal(main.get("inboxAccountFilter"), "acc-b");
@@ -271,6 +453,40 @@ test("відкриття непрочитаної розмови познача�
   assert.equal(calls.filter((call) => call.path === "/inbox/read").length, 1);
 });
 
+test("розмова перемальовується, лише коли вона змінилась, і з того ж місця, а інша розмова — зверху", () => {
+  const { els, warmupState, get } = screen();
+  warmupState.inbox.openAccountId = "acc-a";
+  warmupState.inbox.openThreadKey = "t-read";
+  warmupState.inbox.open = { thread: thread({ threadKey: "t-read" }), messages: [{ direction: "in", body: "Привіт", sentAt: minutesAgo(5) }] };
+  let writes = 0;
+  let html = "";
+  Object.defineProperty(els.warmupInboxThread, "innerHTML", { get: () => html, set: (value) => { writes += 1; html = value; } });
+
+  get("renderWarmupInbox")();
+  assert.equal(writes, 1);
+  els.warmupInboxThread.scrollTop = 120;
+
+  // Список перечитали, а розмова та сама: праворуч нічого не мінялось.
+  get("renderWarmupInbox")();
+  assert.equal(writes, 1, "розмову перемалювали без потреби");
+  assert.equal(els.warmupInboxThread.scrollTop, 120);
+
+  // Змінився вміст (немає більше непрочитаних, зникла кнопка) — перемальовано, але на тому ж місці.
+  for (const row of warmupState.inbox.threads) row.unread = false;
+  get("renderWarmupInbox")();
+  assert.equal(writes, 2);
+  assert.equal(els.warmupInboxThread.scrollTop, 120, "читача кинуло нагору, хоч розмова та сама");
+
+  // Інша розмова — з початку.
+  warmupState.inbox.openThreadKey = "t-new-unread";
+  warmupState.inbox.open = { thread: thread({ threadKey: "t-new-unread" }), messages: [{ direction: "in", body: "Інше", sentAt: minutesAgo(1) }] };
+  get("renderWarmupInbox")();
+  assert.equal(writes, 3);
+  assert.equal(els.warmupInboxThread.scrollTop, 0);
+});
+
+// ── Лічильник на пункті меню ──────────────────────────────────────────────
+
 test("лічильник на пункті меню береться при вході в застосунок, а не лише коли відкрито «Вхідні»", async () => {
   const source = mainSource();
   // Ядро кличе зареєстровані хуки одразу після входу, на яку б вкладку людина не потрапила…
@@ -298,19 +514,12 @@ test("сервер без прогріву не лякає лічильнико�
   assert.equal(els.warmupNavBadge.hidden, true);
 });
 
-// ── Знайти потрібну відповідь, перейти до наступної, не оновлювати руками ────
-
-const SEARCH_STATEMENTS = [
-  'document.getElementById("warmupInboxAccountSelect")?.addEventListener("change"',
-  'document.getElementById("warmupInboxSearch")?.addEventListener("input"',
-  'document.getElementById("warmupInboxBody")?.addEventListener("click"',
-  'document.addEventListener("visibilitychange"'
-];
+// ── Пошук ─────────────────────────────────────────────────────────────────
 
 const typeSearch = (listeners, value) => listeners["search:input"]({ target: { value } });
 
 test("пошук знаходить за іменем, посадою, акаунтом і текстом відповіді; усі слова мають збігтися, регістр не важить", () => {
-  const { els, listeners, get } = screen({ statements: SEARCH_STATEMENTS });
+  const { els, listeners, get } = screen();
   get("renderWarmupInbox")();
   for (const [query, expected] of [
     ["taras", ["t-new-unread"]],
@@ -329,8 +538,17 @@ test("пошук знаходить за іменем, посадою, акау�
   assert.deepEqual(orderOf(els.warmupInboxBody.innerHTML), ["t-new-unread", "t-old-unread", "t-read"], "порожній пошук має повернути все");
 });
 
+test("пошук не шукає в мітках агента: «text» не знаходить повідомлення без тексту", () => {
+  const { els, listeners, get } = screen({ threads: [thread({ threadKey: "none", participant: { name: "Zed" }, lastMessage: { direction: "in", body: "[no text]", sentAt: minutesAgo(5) } })] });
+  get("renderWarmupInbox")();
+  typeSearch(listeners, "text");
+  assert.deepEqual(orderOf(els.warmupInboxBody.innerHTML), []);
+  typeSearch(listeners, "zed");
+  assert.deepEqual(orderOf(els.warmupInboxBody.innerHTML), ["none"]);
+});
+
 test("самі пробіли в пошуку — не фільтр: рядка з лічильником нема, список повний", () => {
-  const { els, listeners, get } = screen({ statements: SEARCH_STATEMENTS });
+  const { els, listeners, get } = screen();
   get("renderWarmupInbox")();
   typeSearch(listeners, "   ");
   assert.deepEqual(orderOf(els.warmupInboxBody.innerHTML), ["t-new-unread", "t-old-unread", "t-read"]);
@@ -338,7 +556,7 @@ test("самі пробіли в пошуку — не фільтр: рядка 
 });
 
 test("під пошуком сказано, скільки розмов лишилось із скількох, а порожній результат — що шукали і як скинути", () => {
-  const { els, warmupState, listeners, get } = screen({ statements: SEARCH_STATEMENTS });
+  const { els, warmupState, listeners, get } = screen();
   get("renderWarmupInbox")();
   assert.doesNotMatch(els.warmupInboxBody.innerHTML, /warmup-inbox-filter/, "без фільтра рядка з лічильником нема");
 
@@ -355,62 +573,21 @@ test("під пошуком сказано, скільки розмов лиши
 });
 
 test("пошук і вибір акаунта працюють разом", () => {
-  const { els, listeners, get } = screen({ statements: SEARCH_STATEMENTS });
+  const { els, listeners, get } = screen();
   get("renderWarmupInbox")();
-  listeners["select:change"]({ target: { value: "acc-a" } });
+  const press = (accountId) => listeners["chips:click"]({ target: { closest: () => ({ dataset: { warmupAccount: accountId } }) } });
+  press("acc-a");
   assert.deepEqual(orderOf(els.warmupInboxBody.innerHTML), ["t-new-unread", "t-read"]);
   typeSearch(listeners, "дякую");
   assert.deepEqual(orderOf(els.warmupInboxBody.innerHTML), ["t-read"]);
   typeSearch(listeners, "iryna");
   assert.deepEqual(orderOf(els.warmupInboxBody.innerHTML), [], "розмова Ірини на іншому акаунті");
-  listeners["select:change"]({ target: { value: "" } });
+  press("");
   assert.deepEqual(orderOf(els.warmupInboxBody.innerHTML), ["t-old-unread"]);
 });
 
-test("інструменти над списком: показані, коли є що шукати; акаунтів не питаємо, коли він один; у розмові їх нема", () => {
-  const { els, warmupState, get } = screen();
-  get("renderWarmupInbox")();
-  assert.equal(els.warmupInboxTools.hidden, false);
-  assert.equal(els.warmupInboxAccountPick.hidden, false);
-  assert.match(els.warmupInboxAccountSelect.innerHTML, /<option value="">Усі акаунти \(3\)<\/option>/);
-  assert.match(els.warmupInboxAccountSelect.innerHTML, /Anna Kovalenko \(2, непрочитаних 1\)/);
-
-  // Лише один акаунт — вибирати нема з чого.
-  warmupState.inbox.threads = warmupState.inbox.threads.filter((row) => row.accountId === "acc-a");
-  get("renderWarmupInbox")();
-  assert.equal(els.warmupInboxTools.hidden, false);
-  assert.equal(els.warmupInboxAccountPick.hidden, true);
-
-  // Порожньо — шукати нема в чому, і не показано.
-  warmupState.inbox.threads = [];
-  get("renderWarmupInbox")();
-  assert.equal(els.warmupInboxTools.hidden, true);
-
-  // Розмова відкрита: інструменти ховаються.
-  warmupState.inbox.threads = threeThreads();
-  get("renderWarmupInbox")();
-  assert.equal(els.warmupInboxTools.hidden, false);
-  warmupState.inbox.openThreadKey = "t-read";
-  warmupState.inbox.openAccountId = "acc-a";
-  get("renderWarmupInbox")();
-  assert.equal(els.warmupInboxTools.hidden, true);
-
-  // Помилка вхідних — теж без інструментів.
-  warmupState.inbox.openThreadKey = null;
-  warmupState.inbox.error = "Сервер мовчить";
-  get("renderWarmupInbox")();
-  assert.equal(els.warmupInboxTools.hidden, true);
-});
-
-test("акаунт, до якого звужено, лишається в списку акаунтів, навіть коли розмов на ньому нема", () => {
-  const { els, get } = screen({ threads: [thread({ threadKey: "only", accountId: "acc-a" })], accounts: [{ accountId: "acc-b", label: "Profile 7", unread: 0 }] });
-  get("showWarmupInboxAccount")("acc-b");
-  assert.match(els.warmupInboxAccountSelect.innerHTML, /<option value="acc-b" selected>Profile 7 \(0\)<\/option>/);
-  assert.equal(els.warmupInboxAccountPick.hidden, false);
-});
-
 test("поле пошуку не перезаписується, поки в ньому вже те саме: людина не втрачає курсор посеред слова", () => {
-  const { els, listeners, get, set } = screen({ statements: SEARCH_STATEMENTS });
+  const { els, listeners, get, set } = screen();
   const writes = [];
   let stored = "";
   Object.defineProperty(els.warmupInboxSearch, "value", { get: () => stored, set: (value) => { writes.push(value); stored = value; } });
@@ -427,6 +604,8 @@ test("поле пошуку не перезаписується, поки в н�
   assert.deepEqual(writes, [""]);
 });
 
+// ── Наступна непрочитана ──────────────────────────────────────────────────
+
 test("в кінці розмови є кнопка до наступної непрочитаної, і вона називає, до кого веде", async () => {
   const opened = [];
   const { els, warmupState, listeners, get, calls } = screen({
@@ -435,37 +614,35 @@ test("в кінці розмови є кнопка до наступної не�
       if (path === "/inbox/read") return { success: true, unread: 1 };
       throw new Error(`невідомий маршрут ${path}`);
     },
-    extra: { scrollTo: (x, y) => opened.push(["scroll", x, y]) },
-    statements: SEARCH_STATEMENTS
+    extra: { scrollTo: (x, y) => opened.push(["scroll", x, y]) }
   });
   // Відкрито Тараса; непрочитаною лишилась Ірина.
   await get("openWarmupThread")("acc-a", "t-new-unread");
-  const html = els.warmupInboxBody.innerHTML;
+  const html = els.warmupInboxThread.innerHTML;
   assert.match(html, /data-warmup-inbox-next/);
   assert.match(html, /Наступна непрочитана: Iryna Shevchenko/);
   assert.equal((html.match(/data-warmup-inbox-next/g) || []).length, 1);
 
   // Клік відкриває саме її і піднімає сторінку нагору.
-  listeners.click({ target: { closest: (selector) => (selector === "[data-warmup-inbox-next]" ? {} : null) } });
-  await new Promise((resolve) => setImmediate(resolve));
+  listeners["layout:click"]({ target: { closest: (selector) => (selector === "[data-warmup-inbox-next]" ? {} : null) } });
+  await tick();
   assert.ok(calls.some((call) => call.path === "/inbox/thread?threadKey=t-old-unread&accountId=acc-b"), "відкрито не ту розмову");
   assert.deepEqual(opened, [["scroll", 0, 0]]);
   assert.equal(warmupState.inbox.openThreadKey, "t-old-unread");
 });
 
 test("наступна непрочитана береться з того, що видно: з урахуванням акаунта й пошуку, а коли її нема — кнопки теж нема", async () => {
-  const { els, warmupState, listeners, get, set } = screen({
+  const { els, warmupState, get, set } = screen({
     api: async (path) => {
       if (path.startsWith("/inbox/thread")) return { thread: thread({ threadKey: "t-new-unread" }), messages: [{ direction: "in", body: "Привіт", sentAt: minutesAgo(1) }] };
       if (path === "/inbox/read") return { success: true, unread: 1 };
       throw new Error(`невідомий маршрут ${path}`);
-    },
-    statements: SEARCH_STATEMENTS
+    }
   });
   // Звужено до акаунта, на якому інших непрочитаних нема: далі йти нікуди.
   set("inboxAccountFilter", "acc-a");
   await get("openWarmupThread")("acc-a", "t-new-unread");
-  assert.doesNotMatch(els.warmupInboxBody.innerHTML, /data-warmup-inbox-next/);
+  assert.doesNotMatch(els.warmupInboxThread.innerHTML, /data-warmup-inbox-next/);
 
   // Звужено пошуком до Ірини: наступна — вона, а не будь-яка непрочитана.
   set("inboxAccountFilter", null);
@@ -479,14 +656,15 @@ test("наступна непрочитана береться з того, що
   set("inboxSearch", "");
   for (const row of warmupState.inbox.threads) row.unread = false;
   get("renderWarmupInbox")();
-  assert.doesNotMatch(els.warmupInboxBody.innerHTML, /data-warmup-inbox-next/);
+  assert.doesNotMatch(els.warmupInboxThread.innerHTML, /data-warmup-inbox-next/);
   // Помилка читання розмови: кнопки до наступної теж нема.
   warmupState.inbox.openError = "Не вдалося";
   assert.doesNotMatch(get("warmupThreadViewHtml")(), /data-warmup-inbox-next/);
-  void listeners;
 });
 
-test("новий лічильник, поки відкритий список, перечитує список; розмову, яку читають, не чіпає", async () => {
+// ── Оновлення ─────────────────────────────────────────────────────────────
+
+test("новий лічильник, поки на екрані «Вхідні», перечитує список — навіть коли відкрита розмова: вона стоїть окремо", async () => {
   const requested = [];
   const make = (options = {}) => screen({
     ...options,
@@ -502,7 +680,7 @@ test("новий лічильник, поки відкритий список, �
   let s = make();
   s.warmupState.unreadReplies = 2;
   await s.get("refreshWarmupBadge")();
-  await new Promise((resolve) => setImmediate(resolve));
+  await tick();
   assert.deepEqual(requested, ["/config", "/inbox"]);
 
   // Те саме число — нічого не перечитується.
@@ -518,14 +696,15 @@ test("новий лічильник, поки відкритий список, �
   await s.get("refreshWarmupBadge")();
   assert.deepEqual(requested, ["/config"]);
 
-  // Відкрита розмова: список не перемальовується з-під очей.
+  // Розмова відкрита: список усе одно оновлюється, бо розмова поруч, а не замість нього.
   requested.length = 0;
   s = make();
   s.warmupState.unreadReplies = 2;
   s.warmupState.inbox.openThreadKey = "t-read";
   s.warmupState.inbox.openAccountId = "acc-a";
   await s.get("refreshWarmupBadge")();
-  assert.deepEqual(requested, ["/config"]);
+  await tick();
+  assert.deepEqual(requested, ["/config", "/inbox"]);
 
   // Інший екран на видноті: вхідні не читаються даремно, лічильник усе одно оновився.
   requested.length = 0;
@@ -537,15 +716,53 @@ test("новий лічильник, поки відкритий список, �
 });
 
 test("повернення на вкладку одразу бере лічильник, прихована вкладка його не питає", async () => {
-  const s = screen({
-    api: async () => ({ configured: true, unreadReplies: 1 }),
-    statements: SEARCH_STATEMENTS
-  });
+  const s = screen({ api: async () => ({ configured: true, unreadReplies: 1 }) });
   s.main.context.document.visibilityState = "hidden";
   await s.listeners["document:visibilitychange"]();
   assert.equal(s.calls.length, 0, "прихована вкладка спитала лічильник");
   s.main.context.document.visibilityState = "visible";
   await s.listeners["document:visibilitychange"]();
-  await new Promise((resolve) => setImmediate(resolve));
+  await tick();
   assert.deepEqual(s.calls.map((call) => call.path), ["/config"]);
+});
+
+test("«Оновити» перечитує список і відкриту розмову, а розмова при цьому не блимає порожнім екраном", async () => {
+  const { warmupState, listeners, get, calls } = screen({
+    api: async (path) => {
+      if (path === "/inbox") return { success: true, unread: 2, threads: threeThreads(), accounts: [], sync: null };
+      if (path.startsWith("/inbox/thread")) return { thread: thread({ threadKey: "t-read" }), messages: [{ direction: "in", body: "Нове", sentAt: minutesAgo(1) }] };
+      throw new Error(`невідомий маршрут ${path}`);
+    }
+  });
+  warmupState.inbox.openAccountId = "acc-a";
+  warmupState.inbox.openThreadKey = "t-read";
+  const shown = { thread: thread({ threadKey: "t-read" }), messages: [{ direction: "in", body: "Старе", sentAt: minutesAgo(9) }] };
+  warmupState.inbox.open = shown;
+
+  // Перечитування розмови, що вже відкрита, лишає її на екрані, поки йде відповідь…
+  const pending = get("openWarmupThread")("acc-a", "t-read", { refresh: true });
+  assert.equal(warmupState.inbox.open, shown, "розмова зникла, поки йшло оновлення");
+  await pending;
+  assert.equal(warmupState.inbox.open.messages[0].body, "Нове");
+
+  // …а відкриття розмови з нуля, навпаки, ховає попередню.
+  const fresh = get("openWarmupThread")("acc-a", "t-new-unread");
+  assert.equal(warmupState.inbox.open, null);
+  await fresh;
+
+  // Кнопка робить і те, і те.
+  calls.length = 0;
+  warmupState.inbox.openAccountId = "acc-a";
+  warmupState.inbox.openThreadKey = "t-read";
+  await listeners["refresh:click"]();
+  await tick();
+  assert.deepEqual(calls.map((call) => call.path).filter((path) => path !== "/inbox/read"), ["/inbox", "/inbox/thread?threadKey=t-read&accountId=acc-a"]);
+
+  // Без відкритої розмови — лише список.
+  calls.length = 0;
+  warmupState.inbox.openAccountId = null;
+  warmupState.inbox.openThreadKey = null;
+  await listeners["refresh:click"]();
+  await tick();
+  assert.deepEqual(calls.map((call) => call.path), ["/inbox"]);
 });

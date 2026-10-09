@@ -73,30 +73,129 @@
   background: none;
 }
 
-/* Над списком: акаунт, до якого звузити, і пошук. Поза списком, який
-   перемальовується, тож вписане в пошук не губиться. */
+/* ── Месенджер: акаунти зверху, зліва список, справа розмова ────────────── */
 
-.warmup-inbox-tools {
+/* Акаунти — кнопки в рядок. «Відкрити лише один акаунт» — це один дотик. */
+
+.inbox-accounts {
   display: flex;
   flex-wrap: wrap;
-  align-items: end;
-  gap: 10px 12px;
-  margin-bottom: 12px;
+  gap: 8px;
+  margin-bottom: 14px;
 }
 
-.warmup-inbox-account {
-  flex: 0 1 300px;
-  min-width: 0;
+.inbox-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 0;
+  padding: 7px 13px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
 }
 
-.warmup-inbox-account select {
-  width: 100%;
+.inbox-chip:hover {
+  border-color: color-mix(in srgb, var(--teal) 45%, var(--line));
+  background: var(--surface-strong);
+}
+
+.inbox-chip:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+}
+
+.inbox-chip.is-active {
+  border-color: var(--teal);
+  background: var(--teal-weak);
+  color: var(--teal);
+}
+
+.inbox-chip-name {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inbox-chip-count {
+  min-width: 20px;
+  padding: 1px 7px;
+  border-radius: 99px;
+  background: var(--teal);
+  color: #04100e;
+  font-size: 12px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.inbox-split {
+  display: grid;
+  grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.inbox-list-pane {
   min-width: 0;
+  display: grid;
+  gap: 10px;
+}
+
+/* Список прокручується сам, а не разом зі сторінкою: розмова поруч стоїть на місці.
+   Висоти — від висоти вікна за вирахуванням шапки; список коротший за розмову на
+   поле пошуку над ним, щоб низ в обох збігався. */
+
+.inbox-list {
+  min-width: 0;
+  min-height: 240px;
+  max-height: calc(100vh - 370px);
+  overflow-y: auto;
+}
+
+.inbox-thread-pane {
+  min-width: 0;
+  min-height: 360px;
+  max-height: calc(100vh - 320px);
+  overflow-y: auto;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.inbox-thread-empty {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 64px 20px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.inbox-thread-empty strong {
+  color: var(--ink);
+  font-size: 15px;
+}
+
+.inbox-thread-empty i {
+  width: 34px;
+  height: 34px;
+}
+
+.inbox-thread-empty .primary-button {
+  margin-top: 8px;
+  max-width: 100%;
 }
 
 .warmup-inbox-search {
-  flex: 1 1 240px;
-  min-width: 0;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -155,14 +254,14 @@
 .warmup-thread {
   width: 100%;
   display: grid;
-  grid-template-columns: 10px minmax(0, 1.05fr) minmax(0, 1.5fr) auto;
+  grid-template-columns: 10px minmax(0, 1fr);
   align-items: start;
-  gap: 4px 14px;
+  gap: 10px;
   min-height: 0;
-  padding: 12px 14px;
-  border-radius: 12px;
-  border: 1px solid var(--line);
-  background: var(--surface);
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
   color: var(--ink);
   text-align: left;
   white-space: normal;
@@ -170,7 +269,6 @@
 }
 
 .warmup-thread:hover {
-  border-color: color-mix(in srgb, var(--teal) 45%, var(--line));
   background: var(--surface-strong);
 }
 
@@ -180,8 +278,14 @@
 }
 
 .warmup-thread.is-unread {
-  border-color: color-mix(in srgb, var(--teal) 40%, var(--line));
   background: color-mix(in srgb, var(--teal) 7%, transparent);
+}
+
+/* Розмова, яка зараз відкрита праворуч. */
+
+.warmup-thread.is-open {
+  border-color: color-mix(in srgb, var(--teal) 55%, var(--line));
+  background: var(--surface-strong);
 }
 
 .warmup-thread-mark {
@@ -198,24 +302,46 @@
   background: var(--teal);
 }
 
-.warmup-thread-who {
+.warmup-thread-main {
   min-width: 0;
   display: grid;
   gap: 2px;
 }
 
-.warmup-thread-who strong {
+.warmup-thread-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.warmup-thread-top strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 14px;
   font-weight: 800;
-  overflow-wrap: anywhere;
 }
 
-.warmup-thread-who .warmup-subtle {
-  overflow-wrap: anywhere;
+.warmup-thread-top time {
+  flex: none;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
-.warmup-thread-who .warmup-identity {
-  margin-top: 1px;
+.warmup-thread.is-unread .warmup-thread-top time {
+  color: var(--teal);
+}
+
+.warmup-thread-headline {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 12.5px;
 }
 
 /* The first line of what was said, and at most two of them: a row is a list
@@ -226,7 +352,7 @@
   min-width: 0;
   color: var(--muted);
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 1.45;
   overflow-wrap: anywhere;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -235,30 +361,25 @@
   overflow: hidden;
 }
 
-.warmup-thread-from {
+.warmup-thread.is-unread .warmup-thread-preview {
   color: var(--ink);
-  font-weight: 800;
 }
 
-.warmup-thread-meta {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-.warmup-thread-meta time {
+.warmup-thread-from {
   color: var(--muted);
   font-weight: 700;
+}
+
+.warmup-thread .warmup-identity {
+  margin-top: 2px;
+  font-size: 12px;
 }
 
 /* ── One conversation ──────────────────────────────────────────────────── */
 
 .warmup-thread-head {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
   gap: 6px 14px;
   padding-bottom: 12px;
@@ -266,7 +387,11 @@
   border-bottom: 1px solid var(--line);
 }
 
+/* Назад до списку потрібен лише там, де список і розмова йдуть по черзі, а не поруч. */
+
 .warmup-thread-back {
+  display: none;
+  grid-column: 1 / -1;
   justify-self: start;
   padding-left: 0;
 }
@@ -424,42 +549,48 @@
   line-height: 1.5;
 }
 
+/* Вузький екран: список і розмова йдуть по черзі, а не поруч. Відкрита розмова
+   займає екран, а «Назад до списку» повертає. Акаунти не переносяться, а
+   прокручуються вбік, щоб не з'їдати пів екрана. */
+
 @media (max-width: 900px) {
-  .warmup-thread {
-    grid-template-columns: 10px minmax(0, 1fr) auto;
+  .inbox-accounts {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 4px;
   }
 
-  .warmup-thread-preview {
-    grid-column: 2 / -1;
-  }
-}
-
-@media (max-width: 640px) {
-  .warmup-inbox-account {
-    flex-basis: 100%;
+  .inbox-chip {
+    flex: none;
   }
 
-  .warmup-thread-next {
-    width: 100%;
-    justify-content: center;
+  .inbox-split {
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .warmup-thread {
-    grid-template-columns: 10px minmax(0, 1fr);
-    gap: 6px 10px;
+  .inbox-list,
+  .inbox-thread-pane {
+    min-height: 0;
+    max-height: none;
+    overflow: visible;
   }
 
-  .warmup-thread-preview,
-  .warmup-thread-meta {
-    grid-column: 2 / -1;
+  .inbox-split.has-thread .inbox-list-pane,
+  .inbox-split:not(.has-thread) .inbox-thread-pane {
+    display: none;
   }
-  .warmup-thread-meta {
-    flex-direction: row;
-    align-items: center;
-    justify-content: flex-start;
-    flex-wrap: wrap;
-    gap: 4px 10px;
-    white-space: normal;
+
+  .inbox-has-thread #warmupInboxNotice,
+  .inbox-has-thread .inbox-accounts {
+    display: none;
+  }
+
+  .inbox-thread-pane {
+    padding: 14px;
+  }
+
+  .warmup-thread-back {
+    display: inline-flex;
   }
 
   .warmup-thread-head {
@@ -468,6 +599,13 @@
 
   .warmup-thread-head-meta {
     align-items: flex-start;
+  }
+}
+
+@media (max-width: 640px) {
+  .warmup-thread-next {
+    width: 100%;
+    justify-content: center;
   }
 
   .warmup-message {
