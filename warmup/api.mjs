@@ -7,7 +7,7 @@ import {
   pausedDaysOn, pausedOn, planForDay, resumeCredit, runDay, totalDays, validateStrategy, workingModeOf, currentDay, fromDays, nextNoteDay, noteAllowedOnDay, toDays
 } from "./strategy.mjs";
 import { SESSION_WINDOW, insideWindow, nextSession, windowLabel } from "./schedule.mjs";
-import { HEALTH_LABEL, HEALTH_VALUES, deriveStatus, isHealth } from "./status.mjs";
+import { HEALTH_LABEL, HEALTH_VALUES, deriveStatus, isHealth, pauseCause } from "./status.mjs";
 import { PLATFORMS, parseProxy, platformOf, proxyString, retag } from "./platform.mjs";
 import { CLAIM_STATUS, OUTREACH_COLUMNS, OUTREACH_STATUSES, describeClaim, describeOutreach, personSnapshot, sentBy } from "./outreach.mjs";
 import {
@@ -22,7 +22,7 @@ import { encryptSecret, secretsConfigured } from "./secretbox.mjs";
 import { RECHECK_DONE, RECHECK_REQUESTED, issueLoginCheck, readLoginCheck } from "./login-check.mjs";
 import {
   activeRun, checkQuota, commitAction, connectQuotaToday, describeAccount, ensureDefaultStrategy, heldUntil,
-  logEvent, loadAccount, loginIdentities, newestRun, openSession, pauseForWarning, probeEventWriteAccess, recordAction,
+  latestWarnings, logEvent, loadAccount, loginIdentities, newestRun, openSession, pauseForWarning, probeEventWriteAccess, recordAction,
   toStrategy
 } from "./store.mjs";
 import {
@@ -1066,7 +1066,12 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         if (!warmup) { totals.idle += 1; continue; }
         if (warmup.state === "paused") {
           totals.paused += 1;
-          attention.push({ id: account.id, label: account.label, reason: `Paused after a warning until ${warmup.pausedUntil}` });
+          attention.push({
+            id: account.id, label: account.label,
+            reason: warmup.pauseCause === "invite_limit"
+              ? `LinkedIn invitation limit — paused until ${warmup.pausedUntil}`
+              : `Paused after a warning until ${warmup.pausedUntil}`
+          });
           continue;
         }
         if (warmup.finished) {
@@ -1166,6 +1171,12 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       // Who each browser is actually signed in as — one query for the whole
       // list, the same rule everything else on this endpoint follows.
       const identityByAccount = await loginIdentities();
+      // Why each paused account is paused — only those, so an ordinary morning
+      // costs nothing extra.
+      const pausedIds = linked
+        .filter((account) => { const run = runByAccount.get(account.id); return run?.paused_until && run.paused_until >= todayIso; })
+        .map((account) => account.id);
+      const warningByAccount = await latestWarnings(pausedIds);
 
       const byProfile = new Map(linked.map((account) => [account.profile_remote_id, account]));
 
@@ -1173,7 +1184,9 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         const account = byProfile.get(row.id) || null;
         const run = account ? runByAccount.get(account.id) || null : null;
         const last = account?.wl_sessions?.[0] || null;
-        const status = deriveStatus(account, run, todayIso);
+        const paused = Boolean(account && run?.paused_until && run.paused_until >= todayIso);
+        const cause = paused ? pauseCause(warningByAccount.get(account.id)) : null;
+        const status = deriveStatus(account, run, todayIso, cause);
         // The day the account is on, so the list's Day column has something to
         // put there. Read from the run's own snapshot, which is what the detail
         // panel reads too — two ways of counting the day is two answers.
@@ -1199,6 +1212,8 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           health: account?.health ?? "ok",
           healthNote: account?.health_note ?? null,
           status,
+          // Until when, and why: «Ліміт LinkedIn · до 11.10» rather than a bare «На паузі».
+          pause: paused ? { until: run.paused_until, cause } : null,
           isRunningNow: row.status === "running",
           connections: {
             ...(connectionsByAccount.get(account?.id ?? "") || { today: 0, total: 0 }),

@@ -451,6 +451,38 @@ test("the end of a stalled pause is written once, with one number, by whichever 
   assert.equal(rows.wl_accounts[0].status, "restricted", "the new warning's account stays restricted");
 });
 
+/**
+ * 09.10.2026: two accounts read «На паузі» and the owner asked how, since
+ * nobody had paused them. LinkedIn had — its weekly invitation limit — and the
+ * agent's two-day rest was only the answer to it. The list says the cause.
+ */
+test("a pause for LinkedIn's weekly invitation limit reads as the limit, with its last date, in the list and on the card", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: morning(0).getTime() });
+  const pausedUntil = plus(isoOf(morning(0)), 2);
+  rows.anty_browser_profiles[0] = { ...rows.anty_browser_profiles[0], name: "Chloe Stewart", start_page: "https://www.linkedin.com/feed/", tags: ["linkedin"] };
+
+  await call({ method: "POST", path: "/api/warmup/agent", body: { action: "warning", accountId: "acc-1", note: "Banner: unusual activity on your account" } });
+  await call({ method: "POST", path: "/api/warmup/agent", body: { action: "warning", accountId: "acc-1", note: "запрошення не було надіслано" } });
+  rows.wl_events.find((row) => row.type === "run.warning").created_at = `${isoOf(morning(0))}T07:00:00.000Z`;
+  rows.wl_events.filter((row) => row.type === "run.warning")[1].created_at = `${isoOf(morning(0))}T07:05:00.000Z`;
+
+  const list = await call({ method: "GET", path: "/api/warmup/profiles" });
+  const row = list.payload.profiles.find((profile) => profile.account?.id === "acc-1");
+  assert.equal(row.status, "limited", "the newest warning was the limit");
+  assert.deepEqual(row.pause, { until: pausedUntil, cause: "invite_limit" });
+
+  const card = await call({ method: "GET", path: "/api/warmup/accounts?id=acc-1" });
+  assert.equal(card.payload.account.warmup.pauseCause, "invite_limit");
+  assert.equal(card.payload.account.warmup.pauseNote, "запрошення не було надіслано");
+
+  // Any other warning is still a pause, said as one.
+  rows.wl_events.filter((row) => row.type === "run.warning")[1].created_at = `${isoOf(morning(0))}T06:00:00.000Z`;
+  const other = await call({ method: "GET", path: "/api/warmup/profiles" });
+  const again = other.payload.profiles.find((profile) => profile.account?.id === "acc-1");
+  assert.equal(again.status, "paused");
+  assert.deepEqual(again.pause, { until: pausedUntil, cause: "warning" });
+});
+
 test("the agent can report a warning, and a second report the same morning is the same pause", async (t) => {
   t.mock.timers.enable({ apis: ["Date"], now: morning(0).getTime() });
   const pausedUntil = plus(isoOf(morning(0)), 2);

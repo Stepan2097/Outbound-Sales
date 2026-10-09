@@ -4,6 +4,7 @@ import {
   warningPause
 } from "./strategy.mjs";
 import { nextSession } from "./schedule.mjs";
+import { pauseCause } from "./status.mjs";
 import { connectCeiling, weeklyConnectAllowance } from "./weekly.mjs";
 
 /**
@@ -243,6 +244,25 @@ export async function loginIdentities() {
     .limit(1, { foreignTable: "wl_events" })
     .rows();
   return new Map(rows.map((row) => [row.id, toIdentity(row.wl_events?.[0])]));
+}
+
+/**
+ * The newest LinkedIn warning per account, for the accounts asked about — what
+ * a pause says it is for (`pauseCause` in `warmup/status.mjs`).
+ */
+export async function latestWarnings(accountIds) {
+  if (!accountIds.length) return new Map();
+  const rows = await anty.from("wl_events").select("account_id,meta,created_at")
+    .eq("type", "run.warning").in("account_id", accountIds)
+    .order("created_at", { ascending: false })
+    .rows();
+  // Newest first by the row's own time, not by trusting the order the reply came in.
+  const newest = new Map();
+  for (const row of rows) {
+    const seen = newest.get(row.account_id);
+    if (!seen || String(row.created_at) > String(seen.created_at)) newest.set(row.account_id, row);
+  }
+  return new Map([...newest].map(([accountId, row]) => [accountId, row.meta?.note ?? null]));
 }
 
 export async function activeRun(accountId) {
@@ -585,6 +605,7 @@ export async function describeAccount(account) {
   const finished = plan.finished || run.state === "completed";
   const working = plan.working && !finished;
 
+  const pauseNote = isPaused ? (await latestWarnings([account.id])).get(account.id) ?? null : null;
   const counters = await anty.from("wl_day_actions").select("kind,quota,done")
     .eq("run_id", run.id).eq("on_date", today()).rows();
 
@@ -628,6 +649,9 @@ export async function describeAccount(account) {
       // screen that printed "paused until" it would be showing a stall that
       // is not there.
       pausedUntil: isPaused ? run.paused_until : null,
+      // What LinkedIn said, and which kind of stop that is — see `pauseCause`.
+      pauseNote: isPaused ? pauseNote : null,
+      pauseCause: isPaused ? pauseCause(pauseNote) : null,
       // The stall included, the number the day is counted with — see
       // `pausedDaysOn`.
       pausedDays: pausedDaysOn(run, today()),

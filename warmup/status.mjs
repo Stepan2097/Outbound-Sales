@@ -22,9 +22,24 @@ export function isHealth(value) {
   return typeof value === "string" && HEALTH_VALUES.includes(value);
 }
 
-export const DERIVED_STATUSES = ["excluded", "blocked", "needs_attention", "paused", "warming", "working", "finished", "off"];
+export const DERIVED_STATUSES = ["excluded", "blocked", "needs_attention", "limited", "paused", "warming", "working", "finished", "off"];
 
-export function deriveStatus(account, run, todayIso) {
+/**
+ * Why a pause holds, read from the warning that started it.
+ *
+ * `invite_limit` is LinkedIn refusing new invitations for the week — on
+ * 09.10.2026 Chloe and gulajpole, whose accounts were also sending from outside
+ * this system. The operator saw «На паузі» and asked how, since nobody had
+ * paused them: the cause is the thing to show, the pause is only what we do
+ * about it. Anything else is a warning in general.
+ */
+const INVITE_LIMIT = /invitation limit|too many invitations|ліміт\S* (?:на )?запрошен|тижнев\S* ліміт|запрошення не було надіслано|лимит\S* приглашени/i;
+
+export function pauseCause(note) {
+  return typeof note === "string" && INVITE_LIMIT.test(note) ? "invite_limit" : "warning";
+}
+
+export function deriveStatus(account, run, todayIso, cause = null) {
   if (!account) return "off";
   if (account.status === "excluded") return "excluded";
   if (account.health === "blocked") return "blocked";
@@ -34,7 +49,7 @@ export function deriveStatus(account, run, todayIso) {
   if (!account.profile_remote_id) return "needs_attention";
 
   if (!run || run.state === "stopped") return "off";
-  if (run.paused_until && run.paused_until >= todayIso) return "paused";
+  if (run.paused_until && run.paused_until >= todayIso) return cause === "invite_limit" ? "limited" : "paused";
   // A run whose last day has passed is working (or, with nothing to fall back
   // on, finished) whether or not anything marked it, so the list and the
   // detail page agree.

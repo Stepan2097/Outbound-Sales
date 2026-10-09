@@ -90,6 +90,7 @@ export function warmupApi(path, options) {
 const WARMUP_STATUS_TONE = {
   warming: "tone-live",
   working: "tone-live",
+  limited: "tone-warn",
   paused: "tone-warn",
   blocked: "tone-bad",
   needs_attention: "tone-warn",
@@ -102,6 +103,8 @@ const WARMUP_STATUS_LABEL = {
   warming: "Прогрівається",
   // Past the last phase an account does not stop; it settles into working mode.
   working: "Робочий режим",
+  // LinkedIn will not take new invitations this week; the account rests until it will.
+  limited: "Ліміт LinkedIn",
   paused: "На паузі",
   blocked: "Заблоковано",
   needs_attention: "Потребує уваги",
@@ -109,6 +112,23 @@ const WARMUP_STATUS_LABEL = {
   excluded: "Виключено",
   off: "Вимкнено"
 };
+
+/** «до 11.10» from "2026-10-11" — the last date the pause holds. */
+function warmupPauseUntil(iso) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || "");
+  return match ? `до ${match[3]}.${match[2]}` : "";
+}
+
+/** The status pill, with the pause's last date beside a pause or a limit. */
+function warmupStatusPill(profile) {
+  const status = profile.status;
+  const until = (status === "paused" || status === "limited") ? warmupPauseUntil(profile.pause?.until) : "";
+  const title = status === "limited"
+    ? "LinkedIn не приймає нових запитів у друзі з цього акаунта: досягнуто тижневого ліміту запрошень. Акаунт відпочиває й продовжить сам."
+    : status === "paused" ? "Зупинено після попередження LinkedIn. Акаунт продовжить сам." : "";
+  const label = `${WARMUP_STATUS_LABEL[status] || status}${until ? ` · ${until}` : ""}`;
+  return `<span class="pill ${WARMUP_STATUS_TONE[status] || "tone-muted"}"${title ? ` title="${escapeAttr(title)}"` : ""}>${escapeHtml(label)}</span>`;
+}
 
 function warmupRelativeTime(iso) {
   if (!iso) return "—";
@@ -374,9 +394,9 @@ export function renderWarmupProfiles() {
               ? `<div class="warmup-identity" title="На останньому вході агента залогінений як ця особа"><i data-lucide="badge-check"></i><span>${escapeHtml(identity.name)}</span></div>`
               : ""}
             ${profile.proxy ? "" : '<div class="warmup-subtle warmup-no-proxy" title="LinkedIn бачить справжню адресу цього профілю">без проксі</div>'}
-            <div class="warmup-row-phone"><span class="pill ${WARMUP_STATUS_TONE[status] || "tone-muted"}">${escapeHtml(WARMUP_STATUS_LABEL[status] || status)}</span>${account && warmupPhoneLine(profile) ? ` <span class="warmup-subtle">${escapeHtml(warmupPhoneLine(profile))}</span>` : ""}</div>
+            <div class="warmup-row-phone">${warmupStatusPill(profile)}${account && warmupPhoneLine(profile) ? ` <span class="warmup-subtle">${escapeHtml(warmupPhoneLine(profile))}</span>` : ""}</div>
           </td>
-          <td><span class="pill ${WARMUP_STATUS_TONE[status] || "tone-muted"}">${escapeHtml(WARMUP_STATUS_LABEL[status] || status)}</span></td>
+          <td>${warmupStatusPill(profile)}</td>
           <td>${escapeHtml(profile.day || "—")}</td>
           <td>${warmupConnectionsCell(profile)}</td>
           <td>${account
@@ -478,7 +498,11 @@ function renderWarmupDetail() {
   body.innerHTML = `
     <div class="warmup-detail-controls">${controls.join("")}</div>
     ${warmupCardCampaignHtml(account.id)}
-    ${warmup?.state === "paused" && warmup.pausedUntil ? `<p class="warmup-paused">На паузі після попередження: до ${escapeHtml(warmup.pausedUntil)} включно акаунт нічого не робить. Далі прогрів продовжиться сам, а дні паузи в нього не рахуються.</p>` : ""}
+    ${warmup?.state === "paused" && warmup.pausedUntil
+      ? warmup.pauseCause === "invite_limit"
+        ? `<p class="warmup-paused">Ліміт LinkedIn: з цього акаунта LinkedIn тиждень не приймає нових запитів у друзі («${escapeHtml(warmup.pauseNote || "запрошення не надіслано")}»). Ліміт рахує всі запити за останні 7 днів, зокрема надіслані поза цією системою. До ${escapeHtml(warmup.pausedUntil)} включно акаунт нічого не робить, далі прогрів продовжиться сам, а ці дні в нього не рахуються.</p>`
+        : `<p class="warmup-paused">На паузі після попередження: до ${escapeHtml(warmup.pausedUntil)} включно акаунт нічого не робить. Далі прогрів продовжиться сам, а дні паузи в нього не рахуються.</p>`
+      : ""}
     ${actionRows ? `<div class="warmup-actions">${actionRows}</div>` : ""}
     ${rules}
     ${warmupAccountQueueHtml(account.id)}

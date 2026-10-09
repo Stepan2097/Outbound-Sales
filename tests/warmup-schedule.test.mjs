@@ -5,7 +5,7 @@ import {
   ACTION_KINDS, CONNECT_HARD_MAX, DEFAULT_STRATEGY, currentDay, dailyQuota, planForDay, totalDays, validateStrategy, fromDays, toDays, withDay
 } from "../warmup/strategy.mjs";
 import { SESSION_WINDOW, insideWindow, nextSession, sessionTimeOn } from "../warmup/schedule.mjs";
-import { deriveStatus } from "../warmup/status.mjs";
+import { deriveStatus, pauseCause } from "../warmup/status.mjs";
 import { parseProxy, platformOf, retag } from "../warmup/platform.mjs";
 
 const strategy = DEFAULT_STRATEGY;
@@ -281,6 +281,9 @@ test("status folds health and the run in a fixed order of urgency", () => {
   // consequence, and the word the operator needs is the cause.
   assert.equal(deriveStatus({ ...healthy, health: "blocked" }, { ...run, paused_until: "2026-09-20" }, todayIso), "blocked");
   assert.equal(deriveStatus(healthy, { ...run, paused_until: "2026-09-20" }, todayIso), "paused");
+  // A pause LinkedIn's weekly invitation limit caused says so.
+  assert.equal(deriveStatus(healthy, { ...run, paused_until: "2026-09-20" }, todayIso, "invite_limit"), "limited");
+  assert.equal(deriveStatus(healthy, run, todayIso, "invite_limit"), "warming", "a cause without a pause is nothing");
   assert.equal(deriveStatus({ ...healthy, profile_remote_id: null }, run, todayIso), "needs_attention");
   assert.equal(deriveStatus(healthy, null, todayIso), "off");
   assert.equal(deriveStatus(null, null, todayIso), "off");
@@ -418,4 +421,16 @@ test("вікно, яке не схоже на дві години по поря�
   assert.deepEqual(await windowWith({ WARMUP_SESSION_START_HOUR: "9", WARMUP_SESSION_END_HOUR: "9" }), { startHour: 9, endHour: 13 });
   // Порожнє — це «не задано», а не нуль.
   assert.deepEqual(await windowWith({ WARMUP_SESSION_START_HOUR: "  " }), { startHour: 9, endHour: 13 });
+});
+
+test("the warning texts that mean LinkedIn's weekly invitation limit, in the languages the accounts use", () => {
+  for (const note of [
+    "запрошення не було надіслано",
+    "ви досягли тижневого ліміту на запрошення контактів",
+    "ліміт запрошень",
+    "You've reached the weekly invitation limit",
+    "too many invitations",
+    "превышен лимит приглашений"
+  ]) assert.equal(pauseCause(note), "invite_limit", note);
+  for (const note of ["unusual activity", "LinkedIn checkpoint or CAPTCHA", "", null]) assert.equal(pauseCause(note), "warning", String(note));
 });
