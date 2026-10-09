@@ -30,6 +30,8 @@ What that means for trust:
 | `messaging-list.html` | The conversation list: five rows, one of them a group thread with no `/in/` link, one with an emoji, one dated `Sep 12` rather than `2h`, plus the composer link that must *not* be read as a conversation. |
 | `thread-reply.html` | An open conversation with the list still in the sidebar — the trap that any "biggest list on the page" heuristic falls into. Grouped bubbles, a `SEP 12` separator, an attachment with no text, a body that arrived with markup in it. |
 | `thread-ours.html` | A conversation we did all the talking in, where the account's own slug is unknown and the only thing identifying us is our name. The direction test that matters. |
+| `thread-cards.html` | A thread that holds only picture rows — avatars described to a screen reader as «Переглянути профіль Sinan», no text, no attachment. Production showed these as «conversations» whose message was `[no text]`; they are not messages, and a thread of nothing else is not sent. |
+| `thread-cards-mixed.html` | A real conversation with a picture row in the middle of it and a file at the end: three messages out, not four. The picture must not become `[no text]` and must not decide who the next bubble belongs to. |
 | `messaging-empty.html` | An inbox with nothing in it. Zero threads here is the truth, not a failure. |
 | `messaging-rotted.html` | The day the anchors go: conversations rendered as `<button>`s with the id in a data attribute. Zero threads here **is** a failure, and the reader has to say so out loud rather than report a quiet zero. |
 

@@ -223,7 +223,12 @@ export function harvestThread() {
       // separately so the node side can prefer the paragraphs and still have
       // something when there are none.
       text: (li.innerText || flat(li) || '').trim(),
-      hasMedia: Boolean(li.querySelector('img[src], video, a[href*="/dms/"], [class*="attachment"]')),
+      // An attachment, a sticker, a video — and not the sender's own avatar,
+      // which is an `img` too. An avatar-only row used to count as media, and a
+      // row that is only somebody's picture is a card, not a message.
+      hasMedia: [...li.querySelectorAll('img[src], video')].some((el) =>
+        !el.closest('a[href*="/in/"]') && !/^(переглянути\s+профіль|view\b.*\bprofile)/i.test(el.getAttribute('alt') || ''))
+        || Boolean(li.querySelector('a[href*="/dms/"], [class*="attachment"]')),
     };
   });
 
@@ -331,6 +336,21 @@ export function parseStamp(raw, nowMs = Date.now()) {
 }
 
 /**
+ * A person's name, out of a string LinkedIn wrote for a screen reader.
+ *
+ * An avatar's alt text is not the name but a sentence about it — "Переглянути
+ * профіль Sinan", "View Sinan's profile" — and read as a name it filed a
+ * conversation under three words that every other conversation begins with the
+ * same way. What is left when the sentence is taken off is the name, or nothing.
+ */
+export function personNameFrom(value) {
+  const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+  const owner = /^view\s+(.+?)['’]s\s+profile(?:\s+(?:photo|picture))?$/i.exec(text);
+  if (owner) return owner[1].trim();
+  return text.replace(/^(?:переглянути\s+профіль|view\s+profile\s+of|view\s+profile)(?:\s+|$)/i, '').trim();
+}
+
+/**
  * A conversation list row, read into something with a name and an age.
  *
  * Two places claim to hold the name and they disagree on group threads: the
@@ -343,7 +363,7 @@ export function parseStamp(raw, nowMs = Date.now()) {
  * group chat that was never about them.
  */
 export function conversationRow(raw, nowMs = Date.now()) {
-  const alt = (raw.alts ?? []).find((a) => a && a.length > 1 && !/^linkedin$|logo|banner|background|icon/i.test(a)) ?? null;
+  const alt = (raw.alts ?? []).map(personNameFrom).find((a) => a && a.length > 1 && !/^linkedin$|logo|banner|background|icon/i.test(a)) ?? null;
   // A line that ends with the row's own timestamp is a name and a time
   // rendered as one line — which is how the list looks when LinkedIn puts the
   // `time` inside the same row element as the name. The stamp is read from the
@@ -462,7 +482,7 @@ export function buildThread({ threadKey, harvest, self, listRow = null, nowMs = 
 
   const isSelf = (item) => {
     if (selfSlug && item.slug && String(item.slug).toLowerCase() === selfSlug) return true;
-    const names = [item.linkText, ...(item.alts ?? [])].filter(Boolean).map((n) => n.toLowerCase().replace(/\s+/g, ' ').trim());
+    const names = [item.linkText, ...(item.alts ?? [])].filter(Boolean).map((n) => personNameFrom(n).toLowerCase());
     if (selfName && names.some((n) => n === selfName)) return true;
     // Some builds label our own group header "You" rather than with our name.
     return names.some((n) => /^(you|ви|ти)$/.test(n));
@@ -474,6 +494,7 @@ export function buildThread({ threadKey, harvest, self, listRow = null, nowMs = 
   let author = null;          // carried forward across a grouped run of bubbles
   let heading = null;         // the day separator the following messages belong to
   let lastAt = null;
+  let cards = 0;              // rows that said nothing: a picture, a notice
 
   for (const item of harvest.items ?? []) {
     const bodyRaw = item.paragraphs?.length ? item.paragraphs.join('\n') : (item.text ?? '');
@@ -494,10 +515,22 @@ export function buildThread({ threadKey, harvest, self, listRow = null, nowMs = 
       continue;
     }
 
+    // Nothing was said: no text and no attachment. That is a profile card, an
+    // avatar, a notice LinkedIn put into the thread — and it used to become a
+    // message whose whole body was «[no text]», filed under the name of its own
+    // alt text, "Переглянути профіль Sinan". It says nothing, so it is not a
+    // message, and it does not speak for anybody either: it must not decide who
+    // the next grouped bubble belongs to. (An attachment has media and is kept.)
+    if (!body && !item.hasMedia) {
+      cards += 1;
+      notes.push(`елемент #${item.index} без тексту й вкладення — службова картка, не повідомлення`);
+      continue;
+    }
+
     if (item.slug || item.linkText || item.alts?.length) {
       author = {
         slug: item.slug ?? null,
-        name: (item.linkText || item.alts?.[0] || '').trim() || null,
+        name: personNameFrom(item.linkText || item.alts?.[0] || '') || null,
         self: isSelf(item),
       };
     }
@@ -551,7 +584,10 @@ export function buildThread({ threadKey, harvest, self, listRow = null, nowMs = 
       // out — see `externalIdFor`. `at` moves every run; `stampToken` does not.
       externalId: item.externalId || externalIdFor({ threadKey, direction, body: body || '[no text]', stampToken: item.stampIso, occurrence }),
       direction,
-      body: body || (item.hasMedia ? '[attachment]' : '[no text]'),
+      // Reached with no text only for an attachment: a row with neither is a
+      // card, and was set aside above. The id keeps hashing the old placeholder,
+      // so an attachment stored before this change is still the same message.
+      body: body || '[attachment]',
     };
     // And when there is no time to be had anywhere: send the label as written
     // rather than a manufactured timestamp. The portal stores its own
@@ -578,8 +614,15 @@ export function buildThread({ threadKey, harvest, self, listRow = null, nowMs = 
     if (selfName && String(h.text ?? '').toLowerCase().replace(/\s+/g, ' ').trim() === selfName) return false;
     return true;
   });
+  // A conversation that had only cards in it is not a conversation: nobody said
+  // anything, and filing it would put a person in the inbox, unread, for a
+  // picture. The sweep notes why and moves on.
+  if (!messages.length && cards) {
+    return { skip: `лише службові картки (${cards}), жодного повідомлення — це не розмова`, notes, cards };
+  }
+
   const participant = {
-    name: ranked[0]?.name ?? listRow?.name ?? fromHeader?.text ?? 'Unknown',
+    name: [ranked[0]?.name, listRow?.name, personNameFrom(fromHeader?.text)].find(Boolean) ?? 'Unknown',
     slug: ranked[0]?.slug ?? fromHeader?.slug ?? listRow?.slug ?? null,
     headline: headlineFrom(harvest, ranked[0]?.name ?? listRow?.name ?? null),
   };
@@ -592,6 +635,7 @@ export function buildThread({ threadKey, harvest, self, listRow = null, nowMs = 
   return {
     payload: { threadKey, participant, messages: capped },
     inbound: capped.filter((m) => m.direction === 'in').length,
+    cards,
     how: harvest.how ?? null,
     notes,
   };

@@ -33,7 +33,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   harvestConversations, harvestThread,
-  parseStamp, conversationRow, pickConversations, buildThread, externalIdFor, trimBody,
+  parseStamp, conversationRow, pickConversations, buildThread, externalIdFor, trimBody, personNameFrom,
 } from './lib/inbox-dom.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -409,5 +409,105 @@ describe('what the portal is told', () => {
     assert.deepEqual(built.payload.messages, []);
     assert.equal(built.payload.participant.name, 'Unknown');
     assert.equal(built.payload.participant.slug, null);
+  });
+});
+
+// ── cards: a picture is not a message, and its description is not a name ───
+
+describe('service cards', () => {
+  test('a thread of only pictures reads as no conversation at all', async (t) => {
+    if (!page) return t.skip('Chrome не знайдено');
+    await open('thread-cards.html');
+    const harvest = await page.evaluate(harvestThread);
+    assert.equal(harvest.items.length, 2, 'обидві картки прочитано як елементи списку');
+    assert.ok(harvest.items.every((item) => !item.hasMedia), 'аватарка — не вкладення');
+    const built = buildThread({ threadKey: 'cards', harvest, self: SELF_BY_NAME, nowMs: NOW });
+    assert.ok(built.skip, 'розмова з самих карток має бути пропущена, а не відправлена порталу');
+    assert.match(built.skip, /службов/);
+    assert.equal(built.payload, undefined);
+    assert.equal(built.cards, 2);
+  });
+
+  test('a picture in the middle of a conversation is not a message in it', async (t) => {
+    if (!page) return t.skip('Chrome не знайдено');
+    await open('thread-cards-mixed.html');
+    const built = buildThread({ threadKey: 'mixed', harvest: await page.evaluate(harvestThread), self: SELF_BY_SLUG, nowMs: NOW });
+    const messages = built.payload.messages;
+    assert.deepEqual(messages.map((m) => m.direction), ['out', 'in', 'in'], 'наше, їхня відповідь і файл — а не четверте «[no text]»');
+    assert.deepEqual(messages.map((m) => m.body), [
+      'Hi Sinan — we work with UA teams on installs analytics. Worth a short chat?',
+      'Sure, send me what you have.',
+      '[attachment]'
+    ]);
+    assert.ok(!messages.some((m) => m.body === '[no text]'));
+    assert.equal(built.cards, 1);
+    assert.ok(built.notes.some((n) => /службова картка/.test(n)));
+  });
+
+  test('the person is Sinan, not three words of an instruction in front of Sinan', async (t) => {
+    if (!page) return t.skip('Chrome не знайдено');
+    await open('thread-cards-mixed.html');
+    const built = buildThread({ threadKey: 'mixed', harvest: await page.evaluate(harvestThread), self: SELF_BY_SLUG, nowMs: NOW });
+    assert.equal(built.payload.participant.name, 'Sinan');
+    assert.equal(built.payload.participant.slug, 'sinan-arslan-1');
+  });
+
+  test('the list row of such a person is filed under the name, not under the sentence', () => {
+    // Only the avatar's description is the name here; the visible line has the full one.
+    const row = conversationRow({
+      threadKey: 'k', alts: ['Переглянути профіль Sinan'], slugs: ['sinan-arslan-1'],
+      lines: ['Sinan Arslan', 'Sure, send me what you have.'], stampText: '2h', stampIso: null, order: 0
+    }, NOW);
+    assert.equal(row.name, 'Sinan Arslan', 'видимий рядок містить ім’я з аватарки, тож він і виграє');
+    const bare = conversationRow({ threadKey: 'k', alts: ['Переглянути профіль Sinan'], slugs: [], lines: [], stampText: '2h', order: 0 }, NOW);
+    assert.equal(bare.name, 'Sinan');
+  });
+
+  test('the words in front of a name are taken off, and a real name is left alone', () => {
+    assert.equal(personNameFrom('Переглянути профіль Sinan'), 'Sinan');
+    assert.equal(personNameFrom('  переглянути   профіль   Edgar Lopez '), 'Edgar Lopez');
+    assert.equal(personNameFrom('View profile of Anna Lee'), 'Anna Lee');
+    assert.equal(personNameFrom('View profile Luke'), 'Luke');
+    assert.equal(personNameFrom('View Sinan’s profile'), 'Sinan');
+    assert.equal(personNameFrom("View Sinan's profile"), 'Sinan');
+    assert.equal(personNameFrom('Viewer Smith'), 'Viewer Smith');
+    assert.equal(personNameFrom('Oleh Petrenko'), 'Oleh Petrenko');
+    assert.equal(personNameFrom('Переглянути профіль'), '', 'без імені лишається порожньо, а не службові слова');
+    assert.equal(personNameFrom(null), '');
+  });
+
+  test('a card does not decide who the next grouped bubble belongs to', () => {
+    // Their picture, then a bubble of ours with no header of its own. If the
+    // picture set the author, our message would be filed as theirs.
+    const built = buildThread({
+      threadKey: 'k',
+      harvest: {
+        items: [
+          { index: 0, slug: 'mary-lindsay-0a12b3', linkText: 'Mary Lindsay', alts: [], paragraphs: ['Hi Sinan'], text: 'Hi Sinan', stampIso: '2026-09-15T09:00:00.000Z', hasMedia: false },
+          { index: 1, slug: 'sinan-arslan-1', linkText: '', alts: ['Переглянути профіль Sinan'], paragraphs: [], text: '', hasMedia: false },
+          { index: 2, slug: null, linkText: '', alts: [], paragraphs: ['Following up'], text: 'Following up', stampIso: '2026-09-15T10:00:00.000Z', hasMedia: false }
+        ],
+        header: []
+      },
+      self: SELF_BY_SLUG,
+      nowMs: NOW,
+    });
+    assert.deepEqual(built.payload.messages.map((m) => m.direction), ['out', 'out'], 'наше повідомлення після картки лишилось нашим');
+    assert.equal(built.inbound, 0);
+  });
+
+  test('a real attachment still arrives, and a conversation with one attachment is a conversation', () => {
+    const built = buildThread({
+      threadKey: 'k',
+      harvest: {
+        items: [{ index: 0, slug: 'sinan-arslan-1', linkText: 'Sinan Arslan', alts: [], paragraphs: [], text: '', hasMedia: true, stampIso: '2026-09-15T12:07:00.000Z' }],
+        header: []
+      },
+      self: SELF_BY_SLUG,
+      nowMs: NOW,
+    });
+    assert.ok(!built.skip);
+    assert.deepEqual(built.payload.messages.map((m) => m.body), ['[attachment]']);
+    assert.equal(built.cards, 0);
   });
 });

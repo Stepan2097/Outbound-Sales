@@ -4,7 +4,7 @@ import test from "node:test";
 
 import { handleWarmupApi } from "../warmup/api.mjs";
 import { ADOPT_FOLDER_DEFAULT, adoptable, forgetAdoptionFolder, personName, profileLink } from "../warmup/people.mjs";
-import { ADOPT_PER_SYNC, CONTACT_TYPE } from "../warmup/inbox.mjs";
+import { ADOPT_PER_SYNC, CONTACT_TYPE, SERVICE_CARD_BODY, isServiceCard, normalizeThreadInput } from "../warmup/inbox.mjs";
 import { DEFAULT_STRATEGY } from "../warmup/strategy.mjs";
 
 /**
@@ -503,4 +503,125 @@ test("і ті, кого цей акаунт сам запрошував, лиш�
   assert.equal(added().length, 0);
   const finished = await done();
   assert.equal(finished.payload.crmAdded.waiting, 0);
+});
+
+// ── Службові картки ───────────────────────────────────────────────────────
+//
+// «Переглянути профіль Sinan» і «[no text]» у вхідних були не розмовами, а
+// картинками: рядок без тексту й без вкладення, який агент зберігав як
+// повідомлення. Нове від агента такого не шле, а те, що вже лежить у базі або
+// ще прийде від старого агента, не стає розмовою, не робить розмову непрочитаною,
+// не є останнім сказаним і не йде в CRM.
+
+let legacyId = 0;
+
+/** A message row as an older agent left it, written straight into the table. */
+function stored({ threadKey, body, direction = "in", participant = { name: "Переглянути профіль Sinan", slug: "sinan-arslan-1" }, accountId = "acc-1", minutesAgo = 30, crmContactId = null }) {
+  const at = new Date(Date.now() - minutesAgo * 60_000).toISOString();
+  rows.wl_events.push({
+    id: `legacy-${++legacyId}`, account_id: accountId, level: "info", type: direction === "in" ? "message.in" : "message.out",
+    message: "legacy", created_at: at,
+    meta: { threadKey, crmContactId, awaitsContact: !crmContactId, externalId: `legacy-ext-${legacyId}`, direction, body, sentAt: at, sentAtGiven: true, participant }
+  });
+}
+
+test("картка — це «[no text]» і більше нічого; вкладення й порожнє слово «text» — ні", () => {
+  assert.equal(SERVICE_CARD_BODY, "[no text]");
+  assert.equal(isServiceCard("[no text]"), true);
+  assert.equal(isServiceCard("  [No Text] "), true);
+  assert.equal(isServiceCard("[attachment]"), false);
+  assert.equal(isServiceCard("no text"), false);
+  assert.equal(isServiceCard("Привіт [no text] світ"), false);
+  assert.equal(isServiceCard(undefined), false);
+});
+
+test("картки, які шле старий агент, відкидаються при вході й не вважаються некоректними", () => {
+  const input = normalizeThreadInput({
+    threadKey: "t-cards",
+    participant: { name: "Sinan", slug: "sinan-arslan-1" },
+    messages: [
+      { externalId: "a", direction: "in", body: "[no text]", sentAt: "2026-09-20T09:00:00.000Z" },
+      { externalId: "b", direction: "in", body: "Привіт!", sentAt: "2026-09-20T09:05:00.000Z" },
+      { externalId: "c", direction: "out", body: "[no text]", sentAt: "2026-09-20T09:06:00.000Z" },
+      { externalId: "d", direction: "in", body: "[attachment]", sentAt: "2026-09-20T09:07:00.000Z" },
+      { externalId: "e", direction: "in", body: "   ", sentAt: "2026-09-20T09:08:00.000Z" }
+    ]
+  });
+  assert.deepEqual(input.messages.map((m) => m.body), ["Привіт!", "[attachment]"]);
+  assert.equal(input.cards, 2);
+  assert.equal(input.invalid, 1, "порожнє тіло лишається некоректним, картка — ні");
+});
+
+test("розмова, у якій від старого агента прийшли самі картки, нічого не зберігає, нікого не додає й не рухає запрошення", async () => {
+  const answer = await thread(
+    [
+      { externalId: "k-1", direction: "in", body: "[no text]", sentAt: "2026-09-20T09:00:00.000Z" },
+      { externalId: "k-2", direction: "out", body: "[no text]", sentAt: "2026-09-20T09:01:00.000Z" }
+    ],
+    { name: "Marta Kovalenko", slug: "marta-kovalenko" },
+    "t-marta"
+  );
+  assert.equal(answer.status, 200);
+  assert.equal(answer.payload.stored, 0);
+  assert.equal(answer.payload.cards, 2);
+  assert.equal(answer.payload.statusMoved, false, "картка — не відповідь, тож «прийняв» запрошення від неї не стає");
+  assert.equal(rows.wl_outreach[0].status, "pending");
+  assert.equal(rows.wl_events.filter((row) => row.type.startsWith("message.")).length, 0);
+  assert.equal(rows.activities.length, 0);
+
+  const stranger = await thread([{ externalId: "k-3", direction: "in", body: "[no text]", sentAt: "2026-09-20T09:00:00.000Z" }], IVAN, "t-ivan-card");
+  assert.equal(stranger.payload.added, false, "заради картки людину в CRM не додають");
+  assert.equal(added().length, 0);
+});
+
+test("картки, що вже лежать у базі, не стають розмовами і не роблять непрочитаного", async () => {
+  // Одна «розмова» з самих карток (як на проді) і одна справжня з карткою всередині.
+  stored({ threadKey: "t-card-only", body: "[no text]", minutesAgo: 60 });
+  stored({ threadKey: "t-card-only", body: "[no text]", direction: "out", minutesAgo: 59 });
+  stored({ threadKey: "t-real", body: "Привіт! Цікаво.", participant: { name: "Ivan Petrov", slug: "ivan-petrov" }, minutesAgo: 20 });
+  stored({ threadKey: "t-real", body: "[no text]", participant: { name: "Переглянути профіль Ivan", slug: "ivan-petrov" }, minutesAgo: 5 });
+
+  const list = await call({ method: "GET", path: "/api/warmup/inbox" });
+  assert.deepEqual(list.payload.threads.map((row) => row.threadKey), ["t-real"], "розмови з самих карток немає");
+  const real = list.payload.threads[0];
+  assert.equal(real.lastMessage.body, "Привіт! Цікаво.", "останнє сказане — слова, а не картка");
+  assert.equal(real.messageCount, 1);
+  assert.equal(real.participant.name, "Ivan Petrov", "ім'я не з картки");
+  assert.equal(real.unread, true);
+  assert.equal(list.payload.unread, 1, "непрочитаних рівно стільки, скільки живих розмов");
+
+  const config = await call({ method: "GET", path: "/api/warmup/config" });
+  assert.equal(config.payload.unreadReplies, 1, "число на пункті меню — теж без карток");
+
+  const opened = await call({ method: "GET", path: "/api/warmup/inbox/thread?accountId=acc-1&threadKey=t-real" });
+  assert.deepEqual(opened.payload.messages.map((m) => m.body), ["Привіт! Цікаво."]);
+  const gone = await call({ method: "GET", path: "/api/warmup/inbox/thread?accountId=acc-1&threadKey=t-card-only" });
+  assert.equal(gone.status, 404, "картка не відкривається як розмова");
+});
+
+test("лише картка у відповідь не робить розмову непрочитаною", async () => {
+  // Прочитана розмова, і після прочитання прийшла картка — це не нова відповідь.
+  stored({ threadKey: "t-read", body: "Дякую!", participant: { name: "Ivan Petrov", slug: "ivan-petrov" }, minutesAgo: 120 });
+  await call({ method: "POST", path: "/api/warmup/inbox/read", body: { accountId: "acc-1", threadKey: "t-read" } });
+  // Збережена після того, як прочитали (хвилина «у майбутньому» відносно позначки).
+  stored({ threadKey: "t-read", body: "[no text]", participant: { name: "Переглянути профіль Ivan", slug: "ivan-petrov" }, minutesAgo: -1 });
+  const list = await call({ method: "GET", path: "/api/warmup/inbox" });
+  assert.equal(list.payload.threads[0].unread, false);
+  assert.equal(list.payload.unread, 0);
+});
+
+test("картки, що вже лежать у базі, не йдуть у CRM ні при додаванні людини, ні в історії контакту", async () => {
+  stored({ threadKey: "t-ivan", body: "Привіт! Цікаво.", participant: IVAN, minutesAgo: 40 });
+  stored({ threadKey: "t-ivan", body: "[no text]", participant: { name: "Переглянути профіль Ivan", slug: "ivan-petrov" }, minutesAgo: 39 });
+  const finished = await done();
+  assert.equal(finished.payload.crmAdded.added, 1);
+  assert.equal(rows.activities.length, 1, "лише справжнє повідомлення");
+  assert.doesNotMatch(rows.activities[0].content, /\[no text\]/);
+
+  // І на картці контакту в самому застосунку.
+  stored({ threadKey: "t-olena", body: "Дякую!", participant: { name: "Olena Bondar", slug: "olena-bondar" }, crmContactId: "c-9", minutesAgo: 30 });
+  stored({ threadKey: "t-olena", body: "[no text]", participant: { name: "Olena Bondar", slug: "olena-bondar" }, crmContactId: "c-9", minutesAgo: 29 });
+  const history = await call({ method: "GET", path: "/api/warmup/history?crmContactId=c-9" });
+  const bodies = (history.payload.entries || []).filter((entry) => entry.kind === "message").map((entry) => entry.body);
+  assert.deepEqual(bodies, ["Дякую!"]);
 });

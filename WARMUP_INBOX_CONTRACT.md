@@ -152,11 +152,21 @@ does not control:
   whether its time is an ISO one as `meta.sentAtIso` — what the thread screen
   orders by (`GET /inbox/thread`, below).
 - An attachment-only message — a file, a sticker, a voice note — arrives with
-  the body `[attachment]`, and a message with neither text nor media as
-  `[no text]`. Carried, never dropped: an inbound file **is** a reply, and
-  dropping it would mean the reply detection missed the very thing this phase
-  exists to catch. It stores, marks the thread unread, matches, moves the
-  status and reaches the CRM like any other inbound message.
+  the body `[attachment]`. Carried, never dropped: an inbound file **is** a
+  reply, and dropping it would mean the reply detection missed the very thing
+  this phase exists to catch. It stores, marks the thread unread, matches, moves
+  the status and reaches the CRM like any other inbound message.
+- **A row with neither text nor media is not a message.** It is a card — a
+  profile picture, a notice LinkedIn put in the thread — and the agent does not
+  send it (a conversation made only of such rows is not sent at all). It used to
+  arrive as `[no text]`, under the name of its own avatar's description
+  («Переглянути профіль Sinan»), and filled the inbox with «conversations» that
+  nobody wrote and unread replies nobody sent. The portal now also refuses the
+  body `[no text]` at the door (`inbox.thread` answers `cards: N`; not counted as
+  `invalid`), and the ones already stored are left out when read: they make no
+  thread, no unread, no preview, no participant, no CRM line and no history
+  entry. An avatar's description is not a name either — the agent strips
+  «Переглянути профіль» / "View profile of" from names.
 - A group thread is named by its whole visible row, e.g.
   `"Anna Bauer, Tomás Ruiz"`, and carries no slug. It therefore matches nobody,
   which is the right outcome: filing a group chat under whichever avatar loaded

@@ -49,6 +49,24 @@ export const READ_TYPE = "inbox.read";
 export const CONTACT_TYPE = "inbox.contact";
 
 /**
+ * What the agent writes as the body of something it read in a conversation that
+ * had no text and no attachment: an avatar, a profile card, a notice. It is not
+ * a message, and every message that carries it is left out of the inbox — it
+ * does not make a conversation, does not make one unread, is not the last thing
+ * said, and is not copied to the CRM. (An attachment is `[attachment]` and is a
+ * message.)
+ *
+ * Left out when read, not deleted: rows are not rewritten here, and the ones
+ * stored before the agent stopped sending them are still in the table, which
+ * is what filling the inbox with «Переглянути профіль …» was.
+ */
+export const SERVICE_CARD_BODY = "[no text]";
+
+export function isServiceCard(body) {
+  return typeof body === "string" && body.trim().toLowerCase() === SERVICE_CARD_BODY;
+}
+
+/**
  * What the audit log must not show, named here so no other file has to know
  * which event types are really messages.
  *
@@ -307,8 +325,11 @@ export function normalizeThreadInput(body) {
   const messages = [];
   let invalid = 0;
   let undated = 0;
+  let cards = 0;
 
   for (const raw of incoming) {
+    // A card an older agent still sends: not a message, and not invalid either.
+    if (isServiceCard(raw?.body)) { cards += 1; continue; }
     const message = normalizeMessage(raw, { threadKey, receivedAt });
     // One unreadable message must not cost the nineteen around it.
     if (!message) { invalid += 1; continue; }
@@ -322,6 +343,7 @@ export function normalizeThreadInput(body) {
     messages: conversationOrder(messages),
     invalid,
     undated,
+    cards,
     receivedAt
   };
 }
@@ -693,7 +715,8 @@ export function messageLine(message, name) {
 
 /** The line any copied row becomes: a message, or a request that went out. */
 function activityLineOf(row, name) {
-  if (MESSAGE_TYPES.includes(row?.type)) return messageLine(row.meta, name);
+  // A card the agent once stored as a message says nothing to the sales team.
+  if (MESSAGE_TYPES.includes(row?.type)) return isServiceCard(row.meta?.body) ? null : messageLine(row.meta, name);
   if (REQUEST_EVENT_TYPES.includes(row?.type)) return requestLine(row, name);
   return null;
 }
@@ -889,7 +912,7 @@ async function earlierLines({ accountId, contactId, threadKey, threadRows, name,
  * CRM holds twice (`contactBySlug`).
  */
 export async function storeThread({ account, input, folderIds = [], now = new Date() }) {
-  const { threadKey, participant, messages, invalid, undated } = input;
+  const { threadKey, participant, messages, invalid, undated, cards = 0 } = input;
 
   const seen = await storedExternalIds(account.id, messages.map((message) => message.externalId));
   const byId = splitStored(messages, seen);
@@ -978,7 +1001,7 @@ export async function storeThread({ account, input, folderIds = [], now = new Da
 
   // `repeated` is the part of `skipped` that came back under a new id. Zero on
   // an agent whose ids are stable; a count every morning says they are not.
-  return { stored: fresh.length, skipped: skipped.length, repeated: repeats.length, invalid, undated, threadKey, ...outcome };
+  return { stored: fresh.length, skipped: skipped.length, repeated: repeats.length, invalid, undated, cards, threadKey, ...outcome };
 }
 
 /**
@@ -1103,7 +1126,7 @@ export async function messagesForContact({ accountId, crmContactId, personName, 
   const seen = new Set();
   return [...keyed, ...named, ...legacy]
     .filter((row) => {
-      if (seen.has(row.id) || !theirs(row)) return false;
+      if (seen.has(row.id) || isServiceCard(row.meta?.body) || !theirs(row)) return false;
       seen.add(row.id);
       return true;
     })
@@ -1241,6 +1264,9 @@ export function deriveThreads(events, { readMarks = new Map(), syncedAt = new Ma
   for (const event of events) {
     const threadKey = event.meta?.threadKey;
     if (!threadKey || !event.account_id) continue;
+    // A card stored as a message is not one (`SERVICE_CARD_BODY`): it makes no
+    // thread, no unread, no preview and no participant.
+    if (isServiceCard(event.meta?.body)) continue;
     const key = threadId(event.account_id, threadKey);
     const message = toMessage(event);
 
@@ -1388,7 +1414,7 @@ export async function readThread({ accountId, threadKey }) {
   const [thread] = deriveThreads(events, { readMarks: read, syncedAt: synced, contactMarks: contacts });
   if (!thread) return null;
 
-  const messages = threadOrder(events.map(toMessage))
+  const messages = threadOrder(events.filter((event) => !isServiceCard(event.meta?.body)).map(toMessage))
     .map((message) => ({
       direction: message.direction,
       body: message.body,
