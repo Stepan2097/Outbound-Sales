@@ -6,7 +6,7 @@ import { REQUEST_EVENT_TYPES, moveStatus, requestLine } from "./invites.mjs";
 import {
   CRM_COPIED, CRM_FAILED, accountName, clampContent, copyToCrm, crmStamp, oneCopyAtATime, outstandingCopies, sourceEvents
 } from "./activities.mjs";
-import { adoptable, adoptionEnabled, createContact, once } from "./people.mjs";
+import { adoptable, adoptionEnabled, createContact, hasProfileWords, once } from "./people.mjs";
 
 /**
  * The inbox: threads, messages, what has been read, and when an account was
@@ -62,8 +62,30 @@ export const CONTACT_TYPE = "inbox.contact";
  */
 export const SERVICE_CARD_BODY = "[no text]";
 
-export function isServiceCard(body) {
-  return typeof body === "string" && body.trim().toLowerCase() === SERVICE_CARD_BODY;
+/**
+ * Whether this stored or arriving message is a card and not something said.
+ *
+ * Two shapes, both written by the agent as it was. A row with neither text nor
+ * media is `[no text]`. But the agent also counted any picture as media, so an
+ * avatar-only row — the same card — was stored as `[attachment]`, and nothing in
+ * its body tells it from a file. What does is who it is attributed to: a real
+ * file is stored under its sender's name, and a picture of somebody's avatar
+ * under the sentence LinkedIn writes about the avatar («Переглянути профіль
+ * Sinan», `hasProfileWords`). `participant` is that name, and without it an
+ * `[attachment]` is taken for what it says.
+ *
+ * The two ways it can be wrong, both small and both from old data: an avatar row
+ * inside a conversation whose participant has a real name stays an
+ * `[attachment]` (nothing distinguishes it from a file), and a real file in a
+ * conversation whose participant the agent read as that sentence — a card came
+ * first — is left out with the cards. New reads cannot do either: the agent no
+ * longer sends cards, and names the person, not the sentence.
+ */
+export function isServiceCard(body, participant = null) {
+  if (typeof body !== "string") return false;
+  const text = body.trim().toLowerCase();
+  if (text === SERVICE_CARD_BODY) return true;
+  return text === "[attachment]" && hasProfileWords(participant?.name);
 }
 
 /**
@@ -329,7 +351,7 @@ export function normalizeThreadInput(body) {
 
   for (const raw of incoming) {
     // A card an older agent still sends: not a message, and not invalid either.
-    if (isServiceCard(raw?.body)) { cards += 1; continue; }
+    if (isServiceCard(raw?.body, body?.participant)) { cards += 1; continue; }
     const message = normalizeMessage(raw, { threadKey, receivedAt });
     // One unreadable message must not cost the nineteen around it.
     if (!message) { invalid += 1; continue; }
@@ -716,7 +738,7 @@ export function messageLine(message, name) {
 /** The line any copied row becomes: a message, or a request that went out. */
 function activityLineOf(row, name) {
   // A card the agent once stored as a message says nothing to the sales team.
-  if (MESSAGE_TYPES.includes(row?.type)) return isServiceCard(row.meta?.body) ? null : messageLine(row.meta, name);
+  if (MESSAGE_TYPES.includes(row?.type)) return isServiceCard(row.meta?.body, row.meta?.participant) ? null : messageLine(row.meta, name);
   if (REQUEST_EVENT_TYPES.includes(row?.type)) return requestLine(row, name);
   return null;
 }
@@ -1126,7 +1148,7 @@ export async function messagesForContact({ accountId, crmContactId, personName, 
   const seen = new Set();
   return [...keyed, ...named, ...legacy]
     .filter((row) => {
-      if (seen.has(row.id) || isServiceCard(row.meta?.body) || !theirs(row)) return false;
+      if (seen.has(row.id) || isServiceCard(row.meta?.body, row.meta?.participant) || !theirs(row)) return false;
       seen.add(row.id);
       return true;
     })
@@ -1266,7 +1288,7 @@ export function deriveThreads(events, { readMarks = new Map(), syncedAt = new Ma
     if (!threadKey || !event.account_id) continue;
     // A card stored as a message is not one (`SERVICE_CARD_BODY`): it makes no
     // thread, no unread, no preview and no participant.
-    if (isServiceCard(event.meta?.body)) continue;
+    if (isServiceCard(event.meta?.body, event.meta?.participant)) continue;
     const key = threadId(event.account_id, threadKey);
     const message = toMessage(event);
 
@@ -1414,7 +1436,7 @@ export async function readThread({ accountId, threadKey }) {
   const [thread] = deriveThreads(events, { readMarks: read, syncedAt: synced, contactMarks: contacts });
   if (!thread) return null;
 
-  const messages = threadOrder(events.filter((event) => !isServiceCard(event.meta?.body)).map(toMessage))
+  const messages = threadOrder(events.filter((event) => !isServiceCard(event.meta?.body, event.meta?.participant)).map(toMessage))
     .map((message) => ({
       direction: message.direction,
       body: message.body,

@@ -54,6 +54,18 @@ const NOT_PEOPLE = new Set([
   "linkedin premium", "linkedin talent solutions", "linkedin learning", "linkedin jobs", "sponsored"
 ]);
 
+/**
+ * Whether a name is really a sentence about a picture: "Переглянути профіль
+ * Sinan", "View profile of Sinan", "View Sinan's profile". LinkedIn writes these
+ * for screen readers on an avatar; read as a name they mean that what was read
+ * was the avatar and not the person — which is how a picture-only row is told
+ * from a message even when it was stored as an attachment.
+ */
+export function hasProfileWords(name) {
+  const text = String(name ?? "").replace(/\s+/g, " ").trim();
+  return NAME_NOISE.test(text) || /^view\s+.+['’]s\s+profile/i.test(text);
+}
+
 /** The person's name as it should stand in the CRM, or "" when there is none. */
 export function personName(participant) {
   return String(participant?.name || "").replace(/\s+/g, " ").trim().replace(NAME_NOISE, "").trim();

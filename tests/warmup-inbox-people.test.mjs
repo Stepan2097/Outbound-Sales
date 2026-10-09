@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import test from "node:test";
 
 import { handleWarmupApi } from "../warmup/api.mjs";
-import { ADOPT_FOLDER_DEFAULT, adoptable, forgetAdoptionFolder, personName, profileLink } from "../warmup/people.mjs";
+import { ADOPT_FOLDER_DEFAULT, adoptable, forgetAdoptionFolder, hasProfileWords, personName, profileLink } from "../warmup/people.mjs";
 import { ADOPT_PER_SYNC, CONTACT_TYPE, SERVICE_CARD_BODY, isServiceCard, normalizeThreadInput } from "../warmup/inbox.mjs";
 import { DEFAULT_STRATEGY } from "../warmup/strategy.mjs";
 
@@ -525,14 +525,26 @@ function stored({ threadKey, body, direction = "in", participant = { name: "Пе
   });
 }
 
-test("картка — це «[no text]» і більше нічого; вкладення й порожнє слово «text» — ні", () => {
+test("картка — це «[no text]» і аватарка, збережена як вкладення; справжнє вкладення й порожнє слово «text» — ні", () => {
   assert.equal(SERVICE_CARD_BODY, "[no text]");
   assert.equal(isServiceCard("[no text]"), true);
   assert.equal(isServiceCard("  [No Text] "), true);
-  assert.equal(isServiceCard("[attachment]"), false);
+  assert.equal(isServiceCard("[attachment]"), false, "вкладення саме по собі — повідомлення");
+  assert.equal(isServiceCard("[attachment]", { name: "Ivan Petrov" }), false, "файл від людини з ім'ям — повідомлення");
+  assert.equal(isServiceCard("[attachment]", { name: "Переглянути профіль Sinan" }), true, "аватарка, яку старий агент прочитав як вкладення");
+  assert.equal(isServiceCard("[attachment]", { name: "View Sinan’s profile" }), true);
+  assert.equal(isServiceCard("[attachment]", { name: "View profile of Anna Lee" }), true);
+  assert.equal(isServiceCard("Привіт", { name: "Переглянути профіль Sinan" }), false, "слова — завжди слова");
   assert.equal(isServiceCard("no text"), false);
   assert.equal(isServiceCard("Привіт [no text] світ"), false);
   assert.equal(isServiceCard(undefined), false);
+});
+
+test("речення про аватарку — не ім'я: українською й англійською, а справжні імена ні", () => {
+  for (const sentence of ["Переглянути профіль Sinan", "переглянути   профіль Edgar", "View profile of Anna Lee", "View profile Luke", "View Sinan’s profile", "View Sinan's profile"]) {
+    assert.equal(hasProfileWords(sentence), true, sentence);
+  }
+  for (const name of ["Sinan Arslan", "Viewer Smith", "Oleh Petrenko", "", null, undefined]) assert.equal(hasProfileWords(name), false, String(name));
 });
 
 test("картки, які шле старий агент, відкидаються при вході й не вважаються некоректними", () => {
@@ -550,6 +562,23 @@ test("картки, які шле старий агент, відкидають�
   assert.deepEqual(input.messages.map((m) => m.body), ["Привіт!", "[attachment]"]);
   assert.equal(input.cards, 2);
   assert.equal(input.invalid, 1, "порожнє тіло лишається некоректним, картка — ні");
+
+  // Той самий старий агент надсилав аватарку як вкладення — під реченням про неї замість імені.
+  const avatar = normalizeThreadInput({
+    threadKey: "t-avatar",
+    participant: { name: "Переглянути профіль Sinan", slug: "sinan-arslan-1" },
+    messages: [{ externalId: "av-1", direction: "in", body: "[attachment]", sentAt: "2026-09-20T09:00:00.000Z" }]
+  });
+  assert.deepEqual(avatar.messages, []);
+  assert.equal(avatar.cards, 1);
+  // А файл від людини з ім'ям — це вкладення.
+  const file = normalizeThreadInput({
+    threadKey: "t-file",
+    participant: { name: "Sinan Arslan", slug: "sinan-arslan-1" },
+    messages: [{ externalId: "f-1", direction: "in", body: "[attachment]", sentAt: "2026-09-20T09:00:00.000Z" }]
+  });
+  assert.deepEqual(file.messages.map((m) => m.body), ["[attachment]"]);
+  assert.equal(file.cards, 0);
 });
 
 test("розмова, у якій від старого агента прийшли самі картки, нічого не зберігає, нікого не додає й не рухає запрошення", async () => {
@@ -597,6 +626,31 @@ test("картки, що вже лежать у базі, не стають ро
   assert.deepEqual(opened.payload.messages.map((m) => m.body), ["Привіт! Цікаво."]);
   const gone = await call({ method: "GET", path: "/api/warmup/inbox/thread?accountId=acc-1&threadKey=t-card-only" });
   assert.equal(gone.status, 404, "картка не відкривається як розмова");
+});
+
+test("аватарки, які старий агент зберіг як «[attachment]», теж не стають розмовами, а справжні файли лишаються", async () => {
+  const sentence = { name: "Переглянути профіль Sinan", slug: "sinan-arslan-1" };
+  // Дві розмови з самих аватарок (за фікстурою картки старий агент читав їх саме так)
+  stored({ threadKey: "t-avatars", body: "[attachment]", participant: sentence, minutesAgo: 50 });
+  stored({ threadKey: "t-avatars", body: "[attachment]", direction: "out", participant: sentence, minutesAgo: 49 });
+  stored({ threadKey: "t-avatars-en", body: "[attachment]", participant: { name: "View Edgar’s profile", slug: "edgar-1" }, minutesAgo: 48 });
+  // Справжній файл від людини, підписаної своїм ім'ям, і справжній текст
+  stored({ threadKey: "t-file", body: "[attachment]", participant: { name: "Ivan Petrov", slug: "ivan-petrov" }, minutesAgo: 10 });
+
+  const list = await call({ method: "GET", path: "/api/warmup/inbox" });
+  assert.deepEqual(list.payload.threads.map((row) => row.threadKey), ["t-file"], "розмови лишилась лише з файлом від людини");
+  assert.equal(list.payload.threads[0].lastMessage.body, "[attachment]");
+  assert.equal(list.payload.unread, 1, "лічильник рахує лише справжню розмову");
+  const config = await call({ method: "GET", path: "/api/warmup/config" });
+  assert.equal(config.payload.unreadReplies, 1);
+  const avatar = await call({ method: "GET", path: "/api/warmup/inbox/thread?accountId=acc-1&threadKey=t-avatars" });
+  assert.equal(avatar.status, 404);
+
+  // І в CRM такі рядки не йдуть: додається лише справжня людина, одним рядком.
+  const finished = await done();
+  assert.equal(finished.payload.crmAdded.waiting, 1);
+  assert.equal(added().map((row) => row.name).join(), "Ivan Petrov");
+  assert.equal(rows.activities.length, 1);
 });
 
 test("лише картка у відповідь не робить розмову непрочитаною", async () => {
