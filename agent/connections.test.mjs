@@ -14,7 +14,7 @@ const sleep = async () => {};
 const queued = { outreachId: 'invite-1', name: 'Person One', linkedin: 'https://www.linkedin.com/in/person-one/', note: '' };
 
 /** All LinkedIn URLs are intercepted. These are local synthetic pages. */
-async function profile(t, { more = false, pending = false, accepted = false, noButton = false, emailWall = false, nameless = false, connectLink = false, connectLong = false, suggestionInCard = false, acceptedUa = false, noteLimit = 200, warning = '', redirected = false, heading = 'h1', confirms = true, sentList = [] } = {}) {
+async function profile(t, { more = false, pending = false, accepted = false, noButton = false, emailWall = false, nameless = false, connectLink = false, connectLong = false, suggestionInCard = false, acceptedUa = false, dialogDelay = 0, noteLimit = 200, warning = '', redirected = false, heading = 'h1', confirms = true, sentList = [] } = {}) {
   const context = await browser.newContext();
   t.after(() => context.close());
   const page = await context.newPage();
@@ -68,7 +68,7 @@ async function profile(t, { more = false, pending = false, accepted = false, noB
           el.querySelector('#send').onclick = () => send(el.querySelector('textarea').value);
         };
       };
-      const connect = document.querySelector('#connect'); if (connect) connect.onclick = (event) => { event.preventDefault(); dialog(); };
+      const connect = document.querySelector('#connect'); if (connect) connect.onclick = (event) => { event.preventDefault(); ${dialogDelay ? `setTimeout(dialog, ${dialogDelay})` : 'dialog()'}; };
       const more = document.querySelector('#more'); if (more) more.onclick = () => {
         const menu = document.createElement('div'); menu.setAttribute('role','menu');
         menu.innerHTML = '<button role="menuitem">Connect</button>'; document.body.append(menu);
@@ -177,6 +177,18 @@ test('Connect посиланням з довгою українською наз
   assert.equal(await sendInvitation(page, { ...queued, note: '' }, { sleep }), 'sent');
   assert.deepEqual(await page.evaluate(() => window.sent), ['']);
   assert.equal(await page.evaluate(() => window.wrongClicks), 0, 'запит пішов іншій людині');
+});
+
+/**
+ * 09.10.2026: the Connect link loads /preload/custom-invite/ and the dialog
+ * comes up there seconds later. The agent looked once, after 0.8s, found no
+ * dialog and stopped the visit — the request was never sent.
+ */
+test('діалог запрошення, що з\'являється за кілька секунд після Connect, дочікується, і запит іде', async (t) => {
+  const page = await profile(t, { heading: 'h2', connectLink: true, dialogDelay: 2500 });
+  const realSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  assert.equal(await sendInvitation(page, { ...queued, note: '' }, { sleep: realSleep }), 'sent');
+  assert.deepEqual(await sentNotes(page), ['']);
 });
 
 test('кнопка з довгою назвою, що називає саме цю людину, — наш Connect, навіть поруч із чужою', async (t) => {

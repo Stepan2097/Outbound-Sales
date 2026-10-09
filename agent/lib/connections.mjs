@@ -1,5 +1,9 @@
 /** Browser actions for people chosen by Outbound-Sales. No recipient discovery here. */
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+// How long the invite dialog may take to come up after Connect: twelve looks
+// a second apart — the link loads a page of its own before showing it.
+const DIALOG_WAIT_TRIES = 12;
+const DIALOG_WAIT_MS = 1000;
 const CONNECT = /^(connect|invite .+ to connect|підключитися|встановити контакт|приєднатися|установить контакт|подключиться)$/i;
 // LinkedIn's long accessible label names a person: «Invite Ajay Manger to
 // connect», «Надіслати запрошення учасникові Ajay Manger, щоб встановити
@@ -308,8 +312,18 @@ export async function sendInvitation(page, invite, { sleep = wait, guard = async
   await connect.click();
   await sleep(800);
   await guard();
+  // The Connect link goes to /preload/custom-invite/, and the «Надіслати без
+  // примітки» dialog comes up there seconds later, not at once. On 09.10.2026
+  // the agent looked once after 0.8s, saw no dialog, and stopped the visit
+  // with the request never sent. A profile that sends on Connect itself shows
+  // no dialog at all; the confirmation below covers that one.
   const dialog = page.getByRole('dialog').last();
-  const hasDialog = await dialog.isVisible();
+  let hasDialog = await dialog.isVisible();
+  for (let waited = 0; !hasDialog && waited < DIALOG_WAIT_TRIES; waited += 1) {
+    await sleep(DIALOG_WAIT_MS);
+    hasDialog = await dialog.isVisible();
+  }
+  await guard();
   const note = typeof invite.note === 'string' ? invite.note : '';
   if (hasDialog) {
     // LinkedIn asks for their email before it will carry the request: we do
