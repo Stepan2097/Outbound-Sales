@@ -84,7 +84,7 @@ async function approachedAmong(contactIds, { todayIso = today() } = {}) {
  * The outcomes that put a person back in the pool unmarked — about our
  * browser, not about them — and so must not bring them straight back.
  */
-const RESTING_OUTCOMES = ["no_button"];
+const RESTING_OUTCOMES = ["no_button", "cannot_connect"];
 
 /**
  * Which of these contacts our own browser could not send to today.

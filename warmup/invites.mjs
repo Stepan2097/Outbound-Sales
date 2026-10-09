@@ -149,7 +149,15 @@ export const INVITE_TYPES = [
  * every redesign wrote people off. An agent built before the split reports
  * `no_button` for both, and nothing is written off — the cautious half.
  */
-export const INVITE_PERSON_OUTCOMES = ["cannot_connect", "no_note", "profile_gone", "blocked"];
+// `cannot_connect` is NOT here any more. On 09.10.2026 every request of the
+// morning — six people on three accounts — came back `cannot_connect`, and
+// each was written off for good. Six people with no Connect anywhere is not
+// LinkedIn answering about them; it is the agent not finding the control on a
+// page that changed. «The card was found» turned out not to prove that the
+// selectors work. Until the agent can tell the two apart from evidence, a
+// person is never written off for it: they rest until tomorrow
+// (`RESTING_OUTCOMES` in feed.mjs), like `no_button`.
+export const INVITE_PERSON_OUTCOMES = ["no_note", "profile_gone", "blocked"];
 
 export const FEED_SKIPPED = "campaign.skipped";
 

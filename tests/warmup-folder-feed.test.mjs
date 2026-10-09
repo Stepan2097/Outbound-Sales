@@ -770,10 +770,9 @@ function secondAccount(day = 8) {
 test("a held outcome about the person lets a folder person go, and the folder never offers them again", async (t) => {
   // `blocked` is here on purpose: the page may have been about the account,
   // not the person, but offering them again risks a second two-day pause.
-  // `cannot_connect` is here too: the card was on screen and the right
-  // person's, and offered no way to connect — tomorrow it will say the same.
-  // `no_button` is deliberately NOT here — see the test below it.
-  for (const outcome of ["profile_gone", "blocked", "cannot_connect"]) {
+  // `no_button` and `cannot_connect` are deliberately NOT here — see the test
+  // below it.
+  for (const outcome of ["profile_gone", "blocked"]) {
     t.mock.timers.setTime(MORNING.getTime());
     resetScheduler();
     resetFeedHints();
@@ -826,13 +825,16 @@ test("a held outcome about the person lets a folder person go, and the folder ne
  * no seller waiting for it, and left waiting it would hold a slot of the day's
  * allowance. It simply must not be marked.
  *
- * The other half of that outcome is `cannot_connect`, tested above: a card
- * that was found and offers no Connect is about the person, and writing those
- * off is the whole point — otherwise an unreachable profile comes back every
- * day and eats a slot of the account's allowance forever.
+ * `cannot_connect` — a card that was found and showed no Connect — was
+ * written off for a day, on the theory that a found card proves the selectors
+ * work. On 09.10.2026 it did not: every request of the morning came back that
+ * way. It rests until tomorrow now, like `no_button`, and is never written off.
  */
 test("a request our own browser could not send puts the person back in the pool unmarked", async (t) => {
-  for (const outcome of ["no_button"]) {
+  // `cannot_connect` too, since 09.10.2026: six people in a row on three
+  // accounts came back «no Connect anywhere», and all six were written off. A
+  // whole morning of it is the page, not the people.
+  for (const outcome of ["no_button", "cannot_connect"]) {
     t.mock.timers.setTime(MORNING.getTime());
     resetScheduler();
     resetFeedHints();
