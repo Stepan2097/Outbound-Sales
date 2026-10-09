@@ -28,7 +28,7 @@ const NAMES = [
   "contactChannelHint", "contactFieldLabels", "contactLinkedInLink", "historyEntryHtml",
   "contactRequestPill", "renderContactPill", "renderContactCard", "renderContacts", "contactConversationHtml",
   "fetchContactFolders", "loadContactFolders", "loadContactPage", "selectContactFolder", "openContact",
-  "loadContactHistory", "openContactsScreen",
+  "loadContactHistory", "openContactsScreen", "contactsRecalled", "rememberContacts", "recallContacts",
   "contactDrafts", "contactDraftsBusy", "contactDraftsError", "contactDraftLanguage", "CONTACT_DRAFT_LANGUAGE_LABEL",
   "contactDraftForm", "CONTACT_DRAFT_LANGUAGES", "contactDraftChoice", "renderKeepingFocus", "rememberContactDraftField",
   "CONTACT_PRODUCT_KEY", "rememberedContactProduct", "rememberContactProduct",
@@ -47,7 +47,7 @@ function element() {
   return { textContent: "", innerHTML: "", hidden: false, disabled: false, className: "", title: "", value: "" };
 }
 
-function screen({ api, warmupApi } = {}) {
+function screen({ api, warmupApi, screens = new Map() } = {}) {
   const ids = {};
   const handlers = {};
   const byId = (id) => {
@@ -78,10 +78,13 @@ function screen({ api, warmupApi } = {}) {
     URLSearchParams,
     navigator: { clipboard: { writeText: async (text) => { calls.push({ copied: text }); } } },
     WARMUP_OUTREACH_LABEL: { pending: "запит надіслано", accepted: "прийняв(ла)", declined: "не прийняв(ла)" },
-    WARMUP_OUTREACH_TONE: { pending: "tone-muted", accepted: "tone-live", declined: "tone-bad" }
+    WARMUP_OUTREACH_TONE: { pending: "tone-muted", accepted: "tone-live", declined: "tone-bad" },
+    // app/cache.js, as the tab's memory: what a screen left there last time.
+    recallScreen: (key) => (screens.has(key) ? { at: 0, value: screens.get(key) } : null),
+    rememberScreen: (key, value) => { screens.set(key, JSON.parse(JSON.stringify(value))); }
   };
   const main = loadMain(NAMES.filter((name) => !["WARMUP_OUTREACH_LABEL", "WARMUP_OUTREACH_TONE"].includes(name)), globals, LISTENERS);
-  return { ids, byId, handlers, calls, stored, main, get: main.get, set: (name, value) => main.context && vm_set(main, name, value) };
+  return { ids, byId, handlers, calls, stored, screens, main, get: main.get, set: (name, value) => main.context && vm_set(main, name, value) };
 }
 
 /** Картка людини з готовими полями; решта стану — як у тесті. */
@@ -250,6 +253,38 @@ test("CRM, що не відповіла при поверненні на екр�
   s.set("contactsLoadedAt", 0);
   await s.get("openContactsScreen")();
   assert.match(s.ids.crmContactList.innerHTML, /CRM не відповіла/);
+});
+
+/**
+ * 09.10.2026, власник: сторінки щоразу довго вантажаться. Після перезавантаження
+ * вкладки остання папка й сторінка списку стоять одразу, а CRM перечитується за
+ * ними — і свіже лягає поверх.
+ */
+test("після перезавантаження остання папка й люди видно одразу, а CRM однаково перечитується", async () => {
+  const screens = new Map([["contacts", {
+    folders: FOLDERS, folderId: "f-2", rows: [{ id: "9", name: "Olena Hrytsenko" }], total: 1, offset: 0, search: "olena"
+  }]]);
+  let answer;
+  const crm = new Promise((resolve) => { answer = resolve; });
+  const s = screen({ screens, api: async (path) => { await crm; return path === "/api/contacts/folders" ? { folders: FOLDERS } : { contacts: [{ id: "10", name: "Olena Fresh" }], total: 1 }; } });
+  const opening = s.get("openContactsScreen")();
+  // CRM ще мовчить, а екран уже не порожній.
+  assert.match(s.ids.crmContactList.innerHTML, /Olena Hrytsenko/);
+  assert.match(s.ids.contactFolderSelect.innerHTML, /value="f-2" selected/);
+  assert.equal(s.ids.contactSearchInput.value, "olena", "пошук, з яким читали сторінку, стоїть і в полі");
+  answer();
+  await opening;
+  assert.ok(s.calls.includes("/api/contacts/folders"), "пам'ять вкладки не замінює читання CRM");
+  assert.ok(s.calls.some((path) => String(path).startsWith("/api/contacts?folderId=f-2")), "та сама папка перечитана");
+  assert.match(s.ids.crmContactList.innerHTML, /Olena Fresh/);
+  assert.equal(screens.get("contacts").rows[0].name, "Olena Fresh", "свіже запам'ятовано для наступного разу");
+});
+
+test("папка, якої в CRM уже немає, не тримається з пам'яті вкладки — береться перша", async () => {
+  const screens = new Map([["contacts", { folders: [{ id: "gone", name: "Стара", contactCount: 3 }], folderId: "gone", rows: [], total: 0, offset: 0, search: "" }]]);
+  const s = screen({ screens, api: async (path) => (path === "/api/contacts/folders" ? { folders: FOLDERS } : { contacts: [], total: 0 }) });
+  await s.get("openContactsScreen")();
+  assert.equal(s.get("contactFolderId"), "f-1");
 });
 
 // ── «Згенерувати три чернетки»: форма на картці ─────────────────────────────

@@ -3,6 +3,8 @@
 // the four screens by name only — each screen registers what opening it means
 // (`onScreen`), so nothing here imports a screen.
 
+import { forgetScreens } from "./cache.js";
+
 export let state = null;
 
 let busyAction = "";
@@ -94,6 +96,9 @@ export async function bootApplication() {
 }
 
 function showAuthGate() {
+  // Whoever signs in next in this tab starts from their own answers, not from
+  // the screens the last person left in memory.
+  forgetScreens();
   document.getElementById("authGate").hidden = false;
   document.getElementById("appShell").hidden = true;
   renderAuthForm();
@@ -103,11 +108,15 @@ function showAuthGate() {
 async function enterWorkspace() {
   document.getElementById("authGate").hidden = true;
   document.getElementById("appShell").hidden = false;
-  authState = await api("/api/auth/status");
-  await refresh();
-  startActivityHeartbeat();
+  // The screen first: it draws from memory at once and starts its own reads,
+  // which need nothing from these two. Waiting for them first was half a
+  // second of empty page before the screen had even asked for its data.
   const saved = rememberedView();
   setView(saved || "warmup");
+  const [status] = await Promise.all([api("/api/auth/status"), refresh()]);
+  authState = status;
+  render();
+  startActivityHeartbeat();
   for (const hook of enterHooks) {
     try { hook(); } catch { /* a counter that cannot be read must not stop anybody entering */ }
   }

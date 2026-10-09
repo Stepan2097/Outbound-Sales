@@ -17,7 +17,7 @@ import { loadMain } from "./app-main-excerpt.mjs";
  */
 
 const NAMES = [
-  "ROLE_LABEL", "personDisplayName", "renderAccount", "teamRowHtml", "loadTeamDirectory",
+  "ROLE_LABEL", "personDisplayName", "renderAccount", "teamRowHtml", "renderTeamDirectory", "loadTeamDirectory",
   "loadSettingsScreen", "removeTeamUser"
 ];
 
@@ -45,7 +45,7 @@ function dispatch(handler, form, extra = {}) {
   return done;
 }
 
-function screen({ user = { id: "u-1", email: "stepan@example.com", name: "Stepan", role: "admin" }, api, confirm = () => true } = {}) {
+function screen({ user = { id: "u-1", email: "stepan@example.com", name: "Stepan", role: "admin" }, api, confirm = () => true, screens = new Map() } = {}) {
   const ids = {};
   const handlers = {};
   const byId = (id) => {
@@ -84,10 +84,13 @@ function screen({ user = { id: "u-1", email: "stepan@example.com", name: "Stepan
     setUiNotice: (text) => { notices.push(text); },
     renderTopbar: () => calls.push("renderTopbar"),
     render: () => calls.push("render"),
-    setAuthState: (value) => calls.push({ setAuthState: value })
+    setAuthState: (value) => calls.push({ setAuthState: value }),
+    // app/cache.js, as the tab's memory.
+    recallScreen: (key) => (screens.has(key) ? { at: 0, value: screens.get(key) } : null),
+    rememberScreen: (key, value) => { screens.set(key, JSON.parse(JSON.stringify(value))); }
   };
   const main = loadMain(NAMES, globals, LISTENERS);
-  return { ids, byId, handlers, calls, notices, main, get: main.get };
+  return { ids, byId, handlers, calls, notices, screens, main, get: main.get };
 }
 
 const directory = (people) => ({ people, canSignIn: people.filter((person) => !person.blocked).length, adminApi: true });
@@ -146,6 +149,31 @@ test("команда: список і підсумок з тим, скільки
   assert.equal((ids.teamUserList.innerHTML.match(/<article/g) || []).length, 3);
   assert.match(ids.teamUserNote.textContent, /3 користувачі · 2 можуть увійти, решту тримає CRM/);
   assert.doesNotMatch(ids.teamUserNote.textContent, /кредити/);
+});
+
+/** 09.10.2026: сторінки щоразу довго вантажаться. Список команди з пам'яті вкладки стоїть, поки сервер відповідає. */
+test("команда з пам'яті вкладки видно одразу, свіжа лягає поверх і запам'ятовується", async () => {
+  let answer;
+  const pending = new Promise((resolve) => { answer = resolve; });
+  const screens = new Map([["team", { ...directory(PEOPLE.slice(0, 1)), selfEmail: "stepan@example.com" }]]);
+  const { ids, get } = screen({ screens, api: async () => { await pending; return directory(PEOPLE); } });
+  const loading = get("loadTeamDirectory")();
+  assert.equal((ids.teamUserList.innerHTML.match(/<article/g) || []).length, 1, "збережений список не намальовано одразу");
+  answer();
+  await loading;
+  assert.equal((ids.teamUserList.innerHTML.match(/<article/g) || []).length, PEOPLE.length);
+  assert.equal(screens.get("team").people.length, PEOPLE.length);
+});
+
+test("список, запам'ятований під іншою людиною, не показується навіть на мить", async () => {
+  let answer;
+  const pending = new Promise((resolve) => { answer = resolve; });
+  const screens = new Map([["team", { ...directory(PEOPLE), selfEmail: "someone-else@example.com" }]]);
+  const { ids, get } = screen({ screens, api: async () => { await pending; return directory(PEOPLE); } });
+  const loading = get("loadTeamDirectory")();
+  assert.equal(ids.teamUserList.innerHTML, "");
+  answer();
+  await loading;
 });
 
 test("команда, яку не вдалося прочитати, каже це і не лишає старого списку", async () => {

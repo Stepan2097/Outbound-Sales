@@ -52,9 +52,9 @@ test("стилі таблиці розкладу на місці", () => {
 
 test("loadWarmup читає розклад, а на сервері без прогріву каже, чому його нема", () => {
   const load = declaration(mainSource(), "loadWarmup");
-  assert.match(load, /await loadWarmupStrategy\(\)/, "loadWarmup більше не читає розклад");
+  assert.match(load, /loadWarmupStrategy\(\{ keepDraft: true \}\)/, "loadWarmup більше не читає розклад (або стирає правки, що в роботі)");
 
-  const offline = load.slice(load.indexOf("if (!warmupState.config.configured)"), load.indexOf("// Reconciling"));
+  const offline = load.slice(load.indexOf("if (!config.configured)"), load.indexOf("const parts = await reading"));
   assert.match(offline, /warmupState\.strategy = null/);
   assert.match(offline, /strategyError = "Розклад лежить у базі Anty/);
   // Без цього виклику панель лишається на «завантаження» назавжди й виглядає як та, що ще пробує.
@@ -209,4 +209,20 @@ test("коли розклад не прочитався, панель каже �
   assert.equal(els.warmupStrategyPill.textContent, "недоступно");
   assert.match(els.warmupStrategyBody.innerHTML, /база Anty не відповідає/);
   assert.equal(els.warmupStrategyBody.hidden, false);
+});
+
+/**
+ * 09.10.2026: the screen now draws from the tab's memory and reads again on
+ * every open, so a read can land while somebody is halfway through the table.
+ * It redraws around their edits rather than putting the saved numbers back.
+ */
+test("a refresh of the same schedule keeps the edits in progress; an ordinary load starts clean", async () => {
+  const { warmupState, main, edit } = panel({ api: async () => ({ strategies: [serverStrategy()] }) });
+  warmupState.strategyDraft = JSON.parse(JSON.stringify(serverStrategy().days));
+  edit(3, (row) => { row.quotas.connect = [5, 7]; });
+  await main.get("loadWarmupStrategy")({ keepDraft: true });
+  assert.deepEqual(warmupState.strategyDraft.find((row) => row.day === 3).quotas.connect, [5, 7], "the edit was thrown away by a background read");
+
+  await main.get("loadWarmupStrategy")();
+  assert.equal(warmupState.strategyDraft, null, "a plain load is the saved schedule");
 });

@@ -8,11 +8,12 @@ import {
 import {
   api, escapeAttr, escapeHtml, onScreen, refreshIcons, uaPlural
 } from "../core.js";
+import { recallScreen, rememberScreen } from "../cache.js";
 import {
   loadWarmupInbox, setWarmupUnread, showWarmupInboxAccount, warmupInboxUnreadFor
 } from "./inbox.js";
 import {
-  loadWarmupCampaigns, loadWarmupStrategy, renderWarmupCampaignDetail, renderWarmupCampaigns, renderWarmupStrategy, toggleWarmupAccount, warmupAutoFeedHtml, warmupCampaignAccountIds, warmupSelectedCampaign
+  loadWarmupCampaigns, loadWarmupStrategy, renderWarmupCampaignDetail, renderWarmupCampaigns, renderWarmupStrategy, toggleWarmupAccount, warmupAutoFeedHtml, warmupCampaignAccountIds, warmupEditsInProgress, warmupSelectedCampaign
 } from "./warmup-campaign.js";
 
 onScreen("warmup", { open: () => loadWarmup() });
@@ -417,11 +418,12 @@ function renderWarmupDetail() {
   if (!title || !body) return;
 
   const detail = warmupState.detail;
+  // No card until an account is picked: an empty block saying «pick one» was
+  // only something to scroll past on the way to the campaign.
+  const panel = document.getElementById("warmupDetailPanel");
+  if (panel) panel.hidden = !detail;
   if (!detail) {
-    title.textContent = "Профіль";
-    subtitle.textContent = "";
-    body.innerHTML = '<div class="empty-state">Вибери профіль зі списку.</div>';
-    refreshIcons();
+    body.innerHTML = "";
     return;
   }
 
@@ -600,17 +602,106 @@ export const WARMUP_KIND_LABEL = {
   connect: "Запити в друзі"
 };
 
+/**
+ * What the warm-up and inbox screens keep for this tab (`app/cache.js`): the
+ * answers, not what somebody is doing with them — no open form, no draft, no
+ * open conversation, no selection.
+ */
+const WARMUP_REMEMBERED = ["config", "dashboard", "profiles", "strategy", "folders", "foldersReady", "campaigns", "campaignsReady", "campaignsError", "selectedCampaignId", "unreadReplies"];
+const WARMUP_INBOX_REMEMBERED = ["threads", "accounts", "unread", "sync", "ready", "available", "error"];
+
+function rememberWarmup() {
+  if (warmupState.error) return;
+  rememberScreen("warmup", Object.fromEntries(WARMUP_REMEMBERED.map((key) => [key, warmupState[key]])));
+  rememberWarmupInbox();
+}
+
+/** The inbox has a screen of its own and is remembered on its own, so neither screen's save overwrites the other's. */
+export function rememberWarmupInbox() {
+  // A failed read is not worth drawing again after a reload: it would greet
+  // the next open with an error the fresh read may no longer have.
+  if (!warmupState.inbox.ready || warmupState.inbox.error) return;
+  rememberScreen("inbox", Object.fromEntries(WARMUP_INBOX_REMEMBERED.map((key) => [key, warmupState.inbox[key]])));
+}
+
+let warmupRecalled = false;
+let warmupInboxRecalled = false;
+
+/**
+ * The last answers, drawn at once — only on the first open after a page load,
+ * and only into a screen that has nothing yet. True when something was drawn.
+ */
+export function recallWarmup() {
+  recallWarmupInbox();
+  if (warmupRecalled) return false;
+  warmupRecalled = true;
+  if (warmupState.config) return false;
+  const saved = recallScreen("warmup")?.value;
+  if (!saved?.config) return false;
+  for (const key of WARMUP_REMEMBERED) if (key in saved) warmupState[key] = saved[key];
+  return true;
+}
+
+export function recallWarmupInbox() {
+  if (warmupInboxRecalled) return false;
+  warmupInboxRecalled = true;
+  if (warmupState.inbox.ready) return false;
+  const saved = recallScreen("inbox")?.value;
+  if (!saved?.ready) return false;
+  for (const key of WARMUP_INBOX_REMEMBERED) if (key in saved) warmupState.inbox[key] = saved[key];
+  if (Number.isFinite(warmupState.inbox.unread)) setWarmupUnread(warmupState.inbox.unread);
+  return true;
+}
+
+/** «Оновити» says when a read is under way, so a screen drawn from memory is not taken for the final word. */
+function renderWarmupRefreshing(busy) {
+  const button = document.getElementById("warmupRefreshBtn");
+  if (!button) return;
+  button.disabled = busy;
+  button.classList.toggle("is-busy", busy);
+  const label = button.querySelector("span");
+  if (label) label.textContent = busy ? "Оновлюю..." : "Оновити";
+}
+
 export async function loadWarmup({ full = true } = {}) {
   if (warmupState.busy) return;
   warmupState.busy = true;
   warmupState.error = "";
-  try {
-    if (full || !warmupState.config) {
-      warmupState.config = await warmupApi("/config");
-    }
+  if (recallWarmup()) {
     renderWarmupConfigNote();
-    if (Number.isFinite(warmupState.config?.unreadReplies)) setWarmupUnread(warmupState.config.unreadReplies);
-    if (!warmupState.config.configured) {
+    renderWarmupStats();
+    renderWarmupStrategy();
+    renderWarmupCampaigns({ resetForm: true });
+    renderWarmupProfiles();
+  }
+  renderWarmupRefreshing(true);
+  // Reconciling Anty's "profile is running" flag with the sessions table is
+  // what makes the Sessions column true. It no longer holds the screen up: the
+  // table is read with everything else and read once more when this is done.
+  const synced = warmupApi("/sync", { method: "POST" }).catch(() => null);
+  // Everything at once, the config included: none of these waits on another.
+  // Each draws its own part when it lands; the campaigns and the table redraw
+  // each other, so the tick column is right whichever comes last.
+  const editing = warmupEditsInProgress();
+  const reading = Promise.allSettled([
+    warmupApi("/dashboard").then((dashboard) => { warmupState.dashboard = dashboard; renderWarmupStats(); }),
+    // The replies, though they have a screen of their own: the accounts table
+    // marks each account with its unread count («1 нова відповідь»), and that
+    // count comes from this read, not from the menu badge's.
+    loadWarmupInbox(),
+    loadWarmupStrategy({ keepDraft: true }),
+    loadWarmupCampaigns({ resetForm: full && !editing.form }),
+    loadWarmupProfiles()
+  ]);
+  try {
+    const config = full || !warmupState.config ? await warmupApi("/config") : warmupState.config;
+    warmupState.config = config;
+    renderWarmupConfigNote();
+    if (Number.isFinite(config?.unreadReplies)) setWarmupUnread(config.unreadReplies);
+    if (!config.configured) {
+      // Let the reads that went out alongside land first, so none of them
+      // draws over the sentences below.
+      await reading;
       warmupState.profiles = [];
       warmupState.foldersReady = false;
       warmupState.campaignsReady = false;
@@ -632,30 +723,21 @@ export async function loadWarmup({ full = true } = {}) {
       return;
     }
 
-    // Reconciling Anty's "profile is running" flag with the sessions table is
-    // what makes the Sessions column true; it is cheap and idempotent, so the
-    // screen does it on every load rather than relying on somebody remembering.
-    await warmupApi("/sync", { method: "POST" }).catch(() => null);
-
-    warmupState.dashboard = await warmupApi("/dashboard");
-    renderWarmupStats();
-    // The replies, though they have a screen of their own: the accounts table
-    // marks each account with its unread count («1 нова відповідь»), and that
-    // count comes from this read, not from the menu badge's.
-    await loadWarmupInbox();
-    // The schedule every account runs on. It depends on nothing else here and
-    // nothing here depends on it, so it is read once and left alone.
-    await loadWarmupStrategy();
-    // Campaigns first: the tick column in the accounts table is drawn from the
-    // selected one.
-    await loadWarmupCampaigns({ resetForm: full });
-    await loadWarmupProfiles();
+    const parts = await reading;
+    const failed = parts.find((part) => part.status === "rejected");
+    if (failed) throw failed.reason;
     if (warmupState.selectedAccountId) await loadWarmupAccountDetail(warmupState.selectedAccountId);
+    rememberWarmup();
+    if (await synced) {
+      await loadWarmupProfiles();
+      rememberWarmup();
+    }
   } catch (error) {
     warmupState.error = error.message;
     renderWarmupConfigNote();
   } finally {
     warmupState.busy = false;
+    renderWarmupRefreshing(false);
     refreshIcons();
   }
 }

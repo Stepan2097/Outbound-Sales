@@ -7,6 +7,7 @@
 import {
   HISTORY_EVENT_LABEL, INVITE_NOTE_DROPPED, api, escapeAttr, escapeHtml, linkIfUrl, onScreen, refreshIcons, relativeTime, setHtml, setText, state, uaPlural
 } from "../core.js";
+import { recallScreen, rememberScreen } from "../cache.js";
 import {
   WARMUP_OUTREACH_LABEL, WARMUP_OUTREACH_TONE, warmupApi
 } from "../screens/warmup-accounts.js";
@@ -19,6 +20,10 @@ onScreen("contacts", { open: () => void openContactsScreen() });
 const CONTACTS_STALE_MS = 60_000;
 
 async function openContactsScreen() {
+  // After a reload the last folder and page are drawn at once from this tab's
+  // memory (`app/cache.js`); being as old as they are, they are also stale, so
+  // the CRM is read again right behind them.
+  if (recallContacts()) renderContacts();
   const stale = Date.now() - contactsLoadedAt > CONTACTS_STALE_MS;
   try {
     await loadContactFolders({ force: stale });
@@ -77,6 +82,37 @@ let contactDraftForm = { productId: "", language: "", instruction: "" };
 
 // Коли CRM читали востаннє; нуль — ще ні.
 let contactsLoadedAt = 0;
+
+let contactsRecalled = false;
+
+/** Папки й сторінка списку, як їх востаннє показали, — щоб після перезавантаження екран не стояв порожній. */
+function rememberContacts() {
+  if (contactsError || !contactFoldersLoaded) return;
+  rememberScreen("contacts", {
+    folders: contactFolders, folderId: contactFolderId, rows: crmContactRows,
+    total: contactTotal, offset: contactOffset, search: contactSearch
+  });
+}
+
+function recallContacts() {
+  if (contactsRecalled) return false;
+  contactsRecalled = true;
+  if (contactFoldersLoaded) return false;
+  const saved = recallScreen("contacts")?.value;
+  if (!Array.isArray(saved?.folders) || !saved.folders.length) return false;
+  contactFolders = saved.folders;
+  contactFoldersLoaded = true;
+  contactFolderId = saved.folderId || null;
+  crmContactRows = Array.isArray(saved.rows) ? saved.rows : [];
+  contactTotal = Number(saved.total) || 0;
+  contactOffset = Number(saved.offset) || 0;
+  contactSearch = String(saved.search || "");
+  // Пошук, з яким цю сторінку читали, стоїть і в полі — інакше список і поле
+  // говорили б різне.
+  const input = document.getElementById("contactSearchInput");
+  if (input) input.value = contactSearch;
+  return true;
+}
 
 let contactsLoading = false;
 
@@ -473,6 +509,11 @@ async function fetchContactFolders({ force = false } = {}) {
   contactFolders = payload.folders || [];
   contactFoldersLoaded = true;
   contactsLoadedAt = Date.now();
+  // Папка, яку пам'ятала вкладка, могла зникнути з CRM — тоді береться перша.
+  if (contactFolderId && !contactFolders.some((folder) => folder.id === contactFolderId)) {
+    contactFolderId = null;
+    contactOffset = 0;
+  }
   // Порожня CRM і CRM, прочитана не тим ключем, виглядають однаково — сервер
   // розрізняє їх за нас, і сторінка повторює це словами.
   contactsError = contactFolders.length ? "" : payload.warning || "";
@@ -520,6 +561,7 @@ async function loadContactPage() {
     crmContactRows = page.contacts || [];
     contactTotal = page.total || 0;
     contactsError = "";
+    rememberContacts();
   } catch (error) {
     crmContactRows = [];
     contactTotal = 0;

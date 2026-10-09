@@ -898,6 +898,15 @@ function warmupStrategyDays() {
 }
 
 /** Has anything been moved since this draft was opened? */
+/**
+ * What somebody is in the middle of editing, so a refresh that lands behind
+ * them — the screen draws from memory and reads again on every open — redraws
+ * around it instead of putting the saved values back under their cursor.
+ */
+export function warmupEditsInProgress() {
+  return { form: Boolean(warmupState.formOpen && warmupFormDirty()), strategy: warmupStrategyDirty() };
+}
+
 function warmupStrategyDirty() {
   if (!warmupState.strategyDraft || !warmupState.strategy) return false;
   return JSON.stringify(warmupState.strategyDraft) !== JSON.stringify(warmupState.strategy.days || []);
@@ -1039,7 +1048,8 @@ function editWarmupStrategyDay(day, apply) {
   warmupState.strategyNotice = "";
 }
 
-export async function loadWarmupStrategy() {
+export async function loadWarmupStrategy({ keepDraft = false } = {}) {
+  const draft = keepDraft && warmupStrategyDirty() ? { id: warmupState.strategy?.id, days: warmupState.strategyDraft } : null;
   try {
     const payload = await warmupApi("/strategies");
     const list = Array.isArray(payload.strategies) ? payload.strategies : [];
@@ -1051,7 +1061,9 @@ export async function loadWarmupStrategy() {
     warmupState.strategy = null;
     warmupState.strategyError = error.message || "Стратегію не вдалося прочитати.";
   }
-  warmupState.strategyDraft = null;
+  // Edits in progress survive a refresh of the same schedule; a different one
+  // is a different table, and the draft would not belong to it.
+  warmupState.strategyDraft = draft && draft.id === warmupState.strategy?.id ? draft.days : null;
   renderWarmupStrategy();
 }
 

@@ -161,6 +161,8 @@
 
         <section class="view" id="view-warmup">
           <div class="warmup-layout">
+            <!-- Розмітку панелі кампанії малює app/screens/warmup-campaign.js. -->
+            <section class="panel warmup-campaigns-panel span-2" id="warmupCampaignPanel"></section>
             <section class="panel warmup-list-panel span-2">
               <div class="panel-heading">
                 <div>
@@ -186,19 +188,16 @@
                 </table>
               </div>
             </section>
-            <section class="panel warmup-detail-panel span-2">
+            <!-- Картка з'являється, коли акаунт вибрано в таблиці; доти її немає зовсім. -->
+            <section class="panel warmup-detail-panel span-2" id="warmupDetailPanel" hidden>
               <div class="panel-heading">
                 <div>
                   <h2 id="warmupDetailTitle">Акаунт</h2>
                   <p id="warmupDetailSubtitle"></p>
                 </div>
               </div>
-              <div id="warmupDetailBody">
-                <div class="empty-state">Вибери акаунт у таблиці.</div>
-              </div>
+              <div id="warmupDetailBody"></div>
             </section>
-            <!-- Розмітку панелі кампанії малює app/screens/warmup-campaign.js. -->
-            <section class="panel warmup-campaigns-panel span-2" id="warmupCampaignPanel"></section>
           </div>
         </section>
 

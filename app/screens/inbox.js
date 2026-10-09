@@ -13,10 +13,19 @@ import {
   showContactCard
 } from "../screens/contacts.js";
 import {
-  WARMUP_OUTREACH_LABEL, WARMUP_OUTREACH_TONE, renderWarmupProfiles, warmupApi, warmupCount, warmupState
+  WARMUP_OUTREACH_LABEL, WARMUP_OUTREACH_TONE, recallWarmupInbox, rememberWarmupInbox, renderWarmupProfiles, warmupApi, warmupCount, warmupState
 } from "../screens/warmup-accounts.js";
 
-onScreen("inbox", { open: () => loadWarmupInbox() });
+// What is already known is drawn at once — from this page's memory or, after a
+// reload, from the tab's (`app/cache.js`) — and the fresh read replaces it.
+onScreen("inbox", {
+  open: async () => {
+    recallWarmupInbox();
+    if (warmupState.inbox.ready) renderWarmupInbox();
+    await loadWarmupInbox();
+    rememberWarmupInbox();
+  }
+});
 
 // The count is wanted the moment somebody is inside, on whatever screen they
 // landed — not only when this one is opened.

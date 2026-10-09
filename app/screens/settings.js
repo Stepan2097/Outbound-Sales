@@ -13,6 +13,7 @@
 import {
   api, authState, escapeAttr, escapeHtml, onScreen, refreshIcons, relativeTime, render, renderTopbar, setAuthState, setHtml, setText, setUiNotice, uaPlural
 } from "../core.js";
+import { recallScreen, rememberScreen } from "../cache.js";
 
 onScreen("account", { open: () => void loadSettingsScreen(), render: () => renderAccount() });
 
@@ -89,20 +90,29 @@ function teamRowHtml(person, selfEmail) {
  * стоять у кінці й підписані чому, але вони тут — список користувачів, який
  * когось не показує, змушує шукати зниклих деінде.
  */
+function renderTeamDirectory(directory, selfEmail) {
+  setHtml("teamUserList", directory.people.map((person) => teamRowHtml(person, selfEmail)).join(""));
+  const total = directory.people.length;
+  const blocked = total - directory.canSignIn;
+  setText("teamUserNote", [
+    `${total} ${uaPlural(total, "користувач", "користувачі", "користувачів")}`,
+    blocked ? `${directory.canSignIn} ${uaPlural(directory.canSignIn, "може", "можуть", "можуть")} увійти, решту тримає CRM` : "усі можуть увійти",
+    directory.adminApi ? "" : "список із бази CRM: акаунтів Supabase без профілю в CRM тут не видно (потрібен сервісний ключ)"
+  ].filter(Boolean).join(" · "));
+  refreshIcons();
+}
+
 async function loadTeamDirectory() {
   const user = authState?.user;
   if (!user || user.role !== "admin") return;
   const selfEmail = String(user.email || "").toLowerCase();
+  // Останній список цієї вкладки — одразу, поки CRM відповідає (`app/cache.js`).
+  const remembered = recallScreen("team")?.value;
+  if (remembered?.people && remembered.selfEmail === selfEmail) renderTeamDirectory(remembered, selfEmail);
   try {
     const directory = await api("/api/account/directory");
-    setHtml("teamUserList", directory.people.map((person) => teamRowHtml(person, selfEmail)).join(""));
-    const total = directory.people.length;
-    const blocked = total - directory.canSignIn;
-    setText("teamUserNote", [
-      `${total} ${uaPlural(total, "користувач", "користувачі", "користувачів")}`,
-      blocked ? `${directory.canSignIn} ${uaPlural(directory.canSignIn, "може", "можуть", "можуть")} увійти, решту тримає CRM` : "усі можуть увійти",
-      directory.adminApi ? "" : "список із бази CRM: акаунтів Supabase без профілю в CRM тут не видно (потрібен сервісний ключ)"
-    ].filter(Boolean).join(" · "));
+    renderTeamDirectory(directory, selfEmail);
+    rememberScreen("team", { ...directory, selfEmail });
   } catch (error) {
     // Список приходить із Supabase; без нього тут було б порожньо, і про це
     // сказано, а не промовчано.
