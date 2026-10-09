@@ -1,6 +1,11 @@
 /** Browser actions for people chosen by Outbound-Sales. No recipient discovery here. */
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const CONNECT = /^(connect|invite .+ to connect|підключитися|встановити контакт|приєднатися|установить контакт|подключиться)$/i;
+// LinkedIn's long accessible label names a person: «Invite Ajay Manger to
+// connect», «Надіслати запрошення учасникові Ajay Manger, щоб встановити
+// контакт». The suggestions beside the card carry the same label with
+// somebody else's name, so it only counts when the name is this person's.
+const CONNECT_LONG = /^(invite .+ to connect|надіслати запрошення .+ встановити контакт|пригласить .+ установить контакт)$/i;
 const MORE = /^(more|more actions|більше|ще|ещё|еще)$/i;
 const SEND = /^(send|send invitation|надіслати|відправити|отправить)$/i;
 const BARE = /^(send without a note|send now|надіслати без нотатки|надіслати без примітки|отправить без заметки)$/i;
@@ -161,6 +166,56 @@ function nameTokens(name) {
     .filter((token) => token.length > 1);
 }
 
+/**
+ * This person's Connect, in the card — and never anybody else's.
+ *
+ * On 09.10.2026 it was not a button at all but a link,
+ * `<a href="/preload/custom-invite/?vanityName=<slug>">`, labelled
+ * «Надіслати запрошення учасникові Ajay Manger, щоб встановити контакт». The
+ * agent looked only for buttons with the short label, so every request of the
+ * morning — fourteen people on three accounts — came back «no Connect» while
+ * the page had one for each of them.
+ *
+ * Next to it sat suggestions with the very same long label and another
+ * person's name, as buttons. So the order is by certainty: the link that names
+ * this person's own profile; then the short label, which names nobody; then a
+ * long label only if it carries this person's name.
+ */
+async function visibleConnect(card, slug, name) {
+  if (slug) {
+    const invites = card.locator('a[href*="/preload/custom-invite/"]');
+    for (let i = 0; i < await invites.count(); i += 1) {
+      const link = invites.nth(i);
+      const href = await link.getAttribute('href') || '';
+      const vanity = new URL(href, 'https://www.linkedin.com').searchParams.get('vanityName') || '';
+      if (decodeURIComponent(vanity).toLowerCase() === slug.toLowerCase() && await link.isVisible()) return link;
+    }
+  }
+  for (const role of ['button', 'link']) {
+    const short = card.getByRole(role, { name: CONNECT });
+    for (let i = 0; i < await short.count(); i += 1) {
+      const control = short.nth(i);
+      const label = (await control.getAttribute('aria-label')) || (await control.innerText()).trim();
+      // `CONNECT` also accepts «Invite X to connect»; that one goes through
+      // the name check below like every long label.
+      if (CONNECT_LONG.test(label)) continue;
+      if (await control.isVisible()) return control;
+    }
+  }
+  const tokens = nameTokens(name);
+  if (!tokens.length) return null;
+  for (const role of ['button', 'link']) {
+    const long = card.getByRole(role, { name: CONNECT_LONG });
+    for (let i = 0; i < await long.count(); i += 1) {
+      const control = long.nth(i);
+      const label = ((await control.getAttribute('aria-label')) || (await control.innerText()))
+        .normalize('NFKD').replace(/\p{M}+/gu, '').toLowerCase();
+      if (tokens.every((token) => label.includes(token)) && await control.isVisible()) return control;
+    }
+  }
+  return null;
+}
+
 async function visibleButton(scope, name) {
   const buttons = scope.getByRole('button', { name });
   for (let i = 0; i < await buttons.count(); i += 1) {
@@ -173,7 +228,10 @@ async function visibleButton(scope, name) {
 async function relation(card) {
   if (await visibleButton(card, /^(pending|запрошення надіслано|очікує|ожидает)$/i)) return 'pending';
   const text = await card.innerText();
-  const degree = card.getByText(/^(?:1st|1-й|1-ий)$/i);
+  // «1st» in English; in Ukrainian it reads «· 1-й», dot and all — on
+  // 09.10.2026 two people already connected to the account were taken for
+  // people with no Connect because the dot did not match.
+  const degree = card.getByText(/^(?:·\s*)?(?:1st|1-й|1-ий)$/i);
   if (await degree.count() && await degree.first().isVisible()) return 'accepted';
   return null;
 }
@@ -190,6 +248,31 @@ async function openProfile(page, invite, { sleep = wait, guard = async () => {} 
   return { card, gone: false };
 }
 
+/**
+ * What `sendInvitation` would find on this person's profile, without clicking
+ * anything: whether the card is there, what LinkedIn says about the two of
+ * us, and which control it would press. For checking a live page by hand
+ * (`agent/check-connect.mjs`) before trusting a change to the selectors.
+ */
+export async function inspectConnect(page, invite, { sleep = wait } = {}) {
+  const slug = profileSlug(invite.linkedin);
+  const { card, gone } = await openProfile(page, invite, { sleep });
+  if (gone) return { slug, card: false, gone: true };
+  if (!card) return { slug, card: false };
+  const before = await relation(card);
+  const connect = before ? null : await visibleConnect(card, slug, invite.name);
+  return {
+    slug,
+    card: true,
+    relation: before,
+    connect: connect ? {
+      tag: await connect.evaluate((el) => el.tagName),
+      label: (await connect.getAttribute('aria-label')) || (await connect.innerText()).trim(),
+      href: await connect.getAttribute('href')
+    } : null
+  };
+}
+
 export async function sendInvitation(page, invite, { sleep = wait, guard = async () => {}, pending = null } = {}) {
   const slug = profileSlug(invite.linkedin);
   // Asked before the profile is even opened: a request already out there is
@@ -202,7 +285,7 @@ export async function sendInvitation(page, invite, { sleep = wait, guard = async
   const before = await relation(card);
   if (before) return before === 'pending' ? 'already_pending' : 'already_connected';
 
-  let connect = await visibleButton(card, CONNECT);
+  let connect = await visibleConnect(card, slug, invite.name);
   if (!connect) {
     const more = await visibleButton(card, MORE);
     if (more) {

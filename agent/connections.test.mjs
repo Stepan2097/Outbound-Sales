@@ -14,7 +14,7 @@ const sleep = async () => {};
 const queued = { outreachId: 'invite-1', name: 'Person One', linkedin: 'https://www.linkedin.com/in/person-one/', note: '' };
 
 /** All LinkedIn URLs are intercepted. These are local synthetic pages. */
-async function profile(t, { more = false, pending = false, accepted = false, noButton = false, emailWall = false, nameless = false, noteLimit = 200, warning = '', redirected = false, heading = 'h1', confirms = true, sentList = [] } = {}) {
+async function profile(t, { more = false, pending = false, accepted = false, noButton = false, emailWall = false, nameless = false, connectLink = false, connectLong = false, suggestionInCard = false, acceptedUa = false, noteLimit = 200, warning = '', redirected = false, heading = 'h1', confirms = true, sentList = [] } = {}) {
   const context = await browser.newContext();
   t.after(() => context.close());
   const page = await context.newPage();
@@ -22,18 +22,31 @@ async function profile(t, { more = false, pending = false, accepted = false, noB
     // LinkedIn's own list of sent invitations, as a synthetic page: links to
     // /in/<slug> are the whole of what the agent reads from it.
     if (route.request().url().includes('/invitation-manager/sent/')) {
-      return route.fulfill({ contentType: 'text/html', body: `<!doctype html><html><body><main>`
+      return route.fulfill({ contentType: 'text/html; charset=utf-8', body: `<!doctype html><html><body><main>`
         + sentList.map((slug) => `<a href="/in/${slug}/">somebody</a>`).join('')
         + `</main></body></html>` });
     }
-    const action = pending ? '<button>Pending</button>' : accepted ? '<span>1st</span><button>Message</button>' : noButton ? '' : more ? '<button id="more">More</button>' : '<button id="connect">Connect</button>';
-    return route.fulfill({ contentType: 'text/html', body: `<!doctype html><html><body>
-      ${warning}<main><section><${heading}>${nameless ? 'Hidden Behind A Redesign' : 'Person One'}</${heading}><div id="actions">${action}</div></section>
+    const action = pending ? '<button>Pending</button>' : accepted ? '<span>1st</span><button>Message</button>'
+      : acceptedUa ? '<span>· 1-й</span><button>Повідомлення</button><button>Більше</button>' : noButton ? ''
+      : more ? '<button id="more">More</button>'
+      // 09.10.2026, the Ukrainian interface: a link to this person's own
+      // invite page, with only the long label.
+      : connectLong ? '<button id="connect" aria-label="Надіслати запрошення учасникові Person One, щоб встановити контакт">Встановити контакт</button>'
+      : connectLink ? '<a id="connect" href="/preload/custom-invite/?vanityName=person-one" aria-label="Надіслати запрошення учасникові Person One, щоб встановити контакт">Встановити контакт</a>'
+      : '<button id="connect">Connect</button>';
+    // A suggestion inside the card itself, with the same long label and
+    // somebody else's name.
+    const suggestion = suggestionInCard
+      ? '<button id="wrong-in-card" aria-label="Надіслати запрошення учасникові Shantal Chengelrayen, щоб встановити контакт">Встановити контакт</button>'
+      : '';
+    return route.fulfill({ contentType: 'text/html; charset=utf-8', body: `<!doctype html><html><body>
+      ${warning}<main><section><${heading}>${nameless ? 'Hidden Behind A Redesign' : 'Person One'}</${heading}><div id="actions">${action}</div>${suggestion}</section>
       <aside><h2>Other Person</h2><button id="wrong">Connect</button></aside></main>
       <script>
       window.sent = []; window.wrongClicks = 0;
       try { if (!sessionStorage.getItem('sent')) sessionStorage.setItem('sent', '[]'); } catch {}
       document.querySelector('#wrong').onclick = () => window.wrongClicks++;
+      const wrongInCard = document.querySelector('#wrong-in-card'); if (wrongInCard) wrongInCard.onclick = () => window.wrongClicks++;
       const dialog = () => {
         document.querySelector('[role="menu"]')?.remove();
         const el = document.createElement('div'); el.setAttribute('role','dialog');
@@ -55,7 +68,7 @@ async function profile(t, { more = false, pending = false, accepted = false, noB
           el.querySelector('#send').onclick = () => send(el.querySelector('textarea').value);
         };
       };
-      const connect = document.querySelector('#connect'); if (connect) connect.onclick = dialog;
+      const connect = document.querySelector('#connect'); if (connect) connect.onclick = (event) => { event.preventDefault(); dialog(); };
       const more = document.querySelector('#more'); if (more) more.onclick = () => {
         const menu = document.createElement('div'); menu.setAttribute('role','menu');
         menu.innerHTML = '<button role="menuitem">Connect</button>'; document.body.append(menu);
@@ -152,6 +165,33 @@ test('Connect inside More is sent; suggestions are never used as a fallback', as
  * written off everybody a redesign hid as well. They are told apart by the
  * card: found and silent is about them, never found is about us.
  */
+/**
+ * 09.10.2026: in the Ukrainian interface Connect was a link to the person's
+ * own invite page, labelled only «Надіслати запрошення учасникові …, щоб
+ * встановити контакт». Every request of the morning — fourteen people — came
+ * back «no Connect». Beside it sat suggestions with the same label and other
+ * names: finding Connect must never mean clicking one of those.
+ */
+test('Connect посиланням з довгою українською назвою надсилається, а пропозиція з чужим іменем у картці — ні', async (t) => {
+  const page = await profile(t, { heading: 'h2', connectLink: true, suggestionInCard: true });
+  assert.equal(await sendInvitation(page, { ...queued, note: '' }, { sleep }), 'sent');
+  assert.deepEqual(await page.evaluate(() => window.sent), ['']);
+  assert.equal(await page.evaluate(() => window.wrongClicks), 0, 'запит пішов іншій людині');
+});
+
+test('кнопка з довгою назвою, що називає саме цю людину, — наш Connect, навіть поруч із чужою', async (t) => {
+  const page = await profile(t, { heading: 'h2', connectLong: true, suggestionInCard: true });
+  assert.equal(await sendInvitation(page, { ...queued, note: '' }, { sleep }), 'sent');
+  assert.deepEqual(await page.evaluate(() => window.sent), ['']);
+  assert.equal(await page.evaluate(() => window.wrongClicks), 0);
+});
+
+test('кнопка з довгою назвою, що називає іншу людину, — не наш Connect', async (t) => {
+  const page = await profile(t, { heading: 'h2', noButton: true, suggestionInCard: true });
+  assert.equal(await sendInvitation(page, { ...queued, note: '' }, { sleep }), 'cannot_connect');
+  assert.equal(await page.evaluate(() => window.wrongClicks), 0);
+});
+
 test('профіль без жодного Connect — це про людину, а зникла картка — про нас', async (t) => {
   const silent = await profile(t, { noButton: true });
   assert.equal(await sendInvitation(silent, queued, { sleep }), 'cannot_connect');
@@ -175,6 +215,12 @@ test('an existing connection or pending request is reconciled without another cl
     assert.equal(await sendInvitation(page, queued, { sleep }), outcome);
     assert.deepEqual(await page.evaluate(() => window.sent), []);
   }
+});
+
+test('«· 1-й» в українському інтерфейсі — це вже контакт, а не людина без Connect', async (t) => {
+  const page = await profile(t, { heading: 'h2', acceptedUa: true });
+  assert.equal(await sendInvitation(page, queued, { sleep }), 'already_connected');
+  assert.deepEqual(await page.evaluate(() => window.sent), []);
 });
 
 test('an approved note too long for LinkedIn is not truncated or replaced by a bare send', async (t) => {
