@@ -112,7 +112,7 @@ async function enterWorkspace() {
   // which need nothing from these two. Waiting for them first was half a
   // second of empty page before the screen had even asked for its data.
   const saved = rememberedView();
-  setView(saved || "warmup");
+  setView(saved || "home");
   const [status] = await Promise.all([api("/api/auth/status"), refresh()]);
   authState = status;
   render();
@@ -250,7 +250,9 @@ export async function runUiAction(actionName, message, work) {
   }
 }
 
-const VIEW_MEMORY_KEY = "outboundActiveView";
+// Versioned: when «Головна» arrived (10.10.2026) everybody was opened on it once,
+// whatever tab they had last; from then on the tab they leave is the one they get.
+const VIEW_MEMORY_KEY = "outboundActiveView.v2";
 
 /**
  * The tab survives a reload. Reopening on the dashboard threw away where
@@ -277,6 +279,7 @@ function setView(viewName) {
   navItems.forEach((item) => item.classList.toggle("active", item.dataset.view === viewName));
   document.getElementById("pageTitle").textContent =
     {
+      home: "Головна",
       warmup: "Прогрів LinkedIn",
       inbox: "Вхідні",
       contacts: "Контакти з CRM",

@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="/styles/base.css" />
     <link rel="stylesheet" href="/styles/warmup-accounts.css" />
     <link rel="stylesheet" href="/styles/warmup-campaign.css" />
+    <link rel="stylesheet" href="/styles/home.css" />
     <link rel="stylesheet" href="/styles/inbox.css" />
     <link rel="stylesheet" href="/styles/contacts.css" />
     <link rel="stylesheet" href="/styles/settings.css" />
@@ -49,7 +50,8 @@
           </div>
         </div>
         <nav class="nav-list" aria-label="Робочий простір">
-          <button class="nav-item active" data-view="warmup" aria-label="Прогрів" title="Прогрів"><i data-lucide="flame"></i><span>Прогрів</span></button>
+          <button class="nav-item active" data-view="home" aria-label="Головна" title="Головна"><i data-lucide="house"></i><span>Головна</span></button>
+          <button class="nav-item" data-view="warmup" aria-label="Прогрів" title="Прогрів"><i data-lucide="flame"></i><span>Прогрів</span></button>
           <button class="nav-item" data-view="inbox" aria-label="Вхідні" title="Вхідні"><i data-lucide="inbox"></i><span>Вхідні</span><span class="nav-badge" id="warmupNavBadge" hidden></span></button>
           <button class="nav-item" data-view="contacts" aria-label="Контакти" title="Контакти"><i data-lucide="contact"></i><span>Контакти</span></button>
           <button class="nav-item" data-view="account" aria-label="Налаштування" title="Налаштування"><i data-lucide="settings"></i><span>Налаштування</span></button>
@@ -65,10 +67,14 @@
       <main class="workspace">
         <header class="topbar">
           <div>
-            <h1 id="pageTitle">Прогрів LinkedIn</h1>
+            <h1 id="pageTitle">Головна</h1>
             <p id="workspaceMeta" hidden></p>
           </div>
         </header>
+
+        <section class="view" id="view-home">
+          <div class="home-layout" id="homeRoot"></div>
+        </section>
 
         <section class="view" id="view-account">
           <div class="account-layout">

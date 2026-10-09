@@ -120,6 +120,23 @@ somebody twice. It adds and never edits, and a CRM that refuses costs the
 message nothing — it is stored and added on the next read. `INBOX_ADOPT_CONTACTS=0`
 turns it off. The inbox's «Відкрити в CRM» opens exactly these records.
 
+**Головна — the page the app opens on.** What the software is for, on one
+screen: the conveyor from a campaign's folder to a reply (у черзі → запрошено →
+прийняли → ми написали → відповіли, with today's numbers), what needs a person
+(an account that needs a login, a LinkedIn limit or pause, no running campaign,
+no model), and — the point of it — **everybody who accepted an invitation and
+has not been written to**, each with a first message the model has already
+written (the contact card's generator: the account's campaign product, the CRM
+record, Ukrainian for Ukraine and English otherwise; stored, written once).
+Edit it or press «Переписати»; «Надіслати» puts it in that account's queue and
+the account sends it in its next session from the person's profile — only from
+the header of their own profile, only when LinkedIn shows them as a first-degree
+connection (otherwise it would be an InMail), with the same checks as a reply.
+«Пропустити» takes somebody off the list. A person approves every first message:
+nothing goes to a stranger under an account's name on the model's say alone.
+Below: the newest unread replies (a click opens the conversation in «Вхідні»)
+and each account's state, today's requests and next session.
+
 **Replying from the inbox.** Under an open conversation there is a field: write
 and press «Надіслати» (or Ctrl/⌘+Enter). The portal owns no browser, so this does
 not send — it asks. The reply waits on the conversation as a dashed bubble

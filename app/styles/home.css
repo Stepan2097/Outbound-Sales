@@ -1,0 +1,418 @@
+/* «Головна»: конвеєр розсилки зверху, під ним — люди, яким треба написати
+   першими, далі — відповіді й акаунти. Усе на токенах base.css, тож темна й
+   світла теми однакові. */
+
+.home-layout {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.home-panel {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.home-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.home-subtle {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.home-stale {
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px dashed color-mix(in srgb, var(--amber) 50%, transparent);
+  color: var(--amber);
+  font-size: 13px;
+}
+
+/* ── конвеєр ── */
+
+.home-funnel {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.home-step {
+  position: relative;
+  display: grid;
+  gap: 4px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-strong);
+  min-width: 0;
+}
+
+.home-step + .home-step::before {
+  content: "→";
+  position: absolute;
+  left: -10px;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.home-step-label {
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.home-step-value {
+  font-size: 28px;
+  line-height: 1.1;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.home-step.is-written .home-step-value,
+.home-step.is-replied .home-step-value {
+  color: var(--teal);
+}
+
+.home-step-hint {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+/* ── що потребує людини ── */
+
+.home-attention {
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.home-attention-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent);
+  background: color-mix(in srgb, var(--amber) 8%, transparent);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.home-attention-item > span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.home-attention-item i {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: var(--amber);
+}
+
+.home-attention-item .text-button {
+  flex: none;
+}
+
+/* ── кому написати ── */
+
+.home-people {
+  display: grid;
+  gap: 12px;
+}
+
+.home-person {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-strong);
+  min-width: 0;
+}
+
+.home-person-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.home-person-who {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.home-person-who strong {
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.home-person-who a {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.home-person-who a:hover {
+  color: var(--teal);
+  text-decoration: underline;
+}
+
+.home-person-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.home-person-meta b {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.home-person-text {
+  width: 100%;
+  min-height: 92px;
+  resize: vertical;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+.home-person-text:disabled {
+  opacity: 0.75;
+  border-style: dashed;
+}
+
+.home-person-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.home-person-status i {
+  flex: none;
+  width: 15px;
+  height: 15px;
+}
+
+.home-person-status.is-waiting {
+  color: var(--teal);
+}
+
+.home-person-status.is-bad,
+.home-person-error {
+  color: var(--red);
+}
+
+.home-person-status.is-warn {
+  color: var(--amber);
+}
+
+.home-person-error {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.home-person-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px 16px;
+  flex-wrap: wrap;
+}
+
+.home-person-actions .primary-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.home-person-actions .primary-button:disabled,
+.home-person-actions .text-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.home-more {
+  margin: 12px 0 0;
+}
+
+/* ── відповіді й акаунти ── */
+
+.home-replies,
+.home-accounts {
+  display: grid;
+  gap: 8px;
+}
+
+/* A whole reply is one button. The shared button rule centres its content on
+   one unbreakable line; a reply is three lines of somebody's text, so all of
+   that is undone here. */
+
+.home-reply {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-content: stretch;
+  justify-items: stretch;
+  align-items: start;
+  gap: 3px;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  white-space: normal;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-strong);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.home-reply:hover {
+  border-color: color-mix(in srgb, var(--teal) 45%, transparent);
+  background: var(--surface-strong);
+}
+
+.home-reply-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13.5px;
+}
+
+.home-reply-head time {
+  flex: none;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.home-reply-body {
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.home-account {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-strong);
+}
+
+.home-account-who {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.home-account-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.home-account-facts b {
+  color: var(--ink);
+}
+
+.home-empty {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 28px 16px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.home-empty.is-small {
+  justify-items: start;
+  padding: 8px 0;
+  text-align: left;
+}
+
+.home-empty strong {
+  color: var(--ink);
+  font-size: 14.5px;
+}
+
+.home-empty i {
+  width: 28px;
+  height: 28px;
+}
+
+.home-empty.is-bad strong {
+  color: var(--red);
+}
+
+@media (max-width: 1100px) {
+  .home-funnel {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .home-step + .home-step::before {
+    display: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .home-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .home-funnel {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .home-step-value {
+    font-size: 22px;
+  }
+
+  .home-person-actions .primary-button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .home-attention-item {
+    flex-wrap: wrap;
+  }
+}

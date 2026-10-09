@@ -1070,6 +1070,17 @@ export function showWarmupInboxAccount(accountId) {
 }
 
 /**
+ * Відкрити одну розмову з іншого екрана (з «Головної»): «Вхідні», той акаунт і
+ * ця розмова праворуч. Список читається, коли екран відкривається.
+ */
+export function showWarmupInboxThread(accountId, threadKey) {
+  if (!accountId || !threadKey) return;
+  openWarmupInboxAccount(accountId);
+  document.querySelector('.nav-item[data-view="inbox"]')?.click();
+  openWarmupThread(accountId, threadKey);
+}
+
+/**
  * Open one account. A search made in another account would answer a question
  * nobody is asking here, and a conversation of another account would stand
  * beside a list that is not its own — both are let go.

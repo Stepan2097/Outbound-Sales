@@ -4,7 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 /**
- * The interface is four screens, and this is what keeps it four.
+ * The interface is five screens, and this is what keeps it five.
  *
  * On 08.10.2026 the owner asked for everything superfluous to go (87001c96):
  * the lead workspace («Панель») with its enrichment, scoring, drafts and
@@ -18,6 +18,13 @@ import test from "node:test";
  * A merge like that now turns this test red instead of quietly undoing the
  * work. If a screen really has to return, change this test in the same commit
  * and say why — that is a decision, not an accident.
+ *
+ * It was four until 10.10.2026, when the owner asked for a home page built
+ * around what the software is for — sending runs by itself and the model writes
+ * the messages. «Головна» is that: the conveyor from a folder to a reply, and the
+ * first messages to people who accepted, written by the model, to approve. It is
+ * not the removed «overview» (an OpenRouter traffic dashboard): nothing of that
+ * comes back with it.
  */
 
 const APP = new URL("../app/", import.meta.url);
@@ -31,7 +38,7 @@ function sources(dir = APP.pathname) {
   });
 }
 
-const SCREENS = [["warmup", "Прогрів"], ["inbox", "Вхідні"], ["contacts", "Контакти"], ["account", "Налаштування"]];
+const SCREENS = [["home", "Головна"], ["warmup", "Прогрів"], ["inbox", "Вхідні"], ["contacts", "Контакти"], ["account", "Налаштування"]];
 
 const REMOVED_VIEWS = ["prospects", "ai", "products", "overview", "models", "routing", "budgets", "privacy", "evaluation"];
 
@@ -45,7 +52,7 @@ const REMOVED_CODE = [
   'id="runDialog"', 'id="quickPrepareBtn"', 'id="productSelect"'
 ];
 
-test("the menu is exactly the four screens, in this order", () => {
+test("the menu is exactly the five screens, in this order", () => {
   const nav = [...html.matchAll(/<button class="nav-item[^"]*" data-view="([a-z-]+)"[^>]*>.*?<span>([^<]+)<\/span>/g)]
     .map((match) => [match[1], match[2]]);
   assert.deepEqual(nav, SCREENS);
@@ -68,10 +75,10 @@ test("no removed screen's code is back anywhere under app/", () => {
   }
 });
 
-test("the workspace opens on the warm-up", () => {
+test("the workspace opens on «Головна»", () => {
   const all = sources().map(({ text }) => text).join("\n");
-  assert.match(all, /setView\(saved \|\| "warmup"\)/, "a first visit lands on Прогрів");
-  assert.match(html, /<button class="nav-item active" data-view="warmup"/);
+  assert.match(all, /setView\(saved \|\| "home"\)/, "a first visit lands on Головна");
+  assert.match(html, /<button class="nav-item active" data-view="home"/);
 });
 
 /**
@@ -81,6 +88,7 @@ test("the workspace opens on the warm-up", () => {
  * and `main.js` does nothing but load them and start.
  */
 const SCREEN_FILES = {
+  home: ["screens/home.js"],
   warmup: ["screens/warmup-accounts.js", "screens/warmup-campaign.js"],
   inbox: ["screens/inbox.js"],
   contacts: ["screens/contacts.js"],
