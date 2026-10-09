@@ -264,6 +264,21 @@ test('an invitation limit warning pauses the server before any request is sent',
   assert.deepEqual(await page.evaluate(() => window.sent), []);
 });
 
+/**
+ * 09.10.2026, Chloe Stewart, verbatim. Her account had 307 old invitations
+ * pending and hit LinkedIn's weekly limit; the Ukrainian toast was not
+ * recognised, so every session clicked Connect into the same refusal.
+ */
+test('український тижневий ліміт LinkedIn теж зупиняє і ставить акаунт на паузу', async (t) => {
+  const page = await profile(t, { warning: '<div role="alert">Ваше запрошення не було надіслано Bruno, оскільки ви досягли тижневого ліміту на запрошення контактів. Повторіть спробу наступного тижня</div>' });
+  let paused = 0;
+  await assert.rejects(sendInvitation(page, queued, { sleep, guard: () => stopOnWarning(page, {
+    warning: async () => { paused++; return { success: true }; }
+  }) }), VisitStopped);
+  assert.equal(paused, 1, 'акаунт не поставлено на паузу');
+  assert.deepEqual(await page.evaluate(() => window.sent), []);
+});
+
 test('a server stop after the first send prevents the next person from opening', async () => {
   let sends = 0;
   const reports = [];

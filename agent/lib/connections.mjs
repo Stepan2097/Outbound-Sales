@@ -62,11 +62,19 @@ export async function pendingSlugs(page, { sleep = wait, guard = async () => {} 
   return slugs;
 }
 
-/** An explicit restriction stops the whole visit, including the inbox. */
+/**
+ * An explicit restriction stops the whole visit, including the inbox.
+ *
+ * The Ukrainian weekly limit reads «Ваше запрошення не було надіслано …,
+ * оскільки ви досягли тижневого ліміту на запрошення контактів» — not «ліміт
+ * запрошень». On 09.10.2026 Chloe's account had 307 old invitations pending and
+ * hit that limit; the toast went unrecognised, and every session clicked
+ * Connect again into the same refusal.
+ */
 export async function linkedinWarning(page) {
   if (/\/(checkpoint|challenge|captcha)(\/|\?)/i.test(page.url())) return 'LinkedIn checkpoint or CAPTCHA';
   const text = await page.locator('body').innerText();
-  const restriction = /(?:you(?:'ve| have) reached (?:your |the )?(?:weekly )?invitation limit|weekly invitation limit|too many invitations|temporarily restricted|account (?:has been |is )restricted|verify your identity|security verification|unusual activity|підтверд(?:іть|ити) (?:свою )?особу|ліміт запрошень|обмежено ваш акаунт|превышен.{0,30}лимит приглашений|подтвердите (?:свою )?личность|аккаунт.{0,30}ограничен|необычн.{0,15}активност)/i;
+  const restriction = /(?:you(?:'ve| have) reached (?:your |the )?(?:weekly )?invitation limit|weekly invitation limit|too many invitations|temporarily restricted|account (?:has been |is )restricted|verify your identity|security verification|unusual activity|підтверд(?:іть|ити) (?:свою )?особу|ліміт запрошень|ліміт\S* на запрошення|тижнев\S* ліміт\S*|запрошення не було надіслано|обмежено ваш акаунт|превышен.{0,30}лимит приглашений|подтвердите (?:свою )?личность|аккаунт.{0,30}ограничен|необычн.{0,15}активност)/i;
   return text.match(restriction)?.[0] ?? null;
 }
 
