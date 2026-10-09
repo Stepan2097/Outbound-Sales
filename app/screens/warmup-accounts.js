@@ -243,6 +243,22 @@ function warmupQueueState(accountId) {
 }
 
 /**
+ * «Веде» in the card as well as in the table: on a phone the card is where an
+ * account is looked at, and whether it works the campaign is the first thing
+ * to see or change there. The same tick, the same save.
+ */
+function warmupCardCampaignHtml(accountId) {
+  const campaign = warmupSelectedCampaign();
+  if (!campaign) return "";
+  const ticked = warmupCampaignAccountIds(campaign).has(accountId);
+  const tickable = warmupState.campaignsReady;
+  return `<label class="warmup-card-campaign">
+    <input type="checkbox" data-warmup-account-tick="${escapeAttr(accountId)}" ${ticked ? "checked" : ""} ${tickable ? "" : "disabled"} />
+    <span>Веде кампанію «${escapeHtml(campaign.name || "без назви")}»</span>
+  </label>`;
+}
+
+/**
  * Who this account will send requests to next, and whether the campaign's
  * folder tops it up today — the part of the old «Черга» panel that answered a
  * question. The manual half of that panel (claim people, mark a request as sent
@@ -461,6 +477,7 @@ function renderWarmupDetail() {
 
   body.innerHTML = `
     <div class="warmup-detail-controls">${controls.join("")}</div>
+    ${warmupCardCampaignHtml(account.id)}
     ${warmup?.state === "paused" && warmup.pausedUntil ? `<p class="warmup-paused">На паузі після попередження: до ${escapeHtml(warmup.pausedUntil)} включно акаунт нічого не робить. Далі прогрів продовжиться сам, а дні паузи в нього не рахуються.</p>` : ""}
     ${actionRows ? `<div class="warmup-actions">${actionRows}</div>` : ""}
     ${rules}
@@ -685,6 +702,13 @@ document.getElementById("warmupProfileTableBody")?.addEventListener("click", (ev
     return;
   }
   selectWarmupProfile(profileId);
+});
+
+document.getElementById("warmupDetailBody")?.addEventListener("change", (event) => {
+  const tick = event.target.closest("[data-warmup-account-tick]");
+  if (!tick) return;
+  toggleWarmupAccount(tick.dataset.warmupAccountTick, tick.checked);
+  renderWarmupDetail();
 });
 
 document.getElementById("warmupDetailBody")?.addEventListener("click", (event) => {

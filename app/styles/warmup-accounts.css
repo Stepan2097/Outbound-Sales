@@ -319,9 +319,9 @@
   margin: 4px 0 14px;
 }
 
-/* On a phone: the account and its next session. The campaign tick goes (it is
-   set at a desk), and the status, the day and today's requests move under the
-   name, so the table fits 390px with nothing to scroll sideways. */
+/* On a phone: «Веде», the account and its next session. The status, the day
+   and today's requests move under the name, so the table fits 390px with
+   nothing to scroll sideways. */
 .warmup-row-phone {
   display: none;
 }
@@ -331,8 +331,6 @@
     min-width: 0;
   }
 
-  .warmup-list-panel th:nth-child(1),
-  .warmup-list-panel td:nth-child(1):not([colspan]),
   .warmup-list-panel th:nth-child(3),
   .warmup-list-panel td:nth-child(3),
   .warmup-list-panel th:nth-child(4),
@@ -360,4 +358,13 @@
   .warmup-list-panel td strong {
     overflow-wrap: anywhere;
   }
+}
+
+/* «Веде кампанію …» in the account's card. */
+.warmup-card-campaign {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 4px;
+  font-size: 14px;
 }
