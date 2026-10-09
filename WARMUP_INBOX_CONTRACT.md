@@ -352,11 +352,80 @@ It gains `--portal <url>` (already present) plus `WARMUP_AGENT_TOKEN`, sent as
 `X-Agent-Token`. The Mac portal ignores the header, so one build works against
 both while the transition lasts.
 
-## Not in this phase
+## Replying from the portal
 
-Replying from the portal. Reading a conversation is safe; sending is a different
-risk, needs its own quota treatment, and should not ride in on the back of a
-read. The thread screen shows a reply box only when there is something behind it.
+Reading a conversation is safe; sending is a different risk, and it was kept out
+of the read for exactly that reason. It is here now — as a request, not an action.
+The portal owns no browser. A reply written on the thread screen is **queued**
+and the account **sends it in its own next session**, after its daily inbox read.
+That is the design and not a gap to close later: opening a warming account's
+browser the moment somebody presses a button is an unscheduled session, which is
+the one signal this folder exists to avoid.
+
+### The queue
+
+A reply is a `wl_events` row `outbox.queued` (`meta.threadKey`, `meta.body`,
+`meta.participantName`), never rewritten; what becomes of it is a second row that
+points back with `meta.replyId` — `outbox.sent`, `outbox.failed` (with
+`meta.reason`) or `outbox.cancelled` — and the newest decides. A reply nobody got
+to in 72 hours reads as `expired` and is never sent. `outbox.queued` is hidden
+from the audit log (it is somebody's private words); the others are not.
+
+Refused when written (`POST /api/warmup/inbox/reply`, `{accountId, threadKey, text}`):
+
+- the thread or the account does not exist (404);
+- **nobody has written to the account in that thread** — that is a first message,
+  which has its own allowance and its own place in «Прогрів» (409);
+- **the account would not be opened**: excluded, no warm-up in progress, paused,
+  or health not ok (409, with the reason in words) — a reply the agent can never
+  send is refused now rather than found out three days later;
+- empty, or over 2000 characters (400);
+- more than 5 already waiting on the account, or `INBOX_REPLIES_PER_DAY`
+  (default 10) sent and waiting together today (429).
+
+The same words in the same thread while one is still waiting are that one
+(`duplicate: true`), so a double click or a re-sent request queues once.
+`POST /api/warmup/inbox/reply/cancel` `{accountId, replyId}` takes a waiting reply
+back, or puts away one that did not go; a sent one is refused (409).
+
+`GET /api/warmup/inbox/thread` carries `outbox` (waiting, failed and expired ones,
+and sent ones until their message turns up among the stored messages, so a send
+whose conversation re-read failed does not vanish for a day) and `reply`
+`{canWrite, reason, limit, goesOutAt, goesOutToday, goesOutSoon, window, sentToday,
+perDay}`. `goesOutAt` is the account's planned session time (`nextSession`), and
+`goesOutSoon` is true when that moment has passed but today's session is still owed.
+`GET /api/warmup/inbox` carries `sync.byAccount` (each account's own last read) and
+`sync.window`.
+
+### What the agent does
+
+`GET /agent` carries `outbox: {toSend: [{id, threadKey, text, name}], waiting,
+sentToday, perDay}` — the oldest waiting, at most 3 a session and never past the
+day's limit, and **empty** where the account would not be opened (paused, no run,
+excluded, unhealthy). After the inbox read, in the same visit:
+
+1. `outbox.prepare {replyId}` before **each** one — `{allowed, reason, stopAll,
+   reply: {id, threadKey, text}}`. The plan was cut earlier and a person may have
+   taken the reply back since; the text comes only with a yes, and `stopAll`
+   (a warning, a pause) ends the visit.
+2. Open `/messaging/thread/<key>/`. If the conversation already ends with our own
+   message in the same words, do not type: report `outbox.failed`.
+3. Find **exactly one** composer (two on the page is not guessed at), put the
+   cursor in it (checked), type in runs of whole characters with human pauses
+   (Shift+Enter for a line break), and check the field holds exactly what was
+   written and the send button is live. Anything else: clear the field and
+   report `outbox.failed` with the reason. No draft is left in a real messenger.
+4. Press the button; **sent means seen** — the message must be on the page one
+   more time than before. The field emptying is not enough. If it never appears:
+   `outbox.failed` «невідомо, чи пішло — не надсилайте вдруге».
+5. `outbox.sent {replyId}` — retried, and the visit stops if it cannot be made, because a
+   reply that went out and is not recorded would be handed out again tomorrow.
+   Then the conversation is re-read and posted through `inbox.thread`, so the
+   message the portal shows is LinkedIn's own and not a copy of what was typed.
+
+`outbox.failed` is final: the agent never retries by itself, since whether a
+message went is the one thing it can fail to know. The person sees the reason and
+can write again.
 
 ## Once a day, onto the contact
 

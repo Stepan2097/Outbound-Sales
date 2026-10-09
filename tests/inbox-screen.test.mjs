@@ -25,7 +25,9 @@ const NAMES = [
   "warmupInboxEmptyHtml", "warmupInboxRows", "warmupInboxMatches", "warmupThreadRowHtml", "warmupInboxAccountName",
   "warmupInboxUnreadFor", "warmupInboxFilterHtml", "warmupInboxAccountOptions", "warmupInboxAccountId",
   "openWarmupInboxAccount", "warmupInboxChipsHtml",
-  "warmupThreadPlaceholderHtml", "warmupNextUnread", "warmupMessageHtml", "warmupThreadViewHtml",
+  "warmupThreadPlaceholderHtml", "warmupNextUnread", "warmupMessageHtml", "warmupGoesOutText", "WARMUP_REPLY_STATE",
+  "warmupOutboxHtml", "warmupThreadViewHtml", "inboxDrafts", "inboxReplyKey", "inboxReplyBusy", "inboxReplyError",
+  "renderWarmupReply", "submitWarmupReply", "removeWarmupReply",
   "renderWarmupInbox", "renderWarmupNavBadge", "setWarmupUnread", "refreshWarmupBadge", "stopWarmupBadgePoll",
   "warmupInboxListOnScreen", "loadWarmupInbox", "warmupThreadIsOpen", "markWarmupThreadRead", "openWarmupThread",
   "closeWarmupThread", "showWarmupInboxAccount"
@@ -36,6 +38,9 @@ const LISTENERS = [
   'document.getElementById("warmupInboxRefreshBtn")?.addEventListener("click"',
   'document.getElementById("warmupInboxAccounts")?.addEventListener("click"',
   'document.getElementById("warmupInboxLayout")?.addEventListener("click"',
+  'document.getElementById("warmupInboxReply")?.addEventListener("submit"',
+  'document.getElementById("warmupInboxReplyText")?.addEventListener("input"',
+  'document.getElementById("warmupInboxReplyText")?.addEventListener("keydown"',
   'document.getElementById("warmupInboxSearch")?.addEventListener("input"',
   'document.addEventListener("visibilitychange"'
 ];
@@ -45,7 +50,7 @@ const minutesAgo = (minutes) => new Date(Date.now() - minutes * 60000).toISOStri
 function element() {
   const classes = new Set();
   return {
-    textContent: "", innerHTML: "", hidden: false, className: "", title: "", value: "", scrollTop: 0, attrs: {},
+    textContent: "", innerHTML: "", hidden: false, className: "", title: "", value: "", scrollTop: 0, disabled: false, placeholder: "", attrs: {},
     setAttribute(key, value) { this.attrs[key] = value; },
     classList: { toggle: (name, on) => { if (on) classes.add(name); else classes.delete(name); }, contains: (name) => classes.has(name) }
   };
@@ -82,7 +87,8 @@ function screen({ threads = threeThreads(), accounts = [], sync = null, api, ext
   const ids = [
     "warmupInboxTitle", "warmupInboxSubtitle", "warmupInboxPill", "warmupInboxBody", "warmupInboxNotice",
     "warmupInboxAccounts", "warmupInboxLayout", "warmupInboxThread", "warmupInboxSearch", "warmupNavBadge",
-    "warmupInboxRefreshBtn"
+    "warmupInboxRefreshBtn", "warmupInboxReply", "warmupInboxReplyText", "warmupInboxReplyHint", "warmupInboxReplySend",
+    "warmupInboxReplyCount"
   ];
   const els = Object.fromEntries(ids.map((id) => [id, element()]));
   // Сам екран: видно чи ні, і чи на ньому відкрита розмова (на телефоні вона забирає весь екран).
@@ -95,6 +101,8 @@ function screen({ threads = threeThreads(), accounts = [], sync = null, api, ext
   els.warmupInboxAccounts.addEventListener = (type, fn) => { listeners[`chips:${type}`] = fn; };
   els.warmupInboxLayout.addEventListener = (type, fn) => { listeners[`layout:${type}`] = fn; };
   els.warmupInboxSearch.addEventListener = (type, fn) => { listeners[`search:${type}`] = fn; };
+  els.warmupInboxReply.addEventListener = (type, fn) => { listeners[`reply:${type}`] = fn; };
+  els.warmupInboxReplyText.addEventListener = (type, fn) => { listeners[`replytext:${type}`] = fn; };
 
   const warmupState = {
     unreadReplies: null,
@@ -325,7 +333,7 @@ test("про читання вхідних скаже одне — найгір�
   const calm = screen({ threads: syncedAt(minutesAgo(30)), sync: { lastSyncedAt: minutesAgo(30) } });
   assert.equal(noteOf(calm).innerHTML, "");
   assert.equal(calm.els.warmupInboxNotice.hidden, true);
-  assert.match(calm.els.warmupInboxSubtitle.textContent, /читали 30 хв тому/);
+  assert.match(calm.els.warmupInboxSubtitle.textContent, /листи оновлено 30 хв тому/);
 });
 
 test("порожня вхідна каже, читали її чи ні, і не малює ні акаунтів, ні порожніх панелей", () => {
@@ -511,6 +519,335 @@ test("розмова перемальовується, лише коли вон�
   get("renderWarmupInbox")();
   assert.equal(writes, 3);
   assert.equal(els.warmupInboxThread.scrollTop, 0);
+});
+
+// ── Коли оновлювались листи цього акаунта ─────────────────────────────────
+
+test("під заголовком — коли оновлювались листи саме відкритого акаунта і як часто це буває; кнопки акаунтів кажуть своє", () => {
+  const threads = [
+    thread({ threadKey: "a1", accountId: "acc-a", accountIdentity: "Mary Lindsay", lastSyncedAt: minutesAgo(60 * 6) }),
+    thread({ threadKey: "b1", accountId: "acc-b", accountIdentity: "Chloe Stewart", lastSyncedAt: minutesAgo(60 * 30),
+      lastMessage: { direction: "in", body: "Привіт", sentAt: minutesAgo(60 * 20) } })
+  ];
+  const sync = {
+    lastSyncedAt: minutesAgo(60 * 6), window: "09:00–13:00",
+    byAccount: { "acc-a": minutesAgo(60 * 6), "acc-b": minutesAgo(60 * 30) }
+  };
+  const view = screen({ threads, sync });
+  view.get("renderWarmupInbox")();
+  // Відкритий — той, у кого свіжіша відповідь.
+  assert.equal(view.els.warmupInboxSubtitle.textContent,
+    "Mary Lindsay: листи оновлено 6 год тому · агент читає їх раз на добу, у вікні 09:00–13:00");
+  assert.ok(view.els.warmupInboxSubtitle.title, "точний час — у підказці");
+
+  // Інший акаунт — його час, а не загальний найсвіжіший.
+  view.listeners["chips:click"]({ target: { closest: () => ({ dataset: { warmupAccount: "acc-b" } }) } });
+  assert.match(view.els.warmupInboxSubtitle.textContent, /^Chloe Stewart: листи оновлено вчора/);
+  assert.doesNotMatch(view.els.warmupInboxSubtitle.textContent, /6 год/);
+
+  // Кожна кнопка знає свій час.
+  const chips = view.els.warmupInboxAccounts.innerHTML;
+  assert.match(chips, /title="Листи оновлено 6 год тому/);
+  assert.match(chips, /title="Листи оновлено вчора/);
+});
+
+test("акаунт, якого ще не читали, каже це про себе; застарілість — теж про свій, а не про найсвіжіший із усіх", () => {
+  const threads = [
+    thread({ threadKey: "a1", accountId: "acc-a", accountIdentity: "Mary Lindsay", lastSyncedAt: minutesAgo(30) }),
+    thread({ threadKey: "b1", accountId: "acc-b", accountIdentity: "Chloe Stewart", lastSyncedAt: null,
+      lastMessage: { direction: "in", body: "Привіт", sentAt: minutesAgo(60 * 20) } }),
+    thread({ threadKey: "c1", accountId: "acc-c", accountIdentity: "Mariana Soto", lastSyncedAt: minutesAgo(60 * 60),
+      lastMessage: { direction: "in", body: "Привіт", sentAt: minutesAgo(60 * 40) } })
+  ];
+  const sync = { lastSyncedAt: minutesAgo(30), byAccount: { "acc-a": minutesAgo(30), "acc-c": minutesAgo(60 * 60) } };
+  const view = screen({ threads, sync });
+  view.get("renderWarmupInbox")();
+  assert.match(view.els.warmupInboxSubtitle.textContent, /^Mary Lindsay: листи оновлено 30 хв тому/);
+  assert.equal(view.els.warmupInboxNotice.hidden, true, "у цього акаунта все гаразд");
+
+  const open = (id) => view.listeners["chips:click"]({ target: { closest: () => ({ dataset: { warmupAccount: id } }) } });
+  open("acc-b");
+  assert.equal(view.els.warmupInboxSubtitle.textContent, "Chloe Stewart: листи ще не читали");
+  assert.match(view.els.warmupInboxNotice.innerHTML, /ще жодного разу не читали/);
+
+  open("acc-c");
+  assert.match(view.els.warmupInboxNotice.innerHTML, /схоже, агент зупинився/);
+  assert.match(view.els.warmupInboxAccounts.innerHTML, /title="Листи цього акаунта ще не читали"/);
+});
+
+// ── Відповідь ─────────────────────────────────────────────────────────────
+
+const REPLY_DOOR = {
+  canWrite: true, reason: null, limit: 2000, window: "09:00–13:00", perDay: 10, sentToday: 0,
+  goesOutAt: new Date(Date.now() + 3 * 3600000).toISOString(), goesOutToday: true, goesOutSoon: false
+};
+
+/** Екран із відкритою розмовою, у якій людина написала, — готовий до відповіді. */
+function replyScreen({ reply = REPLY_DOOR, outbox = [], api, extra = {} } = {}) {
+  const view = screen({ api, extra });
+  view.warmupState.inbox.openAccountId = "acc-a";
+  view.warmupState.inbox.openThreadKey = "t-read";
+  view.warmupState.inbox.open = {
+    thread: thread({ threadKey: "t-read" }),
+    messages: [{ direction: "in", body: "Так, цікаво.", sentAt: minutesAgo(5) }],
+    outbox, reply
+  };
+  view.get("renderWarmupInbox")();
+  return view;
+}
+const type = (view, text) => {
+  view.els.warmupInboxReplyText.value = text;
+  view.listeners["replytext:input"]({ target: view.els.warmupInboxReplyText });
+};
+
+test("поле відповіді з'являється лише в розмові; каже, з якого акаунта, коли й що не одразу, а порожнє не надсилається", () => {
+  const closed = screen();
+  closed.get("renderWarmupInbox")();
+  assert.equal(closed.els.warmupInboxReply.hidden, true, "поки розмову не обрано, поля нема");
+
+  const view = replyScreen();
+  assert.equal(view.els.warmupInboxReply.hidden, false);
+  assert.equal(view.els.warmupInboxReplyText.disabled, false);
+  assert.match(view.els.warmupInboxReplyText.placeholder, /Oleh Petrenko/);
+  assert.match(view.els.warmupInboxReplyHint.textContent, /Надішле акаунт Anna Kovalenko — не одразу/);
+  assert.match(view.els.warmupInboxReplyHint.textContent, /сьогодні близько \d\d:\d\d/);
+  assert.match(view.els.warmupInboxReplyHint.textContent, /вікно 09:00–13:00/);
+  assert.match(view.els.warmupInboxReplyHint.textContent, /можна скасувати/);
+  assert.equal(view.els.warmupInboxReplySend.disabled, true, "порожню відповідь надіслати не можна");
+
+  type(view, "   ");
+  assert.equal(view.els.warmupInboxReplySend.disabled, true, "самі пробіли — теж порожньо");
+  type(view, "Дякую!");
+  assert.equal(view.els.warmupInboxReplySend.disabled, false);
+  assert.equal(view.els.warmupInboxReplyCount.textContent, "6 / 2000");
+
+  type(view, "а".repeat(2001));
+  assert.equal(view.els.warmupInboxReplySend.disabled, true, "довша за межу не надсилається");
+  assert.match(view.els.warmupInboxReplyCount.className, /is-over/);
+});
+
+test("«завтра» і «найближчим часом» кажуться як є, а не підставляється час, якого нема", () => {
+  const tomorrow = replyScreen({ reply: { ...REPLY_DOOR, goesOutToday: false } });
+  assert.match(tomorrow.els.warmupInboxReplyHint.textContent, /завтра близько \d\d:\d\d/);
+  const soon = replyScreen({ reply: { ...REPLY_DOOR, goesOutSoon: true } });
+  assert.match(soon.els.warmupInboxReplyHint.textContent, /найближчим часом/);
+  assert.doesNotMatch(soon.els.warmupInboxReplyHint.textContent, /близько \d/);
+  const unknown = replyScreen({ reply: { ...REPLY_DOOR, goesOutAt: null } });
+  assert.match(unknown.els.warmupInboxReplyHint.textContent, /у наступну сесію акаунта/);
+});
+
+test("куди відповісти не можна — поле заблоковане, і сказано чому, а не мовчки", () => {
+  const view = replyScreen({ reply: { ...REPLY_DOOR, canWrite: false, reason: "Акаунт на паузі до 2026-10-12 — поки вона триває, агент його не відкриває." } });
+  assert.equal(view.els.warmupInboxReplyText.disabled, true);
+  assert.equal(view.els.warmupInboxReplySend.disabled, true);
+  assert.match(view.els.warmupInboxReplyHint.textContent, /на паузі до 2026-10-12/);
+  assert.equal(view.els.warmupInboxReplyHint.className.includes("is-muted"), true);
+
+  // Сервер, що ще не віддає `reply`, не обіцяє нічого.
+  const old = replyScreen({ reply: null });
+  assert.equal(old.els.warmupInboxReplyText.disabled, true);
+  assert.equal(old.els.warmupInboxReplySend.disabled, true);
+});
+
+test("чернетка живе в розмові: повторне малювання її не чіпає, інша розмова має свою, повернення — повертає", () => {
+  const view = replyScreen();
+  type(view, "Півслова, ще пишу");
+  // Поле, у яке пишуть, не переписується з-під рук: запис у `value` зсуває курсор
+  // і ламає відміну набору — тож рахуємо записи.
+  let writes = 0;
+  let held = view.els.warmupInboxReplyText.value;
+  Object.defineProperty(view.els.warmupInboxReplyText, "value", { get: () => held, set: (value) => { writes += 1; held = value; } });
+  view.get("renderWarmupInbox")();
+  view.get("renderWarmupInbox")();
+  assert.equal(writes, 0, "поле переписали, хоч розмова та сама");
+  assert.equal(view.els.warmupInboxReplyText.value, "Півслова, ще пишу", "список оновився, а текст лишився");
+
+  view.warmupState.inbox.openThreadKey = "t-new-unread";
+  view.warmupState.inbox.open = { thread: thread({ threadKey: "t-new-unread" }), messages: [{ direction: "in", body: "Інше", sentAt: minutesAgo(1) }], outbox: [], reply: REPLY_DOOR };
+  view.get("renderWarmupInbox")();
+  assert.equal(view.els.warmupInboxReplyText.value, "", "в іншій розмові — чисте поле");
+  type(view, "Тарасу");
+
+  view.warmupState.inbox.openThreadKey = "t-read";
+  view.warmupState.inbox.open = { thread: thread({ threadKey: "t-read" }), messages: [{ direction: "in", body: "Так.", sentAt: minutesAgo(5) }], outbox: [], reply: REPLY_DOOR };
+  view.get("renderWarmupInbox")();
+  assert.equal(view.els.warmupInboxReplyText.value, "Півслова, ще пишу", "назад — і початий текст на місці");
+
+  // Стерто повністю — чернетки більше нема.
+  type(view, "");
+  assert.equal(view.get("inboxDrafts").has("acc-a|t-read"), false);
+});
+
+test("«Надіслати»: іде з акаунтом і розмовою, без пробілів по краях; після успіху поле порожнє, розмова перечитана, рядок «чекає» на місці", async () => {
+  const sent = [];
+  let outbox = [];
+  const view = replyScreen({
+    api: async (path, options) => {
+      if (path === "/inbox/reply") {
+        const body = JSON.parse(options.body);
+        sent.push(body);
+        outbox = [{ id: "r-1", body: body.text, state: "waiting", queuedAt: new Date().toISOString(), reason: null }];
+        return { success: true, reply: outbox[0] };
+      }
+      if (path.startsWith("/inbox/thread")) {
+        return { thread: thread({ threadKey: "t-read" }), messages: [{ direction: "in", body: "Так, цікаво.", sentAt: minutesAgo(5) }], outbox, reply: REPLY_DOOR };
+      }
+      if (path === "/inbox/read") return { success: true, unread: 1 };
+      throw new Error(path);
+    }
+  });
+  type(view, "  Дякую, Олеже!  ");
+  await view.listeners["reply:submit"]({ preventDefault() {} });
+  await tick();
+  await tick();
+
+  assert.deepEqual(sent, [{ accountId: "acc-a", threadKey: "t-read", text: "Дякую, Олеже!" }]);
+  assert.equal(view.els.warmupInboxReplyText.value, "");
+  assert.equal(view.get("inboxDrafts").size, 0);
+  const html = view.els.warmupInboxThread.innerHTML;
+  assert.match(html, /warmup-outbox/);
+  assert.match(html, /чекає відправки/);
+  assert.match(html, /Дякую, Олеже!/);
+  assert.match(html, /Піде з акаунта Anna Kovalenko/);
+  assert.match(html, /data-warmup-reply-cancel="r-1"/);
+});
+
+test("відмова порталу не губить написане: текст лишається, причина стоїть під полем, повторне натискання працює", async () => {
+  let refuse = true;
+  const view = replyScreen({
+    api: async (path) => {
+      if (path === "/inbox/reply") {
+        if (refuse) throw Object.assign(new Error("З цього акаунта вже чекає 5 відповідей."), { status: 429 });
+        return { success: true, reply: { id: "r-1" } };
+      }
+      return { thread: thread({ threadKey: "t-read" }), messages: [], outbox: [], reply: REPLY_DOOR };
+    }
+  });
+  type(view, "Дуже довга й важлива відповідь");
+  await view.listeners["reply:submit"]({ preventDefault() {} });
+  await tick();
+  assert.equal(view.els.warmupInboxReplyText.value, "Дуже довга й важлива відповідь", "текст не зник");
+  assert.match(view.els.warmupInboxReplyHint.textContent, /вже чекає 5 відповідей/);
+  assert.match(view.els.warmupInboxReplyHint.className, /is-bad/);
+  assert.equal(view.els.warmupInboxReplySend.disabled, false, "можна спробувати ще раз");
+  assert.equal(view.get("inboxDrafts").get("acc-a|t-read"), "Дуже довга й важлива відповідь");
+
+  refuse = false;
+  await view.listeners["reply:submit"]({ preventDefault() {} });
+  await tick();
+  await tick();
+  assert.equal(view.els.warmupInboxReplyText.value, "");
+});
+
+test("поки відповідь іде, друге натискання її не дублює, а поле заблоковане", async () => {
+  let release;
+  const posts = [];
+  const view = replyScreen({
+    api: async (path, options) => {
+      if (path === "/inbox/reply") { posts.push(options.body); await new Promise((resolve) => { release = resolve; }); return { success: true }; }
+      return { thread: thread({ threadKey: "t-read" }), messages: [], outbox: [], reply: REPLY_DOOR };
+    }
+  });
+  type(view, "Раз");
+  const first = view.listeners["reply:submit"]({ preventDefault() {} });
+  await tick();
+  assert.equal(view.els.warmupInboxReplyText.disabled, true);
+  assert.equal(view.els.warmupInboxReplySend.disabled, true);
+  await view.listeners["reply:submit"]({ preventDefault() {} });
+  assert.equal(posts.length, 1, "друге натискання нічого не надіслало");
+  release();
+  await first;
+  await tick();
+});
+
+test("Ctrl або ⌘ + Enter надсилає, просто Enter — ні", async () => {
+  const posts = [];
+  const view = replyScreen({
+    api: async (path, options) => {
+      if (path === "/inbox/reply") { posts.push(options.body); return { success: true }; }
+      return { thread: thread({ threadKey: "t-read" }), messages: [], outbox: [], reply: REPLY_DOOR };
+    }
+  });
+  type(view, "Текст");
+  const press = (extra) => {
+    let prevented = false;
+    view.listeners["replytext:keydown"]({ key: "Enter", preventDefault: () => { prevented = true; }, ...extra });
+    return prevented;
+  };
+  assert.equal(press({}), false, "Enter — новий рядок");
+  assert.equal(press({ shiftKey: true }), false);
+  assert.equal(posts.length, 0);
+  assert.equal(press({ ctrlKey: true }), true);
+  await tick();
+  assert.equal(posts.length, 1);
+  type(view, "Ще");
+  assert.equal(press({ metaKey: true }), true);
+  await tick();
+  assert.equal(posts.length, 2);
+});
+
+test("відповіді в розмові: що чекає — із «Скасувати», що не пішло — з причиною, «Написати знову» і «Прибрати»; чужий текст екранується", () => {
+  const view = replyScreen({
+    outbox: [
+      { id: "w", state: "waiting", body: "Чекаю <b>акаунта</b>", reason: null },
+      { id: "f", state: "failed", body: "Не вийшло", reason: "не знайшов поле для повідомлення" },
+      { id: "e", state: "expired", body: "Запізно", reason: null },
+      { id: "s", state: "sent", body: "Пішло", reason: null }
+    ]
+  });
+  const html = view.els.warmupInboxThread.innerHTML;
+  const part = (id) => html.split("<li").find((chunk) => chunk.includes(`data-warmup-reply="${id}"`));
+  assert.match(part("w"), /чекає відправки/);
+  assert.match(part("w"), /data-warmup-reply-cancel="w"/);
+  assert.match(part("w"), /Чекаю &lt;b&gt;акаунта&lt;\/b&gt;/);
+  assert.doesNotMatch(html, /<b>акаунта/);
+
+  assert.match(part("f"), /не пішло/);
+  assert.match(part("f"), /не знайшов поле для повідомлення/);
+  assert.match(part("f"), /data-warmup-reply-retry="f"/);
+  assert.match(part("f"), /data-warmup-reply-cancel="f"/);
+  assert.match(part("f"), /is-reply-failed/);
+
+  assert.match(part("e"), /минуло три доби/);
+  assert.match(part("e"), /data-warmup-reply-retry="e"/);
+
+  assert.match(part("s"), /надіслано/);
+  assert.doesNotMatch(part("s"), /data-warmup-reply-cancel|data-warmup-reply-retry/, "надіслану не скасувати");
+});
+
+test("«Скасувати» просить портал і перечитує розмову; «Написати знову» повертає текст у поле до початого", async () => {
+  const posts = [];
+  let outbox = [
+    { id: "w", state: "waiting", body: "Чекаю", reason: null },
+    { id: "f", state: "failed", body: "Не вийшло, ось текст", reason: "збій" }
+  ];
+  const view = replyScreen({
+    outbox,
+    api: async (path, options) => {
+      if (path === "/inbox/reply/cancel") {
+        const body = JSON.parse(options.body);
+        posts.push(body);
+        outbox = outbox.filter((row) => row.id !== body.replyId);
+        return { success: true };
+      }
+      if (path === "/inbox/read") return { success: true };
+      return { thread: thread({ threadKey: "t-read" }), messages: [{ direction: "in", body: "Так, цікаво.", sentAt: minutesAgo(5) }], outbox, reply: REPLY_DOOR };
+    }
+  });
+  const click = (selector, dataset) => view.listeners["layout:click"]({ target: { closest: (asked) => (asked === selector ? { dataset } : null) } });
+
+  click("[data-warmup-reply-cancel]", { warmupReplyCancel: "w" });
+  await tick(); await tick();
+  assert.deepEqual(posts, [{ accountId: "acc-a", replyId: "w" }]);
+  assert.doesNotMatch(view.els.warmupInboxThread.innerHTML, /data-warmup-reply="w"/, "скасована зникла");
+  assert.match(view.els.warmupInboxThread.innerHTML, /data-warmup-reply="f"/, "інша лишилась");
+
+  type(view, "Вже почате");
+  click("[data-warmup-reply-retry]", { warmupReplyRetry: "f" });
+  await tick(); await tick();
+  assert.deepEqual(posts.at(-1), { accountId: "acc-a", replyId: "f" });
+  assert.equal(view.els.warmupInboxReplyText.value, "Вже почате\n\nНе вийшло, ось текст", "текст повернувся в поле, не затерши початого");
+  assert.equal(view.get("inboxDrafts").get("acc-a|t-read"), "Вже почате\n\nНе вийшло, ось текст");
 });
 
 // ── Лічильник на пункті меню ──────────────────────────────────────────────

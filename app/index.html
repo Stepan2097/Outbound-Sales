@@ -143,7 +143,17 @@
                   </label>
                   <div class="inbox-list" id="warmupInboxBody"></div>
                 </div>
-                <section class="inbox-thread-pane" id="warmupInboxThread" aria-live="polite"></section>
+                <div class="inbox-thread-col">
+                  <section class="inbox-thread-pane" id="warmupInboxThread" aria-live="polite"></section>
+                  <form class="inbox-reply" id="warmupInboxReply" hidden>
+                    <textarea id="warmupInboxReplyText" rows="3" aria-label="Відповідь" placeholder="Відповісти"></textarea>
+                    <div class="inbox-reply-bar">
+                      <p class="inbox-reply-hint" id="warmupInboxReplyHint"></p>
+                      <span class="inbox-reply-count" id="warmupInboxReplyCount"></span>
+                      <button class="primary-button" id="warmupInboxReplySend" type="submit" disabled><i data-lucide="send"></i><span>Надіслати</span></button>
+                    </div>
+                  </form>
+                </div>
               </div>
             </section>
           </div>

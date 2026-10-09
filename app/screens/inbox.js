@@ -206,13 +206,18 @@ function warmupAccountTitle(account) {
  * threads at all — and the contract also puts `lastSyncedAt` on each thread.
  * Read both, so the two halves of this phase can land in either order.
  */
-function warmupInboxSync() {
+function warmupInboxSync(accountId = null) {
   const inbox = warmupState.inbox;
   const sync = inbox.sync && typeof inbox.sync === "object" ? inbox.sync : null;
+  const byAccount = sync?.byAccount && typeof sync.byAccount === "object" ? sync.byAccount : null;
 
-  let lastSyncedAt = sync?.lastSyncedAt || null;
+  // With an account given it is that account's own reading that counts: the
+  // screen opens one account at a time, and «читали 6 год тому» about another
+  // login is not an answer about this one.
+  let lastSyncedAt = accountId ? (byAccount?.[accountId] || null) : (sync?.lastSyncedAt || null);
   let fromThreads = false;
   for (const thread of inbox.threads) {
+    if (accountId && thread?.accountId !== accountId) continue;
     const seen = thread?.lastSyncedAt;
     if (!seen) continue;
     if (!lastSyncedAt || Date.parse(seen) > Date.parse(lastSyncedAt)) {
@@ -224,12 +229,13 @@ function warmupInboxSync() {
   // "Never synced" is a claim, and it can only be made when the server actually
   // reports on syncing. Without that, the honest answer is that this is not
   // known — which is itself worth saying rather than dressing up as calm.
-  const known = Boolean(sync) || fromThreads;
+  const known = accountId ? Boolean(byAccount) || fromThreads : Boolean(sync) || fromThreads;
   const hours = warmupHoursSince(lastSyncedAt);
 
   return {
     known,
     lastSyncedAt,
+    window: typeof sync?.window === "string" ? sync.window : "",
     stale: Number.isFinite(hours) && hours > WARMUP_SYNC_STALE_HOURS
   };
 }
@@ -409,7 +415,11 @@ function warmupInboxChipsHtml() {
   const open = warmupInboxAccountId();
   return options.map((entry) => {
     const active = entry.accountId === open;
-    return `<button class="inbox-chip ${active ? "is-active" : ""}" type="button" data-warmup-account="${escapeAttr(entry.accountId)}" aria-pressed="${active}">
+    const read = warmupInboxSync(entry.accountId);
+    const title = read.lastSyncedAt
+      ? `Листи оновлено ${warmupAgo(read.lastSyncedAt)} (${warmupStamp(read.lastSyncedAt)})`
+      : (read.known ? "Листи цього акаунта ще не читали" : "");
+    return `<button class="inbox-chip ${active ? "is-active" : ""}" type="button" data-warmup-account="${escapeAttr(entry.accountId)}" aria-pressed="${active}" title="${escapeAttr(title)}">
       <span class="inbox-chip-name">${escapeHtml(entry.name)}</span>${entry.unread ? `<span class="inbox-chip-count" aria-label="непрочитаних: ${entry.unread}">${warmupCount(entry.unread)}</span>` : ""}
     </button>`;
   }).join("");
@@ -443,6 +453,62 @@ function warmupMessageHtml(message, participantName, accountName) {
     </div>
     <div class="warmup-message-body">${warmupBodyHtml(message.body)}</div>
   </li>`;
+}
+
+/**
+ * Коли піде відповідь, яку щойно написали: у наступну сесію акаунта, і ця сесія
+ * має час. Не «зараз»: відповідь вирушає з самого акаунта, разом з його щоденним
+ * заходом, а не за кліком.
+ */
+function warmupGoesOutText(reply) {
+  if (!reply?.goesOutAt) return "у наступну сесію акаунта";
+  if (reply.goesOutSoon) return "найближчим часом, у вікні сесій";
+  const at = new Date(reply.goesOutAt);
+  if (!Number.isFinite(at.getTime())) return "у наступну сесію акаунта";
+  const time = at.toLocaleTimeString("uk", { hour: "2-digit", minute: "2-digit" });
+  return `${reply.goesOutToday ? "сьогодні" : "завтра"} близько ${time}`;
+}
+
+const WARMUP_REPLY_STATE = {
+  waiting: "чекає відправки",
+  sent: "надіслано",
+  failed: "не пішло",
+  expired: "не надіслано — минуло три доби"
+};
+
+/**
+ * Відповіді, які ще не стали повідомленнями в розмові: ті, що чекають акаунта,
+ * ті, що не пішли, і надіслані, поки агент не перечитав розмову. Під самою
+ * перепискою, бо це наступні рядки в ній.
+ */
+function warmupOutboxHtml(accountName) {
+  const open = warmupState.inbox.open;
+  const replies = Array.isArray(open?.outbox) ? open.outbox : [];
+  if (!replies.length) return "";
+  const items = replies.map((reply) => {
+    const state = WARMUP_REPLY_STATE[reply.state] ? reply.state : "waiting";
+    let line = "";
+    if (state === "waiting") line = `Піде з акаунта ${escapeHtml(accountName)} ${escapeHtml(warmupGoesOutText(open.reply))}. До того часу її можна скасувати.`;
+    else if (state === "sent") line = "Акаунт надіслав її; тут вона стане повідомленням після наступного читання листів.";
+    else if (state === "failed") line = escapeHtml(reply.reason || "Агент не зміг надіслати.");
+    else line = "Розмова за цей час пішла далі, тож акаунт її не надсилав. Напишіть знову, якщо ще актуально.";
+    const actions = state === "waiting"
+      ? `<button class="text-button" type="button" data-warmup-reply-cancel="${escapeAttr(reply.id)}"><i data-lucide="x"></i><span>Скасувати</span></button>`
+      : (state === "failed" || state === "expired"
+        ? `<button class="text-button" type="button" data-warmup-reply-retry="${escapeAttr(reply.id)}"><i data-lucide="pencil"></i><span>Написати знову</span></button>
+           <button class="text-button" type="button" data-warmup-reply-cancel="${escapeAttr(reply.id)}"><i data-lucide="x"></i><span>Прибрати</span></button>`
+        : "");
+    return `<li class="warmup-message is-out is-reply is-reply-${state}" data-warmup-reply="${escapeAttr(reply.id)}">
+      <div class="warmup-message-head">
+        <strong>${escapeHtml(accountName)}</strong>
+        <span class="warmup-reply-state">${escapeHtml(WARMUP_REPLY_STATE[state])}</span>
+      </div>
+      <div class="warmup-message-body">${escapeHtml(reply.body || "")}</div>
+      <p class="warmup-reply-note">${line}</p>
+      ${actions ? `<div class="warmup-reply-actions">${actions}</div>` : ""}
+    </li>`;
+  }).join("");
+  return `<ol class="warmup-messages warmup-outbox">${items}</ol>`;
 }
 
 /**
@@ -510,7 +576,7 @@ function warmupThreadViewHtml() {
   const next = warmupNextUnread();
   return `${head}
     <ol class="warmup-messages">${messages.map((message) => warmupMessageHtml(message, name, account.name)).join("")}</ol>
-    <p class="warmup-thread-foot">Тут можна тільки читати: відповідь іде з самого акаунта.</p>
+    ${warmupOutboxHtml(account.name)}
     ${next ? `<button class="primary-button warmup-thread-next" type="button" data-warmup-inbox-next><span>Наступна непрочитана: ${escapeHtml(warmupParticipantName(next.participant || {}))}</span><i data-lucide="arrow-right"></i></button>` : ""}`;
 }
 
@@ -582,19 +648,23 @@ export function renderWarmupInbox() {
     return;
   }
 
-  const sync = warmupInboxSync();
   // Three answers, not two: read at a time, never read, and not reported. The
   // subtitle must not turn the third into the second.
-  const readLine = sync.lastSyncedAt
-    ? `читали ${warmupAgo(sync.lastSyncedAt)}`
-    : (sync.known ? "ще не читали" : "");
-
   if (!inbox.threads.length) {
-    alone(warmupInboxEmptyHtml(sync), readLine);
+    const all = warmupInboxSync();
+    alone(warmupInboxEmptyHtml(all), all.lastSyncedAt ? `читали ${warmupAgo(all.lastSyncedAt)}` : (all.known ? "ще не читали" : ""));
     return;
   }
 
-  subtitle.textContent = readLine;
+  // For the account that is open, and how often that happens: the answer to
+  // «коли це востаннє оновлювалось» is a time and a rhythm, not a time alone.
+  const openId = warmupInboxAccountId();
+  const sync = warmupInboxSync(openId);
+  const openName = warmupInboxAccountName(openId);
+  subtitle.textContent = sync.lastSyncedAt
+    ? `${openName}: листи оновлено ${warmupAgo(sync.lastSyncedAt)} · агент читає їх раз на добу${sync.window ? `, у вікні ${sync.window}` : ""}`
+    : (sync.known ? `${openName}: листи ще не читали` : "");
+  subtitle.title = sync.lastSyncedAt ? warmupStamp(sync.lastSyncedAt) : "";
   const note = warmupInboxNoteHtml(sync);
   if (notice) { notice.innerHTML = note; notice.hidden = !note; }
 
@@ -645,7 +715,133 @@ export function renderWarmupInbox() {
     }
     inboxPaneKey = paneKey;
   }
+  renderWarmupReply();
   refreshIcons();
+}
+
+// ── Відповідь ──────────────────────────────────────────────────────────────
+//
+// Поле під розмовою. Стоїть поза тим, що перемальовується, тож текст, який
+// пишуть, не зникає, коли список оновився; чернетка кожної розмови лишається, поки
+// не надіслана чи не скасована. Надсилання лише просить: відповідь іде з самого
+// акаунта в його наступну сесію, і сторінка каже коли.
+
+/** Чернетки: що почали писати в кожній розмові і не надіслали. Ключ — акаунт і розмова. */
+const inboxDrafts = new Map();
+/** Розмова, для якої поле зараз показано, — щоб не перезаписувати чернетку, коли перемальовується та сама. */
+let inboxReplyKey = "";
+let inboxReplyBusy = false;
+let inboxReplyError = "";
+
+function renderWarmupReply() {
+  const form = document.getElementById("warmupInboxReply");
+  const area = document.getElementById("warmupInboxReplyText");
+  if (!form || !area) return;
+  const hint = document.getElementById("warmupInboxReplyHint");
+  const button = document.getElementById("warmupInboxReplySend");
+  const count = document.getElementById("warmupInboxReplyCount");
+
+  const inbox = warmupState.inbox;
+  const shown = inbox.openThreadKey !== null && Boolean(inbox.open) && !inbox.openError;
+  form.hidden = !shown;
+  if (!shown) {
+    inboxReplyKey = "";
+    return;
+  }
+
+  const reply = inbox.open.reply || null;
+  const key = `${inbox.openAccountId}|${inbox.openThreadKey}`;
+  if (key !== inboxReplyKey) {
+    area.value = inboxDrafts.get(key) || "";
+    inboxReplyKey = key;
+    inboxReplyError = "";
+  }
+
+  const can = Boolean(reply?.canWrite);
+  const limit = Number(reply?.limit) > 0 ? Number(reply.limit) : 2000;
+  const length = area.value.trim().length;
+  const over = length > limit;
+  const account = warmupThreadAccount(inbox.open.thread || {});
+
+  area.disabled = !can || inboxReplyBusy;
+  area.placeholder = can
+    ? `Відповісти — ${warmupParticipantName(inbox.open.thread?.participant || {})}`
+    : "Відповісти звідси не можна";
+  if (count) {
+    count.textContent = can && length ? `${length} / ${limit}` : "";
+    count.className = `inbox-reply-count${over ? " is-over" : ""}`;
+  }
+  if (button) button.disabled = !can || inboxReplyBusy || !length || over;
+
+  if (hint) {
+    let text;
+    if (inboxReplyError) text = inboxReplyError;
+    else if (!can) text = reply?.reason || "Відповісти звідси не можна.";
+    else {
+      text = `Надішле акаунт ${account.name} — не одразу, а ${warmupGoesOutText(reply)}, разом зі щоденним заходом`
+        + `${reply.window ? ` (вікно ${reply.window})` : ""}. До того часу відповідь можна скасувати.`;
+    }
+    hint.textContent = text;
+    hint.className = `inbox-reply-hint${inboxReplyError ? " is-bad" : (can ? "" : " is-muted")}`;
+  }
+}
+
+async function submitWarmupReply() {
+  const inbox = warmupState.inbox;
+  const area = document.getElementById("warmupInboxReplyText");
+  if (!area || inboxReplyBusy || inbox.openThreadKey === null) return;
+  const accountId = inbox.openAccountId;
+  const threadKey = inbox.openThreadKey;
+  const text = area.value.trim();
+  if (!text) return;
+
+  inboxReplyBusy = true;
+  inboxReplyError = "";
+  renderWarmupReply();
+  try {
+    await warmupApi("/inbox/reply", { method: "POST", body: JSON.stringify({ accountId, threadKey, text }) });
+    inboxDrafts.delete(`${accountId}|${threadKey}`);
+    inboxReplyBusy = false;
+    if (!warmupThreadIsOpen(accountId, threadKey)) return;
+    area.value = "";
+    // Розмова перечитується: відповідь у ній з'являється як рядок, що чекає.
+    await openWarmupThread(accountId, threadKey, { refresh: true });
+    const pane = document.getElementById("warmupInboxThread");
+    if (pane && typeof pane.scrollHeight === "number") pane.scrollTop = pane.scrollHeight;
+  } catch (error) {
+    inboxReplyBusy = false;
+    // Помилка належить розмові, в якій її отримали: в іншій вона нічого не означає.
+    if (warmupThreadIsOpen(accountId, threadKey)) inboxReplyError = error?.message || "Не вдалося поставити відповідь у чергу.";
+    renderWarmupReply();
+  }
+}
+
+/** Скасувати відповідь, що чекає, або прибрати ту, що не пішла; «Написати знову» ще й повертає її текст у поле. */
+async function removeWarmupReply(replyId, { rewrite = false } = {}) {
+  const inbox = warmupState.inbox;
+  if (inbox.openThreadKey === null || !replyId) return;
+  const accountId = inbox.openAccountId;
+  const threadKey = inbox.openThreadKey;
+  const reply = (inbox.open?.outbox || []).find((row) => row.id === replyId);
+  try {
+    await warmupApi("/inbox/reply/cancel", { method: "POST", body: JSON.stringify({ accountId, replyId }) });
+  } catch (error) {
+    if (warmupThreadIsOpen(accountId, threadKey)) {
+      inboxReplyError = error?.message || "Не вдалося скасувати.";
+      renderWarmupReply();
+    }
+    return;
+  }
+  if (!warmupThreadIsOpen(accountId, threadKey)) return;
+  if (rewrite && reply?.body) {
+    const key = `${accountId}|${threadKey}`;
+    const area = document.getElementById("warmupInboxReplyText");
+    const held = (area?.value ?? inboxDrafts.get(key) ?? "").trim();
+    const next = held ? `${held}\n\n${reply.body}` : reply.body;
+    inboxDrafts.set(key, next);
+    if (area) area.value = next;
+  }
+  await openWarmupThread(accountId, threadKey, { refresh: true });
 }
 
 const WARMUP_BADGE_POLL_MS = 120000;
@@ -810,7 +1006,12 @@ async function openWarmupThread(accountId, threadKey, { refresh = false } = {}) 
     // The reader may have gone back, or opened something else, while this was
     // in flight. Whatever is open now wins.
     if (!warmupThreadIsOpen(accountId, threadKey)) return;
-    inbox.open = { thread: payload.thread || {}, messages: payload.messages || [] };
+    inbox.open = {
+      thread: payload.thread || {},
+      messages: payload.messages || [],
+      outbox: Array.isArray(payload.outbox) ? payload.outbox : [],
+      reply: payload.reply && typeof payload.reply === "object" ? payload.reply : null
+    };
     inbox.openError = "";
   } catch (error) {
     if (!warmupThreadIsOpen(accountId, threadKey)) return;
@@ -906,6 +1107,16 @@ document.getElementById("warmupInboxLayout")?.addEventListener("click", (event) 
     globalThis.scrollTo?.(0, 0);
     return;
   }
+  const retry = event.target.closest("[data-warmup-reply-retry]");
+  if (retry) {
+    removeWarmupReply(retry.dataset.warmupReplyRetry, { rewrite: true });
+    return;
+  }
+  const cancel = event.target.closest("[data-warmup-reply-cancel]");
+  if (cancel) {
+    removeWarmupReply(cancel.dataset.warmupReplyCancel);
+    return;
+  }
   const contact = event.target.closest("[data-warmup-contact]");
   if (contact) {
     showContactCard(contact.dataset.warmupContact);
@@ -916,6 +1127,28 @@ document.getElementById("warmupInboxLayout")?.addEventListener("click", (event) 
   const row = event.target.closest("[data-warmup-thread]");
   if (!row) return;
   openWarmupThread(row.dataset.warmupThreadAccount, row.dataset.warmupThread);
+});
+
+document.getElementById("warmupInboxReply")?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  submitWarmupReply();
+});
+
+document.getElementById("warmupInboxReplyText")?.addEventListener("input", (event) => {
+  const inbox = warmupState.inbox;
+  if (inbox.openThreadKey === null) return;
+  const key = `${inbox.openAccountId}|${inbox.openThreadKey}`;
+  if (event.target.value) inboxDrafts.set(key, event.target.value);
+  else inboxDrafts.delete(key);
+  renderWarmupReply();
+});
+
+// Ctrl/⌘ + Enter — надіслати; просто Enter — новий рядок, як у будь-якому листі.
+document.getElementById("warmupInboxReplyText")?.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+    event.preventDefault();
+    submitWarmupReply();
+  }
 });
 
 document.getElementById("warmupInboxSearch")?.addEventListener("input", (event) => {

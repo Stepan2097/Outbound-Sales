@@ -23,6 +23,7 @@ import os from 'node:os';
 import { Portal } from './lib/portal.mjs';
 import { readProfile, normalizeCookie } from './lib/anty.mjs';
 import { syncInbox } from './lib/inbox.mjs';
+import { sendReplies } from './lib/outbox.mjs';
 import { AntyApi } from './lib/anty-api.mjs';
 import { settle } from './lib/login-probe.mjs';
 
@@ -37,7 +38,7 @@ const ACCOUNT = arg('account');
 const PORTAL = arg('portal', DEFAULT_PORTAL);
 const ANYTIME = argv.includes('--anytime');
 if (!ACCOUNT) {
-  console.error('usage: node agent/run-account.mjs --account "<profile name or id>" [--portal URL] [--shots DIR] [--no-inbox|--inbox] [--anytime]');
+  console.error('usage: node agent/run-account.mjs --account "<profile name or id>" [--portal URL] [--shots DIR] [--no-inbox|--inbox] [--anytime] [--no-replies]');
   process.exit(2);
 }
 
@@ -115,7 +116,7 @@ log(`день ${plan.day} — «${plan.phase}»`);
 for (const row of plan.plan ?? []) log(`  план: ${row.label} ${row.done}/${row.quota} (лишилось ${row.remaining})`);
 
 const remaining = Object.fromEntries((plan.plan ?? []).map((r) => [r.kind, r.remaining]));
-if (!Object.values(remaining).some((n) => n > 0) && !plan.inbox?.due && !(plan.invites?.toCheck?.length)) {
+if (!Object.values(remaining).some((n) => n > 0) && !plan.inbox?.due && !(plan.invites?.toCheck?.length) && !(plan.outbox?.toSend?.length)) {
   log('денний план уже виконано');
   await portal.log('agent.skipped', `Day ${plan.day} was already complete when the agent ran`);
   return 0;
@@ -434,6 +435,26 @@ log(`сесію відкрито (${session.sessionId}${session.resumed ? ', п�
     log('вхідні: сьогодні вже прочитано або читання вимкнено');
   }
 
+  // ── replies somebody wrote on the Inbox screen ───────────────────────────
+  // After the inbox read, so the conversation is up to date when it is opened,
+  // and last of all, because a message is the one thing here that cannot be
+  // taken back. Its own catch for the same reason as above: a reply that did
+  // not go is reported on the page for the person who wrote it, not a failed
+  // run — only a warning or a report the portal refused stops the visit.
+  const replies = plan.outbox?.toSend ?? [];
+  if (replies.length && !argv.includes('--no-replies')) {
+    try {
+      report.replies = await sendReplies(page, {
+        portal, guard, log, shot, items: replies, self: { slug: selfSlug, name: me },
+      });
+    } catch (e) {
+      if (e instanceof VisitStopped) throw e;
+      report.errors.push(`відповіді: ${e.message}`);
+      log(`  ⚠️ відповіді впали: ${e.message}`);
+      await portal.log('agent.outbox', `Sending replies failed — ${e.message}`, null, 'warn').catch(() => {});
+    }
+  }
+
   await shot(page, '6-final');
 } catch (err) {
   failed = true;
@@ -450,14 +471,17 @@ log(`сесію відкрито (${session.sessionId}${session.resumed ? ', п�
   const inboxNote = report.inbox
     ? ` | розмов: ${report.inbox.threadsSeen}/${report.inbox.listed}, нових повідомлень: ${report.inbox.stored}`
     : '';
+  const repliesNote = report.replies
+    ? ` | відповідей: надіслано ${report.replies.sent}, не пішло ${report.replies.failed}, пропущено ${report.replies.skipped}`
+    : '';
   try { await closeBrowser?.(); } catch (error) {
     failed = true;
     report.errors.push(`Browser cleanup: ${error.message}`);
     await portal.log('agent.error', `Browser cleanup: ${error.message}`, null, 'error').catch(() => {});
   }
-  await portal.closeSession(`${summary}${inboxNote}`.slice(0, 500), failed).catch(() => {});
+  await portal.closeSession(`${summary}${inboxNote}${repliesNote}`.slice(0, 500), failed).catch(() => {});
   fs.writeFileSync(path.join(SHOTS, 'result.json'), JSON.stringify(report, null, 2));
-  log(`готово. дій: ${report.actions.length} | помилок: ${report.errors.length}${inboxNote} | скріни: ${SHOTS}`);
+  log(`готово. дій: ${report.actions.length} | помилок: ${report.errors.length}${inboxNote}${repliesNote} | скріни: ${SHOTS}`);
   if (!failed) closeBrowser = null;
 }
 return failed ? 1 : 0;

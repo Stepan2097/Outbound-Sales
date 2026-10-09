@@ -95,7 +95,7 @@ export function threadKeyFromUrl(url = '') {
 }
 
 /** Wait for one conversation to paint, using the same reader the sweep uses. */
-async function settleThread(page, row, { timeoutMs = 20_000, pace = 1 } = {}) {
+export async function settleThread(page, row, { timeoutMs = 20_000, pace = 1 } = {}) {
   const deadline = Date.now() + timeoutMs;
   let last = null;
   while (Date.now() < deadline) {

@@ -33,6 +33,9 @@ import {
   messagesForContact, outreachFor, readThread, retryCrmCopies, storeThread, summarizeAccounts, syncSummary,
   syncedTodayAccounts, threadKeyOf, unreadCount
 } from "./inbox.mjs";
+import {
+  REPLY_LIMIT, cancelReply, markReplyFailed, markReplySent, prepareReply, queueReply, repliesOf, repliesToSend, visibleReplies
+} from "./outbox.mjs";
 import { activeLease, decideNext, finishRun, leaseAccount, upkeepFor, viewsHeldBackFor } from "./scheduler.mjs";
 import {
   DEFAULT_FROM_DAY, allowanceReason, claimCapacity, claimCutoff, defaultFilters, describeCampaign, feedingFor,
@@ -833,6 +836,53 @@ function describeThread(thread, { labels, identities, outreach }) {
     outreachStatus: found.outreachStatus,
     lastSyncedAt: thread.lastSyncedAt
   };
+}
+
+/**
+ * Whether the account's browser will be opened at all, and so whether a reply
+ * written for it can ever go out. A reply is sent by the account's own session,
+ * so an account the agent does not open — excluded, no warm-up, on pause, marked
+ * unhealthy — would take the reply and never send it. Better said when it is
+ * written than found out three days later.
+ */
+async function replyDoor(account) {
+  if (!account) return { open: false, reason: "Акаунт не знайдено." };
+  if (account.status === "excluded") {
+    return { open: false, reason: "Цей акаунт виключено з прогріву — агент його не відкриває, тож відповісти звідси не вийде." };
+  }
+  const run = await activeRun(account.id);
+  if (!run) {
+    return { open: false, reason: "Для цього акаунта не запущено прогрів — агент його не відкриває, тож відповісти звідси не вийде." };
+  }
+  if (pausedOn(run, today())) {
+    return { open: false, reason: `Акаунт на паузі до ${run.paused_until} — поки вона триває, агент його не відкриває.` };
+  }
+  if (account.health !== "ok") {
+    return { open: false, reason: "Акаунт позначено як проблемний — агент його не відкриває, поки це не знято." };
+  }
+  return { open: true, reason: null };
+}
+
+/** What the plan hands the agent: the replies it sends this session, in the shape it reads them. */
+async function outboxPlan(accountId) {
+  const work = await repliesToSend(accountId, { todayIso: today() });
+  return {
+    toSend: work.toSend.map((reply) => ({
+      id: reply.id, threadKey: reply.threadKey, text: reply.body, name: reply.participantName
+    })),
+    waiting: work.waiting, sentToday: work.sentToday, perDay: work.perDay
+  };
+}
+
+/**
+ * When a reply written now goes out: the account's next session, which is also
+ * when it reads the inbox. Today's, if it has not happened yet, otherwise
+ * tomorrow's — at the time that session is planned for.
+ */
+async function replyGoesOut(account) {
+  const read = await syncedTodayAccounts([account.id], today());
+  const next = nextSession(account.id, { outstanding: !read.has(account.id) });
+  return { at: next.at, today: next.today, soon: next.overdue };
 }
 
 
@@ -2655,7 +2705,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         // an empty inbox — is the case with no thread to carry it, and
         // "nothing arrived" and "the agent never ran" need different people to
         // do different things.
-        sync: await syncSummary(accounts.map((account) => account.id)),
+        sync: { ...await syncSummary(accounts.map((account) => account.id)), window: windowLabel() },
         threads: threads.map((thread) => describeThread(thread, { labels, identities, outreach }))
       });
       return true;
@@ -2672,6 +2722,18 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       const account = await loadAccount(accountId);
       const [identities, outreach] = await Promise.all([loginIdentities(), outreachFor([found.thread])]);
 
+      // What can be done with the conversation from here. A reply is only to
+      // somebody who wrote, from an account the agent will open — and the
+      // screen is told which, and why not, rather than left to find out.
+      const door = await replyDoor(account);
+      const answerable = found.messages.some((message) => message.direction === "in");
+      const [queue, goesOut] = await Promise.all([
+        account ? repliesOf(account.id) : [],
+        door.open && account ? replyGoesOut(account) : null
+      ]);
+      const own = queue.filter((reply) => reply.threadKey === threadKey);
+      const allowance = account && door.open ? await repliesToSend(account.id, { todayIso: today() }) : null;
+
       sendJson(response, 200, {
         success: true,
         thread: describeThread(found.thread, {
@@ -2679,8 +2741,71 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           identities,
           outreach
         }),
-        messages: found.messages
+        messages: found.messages,
+        outbox: visibleReplies(own, found.messages),
+        reply: {
+          canWrite: door.open && answerable,
+          reason: !door.open ? door.reason : (answerable ? null : "Тут ще ніхто не відповів — це не відповідь, а перше повідомлення, і воно йде через «Прогрів»."),
+          limit: REPLY_LIMIT,
+          goesOutAt: goesOut?.at ?? null,
+          goesOutToday: goesOut?.today ?? null,
+          goesOutSoon: goesOut?.soon ?? false,
+          window: windowLabel(),
+          sentToday: allowance?.sentToday ?? 0,
+          perDay: allowance?.perDay ?? null
+        }
       });
+      return true;
+    }
+
+    // A reply, written on the screen and sent by the account. This only asks:
+    // the browser is the agent's, and the reply goes out in the account's own
+    // next session (see `outbox.mjs` for why that is the design and not a gap).
+    if (method === "POST" && path === "/inbox/reply") {
+      const body = await readJson(request);
+      if (!body) return fail(response, sendJson, 400, "Некоректне тіло JSON");
+      const accountId = String(body.accountId || "");
+      const threadKey = String(body.threadKey || "");
+      if (!accountId || !threadKey) return fail(response, sendJson, 400, "Відповіді потрібні accountId і threadKey");
+
+      const account = await loadAccount(accountId);
+      if (!account) return fail(response, sendJson, 404, "Акаунт не знайдено");
+      const door = await replyDoor(account);
+      if (!door.open) return fail(response, sendJson, 409, door.reason);
+
+      const found = await readThread({ accountId, threadKey });
+      if (!found) return fail(response, sendJson, 404, "Тред не знайдено");
+      if (!found.messages.some((message) => message.direction === "in")) {
+        return fail(response, sendJson, 409, "Тут ще ніхто не відповів — це не відповідь, а перше повідомлення, і воно йде через «Прогрів».");
+      }
+
+      return await withAccountQuota(account.id, async () => {
+        const queued = await queueReply({
+          accountId, threadKey, text: body.text,
+          participantName: found.thread.participant?.name ?? null,
+          todayIso: today()
+        });
+        if (!queued.ok) return fail(response, sendJson, queued.status, queued.error);
+        const goesOut = await replyGoesOut(account);
+        sendJson(response, queued.duplicate ? 200 : 201, {
+          success: true, reply: queued.reply, duplicate: queued.duplicate,
+          goesOutAt: goesOut.at, goesOutToday: goesOut.today, goesOutSoon: goesOut.soon, window: windowLabel()
+        });
+        return true;
+      });
+    }
+
+    // Take a reply back before it is sent, or put away one that did not go.
+    if (method === "POST" && path === "/inbox/reply/cancel") {
+      const body = await readJson(request);
+      if (!body) return fail(response, sendJson, 400, "Некоректне тіло JSON");
+      const accountId = String(body.accountId || "");
+      const replyId = String(body.replyId || "");
+      if (!accountId || !replyId) return fail(response, sendJson, 400, "Потрібні accountId і replyId");
+      if (!await loadAccount(accountId)) return fail(response, sendJson, 404, "Акаунт не знайдено");
+      const cancelled = await cancelReply(accountId, replyId);
+      if (!cancelled.ok) return fail(response, sendJson, cancelled.status, cancelled.error);
+      sendJson(response, 200, { success: true, reply: cancelled.reply });
       return true;
     }
 
@@ -2886,6 +3011,14 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           maxThreads: paused ? 0 : MAX_THREADS_PER_RUN,
           due: upkeep.inbox
         },
+        // Replies written on the Inbox screen that this account is to send in
+        // this session — the oldest few, never past the day's limit, and none at
+        // all where the account would not be opened anyway. The agent still asks
+        // `outbox.prepare` before typing each one, because a person may take a
+        // reply back in the hours between this answer and its turn.
+        outbox: !run || paused || account.status === "excluded" || account.health !== "ok"
+          ? { toSend: [], waiting: 0, sentToday: 0, perDay: null }
+          : await outboxPlan(account.id),
         // The invitation work, ready to act on. `toSend` is already cut to what
         // today's allowance permits, so the agent is not handed a request the
         // server would refuse a moment later; `toCheck` is bounded because a
@@ -3228,6 +3361,48 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         // the conversations stored before they were added on arrival.
         const crmAdded = await adoptWaitingThreads(account, { folderIds: runningFolderIds() });
         sendJson(response, 200, { success: true, threadsSeen, syncedAt, crmRetried, crmAdded });
+        return true;
+      }
+
+      // ── replies written on the screen ─────────────────────────────────
+      //
+      // Asked right before each one is typed: has it been taken back since the
+      // plan was cut, is the day's limit already used, did a warning arrive?
+      // The text comes only with a yes — an agent that is told no has nothing
+      // to type.
+      if (action === "outbox.prepare") {
+        const replyId = String(body.replyId || "");
+        if (!replyId) return fail(response, sendJson, 400, "Яку відповідь?");
+        const run = await activeRun(account.id);
+        const stopAll = !run || pausedOn(run, today()) || account.health !== "ok" || account.status === "excluded";
+        const prepared = stopAll
+          ? { allowed: false, reply: null, reason: "stopped" }
+          : await prepareReply(account.id, replyId, { todayIso: today() });
+        sendJson(response, 200, {
+          success: true, allowed: prepared.allowed, reason: prepared.reason, stopAll,
+          reply: prepared.allowed ? { id: prepared.reply.id, threadKey: prepared.reply.threadKey, text: prepared.reply.body } : null
+        });
+        return true;
+      }
+
+      // After LinkedIn showed the message in the conversation, never before.
+      if (action === "outbox.sent") {
+        const replyId = String(body.replyId || "");
+        if (!replyId) return fail(response, sendJson, 400, "Яку відповідь?");
+        const marked = await markReplySent(account.id, replyId);
+        if (!marked.ok) return fail(response, sendJson, marked.status, marked.error);
+        sendJson(response, 200, { success: true, repeated: Boolean(marked.repeated) });
+        return true;
+      }
+
+      // It did not go, or nobody can say whether it did. The reason is shown on
+      // the conversation, so it is written for the person and not the log.
+      if (action === "outbox.failed") {
+        const replyId = String(body.replyId || "");
+        if (!replyId) return fail(response, sendJson, 400, "Яку відповідь?");
+        const marked = await markReplyFailed(account.id, replyId, body.reason);
+        if (!marked.ok) return fail(response, sendJson, marked.status, marked.error);
+        sendJson(response, 200, { success: true, repeated: Boolean(marked.repeated) });
         return true;
       }
 

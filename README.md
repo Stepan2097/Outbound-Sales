@@ -120,6 +120,32 @@ somebody twice. It adds and never edits, and a CRM that refuses costs the
 message nothing — it is stored and added on the next read. `INBOX_ADOPT_CONTACTS=0`
 turns it off. The inbox's «Відкрити в CRM» opens exactly these records.
 
+**Replying from the inbox.** Under an open conversation there is a field: write
+and press «Надіслати» (or Ctrl/⌘+Enter). The portal owns no browser, so this does
+not send — it asks. The reply waits on the conversation as a dashed bubble
+(«чекає відправки», cancellable) and the account sends it in its own next session,
+after its daily inbox read: opened by its address, typed key by key, sent with
+the button, and reported «надіслано» only when the message is on the page. It is
+not instant on purpose — opening a warming account's browser the moment a button
+is pressed is exactly the unscheduled session the warm-up avoids — and the page
+says when: «сьогодні/завтра близько HH:MM», the account's planned session time
+inside the 09:00–13:00 window. Only to somebody who has written to the account
+(a first message goes through «Прогрів»), only from an account the agent will
+open (not excluded, not paused, not unhealthy — the field says which, instead of
+taking a reply that would never go), at most five waiting per account and
+`INBOX_REPLIES_PER_DAY` (default 10) sent-and-waiting per account per day, three
+per session. A reply that nobody got to in three days is shown as not sent and
+never goes. One that did not go — no field found, the button dead, the message
+never appeared — is shown with the reason and «Написати знову»; the agent never
+retries by itself, because whether a message went is the one thing it can fail
+to know. The contract is in `WARMUP_INBOX_CONTRACT.md`.
+
+**When the letters were last read.** The line under «Вхідні» is the open
+account's own: «Mary Lindsay: листи оновлено 6 год тому · агент читає їх раз на
+добу, у вікні 09:00–13:00», with the exact time on hover and on each account's
+button. «Оновити» only reloads what the portal already has; it does not ask
+LinkedIn.
+
 ## Contacts
 
 The Contacts tab reads the CRM directly: its folders, one page of a folder at a

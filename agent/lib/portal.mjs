@@ -78,4 +78,10 @@ export class Portal {
   invitesChecked(results) { return this.#post({ action: 'invites.checked', results }); }
   inboxThread(thread) { return this.#post({ action: 'inbox.thread', ...thread }); }
   inboxDone(threadsSeen) { return this.#post({ action: 'inbox.done', threadsSeen }); }
+  /** Right before typing: is this reply still wanted, and is the account still allowed to send it? */
+  outboxPrepare(replyId) { return this.#post({ action: 'outbox.prepare', replyId }); }
+  /** After LinkedIn showed the message in the conversation — never before. */
+  outboxSent(replyId) { return this.#post({ action: 'outbox.sent', replyId }); }
+  /** It did not go, or nobody can tell. The reason is shown to the person who wrote it. */
+  outboxFailed(replyId, reason) { return this.#post({ action: 'outbox.failed', replyId, reason }); }
 }

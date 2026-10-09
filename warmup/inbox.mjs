@@ -6,6 +6,7 @@ import { REQUEST_EVENT_TYPES, moveStatus, requestLine } from "./invites.mjs";
 import {
   CRM_COPIED, CRM_FAILED, accountName, clampContent, copyToCrm, crmStamp, oneCopyAtATime, outstandingCopies, sourceEvents
 } from "./activities.mjs";
+import { OUTBOX_AUDIT_HIDDEN } from "./outbox.mjs";
 import { adoptable, adoptionEnabled, createContact, hasProfileWords, once } from "./people.mjs";
 
 /**
@@ -104,7 +105,7 @@ export function isServiceCard(body, participant = null) {
  * that the agent's selectors have rotted, and hiding it would hide exactly the
  * failure this phase is most likely to have.
  */
-export const AUDIT_HIDDEN_TYPES = [MESSAGE_IN, MESSAGE_OUT, READ_TYPE, CRM_COPIED, CONTACT_TYPE];
+export const AUDIT_HIDDEN_TYPES = [MESSAGE_IN, MESSAGE_OUT, READ_TYPE, CRM_COPIED, CONTACT_TYPE, ...OUTBOX_AUDIT_HIDDEN];
 
 /**
  * Which of these accounts has already been read today.
@@ -1416,7 +1417,10 @@ export async function syncSummary(accountIds) {
   return {
     accountsTotal: accountIds.length,
     accountsSynced: times.length,
-    lastSyncedAt: times.sort().pop() || null
+    lastSyncedAt: times.sort().pop() || null,
+    // Each account's own, because the screen opens one account at a time and
+    // «читали 6 год тому» about somebody else's login is not an answer.
+    byAccount: Object.fromEntries(accountIds.filter((id) => synced.has(id)).map((id) => [id, synced.get(id)]))
   };
 }
 
