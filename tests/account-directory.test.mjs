@@ -81,13 +81,27 @@ async function startWorkspace(supabasePort, savedState = null) {
     });
     return { status: response.status, body: await response.json().catch(() => ({})) };
   };
-  return { call, stop: async () => { child.kill(); await rm(dir, { recursive: true, force: true }); } };
+  // Stopped and then cleaned, in that order: a server killed mid-write still has
+  // its state file open, and removing the folder under it fails with ENOTEMPTY —
+  // which, in a hook, left the fake Supabase open and the whole run hanging.
+  const exited = new Promise((resolve) => {
+    if (child.exitCode !== null || child.signalCode !== null) resolve();
+    else child.once("exit", resolve);
+  });
+  return {
+    call,
+    stop: async () => {
+      child.kill();
+      await exited;
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
+  };
 }
 
 async function withWorkspace(t, savedState = null) {
   const supabase = await startFakeSupabase();
   const workspace = await startWorkspace(supabase.port, savedState);
-  t.after(async () => { await workspace.stop(); supabase.service.close(); });
+  t.after(async () => { try { await workspace.stop(); } finally { supabase.service.close(); } });
   return workspace;
 }
 
@@ -396,7 +410,7 @@ test("the list still exists when the service-role endpoint refuses, and says whe
   });
   supabase.service.close();
   const workspace = await startWorkspace(noAdminApi.port);
-  t.after(async () => { await workspace.stop(); noAdminApi.service.close(); });
+  t.after(async () => { try { await workspace.stop(); } finally { noAdminApi.service.close(); } });
 
   const { status, body } = await workspace.call("/api/account/directory");
   assert.equal(status, 200, "a refused admin endpoint is not a broken screen");
