@@ -26,6 +26,7 @@ import { VisitStopped } from './lib/connections.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const FIXTURE = fs.readFileSync(path.join(here, 'fixtures', 'thread-composer.html'), 'utf8');
+const PROFILE = fs.readFileSync(path.join(here, 'fixtures', 'profile-message.html'), 'utf8');
 const SELF = { slug: null, name: 'Mary Lindsay' };
 const MARTA = '2-ZjE4ZmQ1NzQtYjE1NC00ZjQ4LThm';
 const TEXT = 'Дякую, Марто!\nПерший рядок — з «лапками» і <тегом> & амперсандом.\n\nНадішлю модель у понеділок 😊';
@@ -52,7 +53,12 @@ before(async () => {
     const url = new URL(req.url, 'http://localhost');
     hits.push(url.pathname);
     let body = null;
-    if (/\/messaging\/thread\//.test(url.pathname)) {
+    if (url.pathname === '/in/gone-person/') { res.writeHead(404, { 'content-type': 'text/html' }); res.end('<title>404</title>'); return; }
+    if (/^\/in\/[^/]+\/?$/.test(url.pathname)) {
+      body = PROFILE
+        .replace(/\/\*MODE\*\/.*?\/\*END\*\//, JSON.stringify(mode))
+        .replace(/\/\*LAST_OURS\*\/.*?\/\*END\*\//, JSON.stringify(lastOurs));
+    } else if (/\/messaging\/thread\//.test(url.pathname)) {
       body = FIXTURE
         .replace(/\/\*MODE\*\/.*?\/\*END\*\//, JSON.stringify(mode === 'plain' ? 'ok' : mode))
         .replace(/\/\*LAST_OURS\*\/.*?\/\*END\*\//, JSON.stringify(lastOurs));
@@ -336,5 +342,109 @@ describe('typing in runs', () => {
       }
     }
     assert.deepEqual(chunkLine(''), []);
+  });
+});
+
+describe('the first message, from the profile', () => {
+  const firstItem = (id = 'f-1', slug = 'person-one') => ({
+    id, kind: 'first', threadKey: `first:o-${id}`, text: 'Hi Person, thanks for connecting!', name: 'Person One',
+    linkedin: `https://www.linkedin.com/in/${slug}/`,
+  });
+  const firstPortal = (slug = 'person-one') => {
+    const portal = stubPortal();
+    portal.outboxPrepare = async (id) => {
+      portal.calls.push(['prepare', id]);
+      return { success: true, allowed: true, stopAll: false,
+        reply: { id, kind: 'first', threadKey: `first:o-${id}`, text: 'Hi Person, thanks for connecting!', name: 'Person One',
+          linkedin: `https://www.linkedin.com/in/${slug}/` } };
+    };
+    return portal;
+  };
+  const sendFirst = (portal, items = [firstItem()]) => sendReplies(page, {
+    portal, items, self: SELF, origin, pace: 0.02, confirmMs: 2500, retryWait: async () => {},
+  });
+  const overlayWho = () => page.evaluate(() => [...document.querySelectorAll('.msg-overlay-conversation-bubble header a')].map((a) => a.textContent));
+
+  test('відкриває профіль, тисне «Повідомлення» у шапці, пише й надсилає — і лише тоді звітує', async (t) => {
+    if (!page) return t.skip('Chrome не знайдено');
+    mode = 'ok'; lastOurs = ''; hits = [];
+    const portal = firstPortal();
+    const result = await sendFirst(portal);
+    assert.equal(result.sent, 1);
+    assert.deepEqual(names(portal), ['prepare', 'sent'], 'перше повідомлення не перечитується як розмова — ключа ще нема');
+    assert.ok(hits.includes('/in/person-one/'), 'відкрито профіль цієї людини');
+    assert.deepEqual(await overlayWho(), ['person-one'], 'розмова саме з нею, а не з кимось у «також переглядали»');
+    assert.equal(await sends(), 1);
+    assert.match(await page.evaluate(() => document.querySelector('.msg-s-message-list-content').innerText), /thanks for connecting/);
+  });
+
+  test('не в контактах (2-й ступінь) — нічого не відкриває й не пише: це був би InMail', async (t) => {
+    if (!page) return t.skip('Chrome не знайдено');
+    mode = 'second'; lastOurs = '';
+    const portal = firstPortal();
+    const result = await sendFirst(portal);
+    assert.equal(result.failed, 1);
+    assert.match(portal.calls.find(([name]) => name === 'failed')[2], /1-й ступінь/);
+    assert.equal(await sends(), 0);
+    assert.deepEqual(await overlayWho(), []);
+  });
+
+  test('у шапці немає «Повідомлення» — не тисне чужу кнопку з бічної колонки', async (t) => {
+    if (!page) return t.skip('Chrome не знайдено');
+    mode = 'nobutton'; lastOurs = '';
+    const portal = firstPortal();
+    const result = await sendFirst(portal);
+    assert.equal(result.failed, 1);
+    assert.match(portal.calls.find(([name]) => name === 'failed')[2], /немає кнопки «Повідомлення»/);
+    assert.deepEqual(await overlayWho(), [], 'розмову ні з ким не відкрито');
+  });
+
+  test('уже відкрита інша розмова поруч — два поля, не вгадує', async (t) => {
+    if (!page) return t.skip('Chrome не знайдено');
+    mode = 'two'; lastOurs = '';
+    const portal = firstPortal();
+    const result = await sendFirst(portal);
+    assert.equal(result.failed, 1);
+    assert.match(portal.calls.find(([name]) => name === 'failed')[2], /2 полів/);
+    assert.equal(await sends(), 0);
+  });
+
+  test('розмова вже закінчується тими самими словами від нас — вдруге не пише', async (t) => {
+    if (!page) return t.skip('Chrome не знайдено');
+    mode = 'ours'; lastOurs = 'Hi Person, thanks for connecting!';
+    const portal = firstPortal();
+    const result = await sendFirst(portal);
+    assert.equal(result.failed, 1);
+    assert.match(portal.calls.find(([name]) => name === 'failed')[2], /вдруге не надсилав/);
+    assert.equal(await sends(), 0);
+  });
+
+  test('натиснув, а повідомлення не з’явилось — «невідомо», а не «надіслано»', async (t) => {
+    if (!page) return t.skip('Chrome не знайдено');
+    mode = 'silent'; lastOurs = '';
+    const portal = firstPortal();
+    const result = await sendFirst(portal);
+    assert.equal(result.failed, 1);
+    assert.match(portal.calls.find(([name]) => name === 'failed')[2], /невідомо, чи пішло/);
+    assert.equal(names(portal).includes('sent'), false);
+  });
+
+  test('натиснув «Повідомлення», а розмова не відкрилась — каже це й нічого не набирає', async (t) => {
+    if (!page) return t.skip('Chrome не знайдено');
+    mode = 'dead'; lastOurs = '';
+    const portal = firstPortal();
+    const result = await sendFirst(portal);
+    assert.equal(result.failed, 1);
+    assert.match(portal.calls.find(([name]) => name === 'failed')[2], /розмова не відкрилась/);
+    assert.equal(await sends(), 0);
+  });
+
+  test('профілю більше немає — каже це', async (t) => {
+    if (!page) return t.skip('Chrome не знайдено');
+    mode = 'ok'; lastOurs = '';
+    const portal = firstPortal('gone-person');
+    const result = await sendFirst(portal, [firstItem('f-9', 'gone-person')]);
+    assert.equal(result.failed, 1);
+    assert.match(portal.calls.find(([name]) => name === 'failed')[2], /профілю більше немає/);
   });
 });

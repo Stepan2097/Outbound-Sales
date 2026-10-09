@@ -9,7 +9,7 @@ import {
 import { SESSION_WINDOW, insideWindow, nextSession, windowLabel } from "./schedule.mjs";
 import { HEALTH_LABEL, HEALTH_VALUES, deriveStatus, isHealth, pauseCause } from "./status.mjs";
 import { PLATFORMS, parseProxy, platformOf, proxyString, retag } from "./platform.mjs";
-import { CLAIM_STATUS, OUTREACH_COLUMNS, OUTREACH_STATUSES, describeClaim, describeOutreach, personSnapshot, sentBy } from "./outreach.mjs";
+import { CLAIM_STATUS, OUTREACH_COLUMNS, OUTREACH_STATUSES, describeClaim, describeOutreach, linkedinSlug, personSnapshot, sentBy } from "./outreach.mjs";
 import {
   ACCEPTED_STATUS, INVITE_HELD_OUTCOMES, INVITE_OUTCOMES, INVITE_PERSON_OUTCOMES, MAX_INVITES_PER_RUN, MAX_INVITE_CHECKS_PER_RUN,
   OUTREACH_SENT, WAITING_STATUS, cancelInvite, copyRequestToCrm, fedInvites, folderAddedToday,
@@ -33,6 +33,9 @@ import {
   messagesForContact, outreachFor, readThread, retryCrmCopies, storeThread, summarizeAccounts, syncSummary,
   syncedTodayAccounts, threadKeyOf, unreadCount
 } from "./inbox.mjs";
+import {
+  FIRST_AUDIT_HIDDEN, FIRST_LIMIT, acceptedRow, dismissFirst, firstMarks, firstMessageBoard, firstThreadKey, saveDraft
+} from "./first-messages.mjs";
 import {
   REPLY_LIMIT, cancelReply, markReplyFailed, markReplySent, prepareReply, queueReply, repliesOf, repliesToSend, visibleReplies
 } from "./outbox.mjs";
@@ -838,6 +841,180 @@ function describeThread(thread, { labels, identities, outreach }) {
   };
 }
 
+/** The same words, whitespace aside — what a double press sends twice. */
+function sameWords(left, right) {
+  const flat = (value) => String(value ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+  return flat(left) === flat(right);
+}
+
+/** One model call per person at a time: a page opened twice must not pay for the same draft twice. */
+const drafting = new Map();
+function draftOnce(outreachId, work) {
+  if (drafting.has(outreachId)) return drafting.get(outreachId);
+  const run = work().finally(() => drafting.delete(outreachId));
+  drafting.set(outreachId, run);
+  return run;
+}
+
+/** The product a person's first message is about: the account's running campaign's, else the workspace's own. */
+function campaignProductFor(accountId, campaigns) {
+  const running = campaigns.filter((campaign) => campaign.state === "running" && campaign.accountIds.includes(accountId));
+  return running.find((campaign) => campaign.productId)?.productId || "";
+}
+
+/**
+ * Ask the writer for the first message to this person, and keep it.
+ *
+ * The CRM's record is used when there is one — what they do, where, what the
+ * team wrote about them — and the outreach row's own name, company and position
+ * when there is not. Ukrainian for somebody in Ukraine, English otherwise, as on
+ * the contact card.
+ */
+async function writeFirstDraft(row, choice, campaigns, writer) {
+  let record = null;
+  if (row.crm_contact_id) {
+    try { record = await leadById(row.crm_contact_id); } catch { record = null; }
+  }
+  const contact = {
+    id: row.crm_contact_id || row.id,
+    name: row.person_name || record?.name || "",
+    position: row.person_position || record?.position || "",
+    company: row.person_company || record?.company || "",
+    country: row.person_country || record?.country || "",
+    ...(record || {})
+  };
+  const language = choice.language
+    || (/^(ua|ukr|україн|украин)/i.test(String(contact.country || "").trim()) ? "uk" : "en");
+  const written = await writer.write(contact, {
+    productId: choice.productId || campaignProductFor(row.account_id, campaigns),
+    language,
+    instruction: choice.instruction
+  });
+  if (!written?.text?.trim()) return null;
+  return saveDraft(row, written);
+}
+
+/** The Home screen's whole answer. Each part is read once and nothing here writes. */
+async function homeView(campaigns, writer) {
+  const accountRows = await anty.from("wl_accounts").select("*").rows();
+  const described = await Promise.all(accountRows.map(describeAccount));
+  const live = described.filter((account) => account.status !== "excluded");
+  const ids = live.map((account) => account.id);
+  const names = new Map(described.map((account) => [account.id, account.identity?.name || account.label || "акаунт"]));
+
+  const [outreach, board, threads, sentToday] = await Promise.all([
+    ids.length ? anty.from("wl_outreach").select("id,account_id,status,created_at,responded_at").in("account_id", ids).rows() : [],
+    firstMessageBoard(ids),
+    listThreads(),
+    connectDoneToday(ids)
+  ]);
+
+  const todayIso = today();
+  const funnel = { queued: 0, invited: 0, accepted: 0, written: board.written, replied: 0 };
+  let repliedToday = 0;
+  for (const row of outreach) {
+    if (row.status === CLAIM_STATUS || row.status === "waiting") { funnel.queued += 1; continue; }
+    funnel.invited += 1;
+    if (row.status === "accepted" || row.status === "connected") funnel.accepted += 1;
+    if (row.status === "connected") {
+      funnel.replied += 1;
+      if (String(row.responded_at || "").startsWith(todayIso)) repliedToday += 1;
+    }
+  }
+
+  // When each account sends what is asked of it, asked once per account.
+  const goesOut = new Map();
+  for (const person of board.toWrite) {
+    if (!person.reply || goesOut.has(person.accountId)) continue;
+    const account = live.find((row) => row.id === person.accountId);
+    if (account) goesOut.set(person.accountId, await replyGoesOut(account));
+  }
+
+  const accounts = live.map((account) => {
+    const warmup = account.warmup;
+    let state = "idle";
+    if (warmup) {
+      if (warmup.state === "paused") state = warmup.pauseCause === "invite_limit" ? "limit" : "paused";
+      else if (warmup.state === "completed") state = "finished";
+      else state = warmup.working ? "working" : "warming";
+    }
+    return {
+      id: account.id,
+      name: names.get(account.id),
+      label: account.label,
+      state,
+      health: account.health,
+      healthNote: account.healthNote || null,
+      day: warmup?.day ?? null,
+      totalDays: warmup?.totalDays ?? null,
+      pausedUntil: warmup?.pausedUntil ?? null,
+      connects: warmup ? { done: warmup.done?.connect ?? 0, quota: warmup.quotas?.connect ?? 0 } : null,
+      nextSession: account.nextSession?.at ?? null,
+      campaigns: campaigns.filter((campaign) => campaign.state === "running" && campaign.accountIds.includes(account.id)).map((campaign) => campaign.name)
+    };
+  });
+
+  const attention = [];
+  for (const account of accounts) {
+    if (account.health && account.health !== "ok") {
+      attention.push({ kind: "account", accountId: account.id, text: `${account.name}: ${account.healthNote || "потрібна увага — агент його не відкриває"}` });
+    } else if (account.state === "limit") {
+      attention.push({ kind: "account", accountId: account.id, text: `${account.name}: тижневий ліміт запрошень LinkedIn — до ${account.pausedUntil}` });
+    } else if (account.state === "paused") {
+      attention.push({ kind: "account", accountId: account.id, text: `${account.name}: на паузі після попередження — до ${account.pausedUntil}` });
+    }
+  }
+  const running = campaigns.filter((campaign) => campaign.state === "running");
+  if (!running.length) {
+    attention.push({ kind: "campaign", text: "Жодна кампанія не запущена — нові запрошення ніхто не надсилає." });
+  }
+  for (const campaign of running) {
+    if (!campaign.accountIds.length) attention.push({ kind: "campaign", text: `Кампанія «${campaign.name}» запущена, але жоден акаунт її не веде.` });
+    if (!campaign.folderId) attention.push({ kind: "campaign", text: `У кампанії «${campaign.name}» не вибрано папку контактів.` });
+  }
+  const writerStatus = writer?.status ? writer.status() : { ready: false };
+  if (!writerStatus.ready) {
+    attention.push({ kind: "writer", text: "Модель для повідомлень не підключена — чернетки пишуться за шаблоном." });
+  }
+
+  const unread = threads.filter((thread) => thread.unread)
+    .sort((left, right) => String(right.lastMessage?.sentAt || "").localeCompare(String(left.lastMessage?.sentAt || "")));
+
+  return {
+    date: todayIso,
+    funnel,
+    today: {
+      invited: [...sentToday.values()].reduce((total, value) => total + value, 0),
+      replied: repliedToday
+    },
+    toWrite: board.toWrite.map((person) => ({
+      ...person,
+      accountName: names.get(person.accountId) || "акаунт",
+      goesOut: person.reply ? goesOut.get(person.accountId) ?? null : null
+    })),
+    toWriteTotal: board.total,
+    replies: {
+      unread: unread.length,
+      latest: unread.slice(0, 5).map((thread) => ({
+        accountId: thread.accountId,
+        accountName: names.get(thread.accountId) || "акаунт",
+        threadKey: thread.threadKey,
+        participant: thread.participant,
+        lastMessage: thread.lastMessage,
+        crmContactId: thread.crmContactId ?? null
+      }))
+    },
+    accounts,
+    campaigns: campaigns.map((campaign) => ({
+      id: campaign.id, name: campaign.name, state: campaign.state,
+      folderName: campaign.folderName || null, accounts: campaign.accountIds.length
+    })),
+    attention,
+    writer: writerStatus,
+    window: windowLabel()
+  };
+}
+
 /**
  * Whether the account's browser will be opened at all, and so whether a reply
  * written for it can ever go out. A reply is sent by the account's own session,
@@ -868,7 +1045,8 @@ async function outboxPlan(accountId) {
   const work = await repliesToSend(accountId, { todayIso: today() });
   return {
     toSend: work.toSend.map((reply) => ({
-      id: reply.id, threadKey: reply.threadKey, text: reply.body, name: reply.participantName
+      id: reply.id, kind: reply.kind, threadKey: reply.threadKey, text: reply.body, name: reply.participantName,
+      ...(reply.kind === "first" ? { linkedin: reply.linkedin, outreachId: reply.outreachId } : {})
     })),
     waiting: work.waiting, sentToday: work.sentToday, perDay: work.perDay
   };
@@ -934,7 +1112,7 @@ const RECHECK_REFUSALS = {
   expired: "Посилання застаріло — дочекайся наступного повідомлення в групі."
 };
 
-export async function handleWarmupApi({ request, response, url, sendJson, readJson, campaigns: campaignStore }) {
+export async function handleWarmupApi({ request, response, url, sendJson, readJson, campaigns: campaignStore, writer = null }) {
   const path = url.pathname.replace(/^\/api\/warmup/, "") || "/";
   const method = request.method;
 
@@ -1096,7 +1274,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       // there are audit lines — eight replies would push a whole day of history
       // off a panel that shows eight rows.
       const recent = await anty.from("wl_events").select("id,account_id,level,type,message,created_at")
-        .notIn("type", AUDIT_HIDDEN_TYPES)
+        .notIn("type", [...AUDIT_HIDDEN_TYPES, ...FIRST_AUDIT_HIDDEN])
         .order("created_at", { ascending: false }).limit(8).rows();
 
       sendJson(response, 200, {
@@ -1107,6 +1285,88 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         attention: attention.slice(0, 8),
         recent
       });
+      return true;
+    }
+
+    // ── the Home screen: the whole conveyor on one page ───────────────────
+    //
+    // What the software is for, end to end: people from a folder → invitations
+    // → who accepted → the first message, written by the model and approved by
+    // a person → who answered. And, beside it, what needs a person now: people to
+    // write to, replies to read, accounts that are stuck.
+    if (method === "GET" && path === "/home") {
+      sendJson(response, 200, { success: true, ...await homeView(readCampaigns(), writer) });
+      return true;
+    }
+
+    // The model writes (or rewrites) the first message to somebody who accepted.
+    if (method === "POST" && path === "/first-messages/draft") {
+      const body = await readJson(request);
+      if (!body) return fail(response, sendJson, 400, "Некоректне тіло JSON");
+      const row = await acceptedRow(String(body.outreachId || ""));
+      if (!row) return fail(response, sendJson, 404, "Ця людина вже не серед тих, хто прийняв і мовчить.");
+      if (!writer?.write) return fail(response, sendJson, 503, "На цьому сервері немає кому писати повідомлення.");
+      if (!body.force) {
+        const { drafts } = await firstMarks([String(row.id)]);
+        const held = drafts.get(String(row.id));
+        if (held?.text) {
+          sendJson(response, 200, { success: true, draft: held, reused: true });
+          return true;
+        }
+      }
+      const draft = await draftOnce(String(row.id), () => writeFirstDraft(row, {
+        productId: typeof body.productId === "string" ? body.productId : "",
+        language: typeof body.language === "string" ? body.language : "",
+        instruction: typeof body.instruction === "string" ? body.instruction.slice(0, 600) : ""
+      }, readCampaigns(), writer));
+      if (!draft?.text) return fail(response, sendJson, 502, "Модель не написала повідомлення — спробуйте ще раз.");
+      sendJson(response, 200, { success: true, draft });
+      return true;
+    }
+
+    // A person approved it: into the account's queue, sent in its next session.
+    if (method === "POST" && path === "/first-messages/send") {
+      const body = await readJson(request);
+      if (!body) return fail(response, sendJson, 400, "Некоректне тіло JSON");
+      const row = await acceptedRow(String(body.outreachId || ""));
+      if (!row) return fail(response, sendJson, 404, "Ця людина вже не серед тих, хто прийняв і мовчить.");
+      if (!linkedinSlug(row.person_linkedin)) return fail(response, sendJson, 409, "У цієї людини немає посилання на профіль — агентові нема куди йти.");
+      const account = await loadAccount(row.account_id);
+      const door = await replyDoor(account);
+      if (!door.open) return fail(response, sendJson, 409, door.reason);
+      const text = String(body.text ?? "");
+      if (text.trim().length > FIRST_LIMIT) return fail(response, sendJson, 400, `Задовге: ${text.trim().length} з ${FIRST_LIMIT} символів.`);
+
+      return await withAccountQuota(account.id, async () => {
+        const already = (await repliesOf(account.id)).find((reply) =>
+          reply.kind === "first" && reply.outreachId === String(row.id) && ["waiting", "sent"].includes(reply.state));
+        if (already && !sameWords(already.body, text)) {
+          return fail(response, sendJson, 409, already.state === "sent"
+            ? "Перше повідомлення цій людині вже надіслано."
+            : "Цій людині вже чекає перше повідомлення — скасуйте його, щоб поставити інше.");
+        }
+        const queued = await queueReply({
+          accountId: account.id, threadKey: firstThreadKey(row.id), text, participantName: row.person_name || null,
+          todayIso: today(), kind: "first", outreachId: String(row.id), linkedin: row.person_linkedin
+        });
+        if (!queued.ok) return fail(response, sendJson, queued.status, queued.error);
+        const goesOut = await replyGoesOut(account);
+        sendJson(response, queued.duplicate ? 200 : 201, {
+          success: true, reply: queued.reply, duplicate: queued.duplicate,
+          goesOutAt: goesOut.at, goesOutToday: goesOut.today, goesOutSoon: goesOut.soon, window: windowLabel()
+        });
+        return true;
+      });
+    }
+
+    // «Пропустити»: this person does not get an opening line from here.
+    if (method === "POST" && path === "/first-messages/dismiss") {
+      const body = await readJson(request);
+      if (!body) return fail(response, sendJson, 400, "Некоректне тіло JSON");
+      const row = await acceptedRow(String(body.outreachId || ""));
+      if (!row) return fail(response, sendJson, 404, "Ця людина вже не серед тих, хто прийняв і мовчить.");
+      await dismissFirst(row);
+      sendJson(response, 200, { success: true });
       return true;
     }
 
@@ -1777,7 +2037,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       // message — somebody's private reply, body and all. The inbox has screens
       // of its own; an account's history panel is not one of them.
       let query = anty.from("wl_events").select("id,account_id,level,type,message,meta,created_at")
-        .notIn("type", AUDIT_HIDDEN_TYPES);
+        .notIn("type", [...AUDIT_HIDDEN_TYPES, ...FIRST_AUDIT_HIDDEN]);
       if (accountId) query = query.eq("account_id", accountId);
       if (level && level !== "all") query = query.eq("level", level);
       const events = await query.order("created_at", { ascending: false }).limit(limit).rows();
@@ -3395,7 +3655,11 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           : await prepareReply(account.id, replyId, { todayIso: today() });
         sendJson(response, 200, {
           success: true, allowed: prepared.allowed, reason: prepared.reason, stopAll,
-          reply: prepared.allowed ? { id: prepared.reply.id, threadKey: prepared.reply.threadKey, text: prepared.reply.body } : null
+          reply: prepared.allowed ? {
+            id: prepared.reply.id, kind: prepared.reply.kind, threadKey: prepared.reply.threadKey, text: prepared.reply.body,
+            name: prepared.reply.participantName,
+            ...(prepared.reply.kind === "first" ? { linkedin: prepared.reply.linkedin, outreachId: prepared.reply.outreachId } : {})
+          } : null
         });
         return true;
       }

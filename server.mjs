@@ -720,6 +720,25 @@ async function handleApi(request, response, url) {
         // A campaign points at one of the workspace's own products, which is
         // all it says about the message — the wording is not this phase's.
         products: () => state.products.map((product) => ({ id: product.id, name: product.name }))
+      },
+      // The first message to somebody who accepted, written the way the contact
+      // card writes it — the same model, product brief and rules — and only its
+      // LinkedIn "after accepting" part is kept. Without a healthy provider it is
+      // the brief's own template, and `status` says so to the Home screen.
+      writer: {
+        status: () => ({ ready: Boolean(state.vault) && state.providerHealth.status === "healthy" }),
+        async write(contact, { productId = "", language = "en", instruction = "" } = {}) {
+          const product = state.products.find((item) => item.id === productId) || currentProduct();
+          const drafts = await generateContactDrafts(contact, product, { language, instruction });
+          addEvent("outreach", `First message written for ${contact.name || "a contact"} (${product?.name || "no product"}).`);
+          return {
+            text: drafts.linkedin?.body || "",
+            productId: product?.id || null,
+            productName: product?.name || null,
+            language: drafts.language,
+            model: drafts.modelUsed || null
+          };
+        }
       }
     });
     if (!handled) sendJson(response, 404, { success: false, error: "Unknown warm-up endpoint." });

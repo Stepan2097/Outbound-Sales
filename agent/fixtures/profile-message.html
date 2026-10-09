@@ -1,0 +1,102 @@
+<!-- A LinkedIn profile of somebody the account is connected to: /in/<slug>/.
+     Constructed, not saved — see README.md in this folder.
+
+     The header card carries the name, «· 1-й» (first degree — we are connected)
+     and a «Повідомлення» button; beside it, a «Люди також переглядали» aside
+     with another person's own «Повідомлення» button, which must never be the one
+     pressed. Pressing the right one opens the messenger overlay with a composer.
+
+     MODE, written into the page by the test server:
+       ok        the message appears in the overlay after Send
+       silent    the overlay field empties and nothing appears
+       second    not connected: «· 2-й» and a Connect, no Message
+       nobutton  connected, but the header has no Message control
+       ours      the overlay conversation already ends with our message LAST_OURS
+       two       a second overlay conversation is already open beside it
+       dead      the Message button opens nothing -->
+<title>Person One | LinkedIn</title>
+<style>
+  ul { list-style: none; margin: 0; padding: 0; }
+  li { display: block; }
+  main { display: block; }
+  section, aside { display: block; padding: 8px; border: 1px solid #ddd; margin: 8px; }
+  .msg-overlay-conversation-bubble { position: fixed; right: 8px; bottom: 0; width: 320px; background: #fff; border: 1px solid #aaa; }
+</style>
+<main>
+  <section class="artdeco-card _9f1c">
+    <h2 class="_5a1b">Person One</h2>
+    <div>Head of Growth at Company One</div>
+    <span id="degree">· 1-й</span>
+    <div class="actions">
+      <button id="message" aria-label="Надіслати повідомлення Person One">Повідомлення</button>
+      <button aria-label="Більше дій">Більше</button>
+    </div>
+  </section>
+  <aside>
+    <section>
+      <h2>Люди також переглядали</h2>
+      <ul>
+        <li><a href="/in/someone-else/">Someone Else</a> <button aria-label="Надіслати повідомлення Someone Else">Повідомлення</button></li>
+      </ul>
+    </section>
+  </aside>
+</main>
+<div id="overlay-root"></div>
+<script>
+  const MODE = /*MODE*/'ok'/*END*/;
+  const LAST_OURS = /*LAST_OURS*/''/*END*/;
+  const card = document.querySelector('main section');
+  if (MODE === 'second') {
+    document.getElementById('degree').textContent = '· 2-й';
+    document.getElementById('message').remove();
+    card.querySelector('.actions').insertAdjacentHTML('afterbegin', '<button aria-label="Надіслати запрошення учасникові Person One, щоб встановити контакт">Встановити контакт</button>');
+  }
+  if (MODE === 'nobutton') document.getElementById('message').remove();
+
+  const bubble = (who) => `
+    <aside class="msg-overlay-conversation-bubble">
+      <header><a href="/in/${who}/">${who}</a></header>
+      <ul class="msg-s-message-list-content"></ul>
+      <form class="msg-form">
+        <div class="msg-form__contenteditable" contenteditable="true" role="textbox" aria-label="Напишіть повідомлення…"></div>
+        <button class="msg-form__send-button" type="submit" disabled>Надіслати</button>
+      </form>
+    </aside>`;
+
+  function ours(list, text) {
+    const li = document.createElement('li');
+    li.className = 'msg-s-message-list__event';
+    const lines = text.split('\n').map((line) => line.replace(/&/g, '&amp;').replace(/</g, '&lt;')).join('<br />');
+    li.innerHTML = '<div class="msg-s-event-listitem">'
+      + '<a href="/in/mary-lindsay-0a12b3/"><span class="msg-s-message-group__name">Mary Lindsay</span></a>'
+      + '<time datetime="' + new Date().toISOString() + '">now</time>'
+      + '<p class="msg-s-event-listitem__body">' + lines + '</p></div>';
+    list.appendChild(li);
+  }
+
+  if (MODE === 'two') document.getElementById('overlay-root').insertAdjacentHTML('beforeend', bubble('someone-else'));
+
+  document.getElementById('message')?.addEventListener('click', () => {
+    if (MODE === 'dead') return;
+    setTimeout(() => {
+      document.getElementById('overlay-root').insertAdjacentHTML('beforeend', bubble('person-one'));
+      const all = document.querySelectorAll('.msg-overlay-conversation-bubble');
+      const mine = all[all.length - 1];
+      const list = mine.querySelector('ul');
+      const composer = mine.querySelector('[contenteditable]');
+      const send = mine.querySelector('button[type="submit"]');
+      const form = mine.querySelector('form');
+      if (LAST_OURS) ours(list, LAST_OURS);
+      composer.addEventListener('input', () => { send.disabled = !composer.innerText.trim(); });
+      form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        const text = composer.innerText.trim();
+        if (!text || send.disabled) return;
+        window.__sends = (window.__sends || 0) + 1;
+        if (MODE !== 'silent') setTimeout(() => ours(list, text), 300);
+        composer.innerHTML = '';
+        send.disabled = true;
+      });
+    }, 400);
+  });
+</script>

@@ -102,6 +102,13 @@ export function deriveReplies(events, { nowMs = Date.now() } = {}) {
     return {
       id: String(row.id),
       accountId: row.account_id,
+      // `reply` goes into a conversation that exists; `first` is the first
+      // message to somebody who accepted, written on their profile, where there
+      // is no conversation yet — its `threadKey` is `first:<outreachId>`, so the
+      // per-conversation rules (one waiting copy of the same words) hold for it too.
+      kind: row.meta?.kind === "first" ? "first" : "reply",
+      outreachId: row.meta?.outreachId ? String(row.meta.outreachId) : null,
+      linkedin: row.meta?.linkedin ?? null,
       threadKey: String(row.meta?.threadKey ?? ""),
       body: String(row.meta?.body ?? ""),
       participantName: row.meta?.participantName ?? null,
@@ -138,7 +145,9 @@ function sentToday(replies, todayIso) {
  * page that re-sent after a timeout, must not put the same message into the
  * account twice.
  */
-export async function queueReply({ accountId, threadKey, text, participantName = null, todayIso, nowMs = Date.now() }) {
+export async function queueReply({
+  accountId, threadKey, text, participantName = null, todayIso, nowMs = Date.now(), kind = "reply", outreachId = null, linkedin = null
+}) {
   const body = cleanReply(text);
   if (!body) return { ok: false, status: 400, error: "Напишіть, що відповісти." };
   if (body.length > REPLY_LIMIT) {
@@ -170,13 +179,18 @@ export async function queueReply({ accountId, threadKey, text, participantName =
     level: "info",
     type: QUEUED,
     message: "Reply queued",
-    meta: { threadKey, body, participantName, length: body.length }
+    meta: {
+      threadKey, body, participantName, length: body.length,
+      ...(kind === "first" ? { kind: "first", outreachId: String(outreachId), linkedin } : {})
+    }
   }).select("id,created_at").rows();
   if (!made?.id) throw new Error("The database did not say which reply it stored");
   return {
     ok: true, duplicate: false,
     reply: {
       id: String(made.id), accountId, threadKey, body, participantName,
+      kind: kind === "first" ? "first" : "reply", outreachId: kind === "first" ? String(outreachId) : null,
+      linkedin: kind === "first" ? linkedin : null,
       queuedAt: made.created_at ?? new Date(nowMs).toISOString(), state: "waiting", at: null, reason: null
     }
   };
@@ -290,4 +304,9 @@ export function visibleReplies(replies, messages = [], { nowMs = Date.now() } = 
       && sameText(message.body, reply.body)
       && Date.parse(message.sentAt || "") >= Date.parse(reply.queuedAt) - 5 * 60_000);
   });
+}
+
+/** The conversation key a first message is queued under: there is no LinkedIn thread yet. */
+export function firstThreadKey(outreachId) {
+  return `first:${outreachId}`;
 }

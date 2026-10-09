@@ -121,7 +121,7 @@ export async function reportWithRetry(send, { sleep = wait, attempts = 2 } = {})
  * for the shape the page had before and may have again. A card that holds two
  * headings is two people's, not this person's header, and is refused.
  */
-async function profileCard(page, name = '', slug = null) {
+export async function profileCard(page, name = '', slug = null) {
   const tokens = nameTokens(name);
   const safeSlug = typeof slug === 'string' && /^[a-z0-9-]+$/.test(slug) ? slug : null;
   const marked = await page.evaluate(({ tokens, slug }) => {
@@ -169,7 +169,7 @@ async function profileCard(page, name = '', slug = null) {
  * "Álex Galindo" in the CRM still matches "Alex Galindo" on screen. One-letter
  * pieces are dropped — an initial matches almost any heading.
  */
-function nameTokens(name) {
+export function nameTokens(name) {
   return String(name || '')
     .normalize('NFKD')
     .replace(/\p{M}+/gu, '')
@@ -237,7 +237,7 @@ async function visibleButton(scope, name) {
   return null;
 }
 
-async function relation(card) {
+export async function relation(card) {
   if (await visibleButton(card, /^(pending|запрошення надіслано|очікує|ожидает)$/i)) return 'pending';
   // «1st» in English; in Ukrainian it reads «· 1-й», dot and all — on
   // 09.10.2026 two people already connected to the account were taken for

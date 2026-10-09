@@ -27,7 +27,7 @@
  * of it (`agent/fixtures`). The hints are tried first and the structure after,
  * exactly as the reader does, and `how` says which one answered.
  */
-import { VisitStopped, reportWithRetry } from './connections.mjs';
+import { VisitStopped, reportWithRetry, profileCard, profileSlug, relation, nameTokens } from './connections.mjs';
 import { harvestThread, buildThread } from './inbox-dom.mjs';
 import { settleThread } from './inbox.mjs';
 
@@ -143,6 +143,75 @@ async function clearComposer(page) {
   } catch { /* the page is going away anyway */ }
 }
 
+/** «Повідомлення» on a profile: the short label, which names nobody, or a long one that names this person. */
+const MESSAGE = /^(message|повідомлення|написати|сообщение|написать)$/i;
+const MESSAGE_LONG = /^(message|надіслати повідомлення|написати|отправить сообщение|написать)\s+.+/i;
+
+/**
+ * Open the person's profile and, from its header, the conversation with them.
+ *
+ * Only the header of this person's own profile (`profileCard`, the same anchor
+ * the invitations use), never a «Повідомлення» on somebody in the asides; only
+ * when LinkedIn says we are connected (first degree) — a Message to anybody else
+ * is an InMail, which is a paid product and not a first message; and only when
+ * the conversation it opens has exactly one composer, which `markComposer`
+ * checks afterwards like for any reply.
+ */
+async function openFromProfile(page, reply, { origin, guard, pace }) {
+  const slug = profileSlug(reply.linkedin);
+  if (!slug) return { fail: 'немає посилання на профіль' };
+  const response = await page.goto(`${origin}/in/${encodeURIComponent(slug)}/`, { waitUntil: 'domcontentloaded', timeout: 45_000 });
+  await sleep(rand(1800, 3500) * pace);
+  await guard();
+  if (response?.status() === 404 || /^\/404\/?$/.test(new URL(page.url()).pathname)) return { fail: 'профілю більше немає' };
+  // By the path alone: where the page landed is LinkedIn's own address, and what
+  // matters is whose profile it is.
+  const landed = decodeURIComponent(new URL(page.url()).pathname.match(/^\/in\/([^/]+)\/?$/)?.[1] ?? '').toLowerCase();
+  if (landed !== slug) return { fail: 'LinkedIn відкрив не цей профіль' };
+
+  const card = await profileCard(page, reply.name || '', slug);
+  if (!card) return { fail: 'не знайшов шапку профілю цієї людини' };
+  if (await relation(card) !== 'accepted') return { fail: 'LinkedIn не показує цю людину у ваших контактах (1-й ступінь) — перше повідомлення не надсилав' };
+
+  let control = null;
+  const tokens = nameTokens(reply.name || '');
+  for (const role of ['button', 'link']) {
+    const found = card.getByRole(role, { name: MESSAGE });
+    for (let i = 0; !control && i < await found.count(); i += 1) {
+      if (await found.nth(i).isVisible()) control = found.nth(i);
+    }
+    if (control) break;
+    const long = card.getByRole(role, { name: MESSAGE_LONG });
+    for (let i = 0; !control && tokens.length && i < await long.count(); i += 1) {
+      const label = ((await long.nth(i).getAttribute('aria-label')) || (await long.nth(i).innerText()))
+        .normalize('NFKD').replace(/\p{M}+/gu, '').toLowerCase();
+      if (tokens.every((token) => label.includes(token)) && await long.nth(i).isVisible()) control = long.nth(i);
+    }
+    if (control) break;
+  }
+  if (!control) return { fail: 'у шапці профілю немає кнопки «Повідомлення»' };
+
+  await sleep(rand(600, 1500) * pace);
+  await guard();
+  // Counted before the press: a conversation already open over the page has a
+  // field of its own, and "a field is there" would then be true at once — about
+  // somebody else. What is waited for is a new one; and when that leaves two on
+  // the page, `markComposer` refuses to choose.
+  const countFields = () => page.evaluate(() => document.querySelectorAll('[contenteditable="true"][role="textbox"]').length);
+  const fieldsBefore = await countFields();
+  await pressOn(page, control, pace);
+  // The conversation opens over the page a moment later, not at once.
+  const deadline = Date.now() + Math.max(2000, 12_000 * pace);
+  let opened = false;
+  while (!opened && Date.now() < deadline) {
+    await sleep(Math.max(50, 500 * pace));
+    opened = await countFields() > fieldsBefore;
+  }
+  await guard();
+  if (!opened) return { fail: 'натиснув «Повідомлення», але розмова не відкрилась' };
+  return { harvest: await page.evaluate(harvestThread).catch(() => ({ items: [] })) };
+}
+
 /** How many times these words stand in the conversation as it is drawn. */
 function timesSaid(harvest, snippet) {
   return (harvest?.items ?? []).filter((item) => {
@@ -203,17 +272,28 @@ export async function sendReplies(page, {
     }
     // What is typed is what the portal says now, not what the plan said earlier.
     const { text, threadKey } = prepared.reply;
+    const first = prepared.reply.kind === 'first';
 
     try {
-      await page.goto(`${origin}/messaging/thread/${encodeURIComponent(threadKey)}/`,
-        { waitUntil: 'domcontentloaded', timeout: 45_000 });
-      await guard();
-      const settled = await settleThread(page, { threadKey }, { pace });
-      await guard();
-      if (!settled.ok) { await fail(item, 'розмова не відкрилась'); continue; }
+      let harvestBefore;
+      if (first) {
+        // The first message to somebody who accepted: there is no conversation
+        // yet to open by its address, so it is opened from their profile.
+        const opened = await openFromProfile(page, { ...prepared.reply, name: prepared.reply.name ?? item.name }, { origin, guard, pace });
+        if (opened.fail) { await fail(item, opened.fail); continue; }
+        harvestBefore = opened.harvest;
+      } else {
+        await page.goto(`${origin}/messaging/thread/${encodeURIComponent(threadKey)}/`,
+          { waitUntil: 'domcontentloaded', timeout: 45_000 });
+        await guard();
+        const settled = await settleThread(page, { threadKey }, { pace });
+        await guard();
+        if (!settled.ok) { await fail(item, 'розмова не відкрилась'); continue; }
+        harvestBefore = settled.harvest;
+      }
 
       // The second guard against sending the same words twice.
-      const before = buildThread({ threadKey, harvest: settled.harvest, self, nowMs });
+      const before = buildThread({ threadKey, harvest: harvestBefore, self, nowMs });
       const last = before.payload?.messages?.at(-1);
       if (last && last.direction === 'out' && flatText(last.body) === flatText(text)) {
         await fail(item, 'такі самі слова вже стоять останніми в розмові від цього акаунта — вдруге не надсилав; перевірте розмову');
@@ -284,12 +364,15 @@ export async function sendReplies(page, {
       const answer = await reportWithRetry(() => portal.outboxSent(item.id), { sleep: retryWait, attempts: 3 });
       if (!answer.success) throw new VisitStopped(`Reply report refused: ${answer.error}`);
       result.sent += 1;
-      log(`  ✉️ відповідь надіслано: ${who}`);
+      log(`  ✉️ ${first ? 'перше повідомлення' : 'відповідь'} надіслано: ${who}`);
 
       // And the conversation as it is now, through the ordinary door, so the
       // message the portal shows is LinkedIn's own and not a copy of what was typed.
-      const built = buildThread({ threadKey, harvest: seen, self, nowMs: Date.now() });
-      if (!built.skip) await portal.inboxThread(built.payload).catch(() => {});
+      // A first message has no conversation key yet; the next inbox read finds it.
+      if (!first) {
+        const built = buildThread({ threadKey, harvest: seen, self, nowMs: Date.now() });
+        if (!built.skip) await portal.inboxThread(built.payload).catch(() => {});
+      }
     } catch (error) {
       if (error instanceof VisitStopped) throw error;
       // Whatever happened after the typing began, it is not known to have sent.
