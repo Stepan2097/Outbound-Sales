@@ -14,7 +14,7 @@ const sleep = async () => {};
 const queued = { outreachId: 'invite-1', name: 'Person One', linkedin: 'https://www.linkedin.com/in/person-one/', note: '' };
 
 /** All LinkedIn URLs are intercepted. These are local synthetic pages. */
-async function profile(t, { more = false, pending = false, accepted = false, noButton = false, emailWall = false, nameless = false, connectLink = false, connectLong = false, suggestionInCard = false, acceptedUa = false, dialogDelay = 0, noteLimit = 200, warning = '', redirected = false, heading = 'h1', confirms = true, sentList = [] } = {}) {
+async function profile(t, { more = false, pending = false, accepted = false, noButton = false, emailWall = false, nameless = false, connectLink = false, connectLong = false, suggestionInCard = false, acceptedUa = false, dialogDelay = 0, softGone = false, noteLimit = 200, warning = '', redirected = false, heading = 'h1', confirms = true, sentList = [] } = {}) {
   const context = await browser.newContext();
   t.after(() => context.close());
   const page = await context.newPage();
@@ -75,6 +75,7 @@ async function profile(t, { more = false, pending = false, accepted = false, noB
         menu.firstChild.onclick = dialog;
       };
       ${redirected ? "history.replaceState(null,'','/in/someone-else/');" : ''}
+      ${softGone ? "history.replaceState(null,'','/404/');" : ''}
       </script></body></html>` });
   });
   return page;
@@ -238,6 +239,12 @@ test('«· 1-й» в українському інтерфейсі — це вж
 test('an approved note too long for LinkedIn is not truncated or replaced by a bare send', async (t) => {
   const page = await profile(t, { noteLimit: 5 });
   assert.equal(await sendInvitation(page, { ...queued, note: 'Радий знайомству' }, { sleep }), 'no_note');
+  assert.deepEqual(await page.evaluate(() => window.sent), []);
+});
+
+test('видалений профіль, що відповідає 200 і переходить на /404/, — це profile_gone, а не зупинка візиту', async (t) => {
+  const page = await profile(t, { softGone: true });
+  assert.equal(await sendInvitation(page, queued, { sleep }), 'profile_gone');
   assert.deepEqual(await page.evaluate(() => window.sent), []);
 });
 

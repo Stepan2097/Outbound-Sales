@@ -246,7 +246,10 @@ async function openProfile(page, invite, { sleep = wait, guard = async () => {} 
   const response = await page.goto(invite.linkedin, { waitUntil: 'domcontentloaded', timeout: 45000 });
   await sleep(1800);
   await guard();
-  if (response?.status() === 404) return { gone: true };
+  // A deleted profile is not always a 404: LinkedIn answers 200 and moves the
+  // page to /404/. On 09.10.2026 that read as «redirected away from the
+  // queued person» and stopped Profile 48's every visit on the same person.
+  if (response?.status() === 404 || /^\/404\/?$/.test(new URL(page.url()).pathname)) return { gone: true };
   if (profileSlug(page.url()) !== expected) throw new VisitStopped('LinkedIn redirected away from the queued person');
   const card = await profileCard(page, invite.name, expected);
   return { card, gone: false };
