@@ -26,12 +26,13 @@
 **Прогрів** (where it opens) — the accounts, what each did today and does next,
 and the campaign that feeds them people from a CRM folder. **Вхідні** — the
 replies from every account, laid out like a messenger: the accounts as buttons
-across the top (one tap, one account), that account's conversations on the left —
-unread first, searchable by name, position or the words of the reply — and the
-whole conversation with the person on the right, without leaving the screen. On a
-phone it is the list first and the conversation after a tap. At the end of a
-conversation one button goes to the next unread one, and the list refreshes
-itself when a new reply arrives. **Контакти** — the CRM: a folder, its
+across the top (one at a time — the one with the freshest reply is open, there is
+no «all»), that account's conversations on the left, the freshest first by date
+and searchable by name, position or the words of the reply, and the whole
+conversation with the person on the right, without leaving the screen, with a
+button that opens the person in the CRM. On a phone it is the list first and the
+conversation after a tap. At the end of a conversation one button goes to the
+next unread one, and the list refreshes itself when a new reply arrives. **Контакти** — the CRM: a folder, its
 people, one person's card with where their LinkedIn request stands, the whole
 conversation, and a small form (product, language, an optional note) whose
 button «Згенерувати три чернетки» has the model write them a letter, a Telegram

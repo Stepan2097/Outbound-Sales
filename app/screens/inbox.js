@@ -221,9 +221,6 @@ function warmupInboxSync() {
     }
   }
 
-  const accountsTotal = Number.isFinite(sync?.accountsTotal) ? sync.accountsTotal : null;
-  const accountsSynced = Number.isFinite(sync?.accountsSynced) ? sync.accountsSynced : null;
-
   // "Never synced" is a claim, and it can only be made when the server actually
   // reports on syncing. Without that, the honest answer is that this is not
   // known — which is itself worth saying rather than dressing up as calm.
@@ -233,17 +230,21 @@ function warmupInboxSync() {
   return {
     known,
     lastSyncedAt,
-    accountsTotal,
-    accountsSynced,
     stale: Number.isFinite(hours) && hours > WARMUP_SYNC_STALE_HOURS
   };
 }
 
 /**
  * The one thing about the reading that a seller has to know, or nothing. The
- * list is only as good as the last time somebody read the inboxes, so the three
- * ways it can be wrong — never read, read long ago, some accounts never read —
- * are one sentence each, and at most one of them is shown: the worst.
+ * list is only as good as the last time somebody read the inboxes, so the two
+ * ways it can be wrong — never read, read long ago — are one sentence each, and
+ * at most one of them is shown.
+ *
+ * "N of M accounts have not been read" used to be a third. It counted every
+ * account the server knew, not the ones on the warm-up, and so said five where
+ * the warm-up has three; it is gone rather than corrected, because the accounts
+ * that matter are the ones across the top of the screen, and those are the ones
+ * that have replies.
  */
 function warmupInboxNoteHtml(sync) {
   if (sync.known && !sync.lastSyncedAt) {
@@ -255,12 +256,6 @@ function warmupInboxNoteHtml(sync) {
   if (sync.stale) {
     return `<div class="warmup-inbox-note is-warn">
       <strong>Вхідні не читали ${escapeHtml(warmupAgo(sync.lastSyncedAt))} — схоже, агент зупинився.</strong>
-    </div>`;
-  }
-  if (sync.accountsTotal !== null && sync.accountsSynced !== null && sync.accountsSynced < sync.accountsTotal) {
-    const missing = sync.accountsTotal - sync.accountsSynced;
-    return `<div class="warmup-inbox-note is-warn">
-      <strong>${warmupCount(missing)} з ${warmupCount(sync.accountsTotal)} ${uaPlural(sync.accountsTotal, "акаунта", "акаунтів", "акаунтів")} ще не читали — їхніх відповідей тут немає.</strong>
     </div>`;
   }
   return "";
@@ -282,24 +277,25 @@ function warmupInboxEmptyHtml(sync) {
 }
 
 /**
- * The list as it is drawn: unread first, then the newest, and — when somebody
- * followed a badge from one account's row — only that account's. A reply that
- * is waiting must be the first thing on the screen whichever account it reached,
- * which is why this is one list and not one list per account.
+ * The list as it is drawn: the conversations of the one account that is open,
+ * the freshest first. Only the date orders it — an unread one is marked, not
+ * moved, so the list does not rearrange itself under a hand that is about to
+ * click. Which account is open is `warmupInboxAccountId`.
  */
 function warmupInboxRows() {
   const sentAt = (thread) => Date.parse(thread?.lastMessage?.sentAt || "") || 0;
   const terms = inboxSearchTerms();
+  const accountId = warmupInboxAccountId();
   return warmupState.inbox.threads
-    .filter((thread) => !inboxAccountFilter || thread.accountId === inboxAccountFilter)
+    .filter((thread) => thread.accountId === accountId)
     .filter((thread) => warmupInboxMatches(thread, terms))
-    .sort((left, right) => Number(Boolean(right.unread)) - Number(Boolean(left.unread)) || sentAt(right) - sentAt(left));
+    .sort((left, right) => sentAt(right) - sentAt(left));
 }
 
 /**
  * Чи підходить розмова під пошук: кожне слово запиту має знайтись серед імені,
- * посади чи компанії людини, акаунта, на який надійшло, і тексту останньої
- * відповіді. Шукається те, що видно в рядку, — нічого прихованого.
+ * посади чи компанії людини і тексту останньої відповіді. Шукається те, що видно
+ * в рядку, — нічого прихованого. Акаунт не шукається: він уже вибраний зверху.
  */
 function warmupInboxMatches(thread, terms) {
   if (!terms.length) return true;
@@ -307,7 +303,6 @@ function warmupInboxMatches(thread, terms) {
   const haystack = [
     warmupParticipantName(participant),
     participant.headline,
-    warmupThreadAccount(thread).name,
     warmupPlaceholder(thread.lastMessage?.body) ? "" : thread.lastMessage?.body
   ].join(" ").toLowerCase();
   return terms.every((term) => haystack.includes(term));
@@ -316,18 +311,14 @@ function warmupInboxMatches(thread, terms) {
 function warmupThreadRowHtml(thread) {
   const participant = thread.participant || {};
   const name = warmupParticipantName(participant);
-  const account = warmupThreadAccount(thread);
   const last = thread.lastMessage || {};
   const mine = last.direction === "out";
   const open = warmupThreadIsOpen(thread.accountId, thread.threadKey);
-  // The account is said on the row only while the list holds every account's
-  // threads; once one account is picked, naming it on each row is noise.
-  const showAccount = !inboxAccountFilter;
   return `
     <button class="warmup-thread ${thread.unread ? "is-unread" : ""} ${open ? "is-open" : ""}" type="button"
       data-warmup-thread="${escapeAttr(thread.threadKey || "")}"
       data-warmup-thread-account="${escapeAttr(thread.accountId || "")}"${open ? ' aria-current="true"' : ""}
-      aria-label="${escapeAttr(`Розмова з ${name}, акаунт ${account.name}${thread.unread ? ", непрочитане" : ""}`)}">
+      aria-label="${escapeAttr(`Розмова з ${name}${thread.unread ? ", непрочитане" : ""}`)}">
       <span class="warmup-thread-mark" aria-hidden="true"></span>
       <span class="warmup-thread-main">
         <span class="warmup-thread-top">
@@ -336,10 +327,6 @@ function warmupThreadRowHtml(thread) {
         </span>
         ${participant.headline ? `<span class="warmup-thread-headline">${escapeHtml(participant.headline)}</span>` : ""}
         <span class="warmup-thread-preview">${mine ? '<span class="warmup-thread-from">Ви:</span> ' : ""}${warmupPreviewHtml(last.body)}</span>
-        ${showAccount ? `<span class="warmup-identity" title="${escapeAttr(warmupAccountTitle(account))}">
-          <i data-lucide="${account.exact ? "badge-check" : "circle-help"}"></i>
-          <span>${escapeHtml(account.name)}</span>
-        </span>` : ""}
       </span>
     </button>`;
 }
@@ -362,59 +349,70 @@ export function warmupInboxUnreadFor(accountId) {
 }
 
 /**
- * Said while the list is narrowed — by an account, by a search, or both: how
- * many of the threads are shown, and the way back to all of them. The count is
- * what tells a seller that the list is short because of the filter, not because
- * nobody wrote.
+ * Said while a search narrows the list: how many of this account's conversations
+ * are shown, and the way back to all of them. The count is what tells a seller
+ * that the list is short because of the search, not because nobody wrote.
  */
 function warmupInboxFilterHtml(shown) {
-  if (!inboxAccountFilter && !inboxSearchTerms().length) return "";
+  if (!inboxSearchTerms().length) return "";
+  const total = warmupState.inbox.threads.filter((thread) => thread.accountId === warmupInboxAccountId()).length;
   return `<div class="warmup-inbox-filter">
-    <span>Розмов: <strong>${warmupCount(shown)}</strong> з ${warmupCount(warmupState.inbox.threads.length)}</span>
-    <button class="warmup-inbox-link" type="button" data-warmup-inbox-reset>Скинути фільтр</button>
+    <span>Знайдено: <strong>${warmupCount(shown)}</strong> з ${warmupCount(total)}</span>
+    <button class="warmup-inbox-link" type="button" data-warmup-inbox-reset>Скинути пошук</button>
   </div>`;
 }
 
 /**
- * The accounts that have a thread here, for the list above the replies: how many
- * threads each holds and how many of them are waiting. The account the list is
- * narrowed to is always among them, even when it holds none, so the field can
- * say what it is set to.
+ * The accounts that have a thread here, for the buttons across the top: how many
+ * threads each holds, how many of them are waiting and when the newest was
+ * written, freshest first. The account that is open is always among them, even
+ * when it holds none, so the buttons can say what is open.
  */
 function warmupInboxAccountOptions() {
+  const sentAt = (thread) => Date.parse(thread?.lastMessage?.sentAt || "") || 0;
   const found = new Map();
   for (const thread of warmupState.inbox.threads) {
     if (!thread.accountId) continue;
-    const entry = found.get(thread.accountId) || { accountId: thread.accountId, count: 0, unread: 0 };
+    const entry = found.get(thread.accountId) || { accountId: thread.accountId, count: 0, unread: 0, newest: 0 };
     entry.count += 1;
     if (thread.unread) entry.unread += 1;
+    entry.newest = Math.max(entry.newest, sentAt(thread));
     found.set(thread.accountId, entry);
   }
   if (inboxAccountFilter && !found.has(inboxAccountFilter)) {
-    found.set(inboxAccountFilter, { accountId: inboxAccountFilter, count: 0, unread: 0 });
+    found.set(inboxAccountFilter, { accountId: inboxAccountFilter, count: 0, unread: 0, newest: 0 });
   }
   return [...found.values()]
     .map((entry) => ({ ...entry, name: warmupInboxAccountName(entry.accountId) }))
-    .sort((left, right) => right.unread - left.unread || left.name.localeCompare(right.name, "uk"));
+    .sort((left, right) => right.newest - left.newest || left.name.localeCompare(right.name, "uk"));
 }
 
 /**
- * The accounts across the top, one button each: «Усі акаунти» and every account
- * that has a thread, with the number of replies waiting on it. One tap narrows
- * the list to that account, which is the whole of "open just one account". With
- * a single account there is nothing to pick, and the row is not drawn.
+ * The account that is open. There is no «all accounts»: one account at a time is
+ * the whole idea of the screen, so when nothing was chosen — or what was chosen
+ * has gone — it is the one with the freshest reply.
+ */
+function warmupInboxAccountId() {
+  const options = warmupInboxAccountOptions();
+  return options.some((entry) => entry.accountId === inboxAccountFilter)
+    ? inboxAccountFilter
+    : (options[0]?.accountId ?? null);
+}
+
+/**
+ * The accounts across the top, one button each, freshest first, with the number
+ * of replies waiting on it. One tap opens that account and only it, which is the
+ * whole of "open just one account".
  */
 function warmupInboxChipsHtml() {
   const options = warmupInboxAccountOptions();
-  if (options.length < 2 && !inboxAccountFilter) return "";
-  const chip = (accountId, label, unread) => {
-    const active = (inboxAccountFilter || "") === accountId;
-    return `<button class="inbox-chip ${active ? "is-active" : ""}" type="button" data-warmup-account="${escapeAttr(accountId)}" aria-pressed="${active}">
-      <span class="inbox-chip-name">${escapeHtml(label)}</span>${unread ? `<span class="inbox-chip-count" aria-label="непрочитаних: ${unread}">${warmupCount(unread)}</span>` : ""}
+  const open = warmupInboxAccountId();
+  return options.map((entry) => {
+    const active = entry.accountId === open;
+    return `<button class="inbox-chip ${active ? "is-active" : ""}" type="button" data-warmup-account="${escapeAttr(entry.accountId)}" aria-pressed="${active}">
+      <span class="inbox-chip-name">${escapeHtml(entry.name)}</span>${entry.unread ? `<span class="inbox-chip-count" aria-label="непрочитаних: ${entry.unread}">${warmupCount(entry.unread)}</span>` : ""}
     </button>`;
-  };
-  const unreadAll = warmupState.inbox.threads.filter((thread) => thread.unread).length;
-  return chip("", "Усі акаунти", unreadAll) + options.map((entry) => chip(entry.accountId, entry.name, entry.unread)).join("");
+  }).join("");
 }
 
 /** Where the conversation goes while none is open: what to do, and the shortest way to start. */
@@ -483,7 +481,7 @@ function warmupThreadViewHtml() {
         <strong${warmupParticipantNameAttr(participant)}>${escapeHtml(name)}</strong>
         ${participant.headline ? `<span class="warmup-subtle">${escapeHtml(participant.headline)}</span>` : ""}
         ${contactId
-          ? `<button class="text-button" type="button" data-warmup-contact="${escapeAttr(contactId)}"><i data-lucide="contact"></i><span>Картка контакту</span></button>`
+          ? `<button class="text-button" type="button" data-warmup-contact="${escapeAttr(contactId)}"><i data-lucide="contact"></i><span>Відкрити в CRM</span></button>`
           : '<span class="warmup-subtle">у CRM цієї людини не знайдено</span>'}
         ${link
           ? `<a href="${escapeAttr(link)}" target="_blank" rel="noreferrer noopener"><i data-lucide="external-link"></i><span>їхній LinkedIn</span></a>`
@@ -856,10 +854,22 @@ function closeWarmupThread() {
  */
 export function showWarmupInboxAccount(accountId) {
   if (!accountId) return;
-  if (warmupState.inbox.openThreadKey !== null) closeWarmupThread();
-  inboxAccountFilter = accountId;
+  openWarmupInboxAccount(accountId);
   document.querySelector('.nav-item[data-view="inbox"]')?.click();
   renderWarmupInbox();
+}
+
+/**
+ * Open one account. A search made in another account would answer a question
+ * nobody is asking here, and a conversation of another account would stand
+ * beside a list that is not its own — both are let go.
+ */
+function openWarmupInboxAccount(accountId) {
+  const inbox = warmupState.inbox;
+  inboxAccountFilter = accountId;
+  inboxSearch = "";
+  if (inbox.openThreadKey !== null && inbox.openAccountId !== accountId) closeWarmupThread();
+  else renderWarmupInbox();
 }
 
 // «Оновити» перечитує список, а коли відкрита розмова — і її: інакше кнопка
@@ -873,9 +883,8 @@ document.getElementById("warmupInboxRefreshBtn")?.addEventListener("click", asyn
 // Акаунти зверху: один дотик — і список лише цього акаунта.
 document.getElementById("warmupInboxAccounts")?.addEventListener("click", (event) => {
   const chip = event.target.closest("[data-warmup-account]");
-  if (!chip) return;
-  inboxAccountFilter = chip.dataset.warmupAccount || null;
-  renderWarmupInbox();
+  if (!chip?.dataset.warmupAccount) return;
+  openWarmupInboxAccount(chip.dataset.warmupAccount);
 });
 
 // Список і розмова — обидві живуть у цьому контейнері, тож клік обробляється тут.
@@ -885,7 +894,6 @@ document.getElementById("warmupInboxLayout")?.addEventListener("click", (event) 
     return;
   }
   if (event.target.closest("[data-warmup-inbox-reset]")) {
-    inboxAccountFilter = null;
     inboxSearch = "";
     renderWarmupInbox();
     return;
