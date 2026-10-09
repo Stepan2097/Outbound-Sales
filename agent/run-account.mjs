@@ -35,8 +35,9 @@ const arg = (name, fallback = null) => {
 
 const ACCOUNT = arg('account');
 const PORTAL = arg('portal', DEFAULT_PORTAL);
+const ANYTIME = argv.includes('--anytime');
 if (!ACCOUNT) {
-  console.error('usage: node agent/run-account.mjs --account "<profile name or id>" [--portal URL] [--shots DIR] [--no-inbox|--inbox]');
+  console.error('usage: node agent/run-account.mjs --account "<profile name or id>" [--portal URL] [--shots DIR] [--no-inbox|--inbox] [--anytime]');
   process.exit(2);
 }
 
@@ -104,10 +105,11 @@ if (!plan.runnable) {
 // The window is the portal's, not the script's. A schedule nothing enforces is
 // a suggestion, and a profile that opens at 22:00 is a signal in itself —
 // --anytime is there for a deliberate catch-up, not for the daily run.
-if (!plan.window?.open) {
+if (!plan.window?.open && !ANYTIME) {
   log(`зараз поза вікном прогріву (${plan.window?.label ?? '?'}) — не запускаю`);
   return 0;
 }
+if (!plan.window?.open) log(`поза вікном прогріву (${plan.window?.label ?? '?'}) — запуск вручну, --anytime`);
 
 log(`день ${plan.day} — «${plan.phase}»`);
 for (const row of plan.plan ?? []) log(`  план: ${row.label} ${row.done}/${row.quota} (лишилось ${row.remaining})`);
