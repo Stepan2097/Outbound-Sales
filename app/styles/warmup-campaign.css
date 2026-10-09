@@ -39,6 +39,8 @@
 
 .warmup-field-folder { grid-column: span 5; }
 
+.warmup-field-product { grid-column: span 3; }
+
 .warmup-field-filter { grid-column: span 3; }
 
 .warmup-campaign-form-footer {
@@ -188,7 +190,8 @@
   }
 
   .warmup-field-name,
-  .warmup-field-folder {
+  .warmup-field-folder,
+  .warmup-field-product {
     grid-column: span 6;
   }
 
@@ -204,6 +207,7 @@
 
   .warmup-field-name,
   .warmup-field-folder,
+  .warmup-field-product,
   .warmup-field-filter {
     grid-column: 1 / -1;
   }
@@ -664,4 +668,22 @@
 
 .warmup-campaign-filters[open] > summary {
   margin-bottom: 8px;
+}
+
+/* The panel's one «Зберегти»: below everything it saves — the campaign above
+   and the schedule — with a line saying which of them changed. */
+.warmup-panel-save {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.warmup-panel-save-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
 }
