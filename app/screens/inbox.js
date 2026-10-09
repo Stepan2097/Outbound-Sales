@@ -482,7 +482,7 @@ function warmupThreadViewHtml() {
         ${participant.headline ? `<span class="warmup-subtle">${escapeHtml(participant.headline)}</span>` : ""}
         ${contactId
           ? `<button class="text-button" type="button" data-warmup-contact="${escapeAttr(contactId)}"><i data-lucide="contact"></i><span>Відкрити в CRM</span></button>`
-          : '<span class="warmup-subtle">у CRM цієї людини не знайдено</span>'}
+          : '<span class="warmup-subtle">цієї людини ще нема в CRM</span>'}
         ${link
           ? `<a href="${escapeAttr(link)}" target="_blank" rel="noreferrer noopener"><i data-lucide="external-link"></i><span>їхній LinkedIn</span></a>`
           : ""}

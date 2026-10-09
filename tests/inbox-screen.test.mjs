@@ -420,7 +420,7 @@ test("розмова: з неї є хід в CRM, коли контакт від
   without.warmupState.inbox.open = { thread: thread({ crmContactId: null }), messages: [{ direction: "in", body: "Привіт", sentAt: minutesAgo(5) }] };
   const bare = without.get("warmupThreadViewHtml")();
   assert.doesNotMatch(bare, /data-warmup-contact/);
-  assert.match(bare, /у CRM цієї людини не знайдено/);
+  assert.match(bare, /цієї людини ще нема в CRM/);
 });
 
 test("клік: по кнопці в розмові — CRM, по рядку — розмова, «Назад» і «Скинути пошук» — як сказано", async () => {

@@ -107,6 +107,19 @@ account's approach, or, failing that, through the contact whose LinkedIn link
 is that profile. A copy the CRM refused is made again on the next day's read.
 The Contacts card shows the same conversation.
 
+**Everybody who appears in a conversation is in the CRM.** A person who writes
+to one of the accounts and is in nobody's list is added to the contact base the
+moment their thread is read — in a folder of their own («Вхідні розмови
+LinkedIn», or `INBOX_CONTACTS_FOLDER`), with their name, profile link and
+headline, and the conversation lands on that record. Conversations stored before
+this existed are added at the end of each day's read, at most twenty-five a day,
+so the first days catch up on the backlog. It is a person with a LinkedIn
+profile and a name, nothing else: never a notice from LinkedIn, a thread with no
+name, a company page, anybody already in the CRM under that profile link, or
+somebody twice. It adds and never edits, and a CRM that refuses costs the
+message nothing — it is stored and added on the next read. `INBOX_ADOPT_CONTACTS=0`
+turns it off. The inbox's «Відкрити в CRM» opens exactly these records.
+
 ## Contacts
 
 The Contacts tab reads the CRM directly: its folders, one page of a folder at a

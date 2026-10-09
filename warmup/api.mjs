@@ -29,7 +29,7 @@ import {
   describeTargeting, folderNameOf, forecastFor, listFolders, normalizeFilters
 } from "./targeting.mjs";
 import {
-  AUDIT_HIDDEN_TYPES, MAX_THREADS_PER_RUN, lastSyncedAt, listThreads, markRead, markSynced, normalizeThreadInput,
+  AUDIT_HIDDEN_TYPES, MAX_THREADS_PER_RUN, adoptWaitingThreads, lastSyncedAt, listThreads, markRead, markSynced, normalizeThreadInput,
   messagesForContact, outreachFor, readThread, retryCrmCopies, storeThread, summarizeAccounts, syncSummary,
   syncedTodayAccounts, threadKeyOf, unreadCount
 } from "./inbox.mjs";
@@ -826,7 +826,10 @@ function describeThread(thread, { labels, identities, outreach }) {
     lastMessage: thread.lastMessage,
     messageCount: thread.messageCount,
     unread: thread.unread,
-    crmContactId: found.crmContactId,
+    // An approach of this account's names the contact first; otherwise the one
+    // the thread was tied to when its messages were stored or the person was
+    // added to the CRM.
+    crmContactId: found.crmContactId ?? thread.crmContactId ?? null,
     outreachStatus: found.outreachStatus,
     lastSyncedAt: thread.lastSyncedAt
   };
@@ -3221,7 +3224,10 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         const threadsSeen = Number.isFinite(seen) ? Math.max(0, Math.trunc(seen)) : 0;
         const syncedAt = await markSynced(account.id, threadsSeen);
         const crmRetried = await retryCrmCopies(account, { folderIds: runningFolderIds() });
-        sendJson(response, 200, { success: true, threadsSeen, syncedAt, crmRetried });
+        // Then the people this account talks to and the CRM has no record of:
+        // the conversations stored before they were added on arrival.
+        const crmAdded = await adoptWaitingThreads(account, { folderIds: runningFolderIds() });
+        sendJson(response, 200, { success: true, threadsSeen, syncedAt, crmRetried, crmAdded });
         return true;
       }
 

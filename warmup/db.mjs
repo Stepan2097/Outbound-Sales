@@ -10,10 +10,12 @@ import { createRestClient, likeLiteral } from "./rest.mjs";
  * `crm` is a different Supabase project holding the lead queue. Its contacts
  * are read-only from here: the CRM is somebody else's system of record, and
  * what we did with a contact belongs in wl_outreach where it can be undone
- * without touching it. The one write is append-only — a line on a contact's
- * activity timeline for each message and each connection request, so the
- * sales team sees the conversation where they already work — and it happens in
- * `activities.mjs` and nowhere else.
+ * without touching it. There are two writes, each in one file and nowhere else:
+ * a line on a contact's activity timeline for each message and each connection
+ * request, so the sales team sees the conversation where they already work
+ * (`activities.mjs`, append-only), and a new contact — in a folder of its own —
+ * for a person who wrote in and was in nobody's CRM, so a reply never comes from
+ * somebody the team cannot open (`people.mjs`, which never edits one that exists).
  * It defaults to the workspace's existing Supabase, which is the same project.
  */
 

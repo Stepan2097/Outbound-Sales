@@ -574,7 +574,10 @@ test("a namesake with a different profile is not the person this account approac
   assert.equal(answer.payload.matchedOutreachId, null, "two known profiles that differ are two people");
   assert.equal(answer.payload.statusMoved, false);
   assert.equal(rows.wl_outreach[0].status, "pending");
-  assert.equal(rows.activities.length, 0, "nothing of theirs on Marta's contact");
+  assert.ok(rows.activities.every((row) => row.contact_id !== "c-1"), "nothing of theirs on Marta's contact");
+  // They are somebody else, and as somebody else they get a record of their own
+  // (`warmup-inbox-people.test.mjs`) — which is where their two lines go.
+  assert.notEqual(answer.payload.crmContactId, "c-1");
 });
 
 test("an inbox.done sent twice at once copies what was owed once", async () => {

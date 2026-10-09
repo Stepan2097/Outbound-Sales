@@ -6,6 +6,7 @@ import { REQUEST_EVENT_TYPES, moveStatus, requestLine } from "./invites.mjs";
 import {
   CRM_COPIED, CRM_FAILED, accountName, clampContent, copyToCrm, crmStamp, oneCopyAtATime, outstandingCopies, sourceEvents
 } from "./activities.mjs";
+import { adoptable, adoptionEnabled, createContact, once } from "./people.mjs";
 
 /**
  * The inbox: threads, messages, what has been read, and when an account was
@@ -40,6 +41,14 @@ export const SYNCED_TYPE = "inbox.synced";
 export const READ_TYPE = "inbox.read";
 
 /**
+ * A thread tied to a CRM contact after the fact: written when somebody who was
+ * only a name on stored messages is added to the CRM (or found there), so the
+ * thread can open that contact. Rows are never rewritten, so the tie is its own
+ * row, like a read mark — and the newest tie for a thread is the one that counts.
+ */
+export const CONTACT_TYPE = "inbox.contact";
+
+/**
  * What the audit log must not show, named here so no other file has to know
  * which event types are really messages.
  *
@@ -55,7 +64,7 @@ export const READ_TYPE = "inbox.read";
  * that the agent's selectors have rotted, and hiding it would hide exactly the
  * failure this phase is most likely to have.
  */
-export const AUDIT_HIDDEN_TYPES = [MESSAGE_IN, MESSAGE_OUT, READ_TYPE, CRM_COPIED];
+export const AUDIT_HIDDEN_TYPES = [MESSAGE_IN, MESSAGE_OUT, READ_TYPE, CRM_COPIED, CONTACT_TYPE];
 
 /**
  * Which of these accounts has already been read today.
@@ -581,6 +590,89 @@ export async function contactBySlug(slug, { folderIds = [] } = {}) {
 }
 
 /**
+ * The CRM contact for somebody nobody has put there: the one carrying their
+ * profile link if somebody did in the meantime, else a new one in the folder
+ * made for people who wrote in. `created` says which of the two it was.
+ *
+ * One person at a time (`once`), so two logins reading the same stranger in the
+ * same minute make one contact — the second finds the first's.
+ */
+async function tieToContact(participant, { folderIds = [], account = null } = {}) {
+  return once(`profile:${linkedinSlug(participant.slug)}`, async () => {
+    const existing = await contactBySlug(participant.slug, { folderIds });
+    if (existing) return { contactId: existing, created: false };
+    const contactId = await createContact({ participant, accountName: account ? accountName(account) : "" });
+    return { contactId, created: true };
+  });
+}
+
+/** A thread belongs to this contact: its own row, because rows are not rewritten (`CONTACT_TYPE`). */
+async function markContact(accountId, threadKey, crmContactId) {
+  await anty.from("wl_events").insert({
+    account_id: accountId,
+    level: "info",
+    type: CONTACT_TYPE,
+    message: "Thread tied to a CRM contact",
+    meta: { threadKey, crmContactId }
+  }).rows();
+}
+
+/**
+ * How many people one sync may add. The first sync after this shipped meets
+ * every conversation the inbox ever held, and one request from the agent must
+ * not carry all of them; what is left is taken on the next sync.
+ */
+export const ADOPT_PER_SYNC = 25;
+
+/**
+ * Add to the CRM the people this account has conversations with and nobody has
+ * a record for — the ones read before this existed, and any that were missed.
+ *
+ * A person who writes to an account is added the moment their thread is read
+ * (`storeThread`); this is for the threads already stored, which are not read
+ * again until somebody writes in them. Each one is tied to its contact (the
+ * thread then opens that contact) and what was said in it so far goes on the
+ * contact's timeline, once — the copy ledger sees to "once".
+ *
+ * Stops at the first refusal: a CRM that will not take a contact will not take
+ * the next either, and is asked again on the next sync. Never throws.
+ */
+export async function adoptWaitingThreads(account, { now = new Date(), folderIds = [], limit = ADOPT_PER_SYNC } = {}) {
+  const result = { waiting: 0, added: 0, linked: 0, failed: 0 };
+  if (!adoptionEnabled()) return result;
+  try {
+    await oneCopyAtATime(account.id, async () => {
+      const [events, marked, approaches] = await Promise.all([
+        messageEvents({ accountId: account.id }), marks(account.id), outreachRowsOf([account.id])
+      ]);
+      const waiting = deriveThreads(events, { contactMarks: marked.contacts })
+        .filter((thread) => !thread.crmContactId && adoptable(thread.participant) && !matchOutreachRow(approaches, thread.participant));
+      result.waiting = waiting.length;
+
+      const name = accountName(account);
+      for (const thread of waiting.slice(0, limit)) {
+        try {
+          const { contactId, created } = await tieToContact(thread.participant, { folderIds, account });
+          await markContact(account.id, thread.threadKey, contactId);
+          const rows = await storedInThread(account.id, thread.threadKey);
+          const entries = oncePerRow(rows.map((row) => lineEntry(row, name))).sort(byConversation);
+          await copyToCrm({ accountId: account.id, contactId, entries, now });
+          if (created) result.added += 1;
+          else result.linked += 1;
+        } catch (error) {
+          result.failed += 1;
+          console.error("[warmup] could not add a person to the CRM:", error.message);
+          break;
+        }
+      }
+    });
+  } catch (error) {
+    console.error("[warmup] adding people to the CRM failed:", error.message);
+  }
+  return result;
+}
+
+/**
  * The line one message becomes on the contact's CRM timeline: which way it
  * went, on which login, when, and the words.
  *
@@ -831,16 +923,31 @@ export async function storeThread({ account, input, folderIds = [], now = new Da
     }
   }
 
+  // Nobody in the CRM at all: a person who wrote to this login and is on nobody's
+  // list. They are added to the contact base, in the folder made for them, so
+  // that the conversation has a record to land on and the sales team a card to
+  // open. A CRM that refuses costs the message nothing — it is stored, and its
+  // copy is owed, as when the CRM cannot be asked who somebody is.
+  let adopted = false;
+  if (fresh.length && !contactId && !lookupError && adoptionEnabled() && adoptable(participant)) {
+    try {
+      ({ contactId, created: adopted } = await tieToContact(participant, { folderIds, account }));
+    } catch (error) {
+      lookupError = error;
+    }
+  }
+
   const stored = await insertMessages(account.id, threadKey, participant, fresh, contactId);
 
   const inbound = fresh.filter((message) => message.direction === "in");
   const outcome = {
     matchedOutreachId: match?.id ?? null,
     crmContactId: contactId,
-    // How the person was found: their approach on this account, or only their
+    // How the person was found: their approach on this account, only their
     // LinkedIn link in the CRM — which moves no status, because there is no
-    // approach of this account's to move.
-    matchedBy: match ? "outreach" : contactId ? "linkedin" : null,
+    // approach of this account's to move — or not at all, and added now.
+    matchedBy: match ? "outreach" : contactId ? (adopted ? "added" : "linkedin") : null,
+    added: adopted,
     statusMoved: false,
     crm: "skipped",
     crmWritten: 0
@@ -1128,7 +1235,7 @@ function threadOrder(messages) {
  * is already read and you never see it; by when we stored it, it is new to you
  * — which it is.
  */
-export function deriveThreads(events, { readMarks = new Map(), syncedAt = new Map() } = {}) {
+export function deriveThreads(events, { readMarks = new Map(), syncedAt = new Map(), contactMarks = new Map() } = {}) {
   const threads = new Map();
 
   for (const event of events) {
@@ -1145,12 +1252,17 @@ export function deriveThreads(events, { readMarks = new Map(), syncedAt = new Ma
         participant: normalizeParticipant(event.meta?.participant),
         participantSeenAt: event.created_at,
         messages: [],
-        newestInboundStoredAt: null
+        newestInboundStoredAt: null,
+        contact: null
       };
       threads.set(key, thread);
     }
 
     thread.messages.push(message);
+    // The person this thread is with, when a message was stored knowing it.
+    if (event.meta?.crmContactId && (!thread.contact || event.created_at > thread.contact.at)) {
+      thread.contact = { crmContactId: String(event.meta.crmContactId), at: event.created_at };
+    }
     // The newest event carrying a participant wins: a headline that changed, or
     // a name the agent could only resolve on the second run, should be current.
     if (event.meta?.participant && event.created_at >= thread.participantSeenAt) {
@@ -1167,9 +1279,15 @@ export function deriveThreads(events, { readMarks = new Map(), syncedAt = new Ma
     // The last in the order the thread screen shows (`threadOrder`), so the
     // list's preview is the message the thread ends on there.
     const lastMessage = threadOrder(thread.messages).at(-1) ?? null;
+    // Who the thread is with: the newest of what a message was stored knowing
+    // and a later tie (`CONTACT_TYPE`). An approach of this account's, which
+    // the caller knows about and this does not, comes before both.
+    const tied = contactMarks.get(threadId(thread.accountId, thread.threadKey));
+    const contact = tied && (!thread.contact || tied.at > thread.contact.at) ? tied : thread.contact;
     return {
       threadKey: thread.threadKey,
       accountId: thread.accountId,
+      crmContactId: contact?.crmContactId ?? null,
       participant: thread.participant,
       lastMessage: lastMessage && {
         direction: lastMessage.direction,
@@ -1197,21 +1315,25 @@ async function messageEvents({ accountId = null, threadKey = null } = {}) {
   return query.order("created_at", { ascending: false }).limit(LISTING_LIMIT).rows();
 }
 
-/** The newest read mark per thread, and the newest sync per account. */
+/** The newest read mark per thread, the newest sync per account, and the newest contact each thread was tied to. */
 async function marks(accountId = null) {
   const read = new Map();
   const synced = new Map();
+  const contacts = new Map();
 
   let readQuery = anty.from("wl_events").select("account_id,meta,created_at").eq("type", READ_TYPE);
   let syncQuery = anty.from("wl_events").select("account_id,meta,created_at").eq("type", SYNCED_TYPE);
+  let contactQuery = anty.from("wl_events").select("account_id,meta,created_at").eq("type", CONTACT_TYPE);
   if (accountId) {
     readQuery = readQuery.eq("account_id", accountId);
     syncQuery = syncQuery.eq("account_id", accountId);
+    contactQuery = contactQuery.eq("account_id", accountId);
   }
 
-  const [readRows, syncRows] = await Promise.all([
+  const [readRows, syncRows, contactRows] = await Promise.all([
     readQuery.order("created_at", { ascending: false }).limit(LISTING_LIMIT).rows(),
-    syncQuery.order("created_at", { ascending: false }).limit(LISTING_LIMIT).rows()
+    syncQuery.order("created_at", { ascending: false }).limit(LISTING_LIMIT).rows(),
+    contactQuery.order("created_at", { ascending: false }).limit(LISTING_LIMIT).rows()
   ]);
 
   // Newest first, so the first mark seen for a key is the one that counts.
@@ -1223,8 +1345,13 @@ async function marks(accountId = null) {
   for (const row of syncRows) {
     if (row.account_id && !synced.has(row.account_id)) synced.set(row.account_id, row.created_at);
   }
+  for (const row of contactRows) {
+    if (!row.account_id || !row.meta?.threadKey || !row.meta?.crmContactId) continue;
+    const key = threadId(row.account_id, row.meta.threadKey);
+    if (!contacts.has(key)) contacts.set(key, { crmContactId: String(row.meta.crmContactId), at: row.created_at });
+  }
 
-  return { read, synced };
+  return { read, synced, contacts };
 }
 
 /**
@@ -1247,18 +1374,18 @@ export async function syncSummary(accountIds) {
 
 /** Threads across every account, or one account, unread first then newest. */
 export async function listThreads({ accountId = null, unreadOnly = false } = {}) {
-  const [events, { read, synced }] = await Promise.all([messageEvents({ accountId }), marks(accountId)]);
-  const threads = deriveThreads(events, { readMarks: read, syncedAt: synced });
+  const [events, { read, synced, contacts }] = await Promise.all([messageEvents({ accountId }), marks(accountId)]);
+  const threads = deriveThreads(events, { readMarks: read, syncedAt: synced, contactMarks: contacts });
   return unreadOnly ? threads.filter((thread) => thread.unread) : threads;
 }
 
 /** One conversation, oldest first — the shape the thread screen renders. */
 export async function readThread({ accountId, threadKey }) {
-  const [events, { read, synced }] = await Promise.all([
+  const [events, { read, synced, contacts }] = await Promise.all([
     messageEvents({ accountId, threadKey }),
     marks(accountId)
   ]);
-  const [thread] = deriveThreads(events, { readMarks: read, syncedAt: synced });
+  const [thread] = deriveThreads(events, { readMarks: read, syncedAt: synced, contactMarks: contacts });
   if (!thread) return null;
 
   const messages = threadOrder(events.map(toMessage))
