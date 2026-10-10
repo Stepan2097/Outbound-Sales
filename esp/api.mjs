@@ -2,11 +2,21 @@
 // which connector this server runs with, and whether one mailbox can be acted
 // as. Both are the administrator's: a seller has nothing to configure here.
 
+import { handleEspDataApi } from "./data-api.mjs";
 import { MailboxError } from "./gmail.mjs";
 
 export async function handleEspApi({ request, response, url, sendJson, readJson, esp }) {
   const path = url.pathname.replace(/^\/api\/esp/, "") || "/";
   const method = request.method;
+
+  // ESP 9 — the journal, the registry and a person's mail timeline — is its own
+  // module with its own rules about who may do what (a timeline is the whole
+  // team's), so it answers first and the gate below is the mail connection's.
+  const profile = request.auth?.profile;
+  if (await handleEspDataApi({
+    request, response, url, sendJson, readJson,
+    actor: profile?.email || profile?.name || "", role: profile?.role || "seller"
+  })) return true;
 
   if (request.auth?.profile?.role !== "admin") {
     sendJson(response, 403, { success: false, error: "Пошту для розсилки налаштовує адміністратор робочого простору." });

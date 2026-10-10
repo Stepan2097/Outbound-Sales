@@ -1,0 +1,136 @@
+/* Пошта (ESP) у «Налаштуваннях»: домени й відправники, їхні стани, DNS і
+   форми додавання. На токенах base.css. */
+
+.esp-title {
+  margin: 16px 0 8px;
+  font-size: 14px;
+}
+
+.esp-list {
+  display: grid;
+  gap: 8px;
+}
+
+.esp-row {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-strong);
+  min-width: 0;
+}
+
+.esp-row-main,
+.esp-row-dns,
+.esp-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.esp-subtle {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.esp-dns {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.esp-dns.is-ok {
+  color: var(--green);
+}
+
+.esp-dns.is-bad {
+  color: var(--red);
+}
+
+.esp-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.esp-notice,
+.esp-verify {
+  margin: 8px 0 0;
+  font-size: 13px;
+}
+
+.esp-notice.is-bad,
+.esp-verify.is-bad {
+  color: var(--red);
+}
+
+.esp-verify.is-ok {
+  color: var(--green);
+}
+
+.esp-foot {
+  margin-top: 14px;
+}
+
+/* Хронологія пошти на картці контакта: кожен лист — з точним текстом. */
+
+.mail-feed {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.mail-event {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-strong);
+  font-size: 13px;
+  min-width: 0;
+}
+
+.mail-event-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+
+.mail-event pre {
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.mail-event.is-bad {
+  border-color: color-mix(in srgb, var(--red) 45%, transparent);
+}
+
+.esp-move {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.esp-move select {
+  width: auto;
+  min-height: 30px;
+  padding: 2px 8px;
+}
+
+.esp-row-dns b {
+  color: var(--ink);
+}

@@ -64,6 +64,10 @@ let contactHistoryNotice = "";
 // Де ця людина в запрошеннях LinkedIn: рядок підходу, який віддає історія. Null —
 // запитів із цього простору їй не було.
 let contactOutreach = null;
+/** Хронологія пошти (ESP) цієї людини: спроби з точним текстом, відповіді, відписки. Ключ — адреса. */
+let contactMail = null;
+let contactMailFor = "";
+let contactMailNotice = "";
 
 // Повідомлення, які модель написала цій людині: лист, Telegram і два тексти для
 // LinkedIn. Сервер зберігає їх на людину, тож вони чекають на картці, поки їх
@@ -309,7 +313,74 @@ function renderContactCard() {
     ${custom}
     ${contactMessagesHtml()}
     ${contactHistoryFor && contactHistoryFor === String(contact.id) ? contactConversationHtml() : ""}
+    ${contact.email ? contactMailHtml(contact.email) : ""}
   `));
+}
+
+const MAIL_EVENT_LABEL = {
+  "message.sending": "Відправка",
+  "message.sent": "Надіслано",
+  "message.failed": "Не пішло",
+  "message.replied": "Відповідь",
+  "message.bounced": "Повернувся (bounce)",
+  "contact.unsubscribed": "Відписка",
+  "contact.skipped": "Не надіслано — перевірка",
+  "contact.note": "Нотатка"
+};
+
+/**
+ * Пошта цієї людини, від найстарішого: кожна спроба з точним текстом, що пішов
+ * (тема, текст, від кого), і все, що було потім. Журнал ESP — окремо від CRM;
+ * якщо він не відповів, картка лишається, а тут одне речення.
+ */
+function contactMailHtml(email) {
+  const key = String(email).trim().toLowerCase();
+  if (contactMailFor !== key) {
+    void loadContactMail(key);
+    return '<section class="contact-history"><strong>Пошта</strong><p>Читаємо журнал пошти...</p></section>';
+  }
+  const body = contactMailNotice
+    ? `<p>Журнал пошти не прочитався: ${escapeHtml(contactMailNotice)}</p>`
+    : !contactMail
+      ? "<p>Читаємо журнал пошти...</p>"
+      : !contactMail.length
+        ? "<p>Холодних листів цій людині ще не було.</p>"
+        : `<ol class="mail-feed">${contactMail.map((event) => {
+          const data = event.data || {};
+          const when = new Date(event.at).toLocaleString();
+          const label = MAIL_EVENT_LABEL[event.type] || event.type;
+          const bad = ["message.failed", "message.bounced", "contact.unsubscribed"].includes(event.type);
+          const detail = event.type === "message.sending"
+            ? `<span>${escapeHtml(data.from || "")} → ${escapeHtml(data.to || "")}${data.campaignId ? ` · кампанія ${escapeHtml(data.campaignId)}${data.step ? `, крок ${escapeHtml(data.step)}` : ""}` : ""}</span>
+               ${data.subject ? `<strong>Тема: ${escapeHtml(data.subject)}</strong>` : ""}
+               <pre>${escapeHtml(data.text || "")}</pre>`
+            : event.type === "message.sent"
+              ? `<span>id ${escapeHtml(data.messageId || "")} · відбиток ${escapeHtml(String(data.hash || "").slice(0, 12))}</span>`
+              : (data.error || data.reason || data.snippet || data.text || data.via)
+                ? `<span>${escapeHtml(data.error || data.reason || data.snippet || data.text || data.via)}</span>`
+                : "";
+          return `<li class="mail-event${bad ? " is-bad" : ""}">
+            <div class="mail-event-head"><strong>${escapeHtml(label)}</strong><span title="${escapeAttr(event.actor || "")}">${escapeHtml(when)}</span></div>
+            ${detail}
+          </li>`;
+        }).join("")}</ol>`;
+  return `<section class="contact-history"><strong>Пошта</strong>${body}</section>`;
+}
+
+async function loadContactMail(key) {
+  contactMailFor = key;
+  contactMail = null;
+  contactMailNotice = "";
+  try {
+    const payload = await api(`/api/esp/contacts/timeline?email=${encodeURIComponent(key)}`);
+    if (contactMailFor !== key) return;
+    contactMail = Array.isArray(payload.events) ? payload.events : [];
+  } catch (error) {
+    if (contactMailFor !== key) return;
+    contactMailNotice = error?.message || "Журнал пошти не відповів.";
+  }
+  renderContactCard();
+  refreshIcons();
 }
 
 /**

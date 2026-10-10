@@ -9,6 +9,7 @@ import { startWarmupBadge } from "./screens/inbox.js";
 import "./screens/contacts.js";
 import "./screens/settings.js";
 import "./screens/esp-mailboxes.js";
+import "./screens/esp-registry.js";
 
 startWarmupBadge();
 await bootApplication();

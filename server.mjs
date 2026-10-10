@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { CHANNEL_RULES, LANGUAGES, buildFallbackDrafts, draftsPromptPayload, normalizeDrafts, normalizeLanguage } from "./contacts/drafts.mjs";
 import { contactAsProspect, contactsConfigured, contactsMissingConfig, crmKeyKind, folderContactAt, listContactFolders, listFolderContacts, searchFolderContacts, readContact, supabaseKeyKind } from "./contacts/store.mjs";
 import { handleKnowledgeLibraryApi } from "./knowledge/api.mjs";
+import { useJournal } from "./esp/journal.mjs";
 import { knowledgeExcerptsForPrompt, knowledgeFilesForProduct, loadKnowledgeLibrary } from "./knowledge/library.mjs";
 import { handleWarmupApi } from "./warmup/api.mjs";
 import { handleEspApi } from "./esp/api.mjs";
@@ -20,6 +21,8 @@ import { startScheduler } from "./warmup/scheduler.mjs";
 const root = fileURLToPath(new URL(".", import.meta.url));
 const appRoot = join(root, "app");
 const stateFilePath = process.env.STATE_FILE_PATH || join(root, ".data", "outbound-state.json");
+// The ESP journal lives beside the state, on the same volume, unless told otherwise.
+useJournal(process.env.ESP_JOURNAL_PATH || join(dirname(stateFilePath), "esp-journal.jsonl"));
 const port = Number.parseInt(process.env.PORT ?? "4173", 10);
 // AUTH_DEV_BYPASS віддає права admin кожному запиту без входу — це лише для
 // локальної розробки й тестів. На проді прапорець ігнорується, а старт пише

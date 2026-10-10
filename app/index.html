@@ -13,6 +13,7 @@
     <link rel="stylesheet" href="/styles/contacts.css" />
     <link rel="stylesheet" href="/styles/settings.css" />
     <link rel="stylesheet" href="/styles/esp.css" />
+    <link rel="stylesheet" href="/styles/esp-registry.css" />
     <script defer src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
     <script defer type="module" src="/main.js"></script>
   </head>
@@ -121,6 +122,17 @@
                 </div>
               </div>
               <div id="espMailBody"></div>
+            </section>
+
+            <!-- ESP 9: реєстр доменів і відправників; малює app/screens/esp-registry.js. -->
+            <section class="panel esp-registry-panel span-2" id="espRegistryPanel">
+              <div class="panel-heading">
+                <div>
+                  <h2>Пошта: домени й відправники</h2>
+                  <p>Звідки йдуть холодні листи. Кожна зміна — рядок у журналі, який лише дописується.</p>
+                </div>
+              </div>
+              <div id="espRegistryBody"></div>
             </section>
 
             <section class="panel profile-admin span-2" id="accountSelfPanel">

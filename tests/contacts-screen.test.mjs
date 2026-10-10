@@ -27,6 +27,7 @@ const NAMES = [
   "contactHistoryNotice", "contactOutreach", "contactsLoadedAt", "contactsLoading", "contactsError",
   "contactChannelHint", "contactFieldLabels", "contactLinkedInLink", "historyEntryHtml",
   "contactRequestPill", "renderContactPill", "renderContactCard", "renderContacts", "contactConversationHtml",
+  "contactMail", "contactMailFor", "contactMailNotice", "MAIL_EVENT_LABEL", "contactMailHtml", "loadContactMail",
   "fetchContactFolders", "loadContactFolders", "loadContactPage", "selectContactFolder", "openContact",
   "loadContactHistory", "openContactsScreen", "contactsRecalled", "rememberContacts", "recallContacts",
   "contactDrafts", "contactDraftsBusy", "contactDraftsError", "contactDraftLanguage", "CONTACT_DRAFT_LANGUAGE_LABEL",

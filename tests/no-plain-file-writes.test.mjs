@@ -26,7 +26,7 @@ const ALLOWED = {
 
 function sources() {
   const found = ["server.mjs"];
-  for (const folder of ["knowledge", "contacts", "warmup", "scripts", "state", "agent", "agent/lib"]) {
+  for (const folder of ["knowledge", "contacts", "warmup", "scripts", "state", "agent", "agent/lib", "esp"]) {
     for (const name of readdirSync(new URL(`${folder}/`, ROOT))) {
       if (!name.endsWith(".mjs")) continue;
       if (/\.(test|probe)\.mjs$/.test(name) || name === "atomic-write.mjs") continue;

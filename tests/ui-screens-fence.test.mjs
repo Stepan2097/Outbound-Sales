@@ -112,7 +112,9 @@ test("each screen has its own module and stylesheet, and registers itself", () =
 test("main.js only loads the screens and starts", () => {
   const entry = readFileSync(new URL("main.js", APP), "utf8");
   const code = entry.split("\n").filter((line) => line.trim() && !line.trim().startsWith("//"));
-  assert.ok(code.length <= 10, `main.js grew to ${code.length} lines of code — screen code belongs in screens/`);
+  // Imports and the two start calls. Twelve since the mail panels (ESP 1 and
+  // ESP 9) became modules of their own on «Налаштування»: one line each.
+  assert.ok(code.length <= 12, `main.js grew to ${code.length} lines of code — screen code belongs in screens/`);
   assert.equal(/function /.test(entry), false, "no functions in the entry");
 });
 
