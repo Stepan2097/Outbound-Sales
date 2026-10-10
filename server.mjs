@@ -24,6 +24,7 @@ import { recordAboutContact, recordFailed, recordSending, recordSent } from "./e
 import { canSend as espCanSend, registry as espRegistry, registrySenderStore, setDomainStatus as espSetDomainStatus, setSenderStatus as espSetSenderStatus, updateSender as espUpdateSender } from "./esp/registry.mjs";
 import { applyAlerts, reviewAlerts, telegramNotifier } from "./esp/alerts.mjs";
 import { compareSenders, runDailyMonitor } from "./esp/monitor.mjs";
+import { runRetention } from "./esp/retention.mjs";
 import { defaultFilters } from "./esp/filters.mjs";
 import { applyRampReviews } from "./esp/ramp.mjs";
 import { campaignStore } from "./esp/campaigns.mjs";
@@ -648,7 +649,13 @@ server.listen(port, () => {
   // (the journal remembers); the first look is a few minutes after start, so a
   // restart is not a burst of DNS queries. ESP_MONITOR=off turns it off.
   if (process.env.ESP_MONITOR !== "off") {
-    const watch = () => void esp.runMonitor().catch((error) => console.error("[esp] monitor failed:", error.message));
+    // ESP 16: the retention pass rides on the same hourly look — once a day too.
+    const watch = () => {
+      void esp.runMonitor().catch((error) => console.error("[esp] monitor failed:", error.message));
+      void runRetention({ campaigns: esp.campaigns })
+        .then((result) => { if (result.anonymized) console.log(`[esp] retention: ${result.anonymized} lead(s) anonymised`); })
+        .catch((error) => console.error("[esp] retention failed:", error.message));
+    };
     setTimeout(watch, 5 * 60_000).unref();
     setInterval(watch, 60 * 60_000).unref();
   }

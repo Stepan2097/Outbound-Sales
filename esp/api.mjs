@@ -5,6 +5,8 @@
 import { can, logAdminAction } from "./access.mjs";
 import { SKIP_REASON_LABEL, defaultFilters, exclusions, refusedAtEnrolment } from "./filters.mjs";
 import { erasePerson, exportPerson } from "./erasure.mjs";
+import { campaignReport, senderDailyReport, toCsv } from "./reports.mjs";
+import { dueForRetention, retentionDays, runRetention } from "./retention.mjs";
 import { handleEspDataApi } from "./data-api.mjs";
 import { MailboxError } from "./provider.mjs";
 import { CampaignError, parseLeadLines } from "./campaigns.mjs";
@@ -42,6 +44,10 @@ export function espRouteRight(method, path) {
   if (path === "/inbox/poll") return "limits.change";
   // ESP 13: stepping a sender's ramp up (or holding it) is a limit.
   if (path.startsWith("/ramp/")) return "limits.change";
+  // ESP 16: the reports are the team's to read; anonymising old leads is an administrator's.
+  if (path.startsWith("/reports")) return "replies.read";
+  if (path === "/retention") return method === "GET" ? "replies.read" : "access.manage";
+  if (path === "/retention/run") return "access.manage";
   // ESP 15: running the DNS and blocklist watch now — the registry's.
   if (path === "/monitor/run") return "registry.change";
   if (path.startsWith("/campaigns")) return "campaigns.launch";
@@ -109,6 +115,45 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
       if (!(error instanceof MailboxError)) throw error;
       sendJson(response, 400, { success: false, error: error.message });
     }
+    return true;
+  }
+
+  // ── ESP 16: reports (no opens, no clicks — there are none) and retention ─
+  if (method === "GET" && (path === "/reports/senders" || path === "/reports/campaigns")) {
+    const entries = await allEntries();
+    const csv = url.searchParams.get("format") === "csv";
+    if (path === "/reports/senders") {
+      const report = senderDailyReport(entries, { from: url.searchParams.get("from") || "", to: url.searchParams.get("to") || "" });
+      if (csv) {
+        const which = url.searchParams.get("by") === "domain" ? "domains" : "senders";
+        const columns = [which === "domains" ? "domain" : "sender", "day", "sent", "firsts", "followups", "bounces", "bounceRate", "bounceCodes", "replies", "positive", "autoreplies", "unsubscribes"];
+        return sendCsv(response, `esp-${which}.csv`, toCsv(report[which], ["day", ...columns.filter((column) => column !== "day")])), true;
+      }
+      sendJson(response, 200, { success: true, ...report });
+      return true;
+    }
+    const sources = new Map(esp.campaigns.enrollments().map((row) => [`${row.campaignId}|${row.email}`, row.lead?.source || ""]));
+    const report = campaignReport(entries, { campaigns: esp.campaigns.list(), sourceOf: (campaignId, email) => sources.get(`${campaignId}|${email}`) || "" });
+    if (csv) {
+      const rows = report.flatMap((campaign) => campaign.steps.map((step) => ({ campaign: campaign.name, step: step.step, sent: step.sent, replied: step.replied, positive: step.positive, shareOfReplies: step.shareOfReplies, replyRate: step.replyRate })));
+      return sendCsv(response, "esp-campaign-steps.csv", toCsv(rows, ["campaign", "step", "sent", "replied", "positive", "shareOfReplies", "replyRate"])), true;
+    }
+    sendJson(response, 200, { success: true, campaigns: report });
+    return true;
+  }
+
+  if (method === "GET" && path === "/retention") {
+    const days = retentionDays();
+    const due = dueForRetention(esp.campaigns.enrollments(), { days });
+    const last = (await allEntries()).filter((entry) => entry.type === "retention.anonymized").at(-1);
+    sendJson(response, 200, { success: true, days, due: due.length, last: last ? { at: last.at, count: last.data?.count ?? 0 } : null, canRun: await can(profile, "access.manage") });
+    return true;
+  }
+
+  if (method === "POST" && path === "/retention/run") {
+    const result = await runRetention({ campaigns: esp.campaigns, force: true, actor });
+    await logged("retention_run", { anonymized: result.anonymized, days: result.days });
+    sendJson(response, 200, { success: true, ...result });
     return true;
   }
 
@@ -560,4 +605,10 @@ function campaignSummary(campaign, enrollments, entries) {
   const byStatus = {};
   for (const row of enrollments) byStatus[row.status] = (byStatus[row.status] || 0) + 1;
   return { ...campaign, people: enrollments.length, byStatus, ...counts };
+}
+
+/** A report as a file to save. */
+function sendCsv(response, filename, body) {
+  response.writeHead(200, { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="${filename}"`, "Cache-Control": "no-store" });
+  response.end(`\uFEFF${body}`);
 }

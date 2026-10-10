@@ -456,4 +456,168 @@ details.esp-row > summary {
   font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+
+/* ESP 16: звіти й строк зберігання. */
+
+.esp-report-bar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 10px;
+}
+
+.esp-report-csv {
+  margin-left: auto;
+  text-decoration: none;
+}
+
+.esp-report-sub {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.esp-report-tabs {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.esp-report-tabs button {
+  border: 0;
+  background: transparent;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.esp-report-tabs button + button {
+  border-left: 1px solid var(--line);
+}
+
+.esp-report-tabs button[aria-selected="true"],
+.esp-report-tabs button[aria-pressed="true"] {
+  background: var(--teal-weak);
+  color: var(--teal);
+  font-weight: 600;
+}
+
+.esp-report-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.esp-report-table th,
+.esp-report-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.esp-report-table th:first-child,
+.esp-report-table td:first-child,
+.esp-report-table td:nth-child(2),
+.esp-report-table th:nth-child(2) {
+  text-align: left;
+}
+
+.esp-report-table.is-compact {
+  min-width: 0;
+}
+
+.esp-report-table.is-compact td:nth-child(2),
+.esp-report-table.is-compact th:nth-child(2) {
+  text-align: right;
+}
+
+.esp-report-table tfoot td {
+  font-weight: 600;
+  border-bottom: 0;
+}
+
+.esp-report-table td.is-bad {
+  color: var(--red);
+  font-weight: 600;
+}
+
+.esp-report-codes {
+  color: var(--muted);
+}
+
+.esp-report-campaign {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 10px;
+}
+
+.esp-report-campaign header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: baseline;
+  margin-bottom: 8px;
+}
+
+.esp-report-bar {
+  display: inline-block;
+  width: 80px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line);
+  vertical-align: middle;
+  overflow: hidden;
+}
+
+.esp-report-bar span {
+  display: block;
+  height: 100%;
+  background: var(--teal);
+}
+
+.esp-report-splits {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.esp-report-split {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.esp-report-split h4 {
+  margin: 4px 0;
+  font-size: 13px;
+}
+
+.esp-report-split td:first-child {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.esp-report-retention {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid var(--line);
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
+.esp-report-retention > div {
+  flex: 1 1 320px;
+}
+
+.esp-report-retention p {
+  margin: 4px 0 0;
 }

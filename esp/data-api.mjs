@@ -2,6 +2,7 @@ import { accessView, adminLog, can, changeAccess } from "./access.mjs";
 import { allEntries, entries, timeline, verify } from "./journal.mjs";
 import { COMPARE_MIN_SENT, watchedExtraDomains } from "./monitor.mjs";
 import { secretsStatus } from "./secrets.mjs";
+import { anonymizedIds, redactFor } from "./retention.mjs";
 import { parseLeadLines } from "./campaigns.mjs";
 import {
   BLOCKED_RECIPIENT_DOMAINS, EXCLUSION_CATEGORIES, ROLE_LOCAL_PARTS, SKIP_REASON_LABEL, VERIFICATION_MAX_DAYS,
@@ -51,8 +52,10 @@ export async function handleEspDataApi({ request, response, url, sendJson, readJ
     if (method === "GET" && path === "/api/esp/contacts/timeline") {
       if (!await allowed("replies.read")) return refuse("replies.read"), true;
       const email = url.searchParams.get("email") || "";
-      const events = (await timeline(email)).filter((entry) => TIMELINE_TYPES.includes(entry.type));
-      sendJson(response, 200, { email: email.trim().toLowerCase(), events });
+      // ESP 16: an anonymised person's words are not shown — what happened and when still is.
+      const ids = anonymizedIds(await allEntries());
+      const events = (await timeline(email)).filter((entry) => TIMELINE_TYPES.includes(entry.type)).map((entry) => redactFor(entry, ids));
+      sendJson(response, 200, { email: email.trim().toLowerCase(), events, anonymized: events.some((entry) => entry.data?.redacted) });
       return true;
     }
 
