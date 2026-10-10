@@ -12,6 +12,7 @@ import { addDomain, addSender, canSend, registry, setDomainStatus, setSenderStat
 import { SenderGate, stateSenderStore } from "../esp/senders.mjs";
 import { addWorkingDays, attemptOf, runTick } from "../esp/sequence.mjs";
 import { templateStore } from "../esp/templates.mjs";
+import { addExclusion, defaultFilters, forgetMx } from "../esp/filters.mjs";
 
 /**
  * ESP 5 — the chain, end to end over the real journal and registry (ESP 9),
@@ -308,4 +309,57 @@ test("the API: «стоп усе» needs a reason and is in force before it answ
   assert.equal(w.connector.sent.length, 0, "the plan sent something");
   const list = await call("GET", "/campaigns");
   assert.deepEqual([list.payload.campaigns[0].people, list.payload.campaigns[0].sent], [1, 0]);
+});
+
+// ── ESP 6: the pre-send checks, before every letter ────────────────────────
+
+const GOOGLE_MX = { resolveMx: async () => [{ exchange: "aspmx.l.google.com" }] };
+const CHECKED_LEAD = { ...LEAD, source: "Apollo export", sourceDate: "2026-10-01", verification: "valid", verifiedAt: "2026-10-12" };
+
+test("ESP 6: виключення, додане посеред ланцюжка, зупиняє його перед наступним листом — не лише при завантаженні", async (t) => {
+  forgetMx();
+  const w = await world(t);
+  const filters = defaultFilters({ dns: GOOGLE_MX });
+  const campaign = await w.campaigns.create({ name: "Northwind", steps: w.steps, senders: ["anna@advantage-mail.com"] });
+  await w.campaigns.enroll(campaign.id, [CHECKED_LEAD]);
+  await w.campaigns.setState(campaign.id, "running");
+  assert.equal((await w.tick(TUESDAY, { filters })).sent, 1, "перший лист пройшов перевірки");
+
+  await addExclusion({ key: "@northwind.com", category: "client" }, "ira@advantage-agency.co");
+  const later = await w.tick(at(3), { filters });
+  assert.equal(later.sent, 0);
+  assert.equal(later.stopped, 1);
+  const [row] = w.campaigns.enrollmentsOf(campaign.id);
+  assert.deepEqual([row.status, row.reason], ["stopped", "client"]);
+  const skipped = (await allEntries()).filter((entry) => entry.type === "contact.skipped");
+  assert.equal(skipped.at(-1).data.reason, "client");
+  assert.equal(w.connector.sent.length, 1, "другого листа немає");
+});
+
+test("ESP 6: застаріла верифікація — лист не йде, лід позначено на повторну перевірку один раз, ланцюжок не зупинено", async (t) => {
+  forgetMx();
+  const w = await world(t);
+  const filters = defaultFilters({ dns: GOOGLE_MX });
+  const campaign = await w.campaigns.create({ name: "Northwind", steps: w.steps, senders: ["anna@advantage-mail.com"] });
+  await w.campaigns.enroll(campaign.id, [{ ...CHECKED_LEAD, verifiedAt: "2026-08-01" }]);
+  await w.campaigns.setState(campaign.id, "running");
+  const first = await w.tick(TUESDAY, { filters });
+  assert.equal(first.sent, 0);
+  assert.equal(first.skipped.verification_stale, 1);
+  await w.tick(at(0, 30), { filters });
+  const [row] = w.campaigns.enrollmentsOf(campaign.id);
+  assert.deepEqual([row.status, row.recheck], ["active", "verification_stale"]);
+  assert.equal((await allEntries()).filter((entry) => entry.type === "contact.skipped").length, 1, "позначено один раз, а не щохвилини");
+  assert.equal(w.connector.sent.length, 0);
+});
+
+test("ESP 6: без джерела лист не йде навіть у вже запущеній кампанії", async (t) => {
+  forgetMx();
+  const w = await world(t);
+  const campaign = await w.campaigns.create({ name: "Northwind", steps: w.steps, senders: ["anna@advantage-mail.com"] });
+  await w.campaigns.enroll(campaign.id, [LEAD]);
+  await w.campaigns.setState(campaign.id, "running");
+  const result = await w.tick(TUESDAY, { filters: defaultFilters({ dns: GOOGLE_MX }) });
+  assert.equal(result.sent, 0);
+  assert.equal(result.skipped.no_source, 1);
 });

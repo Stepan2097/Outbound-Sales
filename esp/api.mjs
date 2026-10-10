@@ -3,12 +3,12 @@
 // as. Both are the administrator's: a seller has nothing to configure here.
 
 import { can, logAdminAction } from "./access.mjs";
+import { SKIP_REASON_LABEL, defaultFilters, refusedAtEnrolment } from "./filters.mjs";
 import { handleEspDataApi } from "./data-api.mjs";
 import { MailboxError } from "./gmail.mjs";
 import { CampaignError, parseLeadLines } from "./campaigns.mjs";
 import { composeLetter } from "./compose.mjs";
 import { allEntries, append } from "./journal.mjs";
-import { recentContactBlocks } from "./company.mjs";
 import { applyRampReviews, reviewRamp } from "./ramp.mjs";
 import { DOMAIN_DAILY_LIMIT, GAP_MINUTES, WINDOW, sendLedger, senderDailyLimit } from "./limits.mjs";
 import { registry, updateSender } from "./registry.mjs";
@@ -167,20 +167,27 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
   if (method === "POST" && path === "/campaigns/leads") {
     const body = await readJson(request);
     if (!body) return badRequest(sendJson, response, "Некоректне тіло JSON");
-    const entries = await allEntries();
-    const gone = new Map();
-    for (const entry of entries) {
-      if (entry.type === "contact.unsubscribed") gone.set(entry.contact, "unsubscribed");
-      else if (entry.type === "message.bounced" && /^5\./.test(String(entry.data?.code || ""))) gone.set(entry.contact, "bounced");
-    }
-    // ESP 13: written to in the last 90 days without an answer, or answered
-    // ever — not put into a sequence again.
-    const recent = recentContactBlocks(entries);
+    // ESP 6: every person through the same checks the chain runs before each
+    // letter — exclusions (unsubscribes, hard bounces, «ні», complaints, clients,
+    // partners), the 90-day rule (ESP 13), source, country, role addresses,
+    // Apple mail, verification and Google MX. Checked here first, because the
+    // checks wait on DNS and enrolment does not.
     const { leads, rejected } = parseLeadLines(body.text);
+    const filters = esp.filters || defaultFilters();
+    const context = await filters.context(await allEntries(), new Date());
+    const verdicts = new Map();
+    for (const lead of leads) verdicts.set(lead.email, await filters.check(lead, context));
+    // Enrolled, but not going until the data is fixed: no source, no or stale
+    // verification, unknown country. Said now, so nobody waits for nothing.
+    const waiting = [...verdicts.entries()].filter(([, verdict]) => !verdict.ok && !refusedAtEnrolment(verdict))
+      .map(([email, verdict]) => ({ email, reason: verdict.reason, label: SKIP_REASON_LABEL[verdict.reason] || verdict.reason, detail: verdict.detail, needsRecheck: verdict.needsRecheck }));
     try {
-      const result = await esp.campaigns.enroll(String(body.id || ""), leads, { blocked: (email) => gone.get(email) || recent(email) });
+      const result = await esp.campaigns.enroll(String(body.id || ""), leads, { blocked: (email) => (refusedAtEnrolment(verdicts.get(email)) ? verdicts.get(email).reason : null) });
       await logged("campaign_leads_added", { id: String(body.id || ""), added: result.added.length });
-      sendJson(response, 200, { success: true, added: result.added.length, skipped: result.skipped, rejected });
+      sendJson(response, 200, {
+        success: true, added: result.added.length, skipped: result.skipped, rejected, waiting,
+        labels: Object.fromEntries(result.skipped.map((row) => [row.email, SKIP_REASON_LABEL[row.reason] || row.reason]))
+      });
     } catch (error) {
       if (!(error instanceof CampaignError)) throw error;
       sendJson(response, error.status, { success: false, error: error.message, code: error.code });
@@ -192,7 +199,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
     const id = String(url.searchParams.get("id") || "");
     sendJson(response, 200, { success: true, people: esp.campaigns.enrollmentsOf(id).map((row) => ({
       email: row.email, name: row.lead?.name || "", company: row.lead?.company || "", country: row.lead?.country || "",
-      sender: row.sender, step: row.step, status: row.status, reason: row.reason || null, nextDueDate: row.nextDueDate, lastSentAt: row.lastSent?.at || null
+      sender: row.sender, step: row.step, status: row.status, reason: row.reason || null, recheck: row.recheck || null, nextDueDate: row.nextDueDate, lastSentAt: row.lastSent?.at || null
     })) });
     return true;
   }

@@ -15,13 +15,14 @@ import { knowledgeExcerptsForPrompt, knowledgeFilesForProduct, loadKnowledgeLibr
 import { handleWarmupApi } from "./warmup/api.mjs";
 import { handleEspApi } from "./esp/api.mjs";
 import { connectorFromEnv } from "./esp/gmail.mjs";
-import { SenderGate, stateSenderStore } from "./esp/senders.mjs";
+import { SenderGate } from "./esp/senders.mjs";
 import { DEFAULT_SIGNATURE, templateStore } from "./esp/templates.mjs";
 import { handleUnsubscribe, unsubscribeSecretFromEnv } from "./esp/unsubscribe.mjs";
 import { privacyPage } from "./esp/notice.mjs";
 import { recordAboutContact, recordFailed, recordSending, recordSent } from "./esp/messages.mjs";
-import { canSend as espCanSend, registry as espRegistry, setSenderStatus as espSetSenderStatus, updateSender as espUpdateSender } from "./esp/registry.mjs";
+import { canSend as espCanSend, registry as espRegistry, registrySenderStore, setSenderStatus as espSetSenderStatus, updateSender as espUpdateSender } from "./esp/registry.mjs";
 import { applyAlerts, reviewAlerts, telegramNotifier } from "./esp/alerts.mjs";
+import { defaultFilters } from "./esp/filters.mjs";
 import { applyRampReviews } from "./esp/ramp.mjs";
 import { campaignStore } from "./esp/campaigns.mjs";
 import { postponedDue, runTick, startSequence } from "./esp/sequence.mjs";
@@ -432,10 +433,13 @@ const state = {
 // stops letting us act as and refuses it until a person lifts the pause.
 const esp = (() => {
   const { connector, keyError } = connectorFromEnv(process.env);
-  const store = stateSenderStore({
-    read: () => state.espSenderPauses,
-    write: async (value) => { state.espSenderPauses = value; await writePersistentWorkspaceState(); }
-  });
+  // ESP 9: a mailbox's pause lives in the sender registry (one truth, in the
+  // journal, with its code) — and only a registered, active mailbox on a
+  // sending domain gets past the gate at all. `espSenderPauses` is kept in the
+  // state for what was paused before this; nothing writes it any more.
+  const store = registrySenderStore("esp-gate");
+  // ESP 6: the checks before every letter, the same at enrolment and in the chain.
+  const filters = defaultFilters();
   const halted = () => Boolean(state.espHalt?.on);
   const gate = new SenderGate({
     connector,
@@ -474,7 +478,9 @@ const esp = (() => {
     journal: { allEntries, recordSending, recordSent, recordFailed, recordAboutContact },
     registry: { senders: async () => (await espRegistry()).senders, canSend: espCanSend },
     signature: () => ({ ...DEFAULT_SIGNATURE, ...(state.espSignature || {}) }),
-    unsubscribe
+    unsubscribe,
+    // ESP 6: the checks before every letter.
+    filters
   });
   // ESP 7: read every sending mailbox's inbox since its cursor, journal what
   // came, move a person's next letter on an auto-reply.
@@ -502,7 +508,7 @@ const esp = (() => {
     const actions = reviewAlerts({ entries, senders, campaigns: campaigns.list(), enrollmentsOf: (id) => campaigns.enrollmentsOf(id) });
     return applyAlerts({ actions, entries, setSenderStatus: espSetSenderStatus, pauseCampaign: (id, reason) => campaigns.pauseForReview(id, reason), append: espAppend, notify: telegram.notify });
   };
-  return { connector, keyError, gate, templates, signature, unsubscribe, campaigns, halt, halted, tick, pollInbox, checkAlerts, alertsTelegram: telegram.configured, sequenceOn: process.env.ESP_SEQUENCE === "on" };
+  return { connector, keyError, gate, templates, signature, unsubscribe, campaigns, halt, halted, tick, filters, pollInbox, checkAlerts, alertsTelegram: telegram.configured, sequenceOn: process.env.ESP_SEQUENCE === "on" };
 })();
 
 /**

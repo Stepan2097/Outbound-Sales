@@ -134,6 +134,10 @@ export async function runTick({ now = new Date(), dryRun = false, ...deps }) {
     }
   }
 
+  // ESP 6: what the pre-send checks read once for the whole pass — exclusions,
+  // excluded countries, who answered or was written to lately.
+  const filterCtx = deps.filters ? await deps.filters.context(entries, now) : null;
+
   for (const campaign of deps.campaigns.list().filter((row) => row.state === "running")) {
     for (const enrollment of deps.campaigns.enrollmentsOf(campaign.id).filter((row) => row.status === "active")) {
       // Checked before every letter, not once a tick: «стоп усе» takes effect
@@ -149,6 +153,31 @@ export async function runTick({ now = new Date(), dryRun = false, ...deps }) {
         if (!dryRun) await deps.campaigns.saveEnrollment({ ...enrollment, status: "stopped", reason: stopper, stoppedAt: now.toISOString() });
         summary.stopped += 1;
         continue;
+      }
+
+      // ESP 6, before every letter (not only when the list was loaded): an
+      // exclusion, an unverified or stale address, a country, a role mailbox,
+      // a recipient not on Google, no source. A reason that will not change
+      // stops this person's chain; one that a re-check fixes waits, marked once.
+      if (filterCtx) {
+        const check = await deps.filters.check(enrollment.lead || { email: enrollment.email }, { ...filterCtx, step: enrollment.step, now });
+        if (!check.ok) {
+          if (check.permanent) {
+            if (!dryRun) {
+              await deps.campaigns.saveEnrollment({ ...enrollment, status: "stopped", reason: check.reason, stoppedAt: now.toISOString() });
+              await deps.journal.recordAboutContact("contact.skipped", enrollment.email, { reason: check.reason, detail: check.detail, campaignId: campaign.id, step: enrollment.step }).catch(() => {});
+            }
+            summary.stopped += 1;
+          } else {
+            if (!dryRun && check.needsRecheck && enrollment.recheck !== check.reason) {
+              await deps.campaigns.saveEnrollment({ ...enrollment, recheck: check.reason });
+              await deps.journal.recordAboutContact("contact.skipped", enrollment.email, { reason: check.reason, detail: check.detail, needsRecheck: true, campaignId: campaign.id, step: enrollment.step }).catch(() => {});
+            }
+            skip(check.reason);
+          }
+          continue;
+        }
+        if (enrollment.recheck && !dryRun) await deps.campaigns.saveEnrollment({ ...enrollment, recheck: null });
       }
 
       const sender = senders.get(enrollment.sender);

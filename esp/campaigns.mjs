@@ -64,7 +64,13 @@ export function cleanLead(input) {
     company: text(input.company),
     position: text(input.position),
     country: text(input.country),
-    timezone: text(input.timezone)
+    timezone: text(input.timezone),
+    // ESP 6: where the address came from and when, and what the verifier said
+    // about it — without these the pre-send checks do not let it go.
+    source: text(input.source),
+    sourceDate: text(input.sourceDate),
+    verification: text(input.verification).toLowerCase(),
+    verifiedAt: text(input.verifiedAt)
   };
 }
 
@@ -72,13 +78,36 @@ export function cleanLead(input) {
  * `email, name, company, country` per line — what a person pastes from a
  * sheet. Extra columns are ignored, a line without an email is reported.
  */
+/**
+ * Columns, in order, when there is no header line: what a person pastes from a
+ * sheet. A header line (one that names an `email` column) maps by name instead,
+ * so a sheet in any order works — `source`, `source_date`, `verification`,
+ * `verified_at` are the ESP 6 columns.
+ */
+const LEAD_COLUMNS = ["email", "name", "company", "country", "timezone", "source", "sourceDate", "verification", "verifiedAt"];
+const HEADER_NAMES = {
+  email: "email", "e-mail": "email", mail: "email", name: "name", "full name": "name", company: "company", country: "country",
+  timezone: "timezone", tz: "timezone", source: "source", "source date": "sourceDate", source_date: "sourceDate", sourcedate: "sourceDate",
+  obtained: "sourceDate", verification: "verification", status: "verification", "email status": "verification",
+  verified_at: "verifiedAt", "verified at": "verifiedAt", verifiedat: "verifiedAt", position: "position", title: "position"
+};
+
 export function parseLeadLines(text) {
   const leads = [];
   const rejected = [];
+  let columns = LEAD_COLUMNS;
+  let first = true;
   for (const [index, line] of String(text ?? "").split(/\r?\n/).entries()) {
     if (!line.trim()) continue;
-    const [email, name, company, country, timezone] = line.split(/[,;\t]/).map((cell) => cell.trim());
-    const lead = cleanLead({ email, name, company, country, timezone });
+    const cells = line.split(/[,;\t]/).map((cell) => cell.trim());
+    // Only the first line can be a header: it names an email column and holds no address.
+    if (first) {
+      first = false;
+      const named = cells.map((cell) => HEADER_NAMES[cell.toLowerCase()] || null);
+      if (named.includes("email") && !cells.some((cell) => cell.includes("@"))) { columns = named; continue; }
+    }
+    const row = Object.fromEntries(columns.map((column, at) => [column, cells[at]]).filter(([column]) => column));
+    const lead = cleanLead(row);
     if (lead) leads.push(lead);
     else rejected.push({ line: index + 1, text: line.slice(0, 120) });
   }

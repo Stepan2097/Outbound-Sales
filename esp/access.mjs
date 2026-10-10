@@ -39,8 +39,8 @@ export const ROLE_DEFAULTS = {
 /** Never handed to a seller: being able to hand out rights is being an administrator. */
 const ADMIN_ONLY = new Set(["access.manage"]);
 
-/** What counts as an administrator's action in the log: the registry, the rights, and `admin.*`. */
-export const ADMIN_EVENT_PREFIXES = ["domain.", "sender.", "access.", "admin."];
+/** What counts as an administrator's action in the log: the registry, the rights, the country list, and `admin.*`. */
+export const ADMIN_EVENT_PREFIXES = ["domain.", "sender.", "access.", "admin.", "filters."];
 
 function fail(message, statusCode = 400) {
   return Object.assign(new Error(message), { statusCode });

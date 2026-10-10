@@ -176,3 +176,33 @@
   background: var(--surface-strong);
   overflow-wrap: anywhere;
 }
+
+/* ESP 6: перевірка списку перед кампанією. */
+
+.esp-leads-check {
+  display: grid;
+  gap: 8px;
+}
+
+.esp-leads-check textarea {
+  width: 100%;
+  min-height: 96px;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: 12.5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.esp-leads-check button {
+  justify-self: start;
+}
+
+.esp-check-table td {
+  overflow-wrap: anywhere;
+}
+
+.esp-check-table td + td,
+.esp-check-table th + th {
+  width: auto;
+  text-align: left;
+}

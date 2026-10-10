@@ -1,6 +1,11 @@
 import { accessView, adminLog, can, changeAccess } from "./access.mjs";
 import { entries, timeline, verify } from "./journal.mjs";
 import { secretsStatus } from "./secrets.mjs";
+import { parseLeadLines } from "./campaigns.mjs";
+import {
+  BLOCKED_RECIPIENT_DOMAINS, EXCLUSION_CATEGORIES, ROLE_LOCAL_PARTS, SKIP_REASON_LABEL, VERIFICATION_MAX_DAYS,
+  addExclusion, defaultFilters, excludedCountries, exclusions, refusedAtEnrolment, setExcludedCountries
+} from "./filters.mjs";
 import { TIMELINE_TYPES } from "./messages.mjs";
 import {
   DOMAIN_LABEL, DOMAIN_STATES, RAMP_STAGES, addDomain, addSender, checkDomain, registry, setDomainStatus, setSenderStatus, updateSender
@@ -92,6 +97,65 @@ export async function handleEspDataApi({ request, response, url, sendJson, readJ
     if (method === "GET" && path === "/api/esp/secrets") {
       if (!await allowed("access.manage")) return refuse("access.manage"), true;
       sendJson(response, 200, secretsStatus(env, (await registry()).senders));
+      return true;
+    }
+
+    // ── ESP 6: exclusions, the country list, and a dry check of a list ────
+    if (method === "GET" && path === "/api/esp/filters") {
+      if (!await allowed("replies.read")) return refuse("replies.read"), true;
+      sendJson(response, 200, {
+        exclusions: [...(await exclusions()).values()].sort((left, right) => String(right.at).localeCompare(String(left.at))),
+        countries: await excludedCountries(),
+        categories: EXCLUSION_CATEGORIES,
+        verificationMaxDays: VERIFICATION_MAX_DAYS,
+        roleLocalParts: [...ROLE_LOCAL_PARTS],
+        blockedDomains: [...BLOCKED_RECIPIENT_DOMAINS],
+        labels: SKIP_REASON_LABEL,
+        canExclude: await allowed("replies.read"),
+        canSetCountries: await allowed("registry.change")
+      });
+      return true;
+    }
+    // Anybody who reads the replies can exclude: a «ні» or a complaint is seen
+    // in a reply, and the person who saw it must not have to ask an admin.
+    if (method === "POST" && path === "/api/esp/exclusions") {
+      if (!await allowed("replies.read")) return refuse("replies.read"), true;
+      const body = await readJson(request);
+      if (!body || typeof body !== "object") return sendJson(response, 400, { error: "Некоректне тіло JSON." }), true;
+      const event = await addExclusion(body, actor);
+      sendJson(response, 201, { success: true, event, unchanged: event === null, exclusions: [...(await exclusions()).values()] });
+      return true;
+    }
+    if (method === "POST" && path === "/api/esp/filters/countries") {
+      if (!await allowed("registry.change")) return refuse("registry.change"), true;
+      const body = await readJson(request);
+      if (!body || typeof body !== "object") return sendJson(response, 400, { error: "Некоректне тіло JSON." }), true;
+      const event = await setExcludedCountries(body.countries, actor);
+      sendJson(response, 200, { success: true, event, unchanged: event === null, countries: await excludedCountries() });
+      return true;
+    }
+    // A list checked before anybody is put into a campaign: what would go,
+    // what never will, and what waits for a source or a fresh verification.
+    if (method === "POST" && path === "/api/esp/leads/check") {
+      if (!await allowed("replies.read")) return refuse("replies.read"), true;
+      const body = await readJson(request);
+      if (!body || typeof body !== "object") return sendJson(response, 400, { error: "Некоректне тіло JSON." }), true;
+      const filters = defaultFilters({ dns });
+      const context = await filters.context(null, new Date());
+      const { leads, rejected } = parseLeadLines(body.text);
+      const results = [];
+      for (const lead of leads.slice(0, 2000)) {
+        const verdict = await filters.check(lead, context);
+        results.push({
+          email: lead.email, name: lead.name, company: lead.company, country: lead.country,
+          ok: verdict.ok, reason: verdict.reason, label: verdict.reason ? SKIP_REASON_LABEL[verdict.reason] || verdict.reason : "піде",
+          detail: verdict.detail, refused: refusedAtEnrolment(verdict), needsRecheck: verdict.needsRecheck
+        });
+      }
+      sendJson(response, 200, {
+        results, rejected,
+        counts: { ok: results.filter((row) => row.ok).length, refused: results.filter((row) => row.refused).length, waiting: results.filter((row) => !row.ok && !row.refused).length }
+      });
       return true;
     }
 
