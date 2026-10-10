@@ -8,6 +8,8 @@ const DIALOG_WAIT_MS = 1000;
 // proxy it takes seconds. 10.10.2026: three people came back `no_button` on
 // Profile 48 while their Connect and its dialog were fine when looked at by
 // hand a minute later — the header was simply not there yet.
+// What only the invitation dialog has: send, send without a note, add a note.
+const INVITE_DIALOG_BUTTONS = /^(send|send invitation|send now|send without a note|add a note|надіслати|відправити|надіслати без нотатки|надіслати без примітки|додати нотатку|додати примітку|отправить|отправить без заметки|добавить заметку)$/i;
 const CARD_WAIT_TRIES = 8;
 const CARD_WAIT_MS = 1000;
 const CONNECT = /^(connect|invite .+ to connect|підключитися|встановити контакт|приєднатися|установить контакт|подключиться)$/i;
@@ -338,7 +340,13 @@ export async function sendInvitation(page, invite, { sleep = wait, guard = async
   // the agent looked once after 0.8s, saw no dialog, and stopped the visit
   // with the request never sent. A profile that sends on Connect itself shows
   // no dialog at all; the confirmation below covers that one.
-  const dialog = page.getByRole('dialog').last();
+  // The invitation's own dialog, not just the last dialog on the page: on
+  // 10.10.2026 two open messenger chats sat below «Надіслати без примітки»,
+  // `.last()` picked a chat, found no Send in it, and Chris Betts came back
+  // `no_button` with the invitation open on screen (the miss screenshot).
+  const dialog = page.getByRole('dialog').filter({
+    has: page.locator('input[type="email"]').or(page.getByRole('button', { name: INVITE_DIALOG_BUTTONS }))
+  }).last();
   let hasDialog = await dialog.isVisible();
   for (let waited = 0; !hasDialog && waited < DIALOG_WAIT_TRIES; waited += 1) {
     await sleep(DIALOG_WAIT_MS);

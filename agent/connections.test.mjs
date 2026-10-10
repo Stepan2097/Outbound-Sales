@@ -14,7 +14,7 @@ const sleep = async () => {};
 const queued = { outreachId: 'invite-1', name: 'Person One', linkedin: 'https://www.linkedin.com/in/person-one/', note: '' };
 
 /** All LinkedIn URLs are intercepted. These are local synthetic pages. */
-async function profile(t, { more = false, pending = false, accepted = false, noButton = false, emailWall = false, nameless = false, connectLink = false, connectLong = false, suggestionInCard = false, acceptedUa = false, dialogDelay = 0, softGone = false, rerendersAfterSend = false, nameDelay = 0, noteLimit = 200, warning = '', redirected = false, heading = 'h1', confirms = true, sentList = [] } = {}) {
+async function profile(t, { more = false, pending = false, accepted = false, noButton = false, emailWall = false, nameless = false, connectLink = false, connectLong = false, suggestionInCard = false, acceptedUa = false, dialogDelay = 0, softGone = false, rerendersAfterSend = false, nameDelay = 0, chatOverlays = false, noteLimit = 200, warning = '', redirected = false, heading = 'h1', confirms = true, sentList = [] } = {}) {
   const context = await browser.newContext();
   t.after(() => context.close());
   const page = await context.newPage();
@@ -53,6 +53,7 @@ async function profile(t, { more = false, pending = false, accepted = false, noB
         el.innerHTML = ${emailWall} ? '<input type="email"><button id="verify">Continue</button>'
           : '<button id="add">Add a note</button><button id="bare">Send without a note</button>';
         document.body.append(el);
+        ${chatOverlays ? `for (const name of ['Saïd Business School', 'Повідомлення']) { const chat = document.createElement('div'); chat.setAttribute('role', 'dialog'); chat.innerHTML = '<h2>' + name + '</h2><button>Закрити</button><textarea></textarea>'; document.body.append(chat); }` : ''}
         const send = (note) => {
           window.sent.push(note);
           // Mirrored: confirming through the sent list navigates away and
@@ -231,6 +232,19 @@ test('коли людину пропущено як no_button чи cannot_connec
   await sendQueuedInvitations(page, portal, [queued], { sleep, guard: async () => {}, pending: new Set(), onMiss: async (invite, outcome) => { misses.push([invite.outreachId, outcome, page.url()]); } });
   assert.deepEqual(misses.map(([id, outcome]) => [id, outcome]), [['invite-1', 'cannot_connect']]);
   assert.match(misses[0][2], /person-one/, 'onMiss ran before the next profile replaced the page');
+});
+
+/**
+ * 10.10.2026, Profile 48, the miss screenshot of Chris Betts: the invitation
+ * dialog open with «Надіслати без примітки», and two messenger chats open
+ * below it — also dialogs, and later in the page. The agent took the last
+ * dialog, a chat, and reported `no_button`.
+ */
+test('відкриті вікна месенджера не плутаються з вікном запрошення — запит іде', async (t) => {
+  const page = await profile(t, { heading: 'h2', connectLink: true, chatOverlays: true });
+  assert.equal(await page.evaluate(() => document.querySelectorAll('[role="dialog"]').length), 0);
+  assert.equal(await sendInvitation(page, { ...queued, note: '' }, { sleep }), 'sent');
+  assert.deepEqual(await sentNotes(page), ['']);
 });
 
 test('кнопка з довгою назвою, що називає саме цю людину, — наш Connect, навіть поруч із чужою', async (t) => {
