@@ -363,6 +363,9 @@ test("помилка відправки несе кампанію й крок с
 
 test("реєстр як сховище пауз для SenderGate (ESP 1): відмова Google ставить сендера на паузу в реєстрі з кодом, і саме реєстр не пускає", async () => {
   const { SenderGate, SenderPaused } = await import("../esp/senders.mjs");
+  // The gate reads every letter back before sending (ESP 2), so it is given a real one.
+  const { buildLetter } = await import("../esp/letter.mjs");
+  const LETTER = buildLetter({ from: { email: "mary@send.example.com", name: "Mary" }, to: { email: "lead@example.com" }, subject: "Hi", body: "Hello" });
   await readySender();
   const store = registrySenderStore();
   assert.equal(await store.pausedFor("mary@send.example.com"), null);
@@ -371,7 +374,7 @@ test("реєстр як сховище пауз для SenderGate (ESP 1): ві�
   const { MailboxError } = await import("../esp/gmail.mjs");
   const refusal = new MailboxError("Делегування для скриньки не налаштовано", { code: "delegation_missing" });
   const gate = new SenderGate({ connector: { send: async () => { throw refusal; } }, store });
-  await assert.rejects(() => gate.send("mary@send.example.com", "raw"), SenderPaused);
+  await assert.rejects(() => gate.send("mary@send.example.com", LETTER), SenderPaused);
   const [sender] = (await registry()).senders;
   assert.equal(sender.status, "paused");
   assert.equal(sender.history.at(-1).code, "delegation_missing");
@@ -379,10 +382,10 @@ test("реєстр як сховище пауз для SenderGate (ESP 1): ві�
 
   let called = false;
   const quiet = new SenderGate({ connector: { send: async () => { called = true; return { id: "x" }; } }, store });
-  await assert.rejects(() => quiet.send("mary@send.example.com", "raw"), SenderPaused);
+  await assert.rejects(() => quiet.send("mary@send.example.com", LETTER), SenderPaused);
   assert.equal(called, false, "поки на паузі — провайдера не питають");
 
   assert.equal(await gate.resume("mary@send.example.com"), true);
-  assert.equal(await quiet.send("mary@send.example.com", "raw").then(() => called), true);
+  assert.equal(await quiet.send("mary@send.example.com", LETTER).then(() => called), true);
   assert.equal(await store.resume("mary@send.example.com"), false, "знімати нічого");
 });
