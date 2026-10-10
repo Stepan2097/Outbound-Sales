@@ -46,7 +46,7 @@ export function invalidateContactCaches({ contactId, folderId } = {}) {
   if (!contactId && !folderId) { reads.invalidate(); legacyIndexes.invalidate(); return; }
   // Search results and folder counts can contain the changed contact even if
   // the caller does not know its old folder (for example after a CRM move).
-  reads.invalidate(["folders", "search", "counts", ...(contactId ? [`contact:${contactId}`] : []), ...(folderId ? [`folder:${folderId}`] : [])]);
+  reads.invalidate(["folders", "search", "pages", "counts", ...(contactId ? [`contact:${contactId}`] : []), ...(folderId ? [`folder:${folderId}`] : [])]);
   legacyIndexes.invalidate(["search"]);
 }
 
@@ -153,12 +153,16 @@ export async function listFolderContacts({ folderId = "", search = "", limit = 2
     return query;
   };
 
-  const [contacts, total] = await Promise.all([
-    build(LIST_COLUMNS).order("created_at", { ascending: queueOrder }).order("id", { ascending: queueOrder }).limit(size).offset(from).rows(),
-    contactCount({ cacheScope, folderId, term, fresh }, () => build("id").count())
-  ]);
-
-  return { contacts, total, limit: size, offset: from };
+  return reads.read(cacheKey(cacheScope, "page", folderId, term, size, from, Boolean(queueOrder)),
+    { ttl: MINUTE, fresh, tags: ["pages", `folder:${folderId}`] }, async () => {
+      const [contacts, total] = await Promise.all([
+        build(LIST_COLUMNS).order("created_at", { ascending: queueOrder }).order("id", { ascending: queueOrder }).limit(size).offset(from).rows(),
+        // Rows and total share the page's lifetime. Reusing a nearly expired
+        // standalone count here would keep that old total for another minute.
+        build("id").count()
+      ]);
+      return { contacts, total, limit: size, offset: from };
+    });
 }
 
 /** One contact, with everything the CRM knows about them. */
