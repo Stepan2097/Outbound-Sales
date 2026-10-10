@@ -25,6 +25,8 @@ export const TEMPLATE_VARIABLES = {
   sender_name: "Ім'я відправника"
 };
 
+import { SpintaxError, checkSpintax } from "./spintax.mjs";
+
 export class TemplateError extends Error {
   constructor(message, { code, detail = null } = {}) {
     super(message);
@@ -112,6 +114,15 @@ export function prepareTemplate({ name, subject, body }) {
     .map((variable) => variable.name).filter((variable) => !(variable in TEMPLATE_VARIABLES)))];
   if (unknown.length) {
     throw new TemplateError(`Невідомі змінні: ${unknown.map((variable) => `{{${variable}}}`).join(", ")}. Доступні: ${Object.keys(TEMPLATE_VARIABLES).join(", ")}.`, { code: "unknown_variable", detail: unknown });
+  }
+  // ESP 12: sentence spintax — `{One sentence.|Another one.}` — has to parse,
+  // and in the body every variant has to be a whole sentence.
+  try {
+    checkSpintax(cleanedSubject.text, { sentences: false });
+    checkSpintax(cleanedBody.text);
+  } catch (error) {
+    if (error instanceof SpintaxError) throw new TemplateError(error.message, { code: error.code });
+    throw error;
   }
   // A stray brace pair that is not a variable would go out as is.
   const leftover = (cleanedSubject.text + cleanedBody.text).replace(VARIABLE, "");

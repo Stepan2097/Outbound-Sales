@@ -99,7 +99,7 @@ function espEditorHtml() {
           ${variables.map((variable) => `<option value="${escapeAttr(variable.name)}">${escapeHtml(variable.label)} — {{${escapeHtml(variable.name)}}}</option>`).join("")}
         </select>
         <span class="pill tone-muted" title="Лист іде однією частиною text/plain: без HTML, без пікселя відкриттів і без переписаних посилань">Лише простий текст</span>
-        <small>Порожня змінна без заміни — лист цій людині не піде. Заміна: <code>{{first_name|друже}}</code></small>
+        <small>Порожня змінна без заміни — лист цій людині не піде. Заміна: <code>{{first_name|друже}}</code> · варіанти речень: <code>{Перше речення.|Інше речення.}</code></small>
       </div>
       <textarea id="espTemplateBody" rows="12" placeholder="Встав або напиши текст листа. Форматування з Google Docs знімається при збереженні." required>${escapeHtml(draft.body)}</textarea>
       ${notice ? `<p class="esp-notice ${noticeTone}">${escapeHtml(notice)}</p>` : ""}
@@ -123,6 +123,7 @@ function espPreviewHtml() {
             <div><dt>List-Unsubscribe</dt><dd>${escapeHtml(preview.listUnsubscribe)}</dd></div>
             <div><dt>List-Unsubscribe-Post</dt><dd>${escapeHtml(preview.listUnsubscribePost)}</dd></div>
           </dl>` : ""}
+          ${preview.variantIds ? `<small class="esp-variants">Варіанти для цієї людини: ${escapeHtml(Object.entries(preview.variantIds).filter(([key]) => key.includes(".")).map(([key, value]) => `${key} → ${value + 1}`).join(", ") || "у шаблоні немає блоків {…|…}")}${preview.variantIds.notice ? ` · блок для ЄС/UK (${escapeHtml(preview.variantIds.notice)})` : ""}</small>` : ""}
           <small>${escapeHtml(preview.contentType)} · ${preview.bytes} байт · відписка в один клік на домені відправника · нічого не надіслано</small>
         </div>`
       : `<p class="esp-notice is-bad">${escapeHtml(preview.error || "Цій людині лист не піде.")}</p>`;

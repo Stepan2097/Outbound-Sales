@@ -179,7 +179,8 @@ export async function runTick({ now = new Date(), dryRun = false, ...deps }) {
         previous: enrollment.lastSent ? { ...enrollment.lastSent, sender: enrollment.sender } : null,
         unsubscribe: deps.unsubscribe,
         campaignId: campaign.id,
-        date: now
+        date: now,
+        spinMode: campaign.spinMode || "all"
       });
       if (!letter?.ok) {
         const reason = letter?.reason || "template_missing";
@@ -205,7 +206,8 @@ export async function runTick({ now = new Date(), dryRun = false, ...deps }) {
       try {
         sending = await deps.journal.recordSending({
           from: enrollment.sender, to: enrollment.email, subject: letter.subject, text: letter.text,
-          headers: Object.fromEntries(headers), campaignId: campaign.id, step: enrollment.step, leadId: enrollment.email
+          headers: Object.fromEntries(headers), campaignId: campaign.id, step: enrollment.step, leadId: enrollment.email,
+          variantIds: letter.variantIds
         }, "esp-sequence");
       } catch (error) {
         // The registry said no between our check and the write.

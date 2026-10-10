@@ -297,6 +297,9 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
         subject: letter.subject,
         text: letter.text,
         headers: head.map((line) => line.split(":")[0]),
+        // ESP 12: which sentence variants this person gets, and whether the
+        // EU/UK notice is under the signature (and which version).
+        variantIds: letter.variantIds,
         listUnsubscribe: header("List-Unsubscribe"),
         listUnsubscribePost: header("List-Unsubscribe-Post"),
         contentType: "text/plain; charset=UTF-8",

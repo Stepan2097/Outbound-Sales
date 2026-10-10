@@ -74,7 +74,7 @@ function listHtml() {
     <tbody>${campaigns.map((campaign) => `
       <tr class="${campaign.id === openId ? "is-selected" : ""}">
         <td><button class="text-button" type="button" data-esp-campaign-open="${escapeAttr(campaign.id)}"><strong>${escapeHtml(campaign.name)}</strong></button>
-          <small class="esp-steps-line">${campaign.steps.map((step, index) => `${index ? `+${step.delayDays} р. д. → ` : ""}лист ${index + 1}`).join(" · ")}</small></td>
+          <small class="esp-steps-line">${campaign.steps.map((step, index) => `${index ? `+${step.delayDays} р. д. → ` : ""}лист ${index + 1}`).join(" · ")}${campaign.spinMode === "half" ? " · спінтакс A/B" : campaign.spinMode === "off" ? " · без спінтаксу" : ""}</small></td>
         <td><span class="pill ${CAMPAIGN_TONE[campaign.state]}">${CAMPAIGN_STATE[campaign.state]}</span></td>
         <td>${campaign.people}</td><td>${campaign.sent}</td><td>${campaign.replied}</td><td>${campaign.bounced}</td><td>${campaign.unsubscribed}</td>
         <td class="esp-campaign-actions">${campaign.state === "done" ? "" : `
@@ -101,6 +101,13 @@ function formHtml() {
     <form class="esp-campaign-form" id="espCampaignForm">
       <input id="espCampaignName" type="text" placeholder="Назва кампанії" required />
       <div id="espCampaignSteps">${[0, 3, 4].map((delay, index) => stepRow(index, delay)).join("")}</div>
+      <label class="esp-spin-mode">Спінтакс по реченнях
+        <select id="espCampaignSpin">
+          <option value="all">усім — кожен отримує свої варіанти</option>
+          <option value="half">половині — A/B: половина бачить базовий текст</option>
+          <option value="off">нікому — завжди перший варіант</option>
+        </select>
+      </label>
       <fieldset class="esp-senders">
         <legend>Скриньки-відправники — кожна людина отримає весь ланцюжок з однієї</legend>
         ${senders.length ? senders.map((sender) => `<label><input type="checkbox" value="${escapeAttr(sender.email)}" data-esp-sender checked /> ${escapeHtml(sender.email)} <small>до ${sender.limit}/день</small></label>`).join("")
@@ -201,8 +208,9 @@ document.getElementById("view-email")?.addEventListener("submit", async (event) 
     }));
     const senders = [...document.querySelectorAll("[data-esp-sender]:checked")].map((input) => input.value);
     const name = document.getElementById("espCampaignName").value;
+    const spinMode = document.getElementById("espCampaignSpin")?.value || "all";
     return act(async () => {
-      const answer = await api("/api/esp/campaigns", { method: "POST", body: JSON.stringify({ name, steps, senders }) });
+      const answer = await api("/api/esp/campaigns", { method: "POST", body: JSON.stringify({ name, steps, senders, spinMode }) });
       espCampaignsState.formOpen = false;
       espCampaignsState.openId = answer.campaign.id;
       espCampaignsState.notice = "Чернетку створено — додайте людей і запустіть.";

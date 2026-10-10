@@ -302,3 +302,15 @@
   .esp-halt.is-on { grid-template-columns: 1fr; flex-direction: column; align-items: stretch; }
   .esp-step-row { grid-template-columns: 1fr; }
 }
+
+.esp-spin-mode {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+}
+
+.esp-variants {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted);
+}

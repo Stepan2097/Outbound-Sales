@@ -102,6 +102,10 @@ test("three letters on day 0, +3 and +4 working days, from one mailbox, in one t
   assert.equal(journal.filter((entry) => entry.type === "message.sent").length, 3);
   const firstSending = journal.find((entry) => entry.type === "message.sending");
   assert.match(firstSending.data.text, /^Hi Olena, a question\.\n\nAnna Koval/, "the journal keeps the exact text that went");
+  // ESP 12: what this person got — the spintax group and the EU notice version (Poland).
+  assert.equal(firstSending.data.variantIds.group, "spin");
+  assert.equal(firstSending.data.variantIds.notice, "eu-uk-2026-10-v1");
+  assert.match(firstSending.data.text, /How we handle your data: https:\/\/advantage-mail\.com\/privacy/);
 });
 
 test("a lead is in one live campaign only, and keeps the sender it got for the whole chain", async (t) => {

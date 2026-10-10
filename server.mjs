@@ -18,6 +18,7 @@ import { connectorFromEnv } from "./esp/gmail.mjs";
 import { SenderGate, stateSenderStore } from "./esp/senders.mjs";
 import { DEFAULT_SIGNATURE, templateStore } from "./esp/templates.mjs";
 import { handleUnsubscribe, unsubscribeSecretFromEnv } from "./esp/unsubscribe.mjs";
+import { privacyPage } from "./esp/notice.mjs";
 import { recordAboutContact, recordFailed, recordSending, recordSent } from "./esp/messages.mjs";
 import { canSend as espCanSend, registry as espRegistry } from "./esp/registry.mjs";
 import { campaignStore } from "./esp/campaigns.mjs";
@@ -547,6 +548,14 @@ const server = createServer(async (request, response) => {
         record: ({ sender, recipient, campaignId, via }) => recordAboutContact("contact.unsubscribed", recipient, { sender, campaignId, via }, "unsubscribe-link")
       });
       if (handled) return;
+    }
+
+    // ESP 12: the data-policy page the EU/UK notice links to — on the sender's
+    // own domain, which points here. Public, plain, nothing tracked.
+    if (request.method === "GET" && (url.pathname === "/privacy" || url.pathname === "/privacy/")) {
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=3600" });
+      response.end(privacyPage({ company: state.espSignature?.company || "ADvantage" }));
+      return;
     }
 
     if (url.pathname.startsWith("/api/")) {

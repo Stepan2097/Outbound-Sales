@@ -13,6 +13,7 @@
 import { randomUUID } from "node:crypto";
 
 import { contactKey } from "./journal.mjs";
+import { SPIN_MODES } from "./spintax.mjs";
 
 export const DEFAULT_STEP_DELAYS = [0, 3, 4];
 export const CAMPAIGN_STATES = ["draft", "running", "paused", "done"];
@@ -95,13 +96,15 @@ export function campaignStore({ read, write, readEnrollments, writeEnrollments, 
     enrollments,
     enrollmentsOf(campaignId) { return enrollments().filter((row) => row.campaignId === campaignId); },
 
-    async create({ name, steps, senders }) {
+    async create({ name, steps, senders, spinMode = "all" }) {
       const title = String(name ?? "").trim().slice(0, 120);
       if (!title) throw new CampaignError("Дайте кампанії назву.", { code: "no_name" });
       const at = now().toISOString();
       const campaign = {
         id: randomUUID(), name: title, state: "draft",
         steps: cleanSteps(steps, templates()), senders: cleanSenders(senders),
+        // ESP 12: spintax for everybody, for half (A/B against the base text), or for nobody.
+        spinMode: SPIN_MODES.includes(spinMode) ? spinMode : "all",
         createdAt: at, updatedAt: at
       };
       await write([...list(), campaign]);
@@ -116,6 +119,10 @@ export function campaignStore({ read, write, readEnrollments, writeEnrollments, 
       // The chain and the senders are fixed once anybody is in it: a letter
       // already sent from one mailbox has its follow-ups owed from the same.
       const started = enrollments().some((row) => row.campaignId === id && row.step > 0);
+      if (input.spinMode !== undefined) {
+        if (started) throw new CampaignError("Ланцюжок уже почався — режим спінтаксу не змінюється, інакше A/B порівнює різне.", { code: "started", status: 409 });
+        next.spinMode = SPIN_MODES.includes(input.spinMode) ? input.spinMode : campaign.spinMode;
+      }
       if (input.steps !== undefined) {
         if (started) throw new CampaignError("Ланцюжок уже почався — листи в ньому не змінюються.", { code: "started", status: 409 });
         next.steps = cleanSteps(input.steps, templates());
