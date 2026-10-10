@@ -28,6 +28,14 @@ export function isAuthFailure(error) {
   return error.code === "gmail_error" && (error.status === 401 || error.status === 403);
 }
 
+/** «Стоп усе» (ESP 5): the whole system stopped sending. Checked by the gate before every letter. */
+export class SendingHalted extends Error {
+  constructor() {
+    super("«Стоп усе»: відправку зупинено для всієї системи.");
+    this.code = "halted";
+  }
+}
+
 export class SenderPaused extends Error {
   constructor(mailbox, pause) {
     super(`Скринька ${mailbox} на паузі: ${pause.reason}`);
@@ -62,14 +70,17 @@ export function stateSenderStore({ read, write }) {
 }
 
 export class SenderGate {
-  constructor({ connector, store, notify = async () => {}, now = () => new Date() }) {
+  constructor({ connector, store, notify = async () => {}, now = () => new Date(), halted = () => false }) {
     this.connector = connector;
+    this.halted = halted;
     this.store = store;
     this.notify = notify;
     this.now = now;
   }
 
   async send(value, raw, options = {}) {
+    // «Стоп усе» first: nothing else is worth asking once the system is stopped.
+    if (this.halted()) throw new SendingHalted();
     const mailbox = normalizeMailbox(value);
     // ESP 2: one text/plain part and nothing that tracks, read back from the
     // finished message — whatever built it, a letter that is not plain stops

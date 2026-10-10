@@ -220,3 +220,85 @@
   color: var(--muted);
   font-size: 13px;
 }
+
+/* Кампанії (ESP 5). */
+.esp-halt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  color: var(--muted);
+}
+
+.esp-halt p { margin: 0; }
+
+.esp-halt.is-on {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  padding: 12px;
+  border: 1px solid var(--red);
+  border-radius: 10px;
+  background: var(--surface-sunk);
+  color: var(--ink);
+}
+
+.esp-halt.is-on > i { color: var(--red); }
+
+.esp-steps-line,
+.esp-people-table small {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.esp-campaign-actions { white-space: nowrap; }
+
+.esp-campaign-form,
+.esp-people-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.esp-step-row {
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.esp-step-row input { width: 64px; }
+.esp-step-row small,
+.esp-step-row label { color: var(--muted); }
+
+.esp-senders {
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.esp-senders legend { color: var(--muted); padding: 0 6px; }
+.esp-senders small { color: var(--muted); }
+
+.esp-people-form textarea { font-family: inherit; }
+
+.esp-plan {
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-sunk);
+}
+
+.esp-plan p { margin: 6px 0 0; }
+.esp-plan small { display: block; margin-top: 8px; color: var(--muted); }
+
+@media (max-width: 640px) {
+  .esp-halt,
+  .esp-halt.is-on { grid-template-columns: 1fr; flex-direction: column; align-items: stretch; }
+  .esp-step-row { grid-template-columns: 1fr; }
+}

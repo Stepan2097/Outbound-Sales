@@ -4,6 +4,7 @@
 
 import { handleEspDataApi } from "./data-api.mjs";
 import { MailboxError } from "./gmail.mjs";
+import { CampaignError, parseLeadLines } from "./campaigns.mjs";
 import { composeLetter } from "./compose.mjs";
 import { allEntries } from "./journal.mjs";
 import { DOMAIN_DAILY_LIMIT, GAP_MINUTES, WINDOW, sendLedger, senderDailyLimit } from "./limits.mjs";
@@ -65,6 +66,102 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
       if (!(error instanceof MailboxError)) throw error;
       sendJson(response, 400, { success: false, error: error.message });
     }
+    return true;
+  }
+
+  // ── ESP 5: «стоп усе», campaigns, their people, and what goes now ───────
+  if (method === "GET" && path === "/halt") {
+    sendJson(response, 200, { success: true, halt: esp.halt.read(), sequenceOn: Boolean(esp.sequenceOn) });
+    return true;
+  }
+
+  if (method === "POST" && path === "/halt") {
+    const body = await readJson(request);
+    if (!body) return badRequest(sendJson, response, "Некоректне тіло JSON");
+    const on = body.on === true;
+    const reason = String(body.reason ?? "").trim().slice(0, 300);
+    if (on && !reason) return badRequest(sendJson, response, "Скажіть, чому зупиняєте все: причина лишається в стані.");
+    const halt = { on, at: new Date().toISOString(), by: profile?.email || profile?.name || "", reason: on ? reason : "" };
+    // Written before answering: the gate reads it before every letter, so the
+    // stop is in force the moment this returns.
+    await esp.halt.write(halt);
+    sendJson(response, 200, { success: true, halt });
+    return true;
+  }
+
+  if (method === "GET" && path === "/campaigns") {
+    const entries = await allEntries();
+    sendJson(response, 200, { success: true, campaigns: esp.campaigns.list().map((campaign) => campaignSummary(campaign, esp.campaigns.enrollmentsOf(campaign.id), entries)) });
+    return true;
+  }
+
+  if ((method === "POST" || method === "PATCH") && path === "/campaigns") {
+    const body = await readJson(request);
+    if (!body) return badRequest(sendJson, response, "Некоректне тіло JSON");
+    try {
+      const campaign = method === "POST" ? await esp.campaigns.create(body) : await esp.campaigns.update(String(body.id || ""), body);
+      sendJson(response, method === "POST" ? 201 : 200, { success: true, campaign });
+    } catch (error) {
+      if (!(error instanceof CampaignError)) throw error;
+      sendJson(response, error.status, { success: false, error: error.message, code: error.code });
+    }
+    return true;
+  }
+
+  if (method === "POST" && path === "/campaigns/state") {
+    const body = await readJson(request);
+    if (!body) return badRequest(sendJson, response, "Некоректне тіло JSON");
+    try {
+      const campaign = esp.campaigns.find(String(body.id || ""));
+      if (body.state === "running" && campaign && !esp.campaigns.enrollmentsOf(campaign.id).length) {
+        throw new CampaignError("У кампанії ще нікого немає — додайте людей, перш ніж запускати.", { code: "empty", status: 409 });
+      }
+      sendJson(response, 200, { success: true, campaign: await esp.campaigns.setState(String(body.id || ""), String(body.state || "")) });
+    } catch (error) {
+      if (!(error instanceof CampaignError)) throw error;
+      sendJson(response, error.status, { success: false, error: error.message, code: error.code });
+    }
+    return true;
+  }
+
+  /**
+   * People into a campaign: lines «email, ім'я, компанія, країна[, пояс]».
+   * Somebody who once unsubscribed or whose address bounced is not added —
+   * the full pre-send checks are ESP 6, this is the floor under them.
+   */
+  if (method === "POST" && path === "/campaigns/leads") {
+    const body = await readJson(request);
+    if (!body) return badRequest(sendJson, response, "Некоректне тіло JSON");
+    const entries = await allEntries();
+    const gone = new Map();
+    for (const entry of entries) {
+      if (entry.type === "contact.unsubscribed") gone.set(entry.contact, "unsubscribed");
+      else if (entry.type === "message.bounced" && /^5\./.test(String(entry.data?.code || ""))) gone.set(entry.contact, "bounced");
+    }
+    const { leads, rejected } = parseLeadLines(body.text);
+    try {
+      const result = await esp.campaigns.enroll(String(body.id || ""), leads, { blocked: (email) => gone.get(email) || null });
+      sendJson(response, 200, { success: true, added: result.added.length, skipped: result.skipped, rejected });
+    } catch (error) {
+      if (!(error instanceof CampaignError)) throw error;
+      sendJson(response, error.status, { success: false, error: error.message, code: error.code });
+    }
+    return true;
+  }
+
+  if (method === "GET" && path === "/campaigns/people") {
+    const id = String(url.searchParams.get("id") || "");
+    sendJson(response, 200, { success: true, people: esp.campaigns.enrollmentsOf(id).map((row) => ({
+      email: row.email, name: row.lead?.name || "", company: row.lead?.company || "", country: row.lead?.country || "",
+      sender: row.sender, step: row.step, status: row.status, reason: row.reason || null, nextDueDate: row.nextDueDate, lastSentAt: row.lastSent?.at || null
+    })) });
+    return true;
+  }
+
+  // What would go out if the chain ran this minute — the same checks, no send.
+  if (method === "GET" && path === "/campaigns/plan") {
+    const plan = await esp.tick({ dryRun: true });
+    sendJson(response, 200, { success: true, sequenceOn: Boolean(esp.sequenceOn), ...plan });
     return true;
   }
 
@@ -205,4 +302,24 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
 function badRequest(sendJson, response, error) {
   sendJson(response, 400, { success: false, error });
   return true;
+}
+
+/**
+ * A campaign as the list shows it: how many people, where they are, and what
+ * the journal says came of it. No opens, no clicks — nothing here tracks them.
+ */
+function campaignSummary(campaign, enrollments, entries) {
+  const people = new Map(enrollments.map((row) => [row.email, row]));
+  const counts = { sent: 0, replied: 0, bounced: 0, unsubscribed: 0 };
+  for (const entry of entries) {
+    if (entry.type === "message.sent" && entry.data?.campaignId === campaign.id) counts.sent += 1;
+    const row = entry.contact ? people.get(entry.contact) : null;
+    if (!row || new Date(entry.at) < new Date(row.enrolledAt)) continue;
+    if (entry.type === "message.replied") counts.replied += 1;
+    else if (entry.type === "message.bounced") counts.bounced += 1;
+    else if (entry.type === "contact.unsubscribed") counts.unsubscribed += 1;
+  }
+  const byStatus = {};
+  for (const row of enrollments) byStatus[row.status] = (byStatus[row.status] || 0) + 1;
+  return { ...campaign, people: enrollments.length, byStatus, ...counts };
 }

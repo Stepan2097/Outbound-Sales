@@ -9,15 +9,18 @@ import { fileURLToPath } from "node:url";
 import { CHANNEL_RULES, LANGUAGES, buildFallbackDrafts, draftsPromptPayload, normalizeDrafts, normalizeLanguage } from "./contacts/drafts.mjs";
 import { contactAsProspect, contactsConfigured, contactsMissingConfig, crmKeyKind, folderContactAt, listContactFolders, listFolderContacts, searchFolderContacts, readContact, supabaseKeyKind } from "./contacts/store.mjs";
 import { handleKnowledgeLibraryApi } from "./knowledge/api.mjs";
-import { useJournal } from "./esp/journal.mjs";
+import { allEntries, useJournal } from "./esp/journal.mjs";
 import { knowledgeExcerptsForPrompt, knowledgeFilesForProduct, loadKnowledgeLibrary } from "./knowledge/library.mjs";
 import { handleWarmupApi } from "./warmup/api.mjs";
 import { handleEspApi } from "./esp/api.mjs";
 import { connectorFromEnv } from "./esp/gmail.mjs";
 import { SenderGate, stateSenderStore } from "./esp/senders.mjs";
-import { templateStore } from "./esp/templates.mjs";
+import { DEFAULT_SIGNATURE, templateStore } from "./esp/templates.mjs";
 import { handleUnsubscribe, unsubscribeSecretFromEnv } from "./esp/unsubscribe.mjs";
-import { recordAboutContact } from "./esp/messages.mjs";
+import { recordAboutContact, recordFailed, recordSending, recordSent } from "./esp/messages.mjs";
+import { canSend as espCanSend, registry as espRegistry } from "./esp/registry.mjs";
+import { campaignStore } from "./esp/campaigns.mjs";
+import { runTick, startSequence } from "./esp/sequence.mjs";
 import { createFileOnceSync, writeFileAtomic } from "./state/atomic-write.mjs";
 import { startScheduler } from "./warmup/scheduler.mjs";
 
@@ -248,6 +251,11 @@ const state = {
   // esp/template.mjs — and the one text signature under every letter.
   espTemplates: [],
   espSignature: null,
+  // ESP 5: the cold-email campaigns, the people in them (one sender each, for
+  // the whole chain), and «стоп усе» — when on, not one letter leaves.
+  espCampaigns: [],
+  espEnrollments: [],
+  espHalt: { on: false, at: null, by: null, reason: "" },
   // Phase 1's single selection, superseded by the list above and kept exactly
   // as it was written: the migration reads it and never writes it, so a
   // rollback finds its targeting intact.
@@ -411,9 +419,11 @@ const esp = (() => {
     read: () => state.espSenderPauses,
     write: async (value) => { state.espSenderPauses = value; await writePersistentWorkspaceState(); }
   });
+  const halted = () => Boolean(state.espHalt?.on);
   const gate = new SenderGate({
     connector,
     store,
+    halted,
     notify: async (pause) => console.warn(`[esp] sender paused: ${pause.mailbox} — ${pause.code}: ${pause.reason}`)
   });
   const templates = templateStore({
@@ -427,7 +437,29 @@ const esp = (() => {
   // ESP 3: the key the unsubscribe links are signed with — from the
   // environment, or a random one for this process (said on the screen).
   const unsubscribe = unsubscribeSecretFromEnv(process.env);
-  return { connector, keyError, gate, templates, signature, unsubscribe };
+  const campaigns = campaignStore({
+    read: () => state.espCampaigns,
+    write: async (value) => { state.espCampaigns = value; await writePersistentWorkspaceState(); },
+    readEnrollments: () => state.espEnrollments,
+    writeEnrollments: async (value) => { state.espEnrollments = value; await writePersistentWorkspaceState(); },
+    templates: () => state.espTemplates
+  });
+  const halt = {
+    read: () => state.espHalt,
+    write: async (value) => { state.espHalt = value; await writePersistentWorkspaceState(); }
+  };
+  // ESP 5: one pass of the chain. The runner below calls it every minute, and
+  // only with ESP_SEQUENCE=on — with the stub connector a running sequence
+  // would write «sent» into the journal for letters that went nowhere.
+  const tick = (options = {}) => runTick({
+    ...options,
+    campaigns, templates, gate, halted,
+    journal: { allEntries, recordSending, recordSent, recordFailed, recordAboutContact },
+    registry: { senders: async () => (await espRegistry()).senders, canSend: espCanSend },
+    signature: () => ({ ...DEFAULT_SIGNATURE, ...(state.espSignature || {}) }),
+    unsubscribe
+  });
+  return { connector, keyError, gate, templates, signature, unsubscribe, campaigns, halt, halted, tick, sequenceOn: process.env.ESP_SEQUENCE === "on" };
 })();
 
 /**
@@ -532,6 +564,8 @@ server.listen(port, () => {
   // process what to do — but the leases and cool-offs it keeps are in memory,
   // so they begin and end with the process that serves /agent/due.
   startScheduler();
+  // ESP 5: the cold-email chain, only when switched on (see `esp` above).
+  if (esp.sequenceOn) startSequence({ tick: () => esp.tick() });
   // Дослідження, яке урвав перезапуск, доробляється саме — з тієї стадії, на
   // якій його застали. Після того, як порт уже слухається, щоб сторінка бачила
   // прогрес із першої ж секунди.
@@ -3759,6 +3793,9 @@ function applyPersistentWorkspaceState(saved = {}) {
     state.espSenderPauses = saved.espSenderPauses;
   }
   if (Array.isArray(saved.espTemplates)) state.espTemplates = saved.espTemplates;
+  if (Array.isArray(saved.espCampaigns)) state.espCampaigns = saved.espCampaigns;
+  if (Array.isArray(saved.espEnrollments)) state.espEnrollments = saved.espEnrollments;
+  if (saved.espHalt && typeof saved.espHalt === "object") state.espHalt = { ...state.espHalt, ...saved.espHalt };
   if (saved.espSignature && typeof saved.espSignature === "object") state.espSignature = saved.espSignature;
   state.providerRule = restoreProviderRule(saved.providerRule, state.providerRule);
   state.budgets = restoreBudgets(saved.budgets, state.budgets);
@@ -3998,6 +4035,9 @@ async function writeWorkspaceStateNow() {
       warmupTargeting: state.warmupTargeting,
       espSenderPauses: state.espSenderPauses,
       espTemplates: state.espTemplates,
+      espCampaigns: state.espCampaigns,
+      espEnrollments: state.espEnrollments,
+      espHalt: state.espHalt,
       espSignature: state.espSignature,
       providerRule: state.providerRule,
       budgets: state.budgets,
