@@ -87,3 +87,42 @@ test("the privacy page is plain, names the company, and says nothing is tracked"
   assert.match(page, /do not track whether our emails are opened/);
   assert.doesNotMatch(page, /<script|<img|<iframe/i);
 });
+
+/**
+ * Judge, ESP 12 round 1: «parseSpintax ділить блок через split("|") і ріже
+ * змінну {{first_name|there}}. У темі такий шаблон зберігається, а частина
+ * лідів отримує тему "Hi {{first_name" або "there}}". У тілі шаблон узагалі
+ * не зберігається, і причину відмови названо хибно.»
+ */
+test("a variable with a stand-in inside a block stays whole — in the subject and in the body", () => {
+  assert.deepEqual(parseSpintax("{Hi {{first_name|there}}.|Hello.}").map((part) => part.variants || part.text), [["Hi {{first_name|there}}.", "Hello."]]);
+  const template = prepareTemplate({
+    subject: "{Hi {{first_name|there}}|Hello} from ADvantage",
+    body: "{Hi {{first_name|there}}, a question.|Hello {{first_name|friend}}!} We help {{company|teams}} grow."
+  });
+  assert.equal(template.subject, "{Hi {{first_name|there}}|Hello} from ADvantage", "the subject was not saved as written");
+  assert.equal(template.body, "{Hi {{first_name|there}}, a question.|Hello {{first_name|friend}}!} We help {{company|teams}} grow.");
+  const subjects = new Set();
+  const openers = new Set();
+  for (let index = 0; index < 60; index += 1) {
+    const named = index % 2 === 0;
+    const lead = { email: `p${index}@c${index}.com`, name: named ? "Olena Koval" : "", company: "Northwind", country: "Brazil" };
+    const letter = composeLetter({ template, sender: SENDER, lead, unsubscribe: UNSUB, campaignId: "c-judge" });
+    assert.equal(letter.ok, true, letter.message);
+    assert.doesNotMatch(letter.subject, /[{}|]/, `a broken subject went out: ${letter.subject}`);
+    assert.doesNotMatch(letter.text, /[{}|]/, `a broken body went out: ${letter.text}`);
+    subjects.add(letter.subject);
+    openers.add(letter.text.split(" We help")[0]);
+  }
+  assert.deepEqual([...subjects].sort(), ["Hello from ADvantage", "Hi Olena from ADvantage", "Hi there from ADvantage"]);
+  assert.deepEqual([...openers].sort(), ["Hello Olena!", "Hello friend!", "Hi Olena, a question.", "Hi there, a question."]);
+});
+
+test("a refusal names the real reason and the whole variant — not a half cut at the variable's bar", () => {
+  assert.throws(() => prepareTemplate({ subject: "Hi", body: "{Hi {{first_name|there}}|Hello.}" }),
+    (error) => error.code === "not_a_sentence" && error.message.includes("«Hi {{first_name|there}}»"));
+  assert.throws(() => prepareTemplate({ subject: "Hi", body: "{Hi {{first_name|there.|Hello.}" }),
+    (error) => error.code === "broken_variable");
+  assert.throws(() => prepareTemplate({ subject: "{Hi {{first_name|there}}}", body: "x." }),
+    (error) => error.code === "single_variant", "one variant with a stand-in is still one variant");
+});

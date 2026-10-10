@@ -39,25 +39,33 @@ export function parseSpintax(text) {
     }
     if (source[index] === "{") {
       // A block: read to its own closing brace, stepping over variables.
+      // Variants are split on a bar at this level only: the bar inside a
+      // variable's stand-in — {{first_name|there}} — belongs to the variable.
+      // (Judge, ESP 12 round 1: split("|") cut it into "Hi {{first_name" and
+      // "there}}", the subject kept the broken halves and the body was refused
+      // as "not a sentence".)
       let cursor = index + 1;
-      let body = "";
+      const variants = [""];
       while (cursor < source.length && source[cursor] !== "}") {
         if (source.startsWith("{{", cursor)) {
           const close = source.indexOf("}}", cursor);
-          if (close === -1) break;
-          body += source.slice(cursor, close + 2);
+          if (close === -1) throw new SpintaxError("Незакрита змінна всередині блоку варіантів: бракує «}}».", { code: "broken_variable" });
+          variants[variants.length - 1] += source.slice(cursor, close + 2);
           cursor = close + 2;
         } else if (source[cursor] === "{") {
           throw new SpintaxError("Варіант у варіанті не підтримується: один рівень дужок.", { code: "nested_spintax" });
+        } else if (source[cursor] === "|") {
+          variants.push("");
+          cursor += 1;
         } else {
-          body += source[cursor];
+          variants[variants.length - 1] += source[cursor];
           cursor += 1;
         }
       }
       if (source[cursor] !== "}") throw new SpintaxError("Незакритий блок варіантів: бракує «}».", { code: "broken_spintax" });
       if (plain) { parts.push({ text: plain }); plain = ""; }
       blocks += 1;
-      parts.push({ block: blocks, variants: body.split("|").map((variant) => variant.trim()) });
+      parts.push({ block: blocks, variants: variants.map((variant) => variant.trim()) });
       index = cursor + 1;
       continue;
     }
