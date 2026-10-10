@@ -3,7 +3,8 @@
 // as. Both are the administrator's: a seller has nothing to configure here.
 
 import { can, logAdminAction } from "./access.mjs";
-import { SKIP_REASON_LABEL, defaultFilters, refusedAtEnrolment } from "./filters.mjs";
+import { SKIP_REASON_LABEL, defaultFilters, exclusions, refusedAtEnrolment } from "./filters.mjs";
+import { erasePerson, exportPerson } from "./erasure.mjs";
 import { handleEspDataApi } from "./data-api.mjs";
 import { MailboxError } from "./provider.mjs";
 import { CampaignError, parseLeadLines } from "./campaigns.mjs";
@@ -31,6 +32,10 @@ export function espRouteRight(method, path) {
   if (path === "/limits" || path === "/ramp" || (method === "GET" && (path.startsWith("/campaigns") || path === "/inbox" || path === "/alerts" || path === "/conversations"))) return "replies.read";
   // ESP 14: answering a lead and correcting a reply's label are the inbox's work.
   if (path === "/conversations/reply" || path === "/conversations/label") return "replies.write";
+  // ESP 17: what we hold about a person is the journal's to read; forgetting
+  // them for good is an administrator's alone.
+  if (path === "/people/export") return "journal.read";
+  if (path === "/people/erase") return "access.manage";
   // ESP 8: running the alarm check now.
   if (path === "/alerts/check") return "limits.change";
   // ESP 7: reading the mailboxes now, rather than waiting five minutes.
@@ -245,6 +250,29 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
       mode: esp.connector?.describe().mode || "stub",
       replyOnStub: Boolean(esp.sequenceOn)
     });
+    return true;
+  }
+
+  /**
+   * ESP 17: a person asks what we hold about them — where the address came
+   * from, every letter as sent, what came back — and may ask to be forgotten.
+   */
+  if (method === "GET" && path === "/people/export") {
+    const email = url.searchParams.get("email") || "";
+    const entries = await allEntries();
+    const report = exportPerson(email, { entries, enrollments: esp.campaigns?.enrollments() || [], campaigns: esp.campaigns?.list() || [], exclusions: await exclusions(entries) });
+    sendJson(response, 200, { success: true, person: report });
+    return true;
+  }
+
+  if (method === "POST" && path === "/people/erase") {
+    const body = await readJson(request);
+    const email = String(body?.email || "").trim().toLowerCase();
+    // Irreversible: the address typed a second time, the same.
+    if (!email || email !== String(body?.confirm || "").trim().toLowerCase()) return badRequest(sendJson, response, "Для видалення введіть адресу ще раз — так само.");
+    const result = await erasePerson(email, { campaigns: esp.campaigns, actor, note: String(body?.note || "") });
+    await logged("person_erased", { journalLines: result.journalLines, campaignRows: result.campaignRows });
+    sendJson(response, 200, { success: true, erased: result });
     return true;
   }
 

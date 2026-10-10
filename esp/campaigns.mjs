@@ -254,6 +254,18 @@ export function campaignStore({ read, write, readEnrollments, writeEnrollments, 
       return next;
     },
 
+    /**
+     * ESP 17: a person asked to be forgotten — every campaign's row for them
+     * goes, with the lead's data in it. The journal side is `eraseContact`.
+     */
+    async forget(email) {
+      const address = String(email ?? "").trim().toLowerCase();
+      const all = enrollments();
+      const kept = all.filter((row) => row.email !== address);
+      if (kept.length !== all.length) await writeEnrollments(kept);
+      return all.length - kept.length;
+    },
+
     async saveEnrollment(enrollment) {
       await writeEnrollments(enrollments().map((row) => (row.id === enrollment.id ? enrollment : row)));
       return enrollment;

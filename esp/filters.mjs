@@ -1,7 +1,7 @@
 import { resolveMx } from "node:dns/promises";
 
 import { recentContactBlocks } from "./company.mjs";
-import { allEntries, append, contactKey } from "./journal.mjs";
+import { allEntries, append, contactKey, erasureKey } from "./journal.mjs";
 
 /**
  * The checks every letter passes before it goes (ESP 6).
@@ -111,6 +111,9 @@ export async function exclusions(entries = null) {
       list.set(entry.contact, { key: entry.contact, category: "unsubscribed", note: entry.data?.via || "", at: entry.at, actor: entry.actor });
     } else if (entry.type === "message.bounced" && entry.contact && /^5\./.test(String(entry.data?.code || "")) && !list.has(entry.contact)) {
       list.set(entry.contact, { key: entry.contact, category: "hard_bounce", note: entry.data.code, at: entry.at, actor: entry.actor });
+    } else if (entry.type === "contact.erased" && entry.data?.key && !list.has(entry.data.key)) {
+      // ESP 17: a person who asked to be forgotten stays out — by the hash of their address.
+      list.set(entry.data.key, { key: entry.data.key, category: "erased", note: "видалено на прохання людини", at: entry.at, actor: entry.actor });
     }
   }
   return list;
@@ -179,8 +182,8 @@ export async function checkLead(lead, { exclusions: excluded, countries, reconta
   const [local, domain] = email.split("@");
 
   const list = excluded ?? await exclusions();
-  const hit = list.get(email) || list.get(`@${domain}`);
-  if (hit) return no(hit.category, `у виключеннях: ${EXCLUSION_CATEGORIES[hit.category] || hit.category}${hit.key.startsWith("@") ? ` (увесь домен ${hit.key})` : ""}`, { permanent: true, excluded: true });
+  const hit = list.get(email) || list.get(`@${domain}`) || list.get(erasureKey(email));
+  if (hit) return no(hit.category, `у виключеннях: ${EXCLUSION_CATEGORIES[hit.category] || SKIP_REASON_LABEL[hit.category] || hit.category}${hit.key.startsWith("@") ? ` (увесь домен ${hit.key})` : ""}`, { permanent: true, excluded: true });
 
   // ESP 13's rule, checked with the rest: somebody who once answered is not put
   // into a sequence again, and somebody written to in the last 90 days without an
@@ -233,6 +236,7 @@ export const SKIP_REASON_LABEL = {
   complaint: "скарга — у виключеннях",
   client: "клієнт — у виключеннях",
   partner: "партнер — у виключеннях",
+  erased: "видалено на прохання людини — у виключеннях",
   no_source: "немає джерела й дати",
   country_excluded: "країна в списку виключених",
   country_unknown: "країна невідома",

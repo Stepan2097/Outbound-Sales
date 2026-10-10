@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, open, readFile } from "node:fs/promises";
+import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { dirname } from "node:path";
 
 /**
@@ -32,6 +32,16 @@ import { dirname } from "node:path";
  * Events: `{ seq, at, type, actor, contact, data, prev, hash }`. `contact` is a
  * lower-cased email address when the event is about one person — that is what
  * a contact's timeline is read by — and `null` otherwise.
+ *
+ * **One exception to «never changed»: a person's request to be forgotten**
+ * (ESP 17, `eraseContact`). The law outranks the journal, so that person's
+ * lines lose the address and every word about them — what stays is what the
+ * counts need (which sender, which campaign, which step, a bounce code). Each
+ * such line keeps its `prev` and its `hash` and is marked `redacted: <seq>`,
+ * pointing at the `contact.erased` line appended in the same write, which
+ * lists every line it touched. So the chain still proves nothing was removed
+ * or reordered; only the redacted lines' own content can no longer be checked,
+ * and `verify()` reports any redacted line no erasure accounts for.
  */
 
 const GENESIS = "0".repeat(64);
@@ -103,10 +113,15 @@ async function load() {
       return;
     }
     if (entry.prev !== prev) problems.push({ line: index + 1, seq: entry.seq, problem: "chain_broken" });
-    else if (hashOf(entry, entry.prev) !== entry.hash) problems.push({ line: index + 1, seq: entry.seq, problem: "hash_mismatch" });
+    else if (!entry.redacted && hashOf(entry, entry.prev) !== entry.hash) problems.push({ line: index + 1, seq: entry.seq, problem: "hash_mismatch" });
     entries.push(entry);
     prev = entry.hash;
   });
+  // A redacted line is only as good as the erasure that says it touched it.
+  const erasures = new Map(entries.filter((entry) => entry.type === "contact.erased").map((entry) => [entry.seq, new Set(entry.data?.entries || [])]));
+  for (const entry of entries) {
+    if (entry.redacted && !erasures.get(entry.redacted)?.has(entry.seq)) problems.push({ seq: entry.seq, problem: "redaction_unaccounted" });
+  }
   loaded = { entries, problems, endsWhole, byContact: indexByContact(entries) };
   return loaded;
 }
@@ -159,6 +174,92 @@ export function append({ type, actor = "system", contact = null, data = {} }) {
       state.byContact.get(entry.contact).push(entry);
     }
     return entry;
+  });
+  tail = run;
+  return run;
+}
+
+/**
+ * What a forgotten person leaves in the exclusions: a hash of the address, so
+ * the same address is refused again without the journal holding it.
+ */
+export function erasureKey(value) {
+  const key = contactKey(value);
+  return key ? `erased:${createHash("sha256").update("esp-erasure\n").update(key).digest("hex")}` : null;
+}
+
+// What a redacted line about the person keeps: enough for the counts (a
+// sender's day, a domain's bounces, a campaign's steps, an A/B variant), no
+// address, no name, no text, no subject, no ids that lead back to the letter.
+const KEPT_WHEN_ERASED = ["from", "sender", "campaignId", "step", "sendingSeq", "code", "reason", "label", "kind", "via", "category", "variantIds", "needsRecheck"];
+
+function keepCounts(data) {
+  const kept = {};
+  for (const name of KEPT_WHEN_ERASED) if (data && data[name] !== undefined) kept[name] = data[name];
+  return kept;
+}
+
+function scrubAddress(value, address) {
+  if (typeof value === "string") return value.replace(new RegExp(address.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), "[видалено]");
+  if (Array.isArray(value)) return value.map((item) => scrubAddress(item, address));
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([name, item]) => [name, scrubAddress(item, address)]));
+  return value;
+}
+
+/**
+ * ESP 17: forget a person. Their lines keep only `KEPT_WHEN_ERASED` and lose
+ * the address; any other line that names them gets «[видалено]» in its place;
+ * a `contact.erased` line records the hash (`erasureKey`) and which lines were
+ * touched. The file is rewritten once — to a temporary file, synced, renamed
+ * over — in the same queue as `append`, so no line is written in between.
+ *
+ * Refused while the file has a problem `verify()` would report: rewriting it
+ * would quietly drop a torn line, and nothing is ever cut out of the journal.
+ */
+export function eraseContact(contact, { actor = "system", note = "" } = {}) {
+  const address = contactKey(contact);
+  if (!address) return Promise.reject(Object.assign(new Error("Це не адреса пошти."), { statusCode: 400 }));
+  const run = tail.catch(() => {}).then(async () => {
+    const state = await load();
+    if (state.problems.length || !state.endsWhole) {
+      throw Object.assign(new Error("Журнал має пошкоджені рядки — спершу перевірка журналу, потім видалення."), { statusCode: 409 });
+    }
+    const last = state.entries.at(-1);
+    const seq = (last?.seq ?? 0) + 1;
+    const touched = [];
+    const next = state.entries.map((entry) => {
+      const own = entry.contact === address;
+      if (!own && !JSON.stringify(entry.data ?? {}).toLowerCase().includes(address)) return entry;
+      touched.push(entry.seq);
+      return { ...entry, contact: own ? null : entry.contact, data: own ? keepCounts(entry.data) : scrubAddress(entry.data, address), redacted: seq };
+    });
+    const erased = {
+      seq,
+      at: new Date().toISOString(),
+      type: "contact.erased",
+      actor: String(actor || "system").slice(0, 200),
+      contact: null,
+      data: { key: erasureKey(address), entries: touched, note: String(note || "").slice(0, 300) },
+      prev: last?.hash ?? GENESIS
+    };
+    erased.hash = hashOf(erased, erased.prev);
+    const path = currentPath();
+    const temporary = `${path}.erase-${process.pid}-${Date.now()}`;
+    await mkdir(dirname(path), { recursive: true });
+    const handle = await open(temporary, "w");
+    try {
+      await handle.write([...next, erased].map((entry) => `${JSON.stringify(entry)}\n`).join(""));
+      await handle.datasync();
+    } catch (error) {
+      await handle.close().catch(() => {});
+      await rm(temporary, { force: true });
+      throw error;
+    }
+    await handle.close();
+    await rename(temporary, path);
+    state.entries = [...next, erased];
+    state.byContact = indexByContact(state.entries);
+    return erased;
   });
   tail = run;
   return run;
