@@ -20,8 +20,9 @@ import { DEFAULT_SIGNATURE, templateStore } from "./esp/templates.mjs";
 import { handleUnsubscribe, unsubscribeSecretFromEnv } from "./esp/unsubscribe.mjs";
 import { privacyPage } from "./esp/notice.mjs";
 import { recordAboutContact, recordFailed, recordSending, recordSent } from "./esp/messages.mjs";
-import { canSend as espCanSend, registry as espRegistry, registrySenderStore, setSenderStatus as espSetSenderStatus, updateSender as espUpdateSender } from "./esp/registry.mjs";
+import { canSend as espCanSend, registry as espRegistry, registrySenderStore, setDomainStatus as espSetDomainStatus, setSenderStatus as espSetSenderStatus, updateSender as espUpdateSender } from "./esp/registry.mjs";
 import { applyAlerts, reviewAlerts, telegramNotifier } from "./esp/alerts.mjs";
+import { compareSenders, runDailyMonitor } from "./esp/monitor.mjs";
 import { defaultFilters } from "./esp/filters.mjs";
 import { applyRampReviews } from "./esp/ramp.mjs";
 import { campaignStore } from "./esp/campaigns.mjs";
@@ -503,12 +504,24 @@ const esp = (() => {
   // ESP 8: the automatic pauses and the alarms, after every pass of the chain
   // and every read of the inboxes.
   const telegram = telegramNotifier(process.env);
+  const alertDeps = { setSenderStatus: espSetSenderStatus, setDomainStatus: espSetDomainStatus, pauseCampaign: (id, reason) => campaigns.pauseForReview(id, reason), append: espAppend, notify: telegram.notify };
   const checkAlerts = async () => {
     const [{ senders }, entries] = await Promise.all([espRegistry(), allEntries()]);
-    const actions = reviewAlerts({ entries, senders, campaigns: campaigns.list(), enrollmentsOf: (id) => campaigns.enrollmentsOf(id) });
-    return applyAlerts({ actions, entries, setSenderStatus: espSetSenderStatus, pauseCampaign: (id, reason) => campaigns.pauseForReview(id, reason), append: espAppend, notify: telegram.notify });
+    const actions = [
+      ...reviewAlerts({ entries, senders, campaigns: campaigns.list(), enrollmentsOf: (id) => campaigns.enrollmentsOf(id) }),
+      // ESP 15: a sender silent next to a partner who gets answers.
+      ...compareSenders({ entries, campaigns: campaigns.list() })
+    ];
+    return applyAlerts({ actions, entries, ...alertDeps });
   };
-  return { connector, keyError, gate, templates, signature, unsubscribe, campaigns, halt, halted, tick, filters, pollInbox, checkAlerts, alertsTelegram: telegram.configured, sequenceOn: process.env.ESP_SEQUENCE === "on" };
+  // ESP 15: DNS and blocklists of every sending domain and the company's own,
+  // once a day; what it finds goes through the same alarms as ESP 8.
+  const runMonitor = async ({ force = false } = {}) => {
+    const result = await runDailyMonitor({ force });
+    const applied = result.actions.length ? await applyAlerts({ actions: result.actions, entries: await allEntries(), ...alertDeps }) : [];
+    return { ...result, applied };
+  };
+  return { connector, keyError, gate, templates, signature, unsubscribe, campaigns, halt, halted, tick, filters, pollInbox, checkAlerts, runMonitor, alertsTelegram: telegram.configured, sequenceOn: process.env.ESP_SEQUENCE === "on" };
 })();
 
 /**
@@ -627,6 +640,14 @@ server.listen(port, () => {
   // process what to do — but the leases and cool-offs it keeps are in memory,
   // so they begin and end with the process that serves /agent/due.
   startScheduler();
+  // ESP 15: the daily DNS and blocklist watch. Asked hourly, runs once a day
+  // (the journal remembers); the first look is a few minutes after start, so a
+  // restart is not a burst of DNS queries. ESP_MONITOR=off turns it off.
+  if (process.env.ESP_MONITOR !== "off") {
+    const watch = () => void esp.runMonitor().catch((error) => console.error("[esp] monitor failed:", error.message));
+    setTimeout(watch, 5 * 60_000).unref();
+    setInterval(watch, 60 * 60_000).unref();
+  }
   // ESP 5: the cold-email chain, only when switched on (see `esp` above).
   if (esp.sequenceOn) {
     startSequence({ tick: async () => { const summary = await esp.tick(); await esp.checkAlerts(); return summary; } });

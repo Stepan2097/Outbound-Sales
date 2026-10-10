@@ -37,6 +37,8 @@ export function espRouteRight(method, path) {
   if (path === "/inbox/poll") return "limits.change";
   // ESP 13: stepping a sender's ramp up (or holding it) is a limit.
   if (path.startsWith("/ramp/")) return "limits.change";
+  // ESP 15: running the DNS and blocklist watch now — the registry's.
+  if (path === "/monitor/run") return "registry.change";
   if (path.startsWith("/campaigns")) return "campaigns.launch";
   if (path === "/templates" || path === "/signature" || path === "/preview") return "templates.edit";
   if (path.startsWith("/senders/")) return "limits.change";
@@ -102,6 +104,15 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
       if (!(error instanceof MailboxError)) throw error;
       sendJson(response, 400, { success: false, error: error.message });
     }
+    return true;
+  }
+
+  // ── ESP 15: run the daily watch now (DNS, blocklists), not tomorrow ─────
+  if (method === "POST" && path === "/monitor/run") {
+    if (!esp.runMonitor) return badRequest(sendJson, response, "Моніторинг на цьому сервері не підключено.");
+    const result = await esp.runMonitor({ force: true });
+    await logged("monitor_run", { domains: result.domains.length, alarms: result.actions.length });
+    sendJson(response, 200, { success: true, ...result });
     return true;
   }
 

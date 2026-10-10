@@ -115,3 +115,18 @@ await recordFailed(sending, { error });                   // не пішло
 її не надсилає й один раз позначає `enrollment.recheck` + `contact.skipped`.
 Список колонок для вставки: `email,name,company,country,timezone,source,source_date,verification,verified_at`
 (або будь-який порядок із заголовком). `POST /api/esp/leads/check` — перевірити список, нічого не додаючи.
+
+## Моніторинг (ESP 15, `monitor.mjs`)
+
+Усе знайдене йде через `applyAlerts` ESP 8: та сама пауза, рядок `esp.alert`, повідомлення людині раз на добу.
+
+- **Порівняння сендерів кампанії** (`compareSenders`, з кожною перевіркою тривог): 0 відповідей на 80+
+  листів, коли напарнику в тій самій запущеній кампанії відповідають → `pause_sender` з кодом
+  `no_replies_vs_partner`. Тиха кампанія (нікому не відповідають) — не сигнал проти сендера.
+- **Щодня** (`runDailyMonitor`, сервер питає щогодини, біжить раз на добу; `ESP_MONITOR=off` вимикає):
+  усі невиведені домени реєстру й домени компанії (`ESP_MONITOR_DOMAINS`, за замовчуванням
+  `advantage-agency.co`). Блоклисти — Spamhaus DBL (лише з `SPAMHAUS_DQS_KEY`), SURBL, Validity Heatwave
+  (поки без доступу — «не перевірено»). Лістинг домену реєстру → `pause_domain`; домену компанії —
+  лише тривога. DNS (SPF, DKIM за селектором, DMARC, MX) порівнюється з минулим знімком: зникло чи
+  змінилось → тривога без паузи (зміну міг зробити хтось свідомо).
+- `POST /api/esp/monitor/run` — перевірити зараз (право реєстру); `GET /api/esp/monitor` — остання перевірка й тривоги.

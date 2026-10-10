@@ -11,7 +11,7 @@ import { api, escapeAttr, escapeHtml, onScreen, refreshIcons } from "../core.js"
 
 onScreen("account", { open: () => void loadEspRegistry() });
 
-export const espRegistryState = { data: null, error: "", busy: false, notice: "", verify: null };
+export const espRegistryState = { data: null, error: "", busy: false, notice: "", verify: null, monitor: null };
 
 const ESP_STATE_LABEL = {
   aging: ["Старіє", "tone-muted"],
@@ -36,7 +36,9 @@ function espAgo(iso) {
 
 export async function loadEspRegistry() {
   try {
-    espRegistryState.data = await api("/api/esp/registry");
+    const [data, monitor] = await Promise.all([api("/api/esp/registry"), api("/api/esp/monitor").catch(() => null)]);
+    espRegistryState.data = data;
+    espRegistryState.monitor = monitor;
     espRegistryState.error = "";
   } catch (error) {
     espRegistryState.error = error?.message || "Реєстр пошти не прочитався.";
@@ -163,6 +165,21 @@ export function renderEspRegistry() {
       : `Журнал пошкоджено: ${state.verify.problems.map((row) => `рядок ${row.line} — ${row.problem}`).join("; ")}.`}</p>`
     : "";
 
+  const monitor = state.monitor;
+  const watch = monitor ? `
+    <h3 class="esp-title">Моніторинг — щодня</h3>
+    <p class="esp-subtle">${monitor.lastRun
+      ? `Остання перевірка DNS і блоклистів: ${escapeHtml(new Date(monitor.lastRun.at).toLocaleString())} — доменів ${monitor.lastRun.domains?.length ?? 0}, тривог ${monitor.lastRun.alarms ?? 0}.`
+      : "DNS і блоклисти ще жодного разу не перевіряли автоматично."}
+      Блоклисти: Spamhaus DBL (лише з ключем DQS), SURBL, Validity Heatwave (поки без доступу). Лістинг — пауза домену; зміна SPF, DKIM, DMARC чи MX — тривога.
+      Сендер без жодної відповіді на ${monitor.compareMinSent} листів, коли напарнику в кампанії відповідають, — на паузу.</p>
+    ${monitor.extraDomains.map((row) => `<div class="esp-row"><div class="esp-row-main"><strong>${escapeHtml(row.domain)}</strong> <span class="esp-subtle">домен компанії — під наглядом, не для розсилки</span></div>
+      <div class="esp-row-dns">${espDnsHtml(row.checks)}</div></div>`).join("")}
+    ${monitor.canRun ? '<div class="esp-actions"><button class="text-button" type="button" data-esp-monitor><i data-lucide="radar"></i><span>Перевірити зараз</span></button></div>' : ""}
+    ${monitor.alerts.length ? `<ol class="esp-log">${monitor.alerts.slice(0, 10).map((alert) => `<li>
+      <span class="esp-subtle">${escapeHtml(new Date(alert.at).toLocaleString())}</span>
+      <strong>${escapeHtml(alert.title || "")}</strong><span>${escapeHtml(alert.reason || "")}</span></li>`).join("")}</ol>` : '<p class="esp-subtle">Тривог не було.</p>'}` : "";
+
   root.innerHTML = `
     ${state.notice ? `<p class="esp-notice ${state.error ? "is-bad" : ""}">${escapeHtml(state.notice)}</p>` : ""}
     <h3 class="esp-title">Домени</h3>
@@ -170,6 +187,7 @@ export function renderEspRegistry() {
     <h3 class="esp-title">Відправники</h3>
     <div class="esp-list">${senderRows}</div>
     ${forms}
+    ${watch}
     ${canEdit ? `<div class="esp-foot"><button class="text-button" type="button" data-esp-verify><i data-lucide="shield-check"></i><span>Перевірити цілість журналу</span></button>${verify}</div>` : ""}`;
   refreshIcons();
 }
@@ -196,6 +214,23 @@ document.getElementById("espRegistryBody")?.addEventListener("click", async (eve
   if (verify) {
     try { espRegistryState.verify = await api("/api/esp/journal/verify"); } catch (error) { espRegistryState.notice = error.message; }
     renderEspRegistry();
+    return;
+  }
+  if (event.target.closest("[data-esp-monitor]")) {
+    espRegistryState.busy = true;
+    espRegistryState.notice = "Перевіряю DNS і блоклисти всіх доменів…";
+    renderEspRegistry();
+    try {
+      const result = await api("/api/esp/monitor/run", { method: "POST", body: "{}" });
+      espRegistryState.notice = `Перевірено доменів: ${result.domains.length}; тривог: ${result.actions.length}.`;
+      espRegistryState.error = "";
+    } catch (error) {
+      espRegistryState.error = error?.message || "Перевірка не вдалася.";
+      espRegistryState.notice = espRegistryState.error;
+    } finally {
+      espRegistryState.busy = false;
+    }
+    await loadEspRegistry();
     return;
   }
   const check = event.target.closest("[data-esp-check]");

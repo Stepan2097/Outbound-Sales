@@ -1,5 +1,6 @@
 import { accessView, adminLog, can, changeAccess } from "./access.mjs";
-import { entries, timeline, verify } from "./journal.mjs";
+import { allEntries, entries, timeline, verify } from "./journal.mjs";
+import { COMPARE_MIN_SENT, watchedExtraDomains } from "./monitor.mjs";
 import { secretsStatus } from "./secrets.mjs";
 import { parseLeadLines } from "./campaigns.mjs";
 import {
@@ -97,6 +98,24 @@ export async function handleEspDataApi({ request, response, url, sendJson, readJ
     if (method === "GET" && path === "/api/esp/secrets") {
       if (!await allowed("access.manage")) return refuse("access.manage"), true;
       sendJson(response, 200, secretsStatus(env, (await registry()).senders));
+      return true;
+    }
+
+    // ── ESP 15: what the daily watch saw, and its alarms ──────────────────
+    if (method === "GET" && path === "/api/esp/monitor") {
+      if (!await allowed("replies.read")) return refuse("replies.read"), true;
+      const all = await allEntries();
+      const runs = all.filter((entry) => entry.type === "esp.monitor");
+      const extras = new Map();
+      for (const entry of all) if (entry.type === "esp.monitor.domain") extras.set(entry.data.domain, { domain: entry.data.domain, checks: { ...entry.data.checks, at: entry.at } });
+      sendJson(response, 200, {
+        lastRun: runs.at(-1) ? { at: runs.at(-1).at, ...runs.at(-1).data } : null,
+        extraDomains: watchedExtraDomains(env).map((domain) => extras.get(domain) || { domain, checks: null }),
+        alerts: all.filter((entry) => entry.type === "esp.alert").slice(-30).reverse()
+          .map((entry) => ({ at: entry.at, title: entry.data?.title, reason: entry.data?.reason, kind: entry.data?.kind, code: entry.data?.code })),
+        compareMinSent: COMPARE_MIN_SENT,
+        canRun: await allowed("registry.change")
+      });
       return true;
     }
 

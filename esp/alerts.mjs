@@ -117,7 +117,7 @@ export function reviewAlerts({ entries, senders, campaigns, enrollmentsOf, now =
  * alarm whose key was raised in the last day is not raised again; the pause it
  * caused stands until a person lifts it.
  */
-export async function applyAlerts({ actions, entries, setSenderStatus, pauseCampaign, append, notify = async () => {}, now = new Date(), actor = "esp-alerts" }) {
+export async function applyAlerts({ actions, entries, setSenderStatus, pauseCampaign, setDomainStatus = async () => null, append, notify = async () => {}, now = new Date(), actor = "esp-alerts" }) {
   const raised = new Set(entries.filter((entry) => entry.type === "esp.alert" && now.getTime() - new Date(entry.at).getTime() < DAY).map((entry) => entry.data?.key));
   const done = [];
   for (const action of actions) {
@@ -127,11 +127,17 @@ export async function applyAlerts({ actions, entries, setSenderStatus, pauseCamp
       await setSenderStatus({ email: action.email, status: "paused", reason: action.reason, code: action.code }, actor).catch(() => null);
     } else if (action.kind === "pause_campaign") {
       await pauseCampaign(action.campaignId, action.reason);
+    } else if (action.kind === "pause_domain") {
+      // ESP 15: a domain on a blocklist stops — all its senders with it.
+      await setDomainStatus({ domain: action.domain, status: "paused", reason: action.reason }, actor).catch(() => null);
     }
+    // `alert` (ESP 15: a DNS record changed) and `ramp_held` pause nothing — they are said, not acted on.
     const title = action.kind === "pause_sender" ? `Сендер ${action.email} на паузі`
       : action.kind === "ramp_held" ? `Рампа ${action.email} не росте`
-      : `Кампанія «${action.name}» на паузі`;
-    await append({ type: "esp.alert", actor, data: { key: action.key, kind: action.kind, code: action.code, title, reason: action.reason, email: action.email || null, campaignId: action.campaignId || null } });
+        : action.kind === "pause_campaign" ? `Кампанія «${action.name}» на паузі`
+          : action.kind === "pause_domain" ? `Домен ${action.domain} на паузі`
+            : `Тривога: ${action.domain || action.email || ""}`.trim();
+    await append({ type: "esp.alert", actor, data: { key: action.key, kind: action.kind, code: action.code, title, reason: action.reason, email: action.email || null, campaignId: action.campaignId || null, domain: action.domain || null } });
     await notify(`⚠️ ${title}\n${action.reason}`).catch(() => {});
     done.push(action);
   }

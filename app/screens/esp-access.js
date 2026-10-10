@@ -37,7 +37,8 @@ const ESP_ADMIN_ACTION_LABEL = {
   "admin.campaign_created": "створив кампанію",
   "admin.campaign_updated": "змінив кампанію",
   "admin.campaign_state": "змінив стан кампанії",
-  "admin.campaign_leads_added": "додав людей у кампанію"
+  "admin.campaign_leads_added": "додав людей у кампанію",
+  "admin.monitor_run": "запустив перевірку DNS і блоклистів"
 };
 
 export async function loadEspAccess() {
