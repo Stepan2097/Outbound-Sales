@@ -31,7 +31,13 @@ const ESP_ADMIN_ACTION_LABEL = {
   "admin.template_created": "створив шаблон",
   "admin.template_updated": "змінив шаблон",
   "admin.template_removed": "видалив шаблон",
-  "admin.signature_changed": "змінив підпис"
+  "admin.signature_changed": "змінив підпис",
+  "admin.halt_on": "натиснув «стоп усе»",
+  "admin.halt_off": "зняв «стоп усе»",
+  "admin.campaign_created": "створив кампанію",
+  "admin.campaign_updated": "змінив кампанію",
+  "admin.campaign_state": "змінив стан кампанії",
+  "admin.campaign_leads_added": "додав людей у кампанію"
 };
 
 export async function loadEspAccess() {

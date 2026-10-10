@@ -6,7 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { ESP_PERMISSIONS, ROLE_DEFAULTS, accessView, adminLog, can, changeAccess, logAdminAction, permissionsOf } from "../esp/access.mjs";
-import { handleEspApi } from "../esp/api.mjs";
+import { espRouteRight, handleEspApi } from "../esp/api.mjs";
 import { handleEspDataApi } from "../esp/data-api.mjs";
 import { allEntries, useJournal } from "../esp/journal.mjs";
 import { addDomain, addSender } from "../esp/registry.mjs";
@@ -258,4 +258,18 @@ test("огляд доступів для екрана: матриця, ролі,
   assert.equal(view.permissions["limits.change"], ESP_PERMISSIONS["limits.change"]);
   assert.deepEqual(view.people[0].rights.sort(), ["limits.change", "replies.read"]);
   assert.equal(view.people[0].history[0].actor, "stepan@advantage-agency.co");
+});
+
+test("кожен маршрут пошти — під своїм правом: кампанії, «стоп усе», ліміти, шаблони, підключення", () => {
+  const cases = [
+    ["POST", "/halt", "stop.all"], ["GET", "/halt", "replies.read"],
+    ["POST", "/campaigns", "campaigns.launch"], ["PATCH", "/campaigns", "campaigns.launch"],
+    ["POST", "/campaigns/state", "campaigns.launch"], ["POST", "/campaigns/leads", "campaigns.launch"],
+    ["GET", "/campaigns", "replies.read"], ["GET", "/campaigns/people", "replies.read"], ["GET", "/campaigns/plan", "replies.read"],
+    ["GET", "/limits", "replies.read"],
+    ["PUT", "/signature", "templates.edit"], ["POST", "/templates", "templates.edit"], ["POST", "/preview", "templates.edit"],
+    ["POST", "/senders/resume", "limits.change"], ["GET", "/senders/paused", "limits.change"],
+    ["GET", "/connection", "registry.change"], ["POST", "/mailboxes/check", "registry.change"]
+  ];
+  for (const [method, path, right] of cases) assert.equal(espRouteRight(method, path), right, `${method} ${path}`);
 });

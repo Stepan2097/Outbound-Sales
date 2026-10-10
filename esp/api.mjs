@@ -14,6 +14,22 @@ import { LetterError, assertPlainLetter } from "./letter.mjs";
 import { TEMPLATE_VARIABLES, TemplateError, prepareTemplate } from "./template.mjs";
 import { DEFAULT_SIGNATURE, prepareSignature } from "./templates.mjs";
 
+/**
+ * The right each part of the mail set-up needs (ESP 10, esp/access.mjs). Seeing
+ * campaigns, limits and whether everything is stopped is the team's; starting,
+ * pausing and filling a campaign is `campaigns.launch`, «стоп усе» is
+ * `stop.all`, templates and the signature are `templates.edit`, lifting a
+ * mailbox pause is a limit, and the connection itself is the registry's.
+ */
+export function espRouteRight(method, path) {
+  if (path === "/halt") return method === "GET" ? "replies.read" : "stop.all";
+  if (path === "/limits" || (method === "GET" && path.startsWith("/campaigns"))) return "replies.read";
+  if (path.startsWith("/campaigns")) return "campaigns.launch";
+  if (path === "/templates" || path === "/signature" || path === "/preview") return "templates.edit";
+  if (path.startsWith("/senders/")) return "limits.change";
+  return "registry.change";
+}
+
 export async function handleEspApi({ request, response, url, sendJson, readJson, esp }) {
   const path = url.pathname.replace(/^\/api\/esp/, "") || "/";
   const method = request.method;
@@ -28,8 +44,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
   // templates and the signature are `templates.edit`, lifting a mailbox pause is
   // a limit, the connection itself is the registry's. By default all three are
   // an administrator's, as before; an administrator may hand one to a seller.
-  const need = path === "/templates" || path === "/signature" || path === "/preview" ? "templates.edit"
-    : path.startsWith("/senders/") ? "limits.change" : "registry.change";
+  const need = espRouteRight(method, path);
   if (!await can(profile, need)) {
     sendJson(response, 403, { success: false, error: "Пошту для розсилки налаштовує адміністратор робочого простору." });
     return true;
@@ -93,6 +108,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
     // Written before answering: the gate reads it before every letter, so the
     // stop is in force the moment this returns.
     await esp.halt.write(halt);
+    await logged(on ? "halt_on" : "halt_off", { reason: halt.reason });
     sendJson(response, 200, { success: true, halt });
     return true;
   }
@@ -108,6 +124,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
     if (!body) return badRequest(sendJson, response, "Некоректне тіло JSON");
     try {
       const campaign = method === "POST" ? await esp.campaigns.create(body) : await esp.campaigns.update(String(body.id || ""), body);
+      await logged(method === "POST" ? "campaign_created" : "campaign_updated", { id: campaign?.id ?? null, name: campaign?.name ?? null });
       sendJson(response, method === "POST" ? 201 : 200, { success: true, campaign });
     } catch (error) {
       if (!(error instanceof CampaignError)) throw error;
@@ -124,7 +141,9 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
       if (body.state === "running" && campaign && !esp.campaigns.enrollmentsOf(campaign.id).length) {
         throw new CampaignError("У кампанії ще нікого немає — додайте людей, перш ніж запускати.", { code: "empty", status: 409 });
       }
-      sendJson(response, 200, { success: true, campaign: await esp.campaigns.setState(String(body.id || ""), String(body.state || "")) });
+      const changed = await esp.campaigns.setState(String(body.id || ""), String(body.state || ""));
+      await logged("campaign_state", { id: String(body.id || ""), status: String(body.state || "") });
+      sendJson(response, 200, { success: true, campaign: changed });
     } catch (error) {
       if (!(error instanceof CampaignError)) throw error;
       sendJson(response, error.status, { success: false, error: error.message, code: error.code });
@@ -149,6 +168,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
     const { leads, rejected } = parseLeadLines(body.text);
     try {
       const result = await esp.campaigns.enroll(String(body.id || ""), leads, { blocked: (email) => gone.get(email) || null });
+      await logged("campaign_leads_added", { id: String(body.id || ""), added: result.added.length });
       sendJson(response, 200, { success: true, added: result.added.length, skipped: result.skipped, rejected });
     } catch (error) {
       if (!(error instanceof CampaignError)) throw error;
