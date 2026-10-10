@@ -95,6 +95,15 @@ export function reviewAlerts({ entries, senders, campaigns, enrollmentsOf, now =
       actions.push({ kind: "pause_sender", email: sender.email, ...finding, key: `sender:${sender.email}:${finding.code}` });
     }
   }
+  // ESP 13's weekly review held a sender's ramp: no pause — the stage already
+  // stands — but a person is told why, once per review.
+  for (const held of entries.filter((entry) => entry.type === "sender.ramp_held" && now.getTime() - new Date(entry.at).getTime() < DAY)) {
+    actions.push({
+      kind: "ramp_held", email: held.data?.email, code: "ramp_held",
+      reason: `етап рампи ${held.data?.stage} стоїть: ${(held.data?.reasons || []).join("; ")}`,
+      key: `ramp:${held.data?.email}:${held.seq ?? held.at}`
+    });
+  }
   for (const campaign of campaigns) {
     if (campaign.state !== "running") continue;
     const finding = campaignFinding(campaign, enrollmentsOf(campaign.id), entries);
@@ -119,7 +128,9 @@ export async function applyAlerts({ actions, entries, setSenderStatus, pauseCamp
     } else if (action.kind === "pause_campaign") {
       await pauseCampaign(action.campaignId, action.reason);
     }
-    const title = action.kind === "pause_sender" ? `Сендер ${action.email} на паузі` : `Кампанія «${action.name}» на паузі`;
+    const title = action.kind === "pause_sender" ? `Сендер ${action.email} на паузі`
+      : action.kind === "ramp_held" ? `Рампа ${action.email} не росте`
+      : `Кампанія «${action.name}» на паузі`;
     await append({ type: "esp.alert", actor, data: { key: action.key, kind: action.kind, code: action.code, title, reason: action.reason, email: action.email || null, campaignId: action.campaignId || null } });
     await notify(`⚠️ ${title}\n${action.reason}`).catch(() => {});
     done.push(action);

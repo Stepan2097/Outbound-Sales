@@ -363,3 +363,75 @@
 .esp-alert > i { color: var(--amber); }
 .esp-alert p { margin: 4px 0; color: var(--ink); }
 .esp-alert small { color: var(--muted); }
+
+/* Спільна вхідна холодної пошти (ESP 14). */
+.esp-conv-filters {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.esp-conv-filters input { flex: 1; }
+
+.esp-conv-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 340px) 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.esp-conv-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+
+.esp-conv-row {
+  width: 100%;
+  display: grid;
+  gap: 3px;
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.esp-conv-row .pill { justify-self: start; }
+.esp-conv-row span { color: var(--ink); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.esp-conv-row small { color: var(--muted); font-size: 12px; }
+.esp-conv-row.is-open { border-color: var(--teal); background: var(--teal-weak); }
+
+.esp-conv-head { margin-bottom: 10px; }
+.esp-conv-head small { color: var(--muted); }
+
+.esp-conv-thread { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 10px; }
+
+.esp-conv-message {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface-sunk);
+}
+
+.esp-conv-message.is-in { border-color: var(--teal); }
+.esp-conv-message small { color: var(--muted); }
+
+.esp-conv-message pre {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: inherit;
+  color: var(--ink);
+}
+
+.esp-conv-labels { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; }
+.esp-label-btn { cursor: pointer; border: 0; }
+.esp-conv-reply { display: grid; gap: 8px; }
+.esp-conv-reply textarea { font-family: inherit; }
+.esp-conv-reply small { color: var(--muted); }
+
+@media (max-width: 860px) {
+  .esp-conv-layout { grid-template-columns: 1fr; }
+}
+
+.esp-conv-filters select { flex: 0 0 220px; width: auto; }
+.esp-conv-filters input { min-width: 0; }

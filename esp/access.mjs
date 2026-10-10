@@ -24,6 +24,8 @@ export const ESP_PERMISSIONS = {
   "campaigns.launch": "Запускати, ставити на паузу й зупиняти кампанії",
   "limits.change": "Міняти ліміти: етап рампи, стан доменів і скриньок",
   "replies.read": "Бачити відповіді й точні тексти листів",
+  // ESP 14: the team's inbox — a quick reply from the lead's sender, a corrected label.
+  "replies.write": "Відповідати людям зі спільної вхідної й виправляти мітки відповідей",
   "registry.change": "Додавати й виводити домени та скриньки",
   "templates.edit": "Редагувати шаблони листів і підпис",
   "stop.all": "Натискати «стоп усе»",

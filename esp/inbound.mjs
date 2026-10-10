@@ -22,6 +22,7 @@
 // there; the exclusions (ESP 6) read the unsubscribes and the 5.1.1s.
 
 import { deliveryReport, header, parseMessage, plainText } from "./mime.mjs";
+import { classifyReply } from "./replies.mjs";
 
 const AUTO_SUBJECT = /(?<!\p{L})(out of (the )?office|automatic reply|auto[- ]?reply|autoreply|auto:|away from (the )?office|on vacation|on holiday|abwesenheit|automatische antwort|fuera de la oficina|respuesta autom[aá]tica|ausente|resposta autom[aá]tica|aus[eê]ncia|r[ée]ponse automatique|absence|absent|niedost[eę]pno[sś][cć]|automatyczna odpowied[zź]|відсутн|автоматична відповідь|автоответ|отсутств)/iu;
 const AUTO_TEXT = /\b(i am|i'm) (currently )?(out of (the )?office|on (annual )?leave|away|on vacation|travelling|traveling)\b|limited access to (my )?e-?mail|will (be back|return) on|i will respond (to your (e-?mail|message) )?(upon|when i) return|ich bin (bis|ab)|estoy fuera|я у відпустці|я в отпуске|nie ma mnie w biurze/i;
@@ -86,6 +87,8 @@ export function classifyInbound(raw, { mailbox, now = new Date() } = {}) {
   const text = plainText(message);
   const base = {
     from, subject,
+    // ESP 14: the incoming letter's own id, so a quick reply answers it in its thread.
+    messageId: header(message.headers, "message-id"),
     inReplyTo: header(message.headers, "in-reply-to"),
     references: String(header(message.headers, "references")).split(/\s+/).filter(Boolean)
   };
@@ -175,7 +178,10 @@ export async function processInbound({ mailbox, message, entries, index, record,
     await record("contact.unsubscribed", letter.contact, { ...common, via: classified.via, text: classified.text });
     return { action: "unsubscribe", contact: letter.contact };
   }
-  await record("message.replied", letter.contact, { ...common, subject: classified.subject.slice(0, 300), text: classified.text, rawText: classified.rawText });
+  // ESP 14: the label is decided with the reply and stored beside its raw text.
+  const { label, rule } = classifyReply(classified.text);
+  await record("message.replied", letter.contact, { ...common, subject: classified.subject.slice(0, 300), text: classified.text, rawText: classified.rawText, label, labelRule: rule, messageId: classified.messageId || null });
+  if (label) return { action: "reply", contact: letter.contact, label };
   return { action: "reply", contact: letter.contact };
 }
 

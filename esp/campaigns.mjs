@@ -20,7 +20,8 @@ export const CAMPAIGN_STATES = ["draft", "running", "paused", "done"];
 // An enrolment that may still get a letter. `uncertain`: an attempt whose
 // outcome nobody knows — counted as live so the person cannot be put into a
 // second campaign while somebody checks.
-const LIVE_ENROLMENT = new Set(["active", "uncertain"]);
+// `paused` (ESP 14): somebody else at the company answered; a person decides.
+const LIVE_ENROLMENT = new Set(["active", "uncertain", "paused"]);
 
 export class CampaignError extends Error {
   constructor(message, { code, status = 400 } = {}) {
@@ -236,6 +237,20 @@ export function campaignStore({ read, write, readEnrollments, writeEnrollments, 
       if (!campaign || campaign.state !== "running") return null;
       const next = { ...campaign, state: "paused", sourceReview: { reason, at: now().toISOString() }, updatedAt: now().toISOString() };
       await write(list().map((row) => (row.id === id ? next : row)));
+      return next;
+    },
+
+    /**
+     * A person picks a held person back up: one set aside after a company
+     * colleague answered (ESP 14), or one whose last send nobody could confirm
+     * — after checking the mailbox's Sent folder. Back to `active`, due now.
+     */
+    async resumePerson(id, email) {
+      const row = enrollments().find((item) => item.campaignId === id && item.email === String(email).toLowerCase());
+      if (!row) throw new CampaignError("Такої людини в кампанії немає.", { code: "not_found", status: 404 });
+      if (!["paused", "uncertain"].includes(row.status)) throw new CampaignError("Продовжити можна лише паузу або «невідомо, чи пішов».", { code: "not_held", status: 409 });
+      const next = { ...row, status: "active", reason: null, resumedAt: now().toISOString() };
+      await writeEnrollments(enrollments().map((item) => (item.id === row.id ? next : item)));
       return next;
     },
 

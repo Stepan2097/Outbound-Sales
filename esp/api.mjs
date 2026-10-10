@@ -8,6 +8,9 @@ import { handleEspDataApi } from "./data-api.mjs";
 import { MailboxError } from "./gmail.mjs";
 import { CampaignError, parseLeadLines } from "./campaigns.mjs";
 import { composeLetter } from "./compose.mjs";
+import { ReplyError, conversations, quickReply } from "./conversations.mjs";
+import { REPLY_LABELS } from "./replies.mjs";
+import { recordFailed, recordSending, recordSent } from "./messages.mjs";
 import { allEntries, append } from "./journal.mjs";
 import { applyRampReviews, reviewRamp } from "./ramp.mjs";
 import { DOMAIN_DAILY_LIMIT, GAP_MINUTES, WINDOW, sendLedger, senderDailyLimit } from "./limits.mjs";
@@ -25,7 +28,9 @@ import { DEFAULT_SIGNATURE, prepareSignature } from "./templates.mjs";
  */
 export function espRouteRight(method, path) {
   if (path === "/halt") return method === "GET" ? "replies.read" : "stop.all";
-  if (path === "/limits" || path === "/ramp" || (method === "GET" && (path.startsWith("/campaigns") || path === "/inbox" || path === "/alerts"))) return "replies.read";
+  if (path === "/limits" || path === "/ramp" || (method === "GET" && (path.startsWith("/campaigns") || path === "/inbox" || path === "/alerts" || path === "/conversations"))) return "replies.read";
+  // ESP 14: answering a lead and correcting a reply's label are the inbox's work.
+  if (path === "/conversations/reply" || path === "/conversations/label") return "replies.write";
   // ESP 8: running the alarm check now.
   if (path === "/alerts/check") return "limits.change";
   // ESP 7: reading the mailboxes now, rather than waiting five minutes.
@@ -208,6 +213,97 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
   if (method === "GET" && path === "/campaigns/plan") {
     const plan = await esp.tick({ dryRun: true });
     sendJson(response, 200, { success: true, sequenceOn: Boolean(esp.sequenceOn), ...plan });
+    return true;
+  }
+
+  // ── ESP 14: the team's inbox for cold email ────────────────────────────
+  if (method === "GET" && path === "/conversations") {
+    const label = String(url.searchParams.get("label") || "");
+    const sender = String(url.searchParams.get("sender") || "").toLowerCase();
+    const campaign = String(url.searchParams.get("campaign") || "");
+    const query = String(url.searchParams.get("q") || "").toLowerCase();
+    const names = new Map((esp.campaigns?.list() || []).map((row) => [row.id, row.name]));
+    const list = conversations(await allEntries()).filter((row) =>
+      (!label || row.label === label) && (!sender || row.sender === sender) && (!campaign || row.campaignId === campaign)
+      && (!query || row.contact.includes(query) || row.messages.some((message) => String(message.text || "").toLowerCase().includes(query))));
+    sendJson(response, 200, {
+      success: true,
+      labels: REPLY_LABELS,
+      conversations: list.slice(0, 200).map((row) => ({ ...row, campaignName: names.get(row.campaignId) || null })),
+      liveSend: Boolean(esp.connector?.describe().liveSend),
+      mode: esp.connector?.describe().mode || "stub",
+      replyOnStub: Boolean(esp.sequenceOn)
+    });
+    return true;
+  }
+
+  if (method === "POST" && path === "/conversations/label") {
+    const body = await readJson(request);
+    if (!body?.gmailId || !REPLY_LABELS[body.label]) return badRequest(sendJson, response, `Мітка — одна з: ${Object.keys(REPLY_LABELS).join(", ")}.`);
+    // A correction is its own entry: the rule's first label stays on record.
+    await append({ type: "reply.labelled", actor, data: { gmailId: String(body.gmailId), label: body.label } });
+    sendJson(response, 200, { success: true });
+    return true;
+  }
+
+  /**
+   * A quick reply from the conversation's own sender, in its thread. Through
+   * the gate like every letter — so until ESP 11 it is refused, and says so.
+   */
+  if (method === "POST" && path === "/conversations/reply") {
+    const body = await readJson(request);
+    if (!body?.key || !body.text) return badRequest(sendJson, response, "Яка розмова і що відповісти?");
+    // On the stub nothing reaches anybody: journalling "sent" for it would put
+    // a letter in the timeline that never left. Only the acceptance cycle
+    // (ESP 11, ESP_SEQUENCE=on) answers through the stub on purpose.
+    if (esp.connector?.kind === "stub" && !esp.sequenceOn) {
+      sendJson(response, 409, { success: false, code: "not_connected", error: "Пошту ще не підключено (працює заглушка) — відповідь нікуди б не пішла, тож її не надіслано й не записано." });
+      return true;
+    }
+    const conversation = conversations(await allEntries()).find((row) => row.key === String(body.key));
+    if (!conversation) {
+      sendJson(response, 404, { success: false, error: "Такої розмови немає." });
+      return true;
+    }
+    const lead = (esp.campaigns?.enrollments() || []).find((row) => row.email === conversation.contact)?.lead || {};
+    let letter;
+    try {
+      letter = quickReply(conversation, body.text, { ...DEFAULT_SIGNATURE, ...(esp.signature.read() || {}) }, { lead });
+    } catch (error) {
+      if (!(error instanceof ReplyError) && !(error instanceof LetterError)) throw error;
+      sendJson(response, 400, { success: false, error: error.message, code: error.code });
+      return true;
+    }
+    let sending;
+    try {
+      sending = await recordSending({ from: conversation.sender, to: conversation.contact, subject: letter.subject, text: letter.text, headers: { "Message-ID": letter.messageId, "In-Reply-To": conversation.messages.map((message) => message.messageId).filter(Boolean).at(-1) }, campaignId: conversation.campaignId, step: null }, actor);
+    } catch (error) {
+      sendJson(response, 409, { success: false, error: error.message, code: "sender_unavailable" });
+      return true;
+    }
+    try {
+      const sent = await esp.gate.send(conversation.sender, letter.raw, { threadId: conversation.threadId });
+      await recordSent(sending, { messageId: sent.id, threadId: sent.threadId }, actor);
+      logged("esp.reply.sent", { sender: conversation.sender, contact: conversation.contact });
+      sendJson(response, 200, { success: true, sent: true, stub: Boolean(sent.stub) });
+    } catch (error) {
+      await recordFailed(sending, { error: error.message }, actor);
+      sendJson(response, 409, { success: false, error: error.message, code: error.code || "send_failed" });
+    }
+    return true;
+  }
+
+  if (method === "POST" && path === "/campaigns/people/resume") {
+    const body = await readJson(request);
+    if (!body) return badRequest(sendJson, response, "Некоректне тіло JSON");
+    try {
+      const person = await esp.campaigns.resumePerson(String(body.id || ""), String(body.email || ""));
+      logged("esp.campaign.person.resumed", { campaignId: body.id, email: person.email });
+      sendJson(response, 200, { success: true, person });
+    } catch (error) {
+      if (!(error instanceof CampaignError)) throw error;
+      sendJson(response, error.status, { success: false, error: error.message, code: error.code });
+    }
     return true;
   }
 

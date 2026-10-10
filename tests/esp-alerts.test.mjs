@@ -122,3 +122,18 @@ test("when the pause itself cannot be set, the person is still told only once a 
   await run();
   assert.equal(told.length, 1, "told every hour");
 });
+
+test("a ramp held by the weekly review (ESP 13) is told to a person — without a pause, once per review", async () => {
+  const held = { seq: 7, type: "sender.ramp_held", at: hoursAgo(1), data: { email: ANNA, stage: 10, reasons: ["жодної відповіді за тиждень"] } };
+  const actions = reviewAlerts({ entries: [held], senders: [], campaigns: [], enrollmentsOf: () => [], now: NOW });
+  assert.deepEqual(actions.map((row) => [row.kind, row.email]), [["ramp_held", ANNA]]);
+  let paused = 0;
+  const told = [];
+  const journal = [];
+  const run = () => applyAlerts({ actions, entries: journal, now: NOW, setSenderStatus: async () => { paused += 1; }, pauseCampaign: async () => {}, append: async (event) => { journal.push({ ...event, at: NOW.toISOString() }); }, notify: async (text) => { told.push(text); } });
+  await run();
+  await run();
+  assert.equal(paused, 0, "a held ramp paused the sender");
+  assert.equal(told.length, 1);
+  assert.match(told[0], /Рампа anna@advantage-mail\.com не росте/);
+});

@@ -137,6 +137,16 @@ export async function runTick({ now = new Date(), dryRun = false, ...deps }) {
   // ESP 6: what the pre-send checks read once for the whole pass — exclusions,
   // excluded countries, who answered or was written to lately.
   const filterCtx = deps.filters ? await deps.filters.context(entries, now) : null;
+  // ESP 14: who answered, per campaign and company — the company's other
+  // people in that campaign wait for a person instead of getting the next letter.
+  const leadOf = new Map(everyone.map((row) => [`${row.campaignId}|${row.email}`, row]));
+  const companyReplies = new Map();
+  for (const entry of entries) {
+    if (entry.type !== "message.replied" || !entry.data?.campaignId) continue;
+    const row = leadOf.get(`${entry.data.campaignId}|${entry.contact}`);
+    const key = companyKey(row?.lead || { email: entry.contact });
+    if (key) companyReplies.set(`${entry.data.campaignId}|${key}`, { contact: entry.contact, at: entry.at });
+  }
 
   for (const campaign of deps.campaigns.list().filter((row) => row.state === "running")) {
     for (const enrollment of deps.campaigns.enrollmentsOf(campaign.id).filter((row) => row.status === "active")) {
@@ -178,6 +188,16 @@ export async function runTick({ now = new Date(), dryRun = false, ...deps }) {
           continue;
         }
         if (enrollment.recheck && !dryRun) await deps.campaigns.saveEnrollment({ ...enrollment, recheck: null });
+      }
+
+      const companyReply = companyReplies.get(`${campaign.id}|${companyKey(enrollment.lead || { email: enrollment.email })}`);
+      // Only an answer since the person joined — or since a person picked them
+      // back up after one: a resume is a decision, not a moment to re-pause.
+      const heldSince = new Date(enrollment.resumedAt || enrollment.enrolledAt);
+      if (companyReply && companyReply.contact !== enrollment.email && new Date(companyReply.at) >= heldSince) {
+        if (!dryRun) await deps.campaigns.saveEnrollment({ ...enrollment, status: "paused", reason: "company_replied", pausedBecause: companyReply.contact, stoppedAt: now.toISOString() });
+        summary.stopped += 1;
+        continue;
       }
 
       const sender = senders.get(enrollment.sender);
