@@ -51,6 +51,9 @@ export function espRouteRight(method, path) {
   // ESP 15: running the DNS and blocklist watch now — the registry's.
   if (path === "/monitor/run") return "registry.change";
   if (path.startsWith("/campaigns")) return "campaigns.launch";
+  // Reading the templates is seeing the letters' texts — the team's, and the
+  // campaigns screen needs them to show which template a campaign sends.
+  if (method === "GET" && path === "/templates") return "replies.read";
   if (path === "/templates" || path === "/signature" || path === "/preview") return "templates.edit";
   if (path.startsWith("/senders/")) return "limits.change";
   return "registry.change";

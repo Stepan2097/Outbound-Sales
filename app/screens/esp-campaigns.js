@@ -30,7 +30,7 @@ export async function loadEspCampaigns() {
   if (!document.getElementById("espCampaignsBody")) return;
   try {
     const [campaigns, halt, templates, limits] = await Promise.all([
-      api("/api/esp/campaigns"), api("/api/esp/halt"), api("/api/esp/templates"), api("/api/esp/limits")
+      api("/api/esp/campaigns"), api("/api/esp/halt"), api("/api/esp/templates").catch(() => ({ templates: [] })), api("/api/esp/limits")
     ]);
     espCampaignsState.campaigns = campaigns.campaigns || [];
     espCampaignsState.halt = halt.halt;

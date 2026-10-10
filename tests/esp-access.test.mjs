@@ -176,6 +176,36 @@ test("налаштування пошти ESP 1/2 теж за правами: п
   ]);
 });
 
+test("роль «лише запускає кампанії»: екран кампаній читається весь — шаблони теж; редагувати шаблони — ні", async () => {
+  // Продавець із правом «Запускати кампанії», без «Редагувати шаблони» (суддя, ESP 10, коло 1):
+  // GET /templates вимагав templates.edit, і екран кампаній показував лише помилку.
+  await changeAccess({ email: SELLER.email, permission: "campaigns.launch", grant: true }, ADMIN);
+  assert.equal(await can(SELLER, "templates.edit"), false);
+  // Кожен запит, яким екран кампаній вантажиться, — з його ж коду, щоб новий не проскочив повз тест.
+  const screen = readFileSync(new URL("../app/screens/esp-campaigns.js", import.meta.url), "utf8");
+  const load = screen.slice(screen.indexOf("export async function loadEspCampaigns"), screen.indexOf("async function loadEspPeople"));
+  const paths = [...load.matchAll(/api\(["`]\/api\/esp([^"`?$]+)/g)].map((match) => match[1]);
+  assert.deepEqual(paths, ["/campaigns", "/halt", "/templates", "/limits"]);
+  for (const path of paths) assert.equal(await can(SELLER, espRouteRight("GET", path)), true, `GET ${path}`);
+  assert.equal(await can(SELLER, espRouteRight("GET", "/campaigns/people")), true, "люди кампанії");
+
+  const esp = { templates: { list: () => [{ id: "t1", name: "UK first touch" }], create: async () => ({}) }, signature: { read: () => null } };
+  const call = async (method, path, body = {}) => {
+    let captured = null;
+    await handleEspApi({
+      request: { method, auth: { profile: SELLER } }, response: {}, url: new URL(`http://x/api/esp${path}`),
+      sendJson: (_response, status, payload) => { captured = { status, payload }; }, readJson: async () => body, esp
+    });
+    return captured;
+  };
+  const read = await call("GET", "/templates");
+  assert.equal(read.status, 200);
+  assert.deepEqual(read.payload.templates.map((row) => row.name), ["UK first touch"]);
+  assert.equal((await call("POST", "/templates", { name: "x", subject: "y", body: "z" })).status, 403, "створити шаблон — лише з templates.edit");
+  assert.equal((await call("PUT", "/signature", { name: "Mary" })).status, 403);
+  assert.equal((await call("POST", "/preview", {})).status, 403);
+});
+
 // ── секрети ───────────────────────────────────────────────────────────────
 
 test("стан секретів — лише назви й так/ні: ні значення, ні його початку, ні довжини", async () => {
