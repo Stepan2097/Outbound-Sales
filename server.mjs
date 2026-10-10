@@ -11,6 +11,9 @@ import { contactAsProspect, contactsConfigured, contactsMissingConfig, crmKeyKin
 import { handleKnowledgeLibraryApi } from "./knowledge/api.mjs";
 import { knowledgeExcerptsForPrompt, knowledgeFilesForProduct, loadKnowledgeLibrary } from "./knowledge/library.mjs";
 import { handleWarmupApi } from "./warmup/api.mjs";
+import { handleEspApi } from "./esp/api.mjs";
+import { connectorFromEnv } from "./esp/gmail.mjs";
+import { SenderGate, stateSenderStore } from "./esp/senders.mjs";
 import { createFileOnceSync, writeFileAtomic } from "./state/atomic-write.mjs";
 import { startScheduler } from "./warmup/scheduler.mjs";
 
@@ -232,6 +235,9 @@ const state = {
   // rather than a record of anything that happened. Null until the first read,
   // which migrates `warmupTargeting` into the list.
   warmupCampaigns: null,
+  // ESP 1: sending mailboxes Google stopped letting us act as, by address —
+  // why and since when. A person lifts each one; nothing retries on its own.
+  espSenderPauses: {},
   // Phase 1's single selection, superseded by the list above and kept exactly
   // as it was written: the migration reads it and never writes it, so a
   // rollback finds its targeting intact.
@@ -384,6 +390,24 @@ const state = {
   supabaseVault: null,
   postgresVault: null
 };
+
+// Which mailbox connector this server runs with (esp/gmail.mjs): the Gmail API
+// once a service-account key is in the environment, the stub until then. Every
+// send goes through the gate (esp/senders.mjs), which pauses a mailbox Google
+// stops letting us act as and refuses it until a person lifts the pause.
+const esp = (() => {
+  const { connector, keyError } = connectorFromEnv(process.env);
+  const store = stateSenderStore({
+    read: () => state.espSenderPauses,
+    write: async (value) => { state.espSenderPauses = value; await writePersistentWorkspaceState(); }
+  });
+  const gate = new SenderGate({
+    connector,
+    store,
+    notify: async (pause) => console.warn(`[esp] sender paused: ${pause.mailbox} — ${pause.code}: ${pause.reason}`)
+  });
+  return { connector, keyError, gate };
+})();
 
 /**
  * A model choice is a model and, optionally, how hard it should think.
@@ -742,6 +766,15 @@ async function handleApi(request, response, url) {
       }
     });
     if (!handled) sendJson(response, 404, { success: false, error: "Unknown warm-up endpoint." });
+    return;
+  }
+
+  // Cold email (ESP): the mailboxes and, later, the letters and the sequence.
+  // Its own modules under esp/; the connector is picked once, from the
+  // environment, and refuses to send anything real until ESP 11 is accepted.
+  if (url.pathname === "/api/esp" || url.pathname.startsWith("/api/esp/")) {
+    const handled = await handleEspApi({ request, response, url, sendJson, readJson: async (incoming) => { try { return await readJson(incoming); } catch { return null; } }, esp });
+    if (!handled) sendJson(response, 404, { success: false, error: "Unknown ESP endpoint." });
     return;
   }
 
@@ -3688,6 +3721,9 @@ function applyPersistentWorkspaceState(saved = {}) {
   if (Array.isArray(saved.warmupCampaigns)) {
     state.warmupCampaigns = saved.warmupCampaigns;
   }
+  if (saved.espSenderPauses && typeof saved.espSenderPauses === "object" && !Array.isArray(saved.espSenderPauses)) {
+    state.espSenderPauses = saved.espSenderPauses;
+  }
   state.providerRule = restoreProviderRule(saved.providerRule, state.providerRule);
   state.budgets = restoreBudgets(saved.budgets, state.budgets);
   state.aiModelDefaults = restoreAiModelDefaults(saved.aiModelDefaults, state.aiModelDefaults);
@@ -3924,6 +3960,7 @@ async function writeWorkspaceStateNow() {
       accountDossiers: state.accountDossiers,
       warmupCampaigns: state.warmupCampaigns,
       warmupTargeting: state.warmupTargeting,
+      espSenderPauses: state.espSenderPauses,
       providerRule: state.providerRule,
       budgets: state.budgets,
       aiModelDefaults: state.aiModelDefaults,

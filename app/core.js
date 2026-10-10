@@ -65,7 +65,7 @@ async function refresh() {
 
 export function render() {
   renderTopbar();
-  for (const hooks of screenHooks.values()) hooks.render?.();
+  for (const list of screenHooks.values()) for (const hooks of list) hooks.render?.();
   renderSidebarUser();
   refreshIcons();
 }
@@ -286,7 +286,7 @@ function setView(viewName) {
       account: "Налаштування"
     }[viewName] || "Outbound Sales OS";
   rememberView(viewName);
-  screenHooks.get(viewName)?.open?.();
+  for (const hooks of screenHooks.get(viewName) || []) hooks.open?.();
 }
 
 /**
@@ -301,7 +301,10 @@ function setView(viewName) {
 const screenHooks = new Map();
 
 export function onScreen(view, hooks) {
-  screenHooks.set(view, { ...screenHooks.get(view), ...hooks });
+  // A list, not one set: a screen can be drawn by more than one module (the
+  // settings and the ESP mailboxes share «Налаштування»), and a second
+  // registration must add to the first rather than replace its `open`.
+  screenHooks.set(view, [...(screenHooks.get(view) || []), hooks]);
 }
 
 export function refreshIcons() {

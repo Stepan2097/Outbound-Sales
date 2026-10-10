@@ -1,0 +1,78 @@
+/* ESP: «Пошта для розсилки» у Налаштуваннях (app/screens/esp-mailboxes.js). */
+
+.esp-facts {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.esp-facts > div {
+  display: grid;
+  grid-template-columns: minmax(140px, 220px) 1fr;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.esp-facts dt {
+  color: var(--muted);
+}
+
+.esp-facts dd {
+  margin: 0;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.esp-scopes {
+  display: block;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--surface-sunk);
+  color: var(--ink);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.esp-check-form {
+  margin-top: 12px;
+}
+
+.esp-check,
+.esp-key-error {
+  margin: 10px 0 0;
+}
+
+.esp-check.is-ok { color: var(--teal); }
+.esp-check.is-bad,
+.esp-key-error { color: var(--red); }
+.esp-check.is-busy { color: var(--muted); }
+
+@media (max-width: 640px) {
+  .esp-facts > div {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}
+
+/* Скринька на паузі після відмови Google — банер угорі блоку. */
+.esp-paused {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 12px;
+  align-items: start;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid var(--amber);
+  border-radius: 10px;
+  background: var(--surface-sunk);
+}
+
+.esp-paused > i { color: var(--amber); }
+.esp-paused p { margin: 4px 0; color: var(--ink); }
+.esp-paused small { color: var(--muted); }
+
+@media (max-width: 640px) {
+  .esp-paused { grid-template-columns: auto 1fr; }
+  .esp-paused button { grid-column: 1 / -1; }
+}

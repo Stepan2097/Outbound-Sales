@@ -106,6 +106,7 @@ const SAVED_AS = {
   accountDossiers: "accountDossiers",
   warmupCampaigns: "warmupCampaigns",
   warmupTargeting: "warmupTargeting",
+  espSenderPauses: "espSenderPauses",
   providerRule: "providerRule",
   budgets: "budgets",
   aiModelDefaults: "aiModelDefaults",

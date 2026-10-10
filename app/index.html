@@ -12,6 +12,7 @@
     <link rel="stylesheet" href="/styles/inbox.css" />
     <link rel="stylesheet" href="/styles/contacts.css" />
     <link rel="stylesheet" href="/styles/settings.css" />
+    <link rel="stylesheet" href="/styles/esp.css" />
     <script defer src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
     <script defer type="module" src="/main.js"></script>
   </head>
@@ -109,6 +110,17 @@
                   </form>
                 </div>
               </details>
+            </section>
+
+            <!-- ESP 1: з чим сервер ходить у Gmail; малює app/screens/esp-mailboxes.js, лише адміністраторові. -->
+            <section class="panel esp-mail-panel span-2" id="espMailPanel" hidden>
+              <div class="panel-heading">
+                <div>
+                  <h2>Пошта для розсилки</h2>
+                  <p>Скриньки, з яких підуть холодні листи: доступ через Gmail API.</p>
+                </div>
+              </div>
+              <div id="espMailBody"></div>
             </section>
 
             <section class="panel profile-admin span-2" id="accountSelfPanel">
