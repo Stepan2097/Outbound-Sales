@@ -5,7 +5,7 @@
 import { can, logAdminAction } from "./access.mjs";
 import { SKIP_REASON_LABEL, defaultFilters, refusedAtEnrolment } from "./filters.mjs";
 import { handleEspDataApi } from "./data-api.mjs";
-import { MailboxError } from "./gmail.mjs";
+import { MailboxError } from "./provider.mjs";
 import { CampaignError, parseLeadLines } from "./campaigns.mjs";
 import { composeLetter } from "./compose.mjs";
 import { ReplyError, conversations, quickReply } from "./conversations.mjs";

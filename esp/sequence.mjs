@@ -28,7 +28,7 @@
 
 import { CampaignError } from "./campaigns.mjs";
 import { composeLetter } from "./compose.mjs";
-import { MailboxError, SendingLocked } from "./gmail.mjs";
+import { MailboxError, SendingLocked } from "./provider.mjs";
 import { LetterError } from "./letter.mjs";
 import { COUNTING_ZONE, localTime, sendDecision, sendLedger, zonesFor } from "./limits.mjs";
 import { SenderPaused, SendingHalted } from "./senders.mjs";

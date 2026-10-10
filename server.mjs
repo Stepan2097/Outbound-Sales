@@ -15,6 +15,7 @@ import { knowledgeExcerptsForPrompt, knowledgeFilesForProduct, loadKnowledgeLibr
 import { handleWarmupApi } from "./warmup/api.mjs";
 import { handleEspApi } from "./esp/api.mjs";
 import { connectorFromEnv } from "./esp/gmail.mjs";
+import { MicrosoftGraphConnector, providerOfFromEnv, providerRouter } from "./esp/provider.mjs";
 import { SenderGate } from "./esp/senders.mjs";
 import { DEFAULT_SIGNATURE, templateStore } from "./esp/templates.mjs";
 import { handleUnsubscribe, unsubscribeSecretFromEnv } from "./esp/unsubscribe.mjs";
@@ -433,7 +434,10 @@ const state = {
 // send goes through the gate (esp/senders.mjs), which pauses a mailbox Google
 // stops letting us act as and refuses it until a person lifts the pause.
 const esp = (() => {
-  const { connector, keyError } = connectorFromEnv(process.env);
+  // ESP 17: each mailbox to its provider — Google by default, Microsoft for
+  // the domains in ESP_MICROSOFT_DOMAINS (not built yet: it says so).
+  const { connector: google, keyError } = connectorFromEnv(process.env);
+  const connector = providerRouter({ connectors: { gmail: google, microsoft: new MicrosoftGraphConnector() }, providerOf: providerOfFromEnv(process.env) });
   // ESP 9: a mailbox's pause lives in the sender registry (one truth, in the
   // journal, with its code) — and only a registered, active mailbox on a
   // sending domain gets past the gate at all. `espSenderPauses` is kept in the

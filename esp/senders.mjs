@@ -11,7 +11,7 @@
 // interface so it can live in the workspace state now and move into the
 // sender registry (ESP 9) without touching the gate.
 
-import { MailboxError, normalizeMailbox } from "./gmail.mjs";
+import { MailboxError, normalizeMailbox } from "./provider.mjs";
 import { assertPlainLetter } from "./letter.mjs";
 
 /**

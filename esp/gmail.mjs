@@ -22,6 +22,8 @@
 
 import { createSign, randomUUID } from "node:crypto";
 
+import { MailboxError, SendingLocked, normalizeMailbox } from "./provider.mjs";
+
 const TOKEN_URI = "https://oauth2.googleapis.com/token";
 const GMAIL = "https://gmail.googleapis.com/gmail/v1/users/me";
 
@@ -36,21 +38,9 @@ export const GMAIL_SCOPES = [
   "https://www.googleapis.com/auth/gmail.readonly"
 ];
 
-export class SendingLocked extends Error {
-  constructor() {
-    super("Справжня відправка вимкнена: до приймання ESP 11 листи назовні не йдуть.");
-    this.code = "sending_locked";
-  }
-}
-
-export class MailboxError extends Error {
-  constructor(message, { code, status = null, detail = null } = {}) {
-    super(message);
-    this.code = code;
-    this.status = status;
-    this.detail = detail;
-  }
-}
+// The errors and the address rule are the provider contract's (esp/provider.mjs),
+// re-exported so existing imports keep working.
+export { MailboxError, SendingLocked, normalizeMailbox } from "./provider.mjs";
 
 /**
  * The key file Google gives for a service account, checked for the three
@@ -97,13 +87,6 @@ export function signAssertion({ clientEmail, privateKey, tokenUri = TOKEN_URI },
   return `${header}.${claims}.${signer.sign(privateKey, "base64url")}`;
 }
 
-export function normalizeMailbox(value) {
-  const mailbox = String(value ?? "").trim().toLowerCase();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mailbox)) {
-    throw new MailboxError("Це не адреса скриньки.", { code: "bad_mailbox" });
-  }
-  return mailbox;
-}
 
 /**
  * Google's refusals, said as what to fix. The two that matter in practice:
