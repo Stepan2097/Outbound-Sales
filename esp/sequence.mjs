@@ -30,6 +30,7 @@ import { CampaignError } from "./campaigns.mjs";
 import { composeLetter } from "./compose.mjs";
 import { MailboxError, SendingLocked } from "./provider.mjs";
 import { LetterError } from "./letter.mjs";
+import { isHoliday } from "./holidays.mjs";
 import { COUNTING_ZONE, localTime, sendDecision, sendLedger, zonesFor } from "./limits.mjs";
 import { SenderPaused, SendingHalted } from "./senders.mjs";
 import { companyKey } from "./company.mjs";
@@ -40,14 +41,17 @@ export { SendingHalted };
 // bounced, or they asked to be left alone.
 const STOPPERS = { "message.replied": "replied", "message.bounced": "bounced", "contact.unsubscribed": "unsubscribed" };
 
-/** A date `days` working days (Mon–Fri) after `date` (YYYY-MM-DD). */
-export function addWorkingDays(date, days) {
+/**
+ * A date `days` working days (Mon–Fri, and not a public holiday of the
+ * recipient's `country` — ESP 17) after `date` (YYYY-MM-DD).
+ */
+export function addWorkingDays(date, days, country = "") {
   const at = new Date(`${date}T12:00:00Z`);
   let left = days;
   while (left > 0) {
     at.setUTCDate(at.getUTCDate() + 1);
     const weekday = at.getUTCDay();
-    if (weekday !== 0 && weekday !== 6) left -= 1;
+    if (weekday !== 0 && weekday !== 6 && !isHoliday(country, at.toISOString().slice(0, 10))) left -= 1;
   }
   return at.toISOString().slice(0, 10);
 }
@@ -96,7 +100,7 @@ function advance(enrollment, campaign, { messageId, threadId, subject, reference
     step: next,
     status: done ? "done" : "active",
     lastSent: { messageId, threadId: threadId || null, subject, references: references || [], at },
-    nextDueDate: done ? null : addWorkingDays(today, campaign.steps[next].delayDays),
+    nextDueDate: done ? null : addWorkingDays(today, campaign.steps[next].delayDays, enrollment.lead?.country),
     ...(done ? { finishedAt: at } : {})
   };
 }
@@ -356,7 +360,7 @@ export async function runTick({ now = new Date(), dryRun = false, ...deps }) {
  * working days on when they said none. Never earlier than it already was.
  */
 export function postponedDue(enrollment, { until = null, today }) {
-  const back = until ? addWorkingDays(until, 1) : addWorkingDays(today, 3);
+  const back = until ? addWorkingDays(until, 1, enrollment.lead?.country) : addWorkingDays(today, 3, enrollment.lead?.country);
   return enrollment.nextDueDate && enrollment.nextDueDate > back ? enrollment.nextDueDate : back;
 }
 

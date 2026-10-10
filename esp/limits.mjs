@@ -22,6 +22,8 @@
 
 import { createHash } from "node:crypto";
 
+import { isHoliday } from "./holidays.mjs";
+
 export const RAMP_LIMITS = [5, 10, 15, 20, 25, 30, 35];
 export const SENDER_DAILY_CAP = 35;
 export const DOMAIN_DAILY_LIMIT = 105;
@@ -102,23 +104,27 @@ export function localTime(instant, zone) {
   return { weekday, hour: Number(parts.hour), minute: Number(parts.minute), date: `${parts.year}-${parts.month}-${parts.day}` };
 }
 
-/** Is it a working moment — Monday to Friday, 08:00–17:00 — in every one of these zones? */
-export function inWindow(instant, zones) {
+/**
+ * Is it a working moment — Monday to Friday, 08:00–17:00, not a public
+ * holiday of the recipient's country (ESP 17) — in every one of these zones?
+ */
+export function inWindow(instant, zones, country = "") {
   return zones.length > 0 && zones.every((zone) => {
     const time = localTime(instant, zone);
-    return time.weekday <= 5 && time.hour >= WINDOW.startHour && time.hour < WINDOW.endHour;
+    return time.weekday <= 5 && time.hour >= WINDOW.startHour && time.hour < WINDOW.endHour && !isHoliday(country, time.date);
   });
 }
 
 /**
  * The next working moment for these zones, minute by minute in 15-minute
- * steps (a week at most): when to come back, not a promise of a send.
+ * steps (two weeks at most — Christmas, a holiday and a weekend fit): when to
+ * come back, not a promise of a send.
  */
-export function nextWindowOpen(instant, zones) {
+export function nextWindowOpen(instant, zones, country = "") {
   if (!zones.length) return null;
   const start = Math.ceil(instant.getTime() / (15 * 60_000)) * 15 * 60_000;
-  for (let at = start; at < start + 8 * 24 * 3600_000; at += 15 * 60_000) {
-    if (inWindow(new Date(at), zones)) return new Date(at);
+  for (let at = start; at < start + 15 * 24 * 3600_000; at += 15 * 60_000) {
+    if (inWindow(new Date(at), zones, country)) return new Date(at);
   }
   return null;
 }
@@ -189,10 +195,13 @@ export function sendDecision({ sender, recipient = {}, ledger, now = new Date(),
   if (!zones.length) {
     return refuse("unknown_timezone", "Невідомо, котра в одержувача година: у ліда немає ні часового поясу, ні знайомої країни.", null);
   }
-  if (!inWindow(now, zones)) {
+  const country = recipient.country || "";
+  if (!inWindow(now, zones, country)) {
     const local = localTime(now, zones[0]);
-    const reason = local.weekday > 5 ? "weekend" : "outside_window";
-    return refuse(reason, reason === "weekend" ? "У одержувача вихідний." : "У одержувача зараз не 08:00–17:00.", nextWindowOpen(now, zones));
+    const holiday = local.weekday <= 5 && zones.some((zone) => isHoliday(country, localTime(now, zone).date));
+    const reason = local.weekday > 5 ? "weekend" : holiday ? "holiday" : "outside_window";
+    const message = { weekend: "У одержувача вихідний.", holiday: `У одержувача державне свято (${country}, ${local.date}).`, outside_window: "У одержувача зараз не 08:00–17:00." }[reason];
+    return refuse(reason, message, nextWindowOpen(now, zones, country));
   }
 
   // Not straight at the window's opening, and never on the hour: the first
