@@ -6,7 +6,7 @@ import test from "node:test";
 
 import { applyAlerts } from "../esp/alerts.mjs";
 import { allEntries, append, useJournal } from "../esp/journal.mjs";
-import { COMPARE_MIN_SENT, compareSenders, dnsChanges, heatwaveChecker, runDailyMonitor } from "../esp/monitor.mjs";
+import { COMPARE_MIN_SENT, HEATWAVE_LOOKUP, compareSenders, dnsChanges, heatwaveChecker, readHeatwavePage, runDailyMonitor } from "../esp/monitor.mjs";
 import { addDomain, checkDomain, registry, setDomainStatus, setSenderStatus } from "../esp/registry.mjs";
 
 /**
@@ -21,6 +21,9 @@ test.beforeEach(async () => {
   useJournal(join(dir, "esp-journal.jsonl"));
 });
 test.afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
+
+// Heatwave is read over HTTP; the tests never go to the network.
+const CLEAN_HEATWAVE = async () => ({ status: "clean" });
 
 const RUNNING = [{ id: "c1", name: "UK operators", state: "running" }];
 const sent = (from, to, campaignId = "c1") => ({ type: "message.sent", contact: to, data: { from, campaignId } });
@@ -95,15 +98,15 @@ test("щоденний монітор: перший прогін — знімо�
   const dns = fakeDns(world);
   const env = { ESP_MONITOR_DOMAINS: "advantage-agency.co" };
   const day1 = new Date("2026-10-10T07:00:00Z");
-  const first = await runDailyMonitor({ now: day1, dns, env });
+  const first = await runDailyMonitor({ now: day1, dns, env, heatwave: CLEAN_HEATWAVE });
   assert.equal(first.skipped, false);
   assert.deepEqual(first.actions, [], "перший знімок — нічого порівнювати");
   assert.deepEqual(first.domains.map((row) => row.domain), ["send.example.com", "advantage-agency.co"]);
-  assert.equal((await runDailyMonitor({ now: day1, dns, env })).skipped, true, "двічі за день — ні");
+  assert.equal((await runDailyMonitor({ now: day1, dns, env, heatwave: CLEAN_HEATWAVE })).skipped, true, "двічі за день — ні");
 
   delete world.txt["send.example.com"];
   world.listed = ["send.example.com.multi.surbl.org"];
-  const second = await runDailyMonitor({ now: new Date("2026-10-11T07:00:00Z"), dns, env, force: true });
+  const second = await runDailyMonitor({ now: new Date("2026-10-11T07:00:00Z"), dns, env, force: true, heatwave: CLEAN_HEATWAVE });
   const kinds = second.actions.map((row) => [row.kind, row.code, row.domain]);
   assert.deepEqual(kinds, [["pause_domain", "blocklisted", "send.example.com"], ["alert", "dns_changed", "send.example.com"]]);
   assert.match(second.actions[1].reason, /SPF зник/);
@@ -123,16 +126,15 @@ test("щоденний монітор: перший прогін — знімо�
 
 test("домен компанії поза реєстром: лістинг — лише тривога (паузити нічого), а знімки DNS — свої", async () => {
   const world = { mx: { "advantage-agency.co": [{ exchange: "aspmx.l.google.com" }] }, txt: { "advantage-agency.co": [["v=spf1 ~all"]] }, listed: ["advantage-agency.co.multi.surbl.org"] };
-  const result = await runDailyMonitor({ now: new Date("2026-10-10T07:00:00Z"), dns: fakeDns(world), env: { ESP_MONITOR_DOMAINS: "advantage-agency.co" } });
+  const result = await runDailyMonitor({ now: new Date("2026-10-10T07:00:00Z"), dns: fakeDns(world), env: { ESP_MONITOR_DOMAINS: "advantage-agency.co" }, heatwave: CLEAN_HEATWAVE });
   assert.deepEqual(result.actions.map((row) => [row.kind, row.domain]), [["alert", "advantage-agency.co"]]);
   assert.ok((await allEntries()).some((entry) => entry.type === "esp.monitor.domain" && entry.data.domain === "advantage-agency.co"));
 });
 
-test("Spamhaus без ключа DQS і Validity Heatwave без доступу — «не перевірено», а не «чисто»; виведений домен не дивимось", async () => {
-  assert.equal((await heatwaveChecker({})()).status, "not_checked");
+test("Spamhaus без ключа DQS — «не перевірено», а не «чисто»; виведений домен не дивимось", async () => {
   await addDomain({ domain: "old.example.com", status: "ramp" }, "a");
   await setDomainStatus({ domain: "old.example.com", status: "retired", reason: "спалений" }, "a");
-  const result = await runDailyMonitor({ now: new Date("2026-10-10T07:00:00Z"), dns: fakeDns({ mx: {}, txt: {}, listed: [] }), env: { ESP_MONITOR_DOMAINS: "" } });
+  const result = await runDailyMonitor({ now: new Date("2026-10-10T07:00:00Z"), dns: fakeDns({ mx: {}, txt: {}, listed: [] }), env: { ESP_MONITOR_DOMAINS: "" }, heatwave: CLEAN_HEATWAVE });
   assert.deepEqual(result.domains, []);
   await addDomain({ domain: "live.example.com", status: "active" }, "a");
   await checkDomain({ domain: "live.example.com" }, "a", fakeDns({ mx: {}, txt: {}, listed: [] }), {});
@@ -152,4 +154,45 @@ test("сендер, поставлений на паузу порівняння�
   const [sender] = (await registry()).senders;
   assert.equal(sender.status, "paused");
   assert.equal(sender.history.at(-1).code, "no_replies_vs_partner");
+});
+
+// ── Validity Heatwave ─────────────────────────────────────────────────────
+
+// The pieces of lookup.validity.tools that carry the verdict, as served on 10.10.2026.
+const HEATWAVE_LISTED = `<div class="d-flex"><span class="status-pill sm status-listed"><i class="bi bi-exclamation-octagon-fill" aria-hidden="true"></i> Listed</span>
+  <span class="status-pill sm status-prewarming">Pre-warming</span></div>
+  <div class="stat-label" style="font-size:.7rem;color:#7D7E7E">Classification</div>
+  <div style="color:#3730A3;font-weight:700"><i class="bi bi-hourglass-split" aria-hidden="true"></i> Pre-warming</div>`;
+const HEATWAVE_CLEAR = `<div class="card p-4"><span class="status-pill status-clear"><i class="bi bi-check-circle-fill" aria-hidden="true"></i> Not currently listed</span></div>
+  <p>Heatwave found 5 listed domains with names similar to example.</p>
+  <table><tr><td>examplemail.co</td><td><span class="status-pill sm status-listed">Listed</span></td></tr></table>`;
+
+test("Heatwave: «Listed» — у блоклисті; «Not currently listed» — чисто, навіть коли нижче є схожі домени у списку; інша сторінка — «не перевірено»", () => {
+  assert.deepEqual(readHeatwavePage(HEATWAVE_LISTED), { status: "listed", classification: "Pre-warming" });
+  assert.deepEqual(readHeatwavePage(HEATWAVE_CLEAR), { status: "clean" });
+  assert.equal(readHeatwavePage("<html>Service temporarily unavailable</html>").status, "not_checked");
+});
+
+test("Heatwave питається публічним пошуком Validity; помилка, таймаут чи 5xx — «не перевірено», а не «чисто»", async () => {
+  const asked = [];
+  const page = (body, status = 200) => async (url) => { asked.push(url); return { ok: status < 400, status, text: async () => body }; };
+  assert.equal((await heatwaveChecker({}, page(HEATWAVE_LISTED))("send.example.com")).status, "listed");
+  assert.equal(asked[0], `${HEATWAVE_LOOKUP}?domain=send.example.com`);
+  assert.equal((await heatwaveChecker({}, page(HEATWAVE_CLEAR, 503))("a.com")).status, "not_checked");
+  assert.equal((await heatwaveChecker({}, async () => { throw new Error("ECONNRESET"); })("a.com")).status, "not_checked");
+  assert.equal((await heatwaveChecker({ ESP_HEATWAVE: "off" }, page(HEATWAVE_LISTED))("a.com")).status, "not_checked");
+});
+
+test("домен реєстру в Heatwave — пауза домену й тривога, як за будь-яким іншим блоклистом", async () => {
+  await addDomain({ domain: "send.example.com", status: "active" }, "a");
+  const fetchImpl = async (url) => ({ ok: true, status: 200, text: async () => (url.includes("send.example.com") ? HEATWAVE_LISTED : HEATWAVE_CLEAR) });
+  const result = await runDailyMonitor({
+    now: new Date("2026-10-10T07:00:00Z"), dns: fakeDns({ mx: {}, txt: {}, listed: [] }), env: { ESP_MONITOR_DOMAINS: "advantage-agency.co" },
+    heatwave: heatwaveChecker({}, fetchImpl)
+  });
+  assert.deepEqual(result.actions.map((row) => [row.kind, row.domain, row.code]), [["pause_domain", "send.example.com", "blocklisted"]]);
+  assert.match(result.actions[0].reason, /heatwave/);
+  await applyAlerts({ actions: result.actions, entries: [], setSenderStatus, setDomainStatus, pauseCampaign: async () => null, append });
+  assert.equal((await registry()).domains.find((row) => row.domain === "send.example.com").status, "paused");
+  assert.ok((await allEntries()).some((entry) => entry.type === "esp.alert" && entry.data?.domain === "send.example.com"));
 });

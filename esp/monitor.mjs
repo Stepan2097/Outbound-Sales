@@ -99,14 +99,41 @@ export function dnsChanges(before, after) {
 }
 
 /**
- * Validity Heatwave has no public lookup this code knows how to call: it is a
- * paid service behind an account. Until its access is given, it says so instead
- * of saying "clean". `checker` is where its client goes when it exists.
+ * Validity Heatwave — the blocklist of domains built by synthetic warming. Its
+ * DNS zone (`bl.validity.tools`) answers only Validity's partners, but the
+ * public lookup does not: `lookup.validity.tools/?domain=` says «Listed» or
+ * «Not currently listed» for the exact domain, and robots.txt allows it. A few
+ * domains once a day is what a person checking by hand would load.
+ *
+ * Read from the page: the first status pill is the verdict for the domain asked
+ * (`status-listed` / `status-clear`); the related-domains table below comes
+ * after it. A page without that pill — Validity changed it, or answered with an
+ * error — is «не перевірено», never «чисто».
  */
-export function heatwaveChecker(env = process.env) {
-  return async () => (env.VALIDITY_HEATWAVE_API_KEY
-    ? { status: "not_checked", why: "ключ Validity задано, але клієнта Heatwave ще не написано" }
-    : { status: "not_checked", why: "немає доступу до Validity Heatwave" });
+export const HEATWAVE_LOOKUP = "https://lookup.validity.tools/";
+
+export function readHeatwavePage(html) {
+  const pill = /class="status-pill[^"]*\bstatus-(listed|clear)\b/.exec(String(html || ""));
+  if (!pill) return { status: "not_checked", why: "сторінка Validity Heatwave не дала вердикту" };
+  if (pill[1] === "clear") return { status: "clean" };
+  const classification = /Classification<\/div>\s*<div[^>]*>(?:\s*<i[^>]*><\/i>)?\s*([^<]{1,60})</.exec(html)?.[1]?.trim() || "";
+  return { status: "listed", ...(classification ? { classification } : {}) };
+}
+
+export function heatwaveChecker(env = process.env, fetchImpl = globalThis.fetch) {
+  return async (domain) => {
+    if (env.ESP_HEATWAVE === "off") return { status: "not_checked", why: "перевірку Heatwave вимкнено (ESP_HEATWAVE=off)" };
+    try {
+      const response = await fetchImpl(`${HEATWAVE_LOOKUP}?domain=${encodeURIComponent(domain)}`, {
+        headers: { "User-Agent": "advantage-outbound-monitor (daily check of own sending domains)" },
+        signal: AbortSignal.timeout(20_000)
+      });
+      if (!response.ok) return { status: "not_checked", why: `Validity Heatwave відповів ${response.status}` };
+      return readHeatwavePage(await response.text());
+    } catch (error) {
+      return { status: "not_checked", why: `Validity Heatwave недоступний: ${error?.name === "TimeoutError" ? "немає відповіді за 20 с" : error?.message || "помилка мережі"}` };
+    }
+  };
 }
 
 /**

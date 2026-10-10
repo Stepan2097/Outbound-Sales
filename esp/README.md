@@ -126,7 +126,8 @@ await recordFailed(sending, { error });                   // не пішло
 - **Щодня** (`runDailyMonitor`, сервер питає щогодини, біжить раз на добу; `ESP_MONITOR=off` вимикає):
   усі невиведені домени реєстру й домени компанії (`ESP_MONITOR_DOMAINS`, за замовчуванням
   `advantage-agency.co`). Блоклисти — Spamhaus DBL (лише з `SPAMHAUS_DQS_KEY`), SURBL, Validity Heatwave
-  (поки без доступу — «не перевірено»). Лістинг домену реєстру → `pause_domain`; домену компанії —
+  (публічний пошук `lookup.validity.tools/?domain=`: DNS-зона `bl.validity.tools` відповідає лише партнерам;
+  сторінка без вердикту, помилка чи таймаут — «не перевірено», не «чисто»; `ESP_HEATWAVE=off` вимикає). Лістинг домену реєстру → `pause_domain`; домену компанії —
   лише тривога. DNS (SPF, DKIM за селектором, DMARC, MX) порівнюється з минулим знімком: зникло чи
   змінилось → тривога без паузи (зміну міг зробити хтось свідомо).
 - `POST /api/esp/monitor/run` — перевірити зараз (право реєстру); `GET /api/esp/monitor` — остання перевірка й тривоги.

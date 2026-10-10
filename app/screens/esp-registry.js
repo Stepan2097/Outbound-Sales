@@ -171,7 +171,7 @@ export function renderEspRegistry() {
     <p class="esp-subtle">${monitor.lastRun
       ? `Остання перевірка DNS і блоклистів: ${escapeHtml(new Date(monitor.lastRun.at).toLocaleString())} — доменів ${monitor.lastRun.domains?.length ?? 0}, тривог ${monitor.lastRun.alarms ?? 0}.`
       : "DNS і блоклисти ще жодного разу не перевіряли автоматично."}
-      Блоклисти: Spamhaus DBL (лише з ключем DQS), SURBL, Validity Heatwave (поки без доступу). Лістинг — пауза домену; зміна SPF, DKIM, DMARC чи MX — тривога.
+      Блоклисти: Spamhaus DBL (лише з ключем DQS), SURBL, Validity Heatwave (публічний пошук Validity). Лістинг — пауза домену; зміна SPF, DKIM, DMARC чи MX — тривога.
       Сендер без жодної відповіді на ${monitor.compareMinSent} листів, коли напарнику в кампанії відповідають, — на паузу.</p>
     ${monitor.extraDomains.map((row) => `<div class="esp-row"><div class="esp-row-main"><strong>${escapeHtml(row.domain)}</strong> <span class="esp-subtle">домен компанії — під наглядом, не для розсилки</span></div>
       <div class="esp-row-dns">${espDnsHtml(row.checks)}</div></div>`).join("")}

@@ -18,7 +18,7 @@ export async function loadEspAlerts() {
         <div>
           <strong>${escapeHtml(alert.title)}</strong>
           <p>${escapeHtml(alert.reason)}</p>
-          <small>${escapeHtml(new Date(alert.at).toLocaleString("uk-UA", { dateStyle: "short", timeStyle: "short" }))} · ${alert.kind === "pause_sender" ? "зняти паузу — у реєстрі відправників, коли причину усунуто" : "запустити знову — у списку кампаній, коли джерело перевірено"}${telegram ? " · надіслано в Telegram" : ""}</small>
+          <small>${escapeHtml(new Date(alert.at).toLocaleString("uk-UA", { dateStyle: "short", timeStyle: "short" }))} · ${alert.kind === "pause_sender" ? "зняти паузу — у реєстрі відправників, коли причину усунуто" : alert.kind === "pause_domain" ? "зняти паузу — у реєстрі доменів, коли домен вийшов зі списку" : alert.kind === "alert" ? "нічого не поставлено на паузу — перевірте" : "запустити знову — у списку кампаній, коли джерело перевірено"}${telegram ? " · надіслано в Telegram" : ""}</small>
         </div>
       </div>`).join(""));
   } catch {
