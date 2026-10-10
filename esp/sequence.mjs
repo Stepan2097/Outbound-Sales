@@ -32,6 +32,7 @@ import { MailboxError, SendingLocked } from "./gmail.mjs";
 import { LetterError } from "./letter.mjs";
 import { COUNTING_ZONE, localTime, sendDecision, sendLedger, zonesFor } from "./limits.mjs";
 import { SenderPaused, SendingHalted } from "./senders.mjs";
+import { companyKey } from "./company.mjs";
 
 export { SendingHalted };
 
@@ -87,6 +88,9 @@ function advance(enrollment, campaign, { messageId, threadId, subject, reference
   const done = next >= campaign.steps.length;
   return {
     ...enrollment,
+    // ESP 13: when this person first heard from us — what «new contacts from
+    // one company today» counts.
+    ...(enrollment.step === 0 ? { firstSentAt: at } : {}),
     step: next,
     status: done ? "done" : "active",
     lastSent: { messageId, threadId: threadId || null, subject, references: references || [], at },
@@ -112,6 +116,21 @@ export async function runTick({ now = new Date(), dryRun = false, ...deps }) {
 
   const entries = [...await deps.journal.allEntries()];
   const senders = new Map((await deps.registry.senders()).map((sender) => [sender.email, sender]));
+  // ESP 13: per company, today's first letters (across every campaign) and
+  // the domains its live chains run from. Kept up to date within the pass.
+  const countingDay = localTime(now, COUNTING_ZONE).date;
+  const everyone = deps.campaigns.enrollments();
+  const companyToday = new Map();
+  const companyDomains = new Map();
+  for (const row of everyone) {
+    const key = companyKey(row.lead || { email: row.email });
+    if (!key) continue;
+    if (row.firstSentAt && localTime(new Date(row.firstSentAt), COUNTING_ZONE).date === countingDay) companyToday.set(key, (companyToday.get(key) || 0) + 1);
+    if ((row.status === "active" || row.status === "uncertain") && row.step > 0) {
+      if (!companyDomains.has(key)) companyDomains.set(key, new Set());
+      companyDomains.get(key).add(row.sender.split("@")[1]);
+    }
+  }
 
   for (const campaign of deps.campaigns.list().filter((row) => row.state === "running")) {
     for (const enrollment of deps.campaigns.enrollmentsOf(campaign.id).filter((row) => row.status === "active")) {
@@ -147,6 +166,17 @@ export async function runTick({ now = new Date(), dryRun = false, ...deps }) {
           skip(decision.reason);
         }
         continue;
+      }
+
+      // ESP 13, first letters only (a follow-up is a conversation already
+      // under way): at most two new people from one company a day, and never
+      // a second of our domains on a company one of them is already writing to.
+      const company = enrollment.step === 0 ? companyKey(enrollment.lead || { email: enrollment.email }) : null;
+      const domain = enrollment.sender.split("@")[1];
+      if (company) {
+        if ((companyToday.get(company) || 0) >= COMPANY_DAILY_NEW) { skip("company_daily_limit"); continue; }
+        const running = companyDomains.get(company);
+        if (running && [...running].some((other) => other !== domain)) { skip("company_other_domain"); continue; }
       }
 
       // The idempotency key: this campaign, this person, this step.
@@ -194,6 +224,7 @@ export async function runTick({ now = new Date(), dryRun = false, ...deps }) {
 
       if (dryRun) {
         summary.planned.push({ campaign: campaign.name, email: enrollment.email, sender: enrollment.sender, step: enrollment.step + 1, subject: letter.subject });
+        if (company) countCompany(companyToday, companyDomains, company, domain);
         // Counted as if sent, so the plan respects the same limits the send would.
         entries.push({ seq: -entries.length, type: "message.sending", at: now.toISOString(), contact: enrollment.email, data: { from: enrollment.sender } });
         continue;
@@ -223,6 +254,7 @@ export async function runTick({ now = new Date(), dryRun = false, ...deps }) {
         await deps.campaigns.saveEnrollment(advance(enrollment, campaign, {
           messageId: letter.messageId, threadId: result.threadId, subject: letter.subject, references: letter.references, at: now.toISOString()
         }, today));
+        if (company) countCompany(companyToday, companyDomains, company, domain);
         summary.sent += 1;
       } catch (error) {
         const definite = error instanceof SendingHalted || error instanceof SendingLocked || error instanceof SenderPaused
@@ -247,6 +279,15 @@ export async function runTick({ now = new Date(), dryRun = false, ...deps }) {
     }
   }
   return summary;
+}
+
+// ESP 13: «не більше 2 нових контактів з однієї компанії на день».
+export const COMPANY_DAILY_NEW = 2;
+
+function countCompany(today, domains, company, domain) {
+  today.set(company, (today.get(company) || 0) + 1);
+  if (!domains.has(company)) domains.set(company, new Set());
+  domains.get(company).add(domain);
 }
 
 /**

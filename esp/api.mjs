@@ -7,9 +7,11 @@ import { handleEspDataApi } from "./data-api.mjs";
 import { MailboxError } from "./gmail.mjs";
 import { CampaignError, parseLeadLines } from "./campaigns.mjs";
 import { composeLetter } from "./compose.mjs";
-import { allEntries } from "./journal.mjs";
+import { allEntries, append } from "./journal.mjs";
+import { recentContactBlocks } from "./company.mjs";
+import { applyRampReviews, reviewRamp } from "./ramp.mjs";
 import { DOMAIN_DAILY_LIMIT, GAP_MINUTES, WINDOW, sendLedger, senderDailyLimit } from "./limits.mjs";
-import { registry } from "./registry.mjs";
+import { registry, updateSender } from "./registry.mjs";
 import { LetterError, assertPlainLetter } from "./letter.mjs";
 import { TEMPLATE_VARIABLES, TemplateError, prepareTemplate } from "./template.mjs";
 import { DEFAULT_SIGNATURE, prepareSignature } from "./templates.mjs";
@@ -23,7 +25,9 @@ import { DEFAULT_SIGNATURE, prepareSignature } from "./templates.mjs";
  */
 export function espRouteRight(method, path) {
   if (path === "/halt") return method === "GET" ? "replies.read" : "stop.all";
-  if (path === "/limits" || (method === "GET" && path.startsWith("/campaigns"))) return "replies.read";
+  if (path === "/limits" || path === "/ramp" || (method === "GET" && path.startsWith("/campaigns"))) return "replies.read";
+  // ESP 13: stepping a sender's ramp up (or holding it) is a limit.
+  if (path.startsWith("/ramp/")) return "limits.change";
   if (path.startsWith("/campaigns")) return "campaigns.launch";
   if (path === "/templates" || path === "/signature" || path === "/preview") return "templates.edit";
   if (path.startsWith("/senders/")) return "limits.change";
@@ -165,9 +169,12 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
       if (entry.type === "contact.unsubscribed") gone.set(entry.contact, "unsubscribed");
       else if (entry.type === "message.bounced" && /^5\./.test(String(entry.data?.code || ""))) gone.set(entry.contact, "bounced");
     }
+    // ESP 13: written to in the last 90 days without an answer, or answered
+    // ever — not put into a sequence again.
+    const recent = recentContactBlocks(entries);
     const { leads, rejected } = parseLeadLines(body.text);
     try {
-      const result = await esp.campaigns.enroll(String(body.id || ""), leads, { blocked: (email) => gone.get(email) || null });
+      const result = await esp.campaigns.enroll(String(body.id || ""), leads, { blocked: (email) => gone.get(email) || recent(email) });
       await logged("campaign_leads_added", { id: String(body.id || ""), added: result.added.length });
       sendJson(response, 200, { success: true, added: result.added.length, skipped: result.skipped, rejected });
     } catch (error) {
@@ -190,6 +197,22 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
   if (method === "GET" && path === "/campaigns/plan") {
     const plan = await esp.tick({ dryRun: true });
     sendJson(response, 200, { success: true, sequenceOn: Boolean(esp.sequenceOn), ...plan });
+    return true;
+  }
+
+  // ── ESP 13: the ramp, reviewed on a clean week ─────────────────────────
+  if (method === "GET" && path === "/ramp") {
+    const now = new Date();
+    const [{ senders }, entries] = await Promise.all([registry(), allEntries()]);
+    sendJson(response, 200, { success: true, reviews: senders.filter((sender) => sender.effectiveStatus === "active").map((sender) => reviewRamp(sender, entries, { now })) });
+    return true;
+  }
+
+  if (method === "POST" && path === "/ramp/review") {
+    const [{ senders }, entries] = await Promise.all([registry(), allEntries()]);
+    const results = await applyRampReviews({ senders, entries, updateSender, append, actor });
+    if (results.length) logged("esp.ramp.reviewed", { results: results.map((row) => ({ email: row.email, action: row.action, stage: row.stage, reasons: row.reasons })) });
+    sendJson(response, 200, { success: true, results });
     return true;
   }
 

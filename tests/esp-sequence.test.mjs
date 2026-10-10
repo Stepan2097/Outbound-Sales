@@ -225,14 +225,15 @@ test("a pause at every level holds the letter: campaign, sender, domain", async 
 test("a reply, a bounce or an unsubscribe stops the person's chain", async (t) => {
   const w = await world(t);
   const campaign = await w.campaigns.create({ name: "N", steps: w.steps, senders: ["anna@advantage-mail.com"] });
-  const people = ["replied", "bounced", "unsubscribed"].map((kind) => ({ email: `${kind}@example.com`, name: "Olena", company: "X", country: "Poland" }));
+  // Three companies: ESP 13 lets only two new people from one company a day.
+  const people = ["replied", "bounced", "unsubscribed"].map((kind) => ({ email: `${kind}@${kind}-co.com`, name: "Olena", company: "X", country: "Poland" }));
   await w.campaigns.enroll(campaign.id, people);
   await w.campaigns.setState(campaign.id, "running");
   for (let minute = 0; minute < 200; minute += 45) await w.tick(at(0, minute));
   assert.equal(w.connector.sent.length, 3);
-  await append({ type: "message.replied", contact: "replied@example.com", data: {} });
-  await append({ type: "message.bounced", contact: "bounced@example.com", data: { code: "5.1.1" } });
-  await append({ type: "contact.unsubscribed", contact: "unsubscribed@example.com", data: {} });
+  await append({ type: "message.replied", contact: "replied@replied-co.com", data: {} });
+  await append({ type: "message.bounced", contact: "bounced@bounced-co.com", data: { code: "5.1.1" } });
+  await append({ type: "contact.unsubscribed", contact: "unsubscribed@unsubscribed-co.com", data: {} });
   const pass = await w.tick(at(3));
   assert.deepEqual([pass.sent, pass.stopped], [0, 3]);
   assert.deepEqual(w.campaigns.enrollmentsOf(campaign.id).map((row) => row.reason).sort(), ["bounced", "replied", "unsubscribed"]);
@@ -241,7 +242,8 @@ test("a reply, a bounce or an unsubscribe stops the person's chain", async (t) =
 test("a big queue still goes out within the sender's ramp and its gaps; the dry run says the same and sends nothing", async (t) => {
   const w = await world(t, { rampStage: 5 });
   const campaign = await w.campaigns.create({ name: "Big", steps: w.steps, senders: ["anna@advantage-mail.com"] });
-  const lines = Array.from({ length: 40 }, (_, index) => `lead${index}@example.com, Lead ${index}, Co ${index}, Poland`).join("\n");
+  // Forty people from forty companies, so only the sender's ramp holds them back.
+  const lines = Array.from({ length: 40 }, (_, index) => `lead${index}@company${index}.com, Lead ${index}, Co ${index}, Poland`).join("\n");
   const { leads } = parseLeadLines(lines);
   assert.equal((await w.campaigns.enroll(campaign.id, leads)).added.length, 40);
   await w.campaigns.setState(campaign.id, "running");

@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { CHANNEL_RULES, LANGUAGES, buildFallbackDrafts, draftsPromptPayload, normalizeDrafts, normalizeLanguage } from "./contacts/drafts.mjs";
 import { contactAsProspect, contactsConfigured, contactsMissingConfig, crmKeyKind, folderContactAt, listContactFolders, listFolderContacts, searchFolderContacts, readContact, supabaseKeyKind } from "./contacts/store.mjs";
 import { handleKnowledgeLibraryApi } from "./knowledge/api.mjs";
-import { allEntries, useJournal } from "./esp/journal.mjs";
+import { allEntries, append as espAppend, useJournal } from "./esp/journal.mjs";
 import { logAdminAction } from "./esp/access.mjs";
 import { knowledgeExcerptsForPrompt, knowledgeFilesForProduct, loadKnowledgeLibrary } from "./knowledge/library.mjs";
 import { handleWarmupApi } from "./warmup/api.mjs";
@@ -20,7 +20,8 @@ import { DEFAULT_SIGNATURE, templateStore } from "./esp/templates.mjs";
 import { handleUnsubscribe, unsubscribeSecretFromEnv } from "./esp/unsubscribe.mjs";
 import { privacyPage } from "./esp/notice.mjs";
 import { recordAboutContact, recordFailed, recordSending, recordSent } from "./esp/messages.mjs";
-import { canSend as espCanSend, registry as espRegistry } from "./esp/registry.mjs";
+import { canSend as espCanSend, registry as espRegistry, updateSender as espUpdateSender } from "./esp/registry.mjs";
+import { applyRampReviews } from "./esp/ramp.mjs";
 import { campaignStore } from "./esp/campaigns.mjs";
 import { runTick, startSequence } from "./esp/sequence.mjs";
 import { createFileOnceSync, writeFileAtomic } from "./state/atomic-write.mjs";
@@ -582,7 +583,16 @@ server.listen(port, () => {
   // so they begin and end with the process that serves /agent/due.
   startScheduler();
   // ESP 5: the cold-email chain, only when switched on (see `esp` above).
-  if (esp.sequenceOn) startSequence({ tick: () => esp.tick() });
+  if (esp.sequenceOn) {
+    startSequence({ tick: () => esp.tick() });
+    // ESP 13: the ramp is looked at hourly; each sender is due once a week.
+    setInterval(() => {
+      void Promise.all([espRegistry(), allEntries()])
+        .then(([{ senders }, entries]) => applyRampReviews({ senders, entries, updateSender: espUpdateSender, append: espAppend }))
+        .then((results) => { if (results.length) console.log("[esp] ramp", JSON.stringify(results.map((row) => [row.email, row.action, row.reasons]))); })
+        .catch((error) => console.error("[esp] ramp review failed:", error.message));
+    }, 3600_000).unref?.();
+  }
   // Дослідження, яке урвав перезапуск, доробляється саме — з тієї стадії, на
   // якій його застали. Після того, як порт уже слухається, щоб сторінка бачила
   // прогрес із першої ж секунди.
