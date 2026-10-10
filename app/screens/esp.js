@@ -4,3 +4,4 @@
 import "./esp-mailboxes.js";
 import "./esp-registry.js";
 import "./esp-templates.js";
+import "./esp-limits.js";

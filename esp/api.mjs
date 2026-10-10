@@ -5,6 +5,9 @@
 import { handleEspDataApi } from "./data-api.mjs";
 import { MailboxError } from "./gmail.mjs";
 import { composeLetter } from "./compose.mjs";
+import { allEntries } from "./journal.mjs";
+import { DOMAIN_DAILY_LIMIT, GAP_MINUTES, WINDOW, sendLedger, senderDailyLimit } from "./limits.mjs";
+import { registry } from "./registry.mjs";
 import { LetterError, assertPlainLetter } from "./letter.mjs";
 import { TEMPLATE_VARIABLES, TemplateError, prepareTemplate } from "./template.mjs";
 import { DEFAULT_SIGNATURE, prepareSignature } from "./templates.mjs";
@@ -62,6 +65,29 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
       if (!(error instanceof MailboxError)) throw error;
       sendJson(response, 400, { success: false, error: error.message });
     }
+    return true;
+  }
+
+  // ── ESP 4: what each sender and domain has sent today, against its limit ─
+  if (method === "GET" && path === "/limits") {
+    const now = new Date();
+    const [{ senders, domains }, entries] = await Promise.all([registry(), allEntries()]);
+    const ledger = sendLedger(entries, { now });
+    sendJson(response, 200, {
+      success: true,
+      day: ledger.today,
+      window: { ...WINDOW, days: "Пн–Пт", zone: "одержувача" },
+      gapMinutes: GAP_MINUTES,
+      domainLimit: DOMAIN_DAILY_LIMIT,
+      senders: senders.map((sender) => {
+        const row = ledger.senders.get(sender.email) || { today: 0, lastAt: null };
+        return {
+          email: sender.email, domain: sender.domain, status: sender.effectiveStatus, rampStage: sender.rampStage,
+          limit: senderDailyLimit(sender), today: row.today, lastAt: row.lastAt ? row.lastAt.toISOString() : null
+        };
+      }),
+      domains: domains.map((domain) => ({ domain: domain.domain, status: domain.status, today: ledger.domains.get(domain.domain) || 0, limit: DOMAIN_DAILY_LIMIT }))
+    });
     return true;
   }
 

@@ -213,3 +213,10 @@
 
 .esp-preview-headers dt { color: var(--muted); }
 .esp-preview-headers dd { margin: 0; color: var(--ink); overflow-wrap: anywhere; }
+
+.esp-limits-rules,
+.esp-limits-domains {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
