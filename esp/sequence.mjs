@@ -117,6 +117,24 @@ export async function runTick({ now = new Date(), dryRun = false, ...deps }) {
   if (deps.halted()) return { ...summary, halted: true };
 
   const entries = [...await deps.journal.allEntries()];
+  // Indexed once per pass: what the journal says about each person, and the
+  // day's counts for the limits — not a walk over the whole journal for every
+  // person (a load run of 300 people made that minutes per tick). `remember`
+  // keeps both current as this pass writes.
+  const byContact = new Map();
+  const index = (entry) => {
+    if (!entry?.contact) return;
+    if (!byContact.has(entry.contact)) byContact.set(entry.contact, []);
+    byContact.get(entry.contact).push(entry);
+  };
+  entries.forEach(index);
+  const about = (email) => byContact.get(email) || [];
+  let ledger = sendLedger(entries, { now });
+  const remember = (entry) => {
+    entries.push(entry);
+    index(entry);
+    if (entry.type === "message.sending" || entry.type === "message.failed") ledger = sendLedger(entries, { now });
+  };
   const senders = new Map((await deps.registry.senders()).map((sender) => [sender.email, sender]));
   // ESP 13: per company, today's first letters (across every campaign) and
   // the domains its live chains run from. Kept up to date within the pass.
@@ -158,7 +176,7 @@ export async function runTick({ now = new Date(), dryRun = false, ...deps }) {
       const today = recipientToday(enrollment.lead, now);
       if (enrollment.nextDueDate && today < enrollment.nextDueDate) { skip("not_due"); continue; }
 
-      const stopper = stopperFor(entries, enrollment);
+      const stopper = stopperFor(about(enrollment.email), enrollment);
       if (stopper) {
         if (!dryRun) await deps.campaigns.saveEnrollment({ ...enrollment, status: "stopped", reason: stopper, stoppedAt: now.toISOString() });
         summary.stopped += 1;
@@ -205,7 +223,7 @@ export async function runTick({ now = new Date(), dryRun = false, ...deps }) {
       if (!allowed.ok) { skip("sender_unavailable"); continue; }
       if (await deps.gate.store.pausedFor(enrollment.sender)) { skip("sender_paused"); continue; }
 
-      const decision = sendDecision({ sender, recipient: enrollment.lead, ledger: sendLedger(entries, { now }), now });
+      const decision = sendDecision({ sender, recipient: enrollment.lead, ledger, now });
       if (!decision.ok) {
         if (decision.reason === "unknown_timezone") {
           if (!dryRun) {
@@ -232,7 +250,7 @@ export async function runTick({ now = new Date(), dryRun = false, ...deps }) {
 
       // The idempotency key: this campaign, this person, this step.
       const key = { campaignId: campaign.id, email: enrollment.email, step: enrollment.step };
-      const attempt = attemptOf(entries, key);
+      const attempt = attemptOf(about(enrollment.email), key);
       if (attempt.state === "sent") {
         // The letter went and the enrolment never heard: catch up from the
         // journal instead of sending it again.
@@ -277,7 +295,7 @@ export async function runTick({ now = new Date(), dryRun = false, ...deps }) {
         summary.planned.push({ campaign: campaign.name, email: enrollment.email, sender: enrollment.sender, step: enrollment.step + 1, subject: letter.subject });
         if (company) countCompany(companyToday, companyDomains, company, domain);
         // Counted as if sent, so the plan respects the same limits the send would.
-        entries.push({ seq: -entries.length, type: "message.sending", at: now.toISOString(), contact: enrollment.email, data: { from: enrollment.sender } });
+        remember({ seq: -entries.length - 1, type: "message.sending", at: now.toISOString(), contact: enrollment.email, data: { from: enrollment.sender } });
         continue;
       }
 
@@ -296,12 +314,12 @@ export async function runTick({ now = new Date(), dryRun = false, ...deps }) {
         skip("sender_unavailable");
         continue;
       }
-      entries.push(sending);
+      remember(sending);
 
       try {
         const result = await deps.gate.send(enrollment.sender, letter.raw, { threadId: enrollment.lastSent?.threadId || null });
         const sent = await deps.journal.recordSent(sending, { messageId: result.id, threadId: result.threadId }, "esp-sequence");
-        entries.push(sent);
+        remember(sent);
         await deps.campaigns.saveEnrollment(advance(enrollment, campaign, {
           messageId: letter.messageId, threadId: result.threadId, subject: letter.subject, references: letter.references, at: now.toISOString()
         }, today));
@@ -317,7 +335,7 @@ export async function runTick({ now = new Date(), dryRun = false, ...deps }) {
           summary.uncertain += 1;
           continue;
         }
-        entries.push(await deps.journal.recordFailed(sending, { error: error.message }, "esp-sequence"));
+        remember(await deps.journal.recordFailed(sending, { error: error.message }, "esp-sequence"));
         if (error instanceof SendingHalted) return { ...summary, halted: true };
         if (error instanceof SendingLocked) return { ...summary, locked: true };
         if (error instanceof LetterError) {
