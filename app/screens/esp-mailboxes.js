@@ -40,7 +40,10 @@ function espConnectionHtml(connection) {
   const rows = [
     ["Підключення", real ? "Gmail API через сервісний акаунт" : "Заглушка — нікуди не надсилає, поки власник не дасть ключ"],
     ...(real ? [["Сервісний акаунт", connection.serviceAccountEmail], ["Client ID для делегування", connection.clientId || "—"]] : []),
-    ["Відправка", connection.liveSend ? "увімкнена" : "вимкнена до приймання ESP 11 — справжні листи не йдуть"]
+    ["Відправка", connection.liveSend ? "увімкнена" : "вимкнена до приймання ESP 11 — справжні листи не йдуть"],
+    ["Посилання відписки", connection.unsubscribe?.configured
+      ? "підписуються постійним ключем"
+      : "ключ випадковий до перезапуску — задай ESP_UNSUBSCRIBE_SECRET, інакше старі посилання перестануть працювати"]
   ];
   return `
     ${connection.keyError ? `<p class="esp-key-error">Ключ дали, але він не читається: ${escapeHtml(connection.keyError)} Працює заглушка.</p>` : ""}

@@ -16,6 +16,8 @@ import { handleEspApi } from "./esp/api.mjs";
 import { connectorFromEnv } from "./esp/gmail.mjs";
 import { SenderGate, stateSenderStore } from "./esp/senders.mjs";
 import { templateStore } from "./esp/templates.mjs";
+import { handleUnsubscribe, unsubscribeSecretFromEnv } from "./esp/unsubscribe.mjs";
+import { recordAboutContact } from "./esp/messages.mjs";
 import { createFileOnceSync, writeFileAtomic } from "./state/atomic-write.mjs";
 import { startScheduler } from "./warmup/scheduler.mjs";
 
@@ -422,7 +424,10 @@ const esp = (() => {
     read: () => state.espSignature,
     write: async (value) => { state.espSignature = value; await writePersistentWorkspaceState(); }
   };
-  return { connector, keyError, gate, templates, signature };
+  // ESP 3: the key the unsubscribe links are signed with — from the
+  // environment, or a random one for this process (said on the screen).
+  const unsubscribe = unsubscribeSecretFromEnv(process.env);
+  return { connector, keyError, gate, templates, signature, unsubscribe };
 })();
 
 /**
@@ -489,6 +494,19 @@ const server = createServer(async (request, response) => {
         checkedAt: new Date().toISOString()
       });
       return;
+    }
+
+    // ESP 3: the unsubscribe link in every cold letter — https on the sender's
+    // domain, which points here. Public by nature: the person unsubscribing
+    // has no account, and the signed token is the whole authorisation.
+    if (url.pathname.startsWith("/u/")) {
+      const handled = await handleUnsubscribe({
+        request, response, url,
+        readBody: async (incoming) => (await readBody(incoming, 4096)).toString("utf8"),
+        secret: esp.unsubscribe.secret,
+        record: ({ sender, recipient, campaignId, via }) => recordAboutContact("contact.unsubscribed", recipient, { sender, campaignId, via }, "unsubscribe-link")
+      });
+      if (handled) return;
     }
 
     if (url.pathname.startsWith("/api/")) {

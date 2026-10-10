@@ -25,7 +25,8 @@ function stubbed() {
     connector: new StubGmailConnector({ domains: ["advantage-mail.com"] }),
     keyError: null,
     templates: templateStore({ read: () => templates, write: async (value) => { templates = value; } }),
-    signature: { read: () => signature, write: async (value) => { signature = value; } }
+    signature: { read: () => signature, write: async (value) => { signature = value; } },
+    unsubscribe: { secret: "test-unsubscribe-secret-0123456789", ephemeral: false }
   };
 }
 
@@ -123,4 +124,17 @@ test("a US lead without the company's postal address is not previewed as sendabl
   const preview = await call({ method: "POST", path: "/preview", esp, body: { subject: "Hi", body: "Hi {{first_name}}", lead: { name: "Mark Lee", country: "United States" } } });
   assert.equal(preview.payload.ok, false);
   assert.equal(preview.payload.reason, "us_address_missing");
+});
+
+test("the preview carries the unsubscribe headers on the sender's own domain, and the connection says whether their key will survive a restart", async () => {
+  const esp = stubbed();
+  await call({ method: "PUT", path: "/signature", esp, body: { name: "Anna" } });
+  const preview = await call({ method: "POST", path: "/preview", esp, body: { subject: "Hi", body: "Hi {{first_name}}", mailbox: "anna@advantage-mail.com", lead: { name: "Olena", email: "olena@northwind.com" } } });
+  assert.match(preview.payload.listUnsubscribe, /^<mailto:anna@advantage-mail\.com\?subject=unsubscribe>, <https:\/\/advantage-mail\.com\/u\/[\w-]+\.[\w-]+>$/);
+  assert.equal(preview.payload.listUnsubscribePost, "List-Unsubscribe=One-Click");
+  const connection = await call({ path: "/connection", esp: { ...esp, unsubscribe: { secret: "x", ephemeral: true } } });
+  assert.equal(connection.payload.unsubscribe.configured, false);
+  const fake = await call({ method: "POST", path: "/preview", esp, body: { subject: "Re: our call", body: "Hi {{first_name}}", lead: { name: "Olena" } } });
+  assert.equal(fake.payload.ok, false);
+  assert.equal(fake.payload.reason, "fake_reply");
 });

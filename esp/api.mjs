@@ -4,8 +4,9 @@
 
 import { handleEspDataApi } from "./data-api.mjs";
 import { MailboxError } from "./gmail.mjs";
-import { LetterError, assertPlainLetter, buildLetter, signatureText } from "./letter.mjs";
-import { TEMPLATE_VARIABLES, TemplateError, prepareTemplate, renderTemplate } from "./template.mjs";
+import { composeLetter } from "./compose.mjs";
+import { LetterError, assertPlainLetter } from "./letter.mjs";
+import { TEMPLATE_VARIABLES, TemplateError, prepareTemplate } from "./template.mjs";
 import { DEFAULT_SIGNATURE, prepareSignature } from "./templates.mjs";
 
 export async function handleEspApi({ request, response, url, sendJson, readJson, esp }) {
@@ -32,7 +33,11 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
       ...esp.connector.describe(),
       // A key that was given and does not parse is said as such; the stub runs
       // meanwhile, and the screen must not read as "no key yet".
-      keyError: esp.keyError || null
+      keyError: esp.keyError || null,
+      // ESP 3: without ESP_UNSUBSCRIBE_SECRET the links are signed with a key
+      // that dies with this process — every link sent before a restart would
+      // stop working. The screen says so; ESP 11 does not pass with it.
+      unsubscribe: { configured: !esp.unsubscribe?.ephemeral }
     });
     return true;
   }
@@ -119,31 +124,29 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
         sendJson(response, 404, { success: false, error: "Такого шаблону немає." });
         return true;
       }
-      const lead = body.lead || {};
-      const sender = { ...DEFAULT_SIGNATURE, ...(esp.signature.read() || {}), ...(body.sender || {}) };
-      const rendered = renderTemplate(template, lead, sender);
-      if (!rendered.ok) {
-        sendJson(response, 200, { success: true, ok: false, reason: rendered.reason, variables: rendered.variables, error: rendered.message });
+      const lead = { email: "lead@example.com", ...(body.lead || {}) };
+      const mailbox = String(body.mailbox || "sender@example.com");
+      const sender = { ...DEFAULT_SIGNATURE, ...(esp.signature.read() || {}), ...(body.sender || {}), email: mailbox };
+      // Built exactly as a first letter of a sequence is (esp/compose.mjs),
+      // with its unsubscribe headers — and not sent.
+      const letter = composeLetter({ template, sender, lead, unsubscribe: esp.unsubscribe });
+      if (!letter.ok) {
+        sendJson(response, 200, { success: true, ok: false, reason: letter.reason, variables: letter.variables, error: letter.message });
         return true;
       }
-      const signature = signatureText(sender, { country: lead.country });
-      const mailbox = String(body.mailbox || "sender@example.com");
-      const raw = buildLetter({
-        from: { email: mailbox, name: sender.name },
-        to: { email: String(lead.email || "lead@example.com"), name: lead.name || "" },
-        subject: rendered.subject,
-        body: rendered.body,
-        signature
-      });
-      assertPlainLetter(raw);
+      assertPlainLetter(letter.raw);
+      const head = letter.raw.slice(0, letter.raw.indexOf("\r\n\r\n")).replace(/\r\n /g, " ").split("\r\n");
+      const header = (name) => (head.find((line) => line.toLowerCase().startsWith(`${name.toLowerCase()}:`)) || "").slice(name.length + 1).trim();
       sendJson(response, 200, {
         success: true,
         ok: true,
-        subject: rendered.subject,
-        text: [rendered.body, signature].join("\n\n"),
-        headers: raw.slice(0, raw.indexOf("\r\n\r\n")).split("\r\n").filter((line) => !line.startsWith(" ")).map((line) => line.split(":")[0]),
+        subject: letter.subject,
+        text: letter.text,
+        headers: head.map((line) => line.split(":")[0]),
+        listUnsubscribe: header("List-Unsubscribe"),
+        listUnsubscribePost: header("List-Unsubscribe-Post"),
         contentType: "text/plain; charset=UTF-8",
-        bytes: Buffer.byteLength(raw)
+        bytes: Buffer.byteLength(letter.raw)
       });
     } catch (error) {
       if (!(error instanceof TemplateError) && !(error instanceof LetterError)) throw error;

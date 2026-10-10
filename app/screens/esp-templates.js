@@ -119,7 +119,11 @@ function espPreviewHtml() {
       ? `<div class="esp-preview-letter">
           <div class="esp-preview-subject"><span>Тема</span><strong>${escapeHtml(preview.subject)}</strong></div>
           <pre>${escapeHtml(preview.text)}</pre>
-          <small>${escapeHtml(preview.contentType)} · ${preview.bytes} байт · нічого не надіслано</small>
+          ${preview.listUnsubscribe ? `<dl class="esp-preview-headers">
+            <div><dt>List-Unsubscribe</dt><dd>${escapeHtml(preview.listUnsubscribe)}</dd></div>
+            <div><dt>List-Unsubscribe-Post</dt><dd>${escapeHtml(preview.listUnsubscribePost)}</dd></div>
+          </dl>` : ""}
+          <small>${escapeHtml(preview.contentType)} · ${preview.bytes} байт · відписка в один клік на домені відправника · нічого не надіслано</small>
         </div>`
       : `<p class="esp-notice is-bad">${escapeHtml(preview.error || "Цій людині лист не піде.")}</p>`;
   return `
@@ -211,7 +215,7 @@ async function previewEspTemplate() {
     // перевіряє так само, як збереження.
     espTemplatesState.preview = await api("/api/esp/preview", {
       method: "POST",
-      body: JSON.stringify({ subject: espTemplatesState.draft.subject, body: espTemplatesState.draft.body, lead: espTemplatesState.sample })
+      body: JSON.stringify({ subject: espTemplatesState.draft.subject, body: espTemplatesState.draft.body, lead: espTemplatesState.sample, mailbox: "sender@your-domain.com" })
     });
   } catch (error) {
     espTemplatesState.preview = { ok: false, error: error.message };

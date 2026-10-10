@@ -197,3 +197,19 @@
   .esp-layout { grid-template-columns: 1fr; }
   .esp-preview-form { grid-template-columns: 1fr; }
 }
+
+.esp-preview-headers {
+  display: grid;
+  gap: 4px;
+  margin: 0 0 10px;
+  font-size: 12px;
+}
+
+.esp-preview-headers > div {
+  display: grid;
+  grid-template-columns: 170px 1fr;
+  gap: 8px;
+}
+
+.esp-preview-headers dt { color: var(--muted); }
+.esp-preview-headers dd { margin: 0; color: var(--ink); overflow-wrap: anywhere; }
