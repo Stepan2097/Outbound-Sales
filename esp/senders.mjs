@@ -12,6 +12,7 @@
 // sender registry (ESP 9) without touching the gate.
 
 import { MailboxError, normalizeMailbox } from "./gmail.mjs";
+import { assertPlainLetter } from "./letter.mjs";
 
 /**
  * Google answers that mean "this mailbox cannot be used until somebody fixes
@@ -70,6 +71,10 @@ export class SenderGate {
 
   async send(value, raw, options = {}) {
     const mailbox = normalizeMailbox(value);
+    // ESP 2: one text/plain part and nothing that tracks, read back from the
+    // finished message — whatever built it, a letter that is not plain stops
+    // here, before Google is asked anything.
+    assertPlainLetter(raw);
     const paused = await this.store.pausedFor(mailbox);
     if (paused) throw new SenderPaused(mailbox, paused);
     try {

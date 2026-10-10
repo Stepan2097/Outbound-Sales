@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { handleEspApi } from "../esp/api.mjs";
 import { MailboxError, StubGmailConnector } from "../esp/gmail.mjs";
+import { templateStore } from "../esp/templates.mjs";
 
 async function call({ method = "GET", path, body = null, role = "admin", esp }) {
   let answer = null;
@@ -17,7 +18,16 @@ async function call({ method = "GET", path, body = null, role = "admin", esp }) 
   return { handled, ...answer };
 }
 
-const stubbed = () => ({ connector: new StubGmailConnector({ domains: ["advantage-mail.com"] }), keyError: null });
+function stubbed() {
+  let templates = [];
+  let signature = null;
+  return {
+    connector: new StubGmailConnector({ domains: ["advantage-mail.com"] }),
+    keyError: null,
+    templates: templateStore({ read: () => templates, write: async (value) => { templates = value; } }),
+    signature: { read: () => signature, write: async (value) => { signature = value; } }
+  };
+}
 
 test("only an administrator reaches the mailboxes", async () => {
   const seller = await call({ path: "/connection", role: "seller", esp: stubbed() });
@@ -67,4 +77,50 @@ test("paused mailboxes are listed, and a person lifts one", async () => {
   assert.deepEqual(lifted.payload.paused, []);
   const empty = await call({ method: "POST", path: "/senders/resume", body: {}, esp });
   assert.equal(empty.status, 400);
+});
+
+
+// ── ESP 2: templates, signature, preview ─────────────────────────────────────
+
+test("saving a template cleans it and says what was removed; a template with a bad variable is refused", async () => {
+  const esp = stubbed();
+  const saved = await call({ method: "POST", path: "/templates", esp, body: { name: "Перший", subject: "Hi&nbsp;{{first_name}}", body: "<p style=\"x\">Hi {{first_name|there}},</p><p>We help.</p>" } });
+  assert.equal(saved.status, 201);
+  assert.equal(saved.payload.template.subject, "Hi {{first_name}}");
+  assert.equal(saved.payload.template.body, "Hi {{first_name|there}},\n\nWe help.");
+  assert.ok(saved.payload.removed.includes("html"));
+  const refused = await call({ method: "POST", path: "/templates", esp, body: { subject: "Hi", body: "{{nickname}}" } });
+  assert.equal(refused.status, 400);
+  assert.equal(refused.payload.code, "unknown_variable");
+  const listed = await call({ path: "/templates", esp });
+  assert.equal(listed.payload.templates.length, 1);
+  assert.ok(listed.payload.variables.some((variable) => variable.name === "first_name"));
+});
+
+test("the preview is the real letter for one lead — plain text with the signature — and nothing is sent", async () => {
+  const esp = stubbed();
+  await call({ method: "PUT", path: "/signature", esp, body: { name: "Anna Koval", title: "Partnerships", site: "advantage.agency", usPostalAddress: "ADvantage LLC\n1 Main St" } });
+  const { payload } = await call({ method: "POST", path: "/templates", esp, body: { subject: "Hi {{first_name}}", body: "Hi {{first_name}}, a question about {{company|your team}}." } });
+  const preview = await call({ method: "POST", path: "/preview", esp, body: { templateId: payload.template.id, mailbox: "anna@advantage-mail.com", lead: { name: "Olena Hrytsenko", country: "Poland" } } });
+  assert.equal(preview.payload.ok, true);
+  assert.equal(preview.payload.subject, "Hi Olena");
+  assert.equal(preview.payload.text, "Hi Olena, a question about your team.\n\nAnna Koval\nPartnerships\nADvantage\nadvantage.agency");
+  assert.equal(preview.payload.contentType, "text/plain; charset=UTF-8");
+  assert.equal(esp.connector.sent.length, 0, "a preview sent something");
+
+  const us = await call({ method: "POST", path: "/preview", esp, body: { templateId: payload.template.id, lead: { name: "Mark Lee", country: "USA" } } });
+  assert.match(us.payload.text, /1 Main St$/);
+
+  const empty = await call({ method: "POST", path: "/preview", esp, body: { templateId: payload.template.id, lead: { country: "Poland" } } });
+  assert.equal(empty.payload.ok, false);
+  assert.equal(empty.payload.reason, "empty_variable");
+  assert.deepEqual(empty.payload.variables, ["first_name"]);
+});
+
+test("a US lead without the company's postal address is not previewed as sendable", async () => {
+  const esp = stubbed();
+  await call({ method: "PUT", path: "/signature", esp, body: { name: "Anna" } });
+  const preview = await call({ method: "POST", path: "/preview", esp, body: { subject: "Hi", body: "Hi {{first_name}}", lead: { name: "Mark Lee", country: "United States" } } });
+  assert.equal(preview.payload.ok, false);
+  assert.equal(preview.payload.reason, "us_address_missing");
 });

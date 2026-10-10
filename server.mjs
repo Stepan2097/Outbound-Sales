@@ -15,6 +15,7 @@ import { handleWarmupApi } from "./warmup/api.mjs";
 import { handleEspApi } from "./esp/api.mjs";
 import { connectorFromEnv } from "./esp/gmail.mjs";
 import { SenderGate, stateSenderStore } from "./esp/senders.mjs";
+import { templateStore } from "./esp/templates.mjs";
 import { createFileOnceSync, writeFileAtomic } from "./state/atomic-write.mjs";
 import { startScheduler } from "./warmup/scheduler.mjs";
 
@@ -241,6 +242,10 @@ const state = {
   // ESP 1: sending mailboxes Google stopped letting us act as, by address —
   // why and since when. A person lifts each one; nothing retries on its own.
   espSenderPauses: {},
+  // ESP 2: letter templates as stored — already cleaned to plain text by
+  // esp/template.mjs — and the one text signature under every letter.
+  espTemplates: [],
+  espSignature: null,
   // Phase 1's single selection, superseded by the list above and kept exactly
   // as it was written: the migration reads it and never writes it, so a
   // rollback finds its targeting intact.
@@ -409,7 +414,15 @@ const esp = (() => {
     store,
     notify: async (pause) => console.warn(`[esp] sender paused: ${pause.mailbox} — ${pause.code}: ${pause.reason}`)
   });
-  return { connector, keyError, gate };
+  const templates = templateStore({
+    read: () => state.espTemplates,
+    write: async (value) => { state.espTemplates = value; await writePersistentWorkspaceState(); }
+  });
+  const signature = {
+    read: () => state.espSignature,
+    write: async (value) => { state.espSignature = value; await writePersistentWorkspaceState(); }
+  };
+  return { connector, keyError, gate, templates, signature };
 })();
 
 /**
@@ -3727,6 +3740,8 @@ function applyPersistentWorkspaceState(saved = {}) {
   if (saved.espSenderPauses && typeof saved.espSenderPauses === "object" && !Array.isArray(saved.espSenderPauses)) {
     state.espSenderPauses = saved.espSenderPauses;
   }
+  if (Array.isArray(saved.espTemplates)) state.espTemplates = saved.espTemplates;
+  if (saved.espSignature && typeof saved.espSignature === "object") state.espSignature = saved.espSignature;
   state.providerRule = restoreProviderRule(saved.providerRule, state.providerRule);
   state.budgets = restoreBudgets(saved.budgets, state.budgets);
   state.aiModelDefaults = restoreAiModelDefaults(saved.aiModelDefaults, state.aiModelDefaults);
@@ -3964,6 +3979,8 @@ async function writeWorkspaceStateNow() {
       warmupCampaigns: state.warmupCampaigns,
       warmupTargeting: state.warmupTargeting,
       espSenderPauses: state.espSenderPauses,
+      espTemplates: state.espTemplates,
+      espSignature: state.espSignature,
       providerRule: state.providerRule,
       budgets: state.budgets,
       aiModelDefaults: state.aiModelDefaults,

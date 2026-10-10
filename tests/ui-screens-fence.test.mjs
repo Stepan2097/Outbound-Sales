@@ -38,7 +38,7 @@ function sources(dir = APP.pathname) {
   });
 }
 
-const SCREENS = [["home", "Головна"], ["warmup", "Прогрів"], ["inbox", "Вхідні"], ["contacts", "Контакти"], ["account", "Налаштування"]];
+const SCREENS = [["home", "Головна"], ["warmup", "Прогрів"], ["email", "Листи"], ["inbox", "Вхідні"], ["contacts", "Контакти"], ["account", "Налаштування"]];
 
 const REMOVED_VIEWS = ["prospects", "ai", "products", "overview", "models", "routing", "budgets", "privacy", "evaluation"];
 

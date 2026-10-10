@@ -4,6 +4,9 @@
 
 import { handleEspDataApi } from "./data-api.mjs";
 import { MailboxError } from "./gmail.mjs";
+import { LetterError, assertPlainLetter, buildLetter, signatureText } from "./letter.mjs";
+import { TEMPLATE_VARIABLES, TemplateError, prepareTemplate, renderTemplate } from "./template.mjs";
+import { DEFAULT_SIGNATURE, prepareSignature } from "./templates.mjs";
 
 export async function handleEspApi({ request, response, url, sendJson, readJson, esp }) {
   const path = url.pathname.replace(/^\/api\/esp/, "") || "/";
@@ -57,6 +60,98 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
     return true;
   }
 
+  // ── ESP 2: templates, the signature, and a preview of the letter ────────
+  if (method === "GET" && path === "/templates") {
+    sendJson(response, 200, {
+      success: true,
+      templates: esp.templates.list(),
+      variables: Object.entries(TEMPLATE_VARIABLES).map(([name, label]) => ({ name, label })),
+      signature: { ...DEFAULT_SIGNATURE, ...(esp.signature.read() || {}) }
+    });
+    return true;
+  }
+
+  if ((method === "POST" || method === "PATCH") && path === "/templates") {
+    const body = await readJson(request);
+    if (!body) return badRequest(sendJson, response, "Некоректне тіло JSON");
+    try {
+      const saved = method === "POST" ? await esp.templates.create(body) : await esp.templates.update(String(body.id || ""), body);
+      if (!saved) {
+        sendJson(response, 404, { success: false, error: "Такого шаблону немає." });
+        return true;
+      }
+      // `removed` is what the cleaning took out — the screen says it, so
+      // nobody wonders where their bold went.
+      sendJson(response, method === "POST" ? 201 : 200, { success: true, ...saved, templates: esp.templates.list() });
+    } catch (error) {
+      if (!(error instanceof TemplateError)) throw error;
+      sendJson(response, 400, { success: false, error: error.message, code: error.code });
+    }
+    return true;
+  }
+
+  if (method === "DELETE" && path === "/templates") {
+    const removed = await esp.templates.remove(String(url.searchParams.get("id") || ""));
+    sendJson(response, removed ? 200 : 404, { success: removed, templates: esp.templates.list(), ...(removed ? {} : { error: "Такого шаблону немає." }) });
+    return true;
+  }
+
+  if (method === "PUT" && path === "/signature") {
+    const body = await readJson(request);
+    if (!body) return badRequest(sendJson, response, "Некоректне тіло JSON");
+    const signature = prepareSignature(body);
+    await esp.signature.write(signature);
+    sendJson(response, 200, { success: true, signature });
+    return true;
+  }
+
+  /**
+   * The letter one lead would get from one mailbox, built exactly as it would
+   * be sent and checked the same way — but not sent. A template that cannot
+   * be sent to this lead says why.
+   */
+  if (method === "POST" && path === "/preview") {
+    const body = await readJson(request);
+    if (!body) return badRequest(sendJson, response, "Некоректне тіло JSON");
+    try {
+      const template = body.templateId ? esp.templates.get(String(body.templateId)) : prepareTemplate({ subject: body.subject, body: body.body });
+      if (!template) {
+        sendJson(response, 404, { success: false, error: "Такого шаблону немає." });
+        return true;
+      }
+      const lead = body.lead || {};
+      const sender = { ...DEFAULT_SIGNATURE, ...(esp.signature.read() || {}), ...(body.sender || {}) };
+      const rendered = renderTemplate(template, lead, sender);
+      if (!rendered.ok) {
+        sendJson(response, 200, { success: true, ok: false, reason: rendered.reason, variables: rendered.variables, error: rendered.message });
+        return true;
+      }
+      const signature = signatureText(sender, { country: lead.country });
+      const mailbox = String(body.mailbox || "sender@example.com");
+      const raw = buildLetter({
+        from: { email: mailbox, name: sender.name },
+        to: { email: String(lead.email || "lead@example.com"), name: lead.name || "" },
+        subject: rendered.subject,
+        body: rendered.body,
+        signature
+      });
+      assertPlainLetter(raw);
+      sendJson(response, 200, {
+        success: true,
+        ok: true,
+        subject: rendered.subject,
+        text: [rendered.body, signature].join("\n\n"),
+        headers: raw.slice(0, raw.indexOf("\r\n\r\n")).split("\r\n").filter((line) => !line.startsWith(" ")).map((line) => line.split(":")[0]),
+        contentType: "text/plain; charset=UTF-8",
+        bytes: Buffer.byteLength(raw)
+      });
+    } catch (error) {
+      if (!(error instanceof TemplateError) && !(error instanceof LetterError)) throw error;
+      sendJson(response, 200, { success: true, ok: false, reason: error.code, error: error.message });
+    }
+    return true;
+  }
+
   if (method === "POST" && path === "/mailboxes/check") {
     const body = await readJson(request);
     if (!body) {
@@ -76,4 +171,9 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
   }
 
   return false;
+}
+
+function badRequest(sendJson, response, error) {
+  sendJson(response, 400, { success: false, error });
+  return true;
 }

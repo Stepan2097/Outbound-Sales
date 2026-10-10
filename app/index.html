@@ -54,6 +54,7 @@
         <nav class="nav-list" aria-label="Робочий простір">
           <button class="nav-item active" data-view="home" aria-label="Головна" title="Головна"><i data-lucide="house"></i><span>Головна</span></button>
           <button class="nav-item" data-view="warmup" aria-label="Прогрів" title="Прогрів"><i data-lucide="flame"></i><span>Прогрів</span></button>
+          <button class="nav-item" data-view="email" aria-label="Листи" title="Листи"><i data-lucide="mail"></i><span>Листи</span></button>
           <button class="nav-item" data-view="inbox" aria-label="Вхідні" title="Вхідні"><i data-lucide="inbox"></i><span>Вхідні</span><span class="nav-badge" id="warmupNavBadge" hidden></span></button>
           <button class="nav-item" data-view="contacts" aria-label="Контакти" title="Контакти"><i data-lucide="contact"></i><span>Контакти</span></button>
           <button class="nav-item" data-view="account" aria-label="Налаштування" title="Налаштування"><i data-lucide="settings"></i><span>Налаштування</span></button>
@@ -227,6 +228,39 @@
                 </div>
               </div>
               <div id="warmupDetailBody"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="view-email">
+          <div class="esp-layout">
+            <section class="panel esp-templates-panel">
+              <div class="panel-heading">
+                <div>
+                  <h2>Шаблони листів</h2>
+                  <p>Лише простий текст: без HTML, пікселів і переписаних посилань.</p>
+                </div>
+                <button class="text-button" id="espTemplateNew" type="button"><i data-lucide="plus"></i><span>Новий</span></button>
+              </div>
+              <div id="espTemplatesBody"></div>
+            </section>
+            <section class="panel esp-editor-panel">
+              <div class="panel-heading">
+                <div>
+                  <h2 id="espEditorTitle">Новий шаблон</h2>
+                  <p>Звідси нічого не надсилається — лише зберігається й переглядається.</p>
+                </div>
+              </div>
+              <div id="espEditorBody"></div>
+            </section>
+            <section class="panel esp-signature-panel span-2">
+              <div class="panel-heading">
+                <div>
+                  <h2>Підпис</h2>
+                  <p>Текстом під кожним листом: ім'я, посада, ADvantage, сайт. Для США — ще поштова адреса юрособи.</p>
+                </div>
+              </div>
+              <div id="espSignatureBody"></div>
             </section>
           </div>
         </section>

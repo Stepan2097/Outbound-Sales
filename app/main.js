@@ -8,8 +8,7 @@ import "./screens/warmup-campaign.js";
 import { startWarmupBadge } from "./screens/inbox.js";
 import "./screens/contacts.js";
 import "./screens/settings.js";
-import "./screens/esp-mailboxes.js";
-import "./screens/esp-registry.js";
+import "./screens/esp.js";
 
 startWarmupBadge();
 await bootApplication();
