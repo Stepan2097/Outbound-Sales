@@ -321,3 +321,28 @@
   color: var(--muted);
   font-size: 12px;
 }
+
+/* Що прийшло в скриньки (ESP 7). */
+.esp-inbox-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.esp-inbox-list li {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: 12px;
+  align-items: start;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.esp-inbox-list small { display: block; color: var(--muted); }
+.esp-inbox-list p { margin: 4px 0 0; color: var(--ink); overflow-wrap: anywhere; }
+
+@media (max-width: 640px) {
+  .esp-inbox-list li { grid-template-columns: 1fr; gap: 4px; }
+}

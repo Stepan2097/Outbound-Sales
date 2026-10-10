@@ -112,6 +112,7 @@ const SAVED_AS = {
   espCampaigns: "espCampaigns",
   espEnrollments: "espEnrollments",
   espHalt: "espHalt",
+  espInboxCursors: "espInboxCursors",
   providerRule: "providerRule",
   budgets: "budgets",
   aiModelDefaults: "aiModelDefaults",

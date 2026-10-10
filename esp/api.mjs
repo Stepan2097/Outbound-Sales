@@ -25,7 +25,9 @@ import { DEFAULT_SIGNATURE, prepareSignature } from "./templates.mjs";
  */
 export function espRouteRight(method, path) {
   if (path === "/halt") return method === "GET" ? "replies.read" : "stop.all";
-  if (path === "/limits" || path === "/ramp" || (method === "GET" && path.startsWith("/campaigns"))) return "replies.read";
+  if (path === "/limits" || path === "/ramp" || (method === "GET" && (path.startsWith("/campaigns") || path === "/inbox"))) return "replies.read";
+  // ESP 7: reading the mailboxes now, rather than waiting five minutes.
+  if (path === "/inbox/poll") return "limits.change";
   // ESP 13: stepping a sender's ramp up (or holding it) is a limit.
   if (path.startsWith("/ramp/")) return "limits.change";
   if (path.startsWith("/campaigns")) return "campaigns.launch";
@@ -197,6 +199,25 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
   if (method === "GET" && path === "/campaigns/plan") {
     const plan = await esp.tick({ dryRun: true });
     sendJson(response, 200, { success: true, sequenceOn: Boolean(esp.sequenceOn), ...plan });
+    return true;
+  }
+
+  // ── ESP 7: what came into the sending mailboxes ───────────────────────
+  if (method === "GET" && path === "/inbox") {
+    const kinds = new Set(["message.replied", "message.autoreplied", "message.bounced", "contact.unsubscribed", "sender.alert"]);
+    const events = (await allEntries()).filter((entry) => kinds.has(entry.type)).slice(-100).reverse().map((entry) => ({
+      at: entry.at, type: entry.type, contact: entry.contact || entry.data?.contact || null,
+      sender: entry.data?.sender || entry.data?.email || null, code: entry.data?.code || null, via: entry.data?.via || null,
+      returnDate: entry.data?.returnDate || null, subject: entry.data?.subject || null,
+      text: entry.data?.text ? String(entry.data.text).slice(0, 300) : null, campaignId: entry.data?.campaignId || null
+    }));
+    sendJson(response, 200, { success: true, events, polling: Boolean(esp.sequenceOn) });
+    return true;
+  }
+
+  if (method === "POST" && path === "/inbox/poll") {
+    const summary = await esp.pollInbox();
+    sendJson(response, 200, { success: true, ...summary });
     return true;
   }
 

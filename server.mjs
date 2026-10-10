@@ -23,7 +23,8 @@ import { recordAboutContact, recordFailed, recordSending, recordSent } from "./e
 import { canSend as espCanSend, registry as espRegistry, updateSender as espUpdateSender } from "./esp/registry.mjs";
 import { applyRampReviews } from "./esp/ramp.mjs";
 import { campaignStore } from "./esp/campaigns.mjs";
-import { runTick, startSequence } from "./esp/sequence.mjs";
+import { postponedDue, runTick, startSequence } from "./esp/sequence.mjs";
+import { pollInboxes } from "./esp/inbound.mjs";
 import { createFileOnceSync, writeFileAtomic } from "./state/atomic-write.mjs";
 import { startScheduler } from "./warmup/scheduler.mjs";
 
@@ -266,6 +267,8 @@ const state = {
   espCampaigns: [],
   espEnrollments: [],
   espHalt: { on: false, at: null, by: null, reason: "" },
+  // ESP 7: per sending mailbox, the Gmail historyId its inbox was read up to.
+  espInboxCursors: {},
   // Phase 1's single selection, superseded by the list above and kept exactly
   // as it was written: the migration reads it and never writes it, so a
   // rollback finds its targeting intact.
@@ -469,7 +472,25 @@ const esp = (() => {
     signature: () => ({ ...DEFAULT_SIGNATURE, ...(state.espSignature || {}) }),
     unsubscribe
   });
-  return { connector, keyError, gate, templates, signature, unsubscribe, campaigns, halt, halted, tick, sequenceOn: process.env.ESP_SEQUENCE === "on" };
+  // ESP 7: read every sending mailbox's inbox since its cursor, journal what
+  // came, move a person's next letter on an auto-reply.
+  const postpone = async ({ campaignId, email, until }) => {
+    const enrollment = campaigns.enrollmentsOf(campaignId).find((row) => row.email === email && row.status === "active");
+    if (!enrollment) return;
+    const today = new Date().toISOString().slice(0, 10);
+    await campaigns.saveEnrollment({ ...enrollment, nextDueDate: postponedDue(enrollment, { until, today }), postponedBy: "autoreply" });
+  };
+  const pollInbox = async () => pollInboxes({
+    connector,
+    mailboxes: (await espRegistry()).senders.filter((sender) => sender.effectiveStatus !== "retired").map((sender) => sender.email),
+    cursors: {
+      read: (mailbox) => state.espInboxCursors?.[mailbox] || null,
+      write: async (mailbox, cursor) => { state.espInboxCursors = { ...state.espInboxCursors, [mailbox]: cursor }; await writePersistentWorkspaceState(); }
+    },
+    journal: { allEntries, recordAboutContact, append: espAppend },
+    postpone
+  });
+  return { connector, keyError, gate, templates, signature, unsubscribe, campaigns, halt, halted, tick, pollInbox, sequenceOn: process.env.ESP_SEQUENCE === "on" };
 })();
 
 /**
@@ -585,6 +606,8 @@ server.listen(port, () => {
   // ESP 5: the cold-email chain, only when switched on (see `esp` above).
   if (esp.sequenceOn) {
     startSequence({ tick: () => esp.tick() });
+    // ESP 7: the inboxes every five minutes — an unsubscribe is honoured the same day, a reply stops the chain before its next letter.
+    startSequence({ intervalMs: 5 * 60_000, tick: () => esp.pollInbox() });
     // ESP 13: the ramp is looked at hourly; each sender is due once a week.
     setInterval(() => {
       void Promise.all([espRegistry(), allEntries()])
@@ -3828,6 +3851,7 @@ function applyPersistentWorkspaceState(saved = {}) {
   if (Array.isArray(saved.espCampaigns)) state.espCampaigns = saved.espCampaigns;
   if (Array.isArray(saved.espEnrollments)) state.espEnrollments = saved.espEnrollments;
   if (saved.espHalt && typeof saved.espHalt === "object") state.espHalt = { ...state.espHalt, ...saved.espHalt };
+  if (saved.espInboxCursors && typeof saved.espInboxCursors === "object") state.espInboxCursors = saved.espInboxCursors;
   if (saved.espSignature && typeof saved.espSignature === "object") state.espSignature = saved.espSignature;
   state.providerRule = restoreProviderRule(saved.providerRule, state.providerRule);
   state.budgets = restoreBudgets(saved.budgets, state.budgets);
@@ -4070,6 +4094,7 @@ async function writeWorkspaceStateNow() {
       espCampaigns: state.espCampaigns,
       espEnrollments: state.espEnrollments,
       espHalt: state.espHalt,
+      espInboxCursors: state.espInboxCursors,
       espSignature: state.espSignature,
       providerRule: state.providerRule,
       budgets: state.budgets,

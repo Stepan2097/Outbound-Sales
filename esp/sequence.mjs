@@ -61,6 +61,8 @@ function stopperFor(entries, enrollment) {
   const since = new Date(enrollment.enrolledAt).getTime();
   for (const entry of entries) {
     const reason = STOPPERS[entry.type];
+    // A 4.x.x is a delay, counted apart (ESP 7) — only a permanent bounce ends the chain.
+    if (entry.type === "message.bounced" && !/^5\./.test(String(entry.data?.code || ""))) continue;
     if (reason && entry.contact === enrollment.email && new Date(entry.at).getTime() >= since) return reason;
   }
   return null;
@@ -281,6 +283,16 @@ export async function runTick({ now = new Date(), dryRun = false, ...deps }) {
   return summary;
 }
 
+/**
+ * ESP 7: an auto-reply moves the person's next letter instead of ending the
+ * chain — to the day after the date they said they are back, or three
+ * working days on when they said none. Never earlier than it already was.
+ */
+export function postponedDue(enrollment, { until = null, today }) {
+  const back = until ? addWorkingDays(until, 1) : addWorkingDays(today, 3);
+  return enrollment.nextDueDate && enrollment.nextDueDate > back ? enrollment.nextDueDate : back;
+}
+
 // ESP 13: «не більше 2 нових контактів з однієї компанії на день».
 export const COMPANY_DAILY_NEW = 2;
 
@@ -301,7 +313,7 @@ export function startSequence({ intervalMs = 60_000, tick }) {
     busy = true;
     try {
       const summary = await tick();
-      if (summary.sent || summary.uncertain || summary.halted || summary.locked) console.log("[esp] tick", JSON.stringify(summary));
+      if (summary.sent || summary.uncertain || summary.halted || summary.locked || summary.errors?.length || Object.keys(summary.actions || {}).some((key) => !["seen", "own", "not_ours"].includes(key))) console.log("[esp] tick", JSON.stringify(summary));
     } catch (error) {
       console.error("[esp] tick failed:", error.message);
     } finally {

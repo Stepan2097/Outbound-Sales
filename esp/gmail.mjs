@@ -195,6 +195,48 @@ export class GmailApiConnector {
   }
 
   /**
+   * ESP 7: what arrived in this mailbox's inbox since `cursor` (a Gmail
+   * historyId). Without a cursor — the first read, or one Google no longer
+   * remembers (404) — the last two days of the inbox, and the cursor to go on
+   * from. Messages come back raw (RFC 5322) for esp/inbound.mjs; our own sent
+   * mail is left out. Reading only: `gmail.readonly` is enough.
+   */
+  async inboxSince(value, cursor = null) {
+    const mailbox = normalizeMailbox(value);
+    let ids = [];
+    let next = null;
+    let from = cursor;
+    if (from) {
+      try {
+        let pageToken = null;
+        do {
+          const page = await this.call(mailbox, `/history?startHistoryId=${encodeURIComponent(from)}&historyTypes=messageAdded&labelId=INBOX${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ""}`);
+          for (const row of page.history || []) for (const added of row.messagesAdded || []) ids.push(added.message.id);
+          next = page.historyId || next;
+          pageToken = page.nextPageToken || null;
+        } while (pageToken);
+      } catch (error) {
+        if (error.status !== 404) throw error;
+        from = null;
+        ids = [];
+      }
+    }
+    if (!from) {
+      next = (await this.call(mailbox, "/profile")).historyId;
+      const list = await this.call(mailbox, `/messages?q=${encodeURIComponent("in:inbox newer_than:2d")}&maxResults=100`);
+      ids = (list.messages || []).map((row) => row.id);
+    }
+    const messages = [];
+    for (const id of [...new Set(ids)]) {
+      const message = await this.call(mailbox, `/messages/${encodeURIComponent(id)}?format=raw`);
+      const labels = message.labelIds || [];
+      if (labels.includes("SENT") && !labels.includes("INBOX")) continue;
+      messages.push({ id: message.id, threadId: message.threadId || null, raw: Buffer.from(message.raw || "", "base64url").toString("latin1") });
+    }
+    return { messages, cursor: String(next || cursor || "") || null };
+  }
+
+  /**
    * One finished RFC 5322 message (built by ESP 2/3), sent as `mailbox`. With
    * `threadId` Gmail keeps a follow-up in the conversation it continues.
    */
@@ -217,6 +259,24 @@ export class StubGmailConnector {
     this.kind = "stub";
     this.domains = domains.map((domain) => String(domain).toLowerCase());
     this.sent = [];
+    // ESP 7: what has "arrived" per mailbox — the tests put mail here.
+    this.inboxes = new Map();
+  }
+
+  /** A message arriving in `mailbox` (tests and the acceptance cycle on the stub). */
+  deliver(value, raw, { threadId = null } = {}) {
+    const mailbox = normalizeMailbox(value);
+    if (!this.inboxes.has(mailbox)) this.inboxes.set(mailbox, []);
+    const list = this.inboxes.get(mailbox);
+    const message = { id: `in-${randomUUID()}`, threadId, raw: String(raw) };
+    list.push(message);
+    return message;
+  }
+
+  async inboxSince(value, cursor = null) {
+    const list = this.inboxes.get(normalizeMailbox(value)) || [];
+    const from = Number(cursor) || 0;
+    return { messages: list.slice(from), cursor: String(list.length) };
   }
 
   describe() {
