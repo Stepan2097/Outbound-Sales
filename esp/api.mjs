@@ -2,6 +2,7 @@
 // which connector this server runs with, and whether one mailbox can be acted
 // as. Both are the administrator's: a seller has nothing to configure here.
 
+import { can, logAdminAction } from "./access.mjs";
 import { handleEspDataApi } from "./data-api.mjs";
 import { MailboxError } from "./gmail.mjs";
 import { CampaignError, parseLeadLines } from "./campaigns.mjs";
@@ -21,15 +22,21 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
   // module with its own rules about who may do what (a timeline is the whole
   // team's), so it answers first and the gate below is the mail connection's.
   const profile = request.auth?.profile;
-  if (await handleEspDataApi({
-    request, response, url, sendJson, readJson,
-    actor: profile?.email || profile?.name || "", role: profile?.role || "seller"
-  })) return true;
+  if (await handleEspDataApi({ request, response, url, sendJson, readJson, profile })) return true;
 
-  if (request.auth?.profile?.role !== "admin") {
+  // ESP 10: each part of the mail set-up needs its own right (esp/access.mjs) —
+  // templates and the signature are `templates.edit`, lifting a mailbox pause is
+  // a limit, the connection itself is the registry's. By default all three are
+  // an administrator's, as before; an administrator may hand one to a seller.
+  const need = path === "/templates" || path === "/signature" || path === "/preview" ? "templates.edit"
+    : path.startsWith("/senders/") ? "limits.change" : "registry.change";
+  if (!await can(profile, need)) {
     sendJson(response, 403, { success: false, error: "Пошту для розсилки налаштовує адміністратор робочого простору." });
     return true;
   }
+  // What an administrator changes here goes into the administrators' log.
+  const actor = profile?.email || profile?.name || "";
+  const logged = (action, data) => logAdminAction(action, actor, data).catch((error) => console.warn(`[esp] admin log: ${error.message}`));
 
   if (method === "GET" && path === "/connection") {
     sendJson(response, 200, {
@@ -61,6 +68,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
     }
     try {
       const resumed = await esp.gate.resume(body.mailbox);
+      if (resumed) await logged("mailbox_resumed", { mailbox: String(body.mailbox) });
       sendJson(response, 200, { success: true, resumed, paused: await esp.gate.paused() });
     } catch (error) {
       if (!(error instanceof MailboxError)) throw error;
@@ -208,6 +216,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
         sendJson(response, 404, { success: false, error: "Такого шаблону немає." });
         return true;
       }
+      await logged(method === "POST" ? "template_created" : "template_updated", { id: saved.template?.id ?? saved.id ?? body.id ?? null, name: saved.template?.name ?? body.name ?? null });
       // `removed` is what the cleaning took out — the screen says it, so
       // nobody wonders where their bold went.
       sendJson(response, method === "POST" ? 201 : 200, { success: true, ...saved, templates: esp.templates.list() });
@@ -220,6 +229,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
 
   if (method === "DELETE" && path === "/templates") {
     const removed = await esp.templates.remove(String(url.searchParams.get("id") || ""));
+    if (removed) await logged("template_removed", { id: String(url.searchParams.get("id") || "") });
     sendJson(response, removed ? 200 : 404, { success: removed, templates: esp.templates.list(), ...(removed ? {} : { error: "Такого шаблону немає." }) });
     return true;
   }
@@ -229,6 +239,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
     if (!body) return badRequest(sendJson, response, "Некоректне тіло JSON");
     const signature = prepareSignature(body);
     await esp.signature.write(signature);
+    await logged("signature_changed", { fields: Object.keys(signature) });
     sendJson(response, 200, { success: true, signature });
     return true;
   }

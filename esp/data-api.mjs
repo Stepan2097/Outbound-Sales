@@ -1,4 +1,6 @@
+import { accessView, adminLog, can, changeAccess } from "./access.mjs";
 import { entries, timeline, verify } from "./journal.mjs";
+import { secretsStatus } from "./secrets.mjs";
 import { TIMELINE_TYPES } from "./messages.mjs";
 import {
   DOMAIN_LABEL, DOMAIN_STATES, RAMP_STAGES, addDomain, addSender, checkDomain, registry, setDomainStatus, setSenderStatus, updateSender
@@ -18,22 +20,30 @@ import {
  * when it answered, false when the path is not one of these — the rest of
  * /api/esp is the mail connection's.
  */
-export async function handleEspDataApi({ request, response, url, sendJson, readJson, actor = "", role = "seller", dns }) {
+export async function handleEspDataApi({ request, response, url, sendJson, readJson, profile = null, dns, env = process.env }) {
   const path = url.pathname;
   if (path !== "/api/esp" && !path.startsWith("/api/esp/")) return false;
   const method = request.method;
-  const admin = role === "admin";
-  const refuse = () => sendJson(response, 403, { error: "Це може лише адміністратор." });
+  const actor = profile?.email || profile?.name || "";
+  // Who may do what is ESP 10's matrix (esp/access.mjs), not a role check here.
+  const allowed = (permission) => can(profile, permission);
+  const refuse = (permission) => sendJson(response, 403, { error: `Немає права: ${permission}. Його видає адміністратор у «Налаштуваннях».` });
 
   try {
     if (method === "GET" && path === "/api/esp/registry") {
-      sendJson(response, 200, { ...await registry(), canEdit: admin, domainStates: DOMAIN_STATES, domainLabels: DOMAIN_LABEL, rampStages: RAMP_STAGES });
+      sendJson(response, 200, {
+        ...await registry(),
+        canEdit: await allowed("registry.change") || await allowed("limits.change"),
+        canAdd: await allowed("registry.change"),
+        canLimit: await allowed("limits.change"),
+        domainStates: DOMAIN_STATES, domainLabels: DOMAIN_LABEL, rampStages: RAMP_STAGES });
       return true;
     }
 
     // A person's whole history with the cold-email side: every attempt with the
     // exact text, every reply, bounce, unsubscribe and skip — oldest first.
     if (method === "GET" && path === "/api/esp/contacts/timeline") {
+      if (!await allowed("replies.read")) return refuse("replies.read"), true;
       const email = url.searchParams.get("email") || "";
       const events = (await timeline(email)).filter((entry) => TIMELINE_TYPES.includes(entry.type));
       sendJson(response, 200, { email: email.trim().toLowerCase(), events });
@@ -41,7 +51,7 @@ export async function handleEspDataApi({ request, response, url, sendJson, readJ
     }
 
     if (method === "GET" && path === "/api/esp/journal") {
-      if (!admin) return refuse(), true;
+      if (!await allowed("journal.read")) return refuse("journal.read"), true;
       const limit = Math.max(1, Math.min(500, Number(url.searchParams.get("limit")) || 100));
       const before = Number(url.searchParams.get("before")) || null;
       sendJson(response, 200, {
@@ -55,27 +65,56 @@ export async function handleEspDataApi({ request, response, url, sendJson, readJ
     }
 
     if (method === "GET" && path === "/api/esp/journal/verify") {
-      if (!admin) return refuse(), true;
+      if (!await allowed("journal.read")) return refuse("journal.read"), true;
       sendJson(response, 200, await verify());
       return true;
     }
 
+    // Rights, the administrators' log and which secrets are set (ESP 10).
+    if (method === "GET" && path === "/api/esp/access") {
+      const view = await accessView(profile);
+      sendJson(response, 200, await allowed("access.manage") ? view : { permissions: view.permissions, roles: view.roles, mine: view.mine, people: [] });
+      return true;
+    }
+    if (method === "POST" && (path === "/api/esp/access/grant" || path === "/api/esp/access/revoke")) {
+      const body = await readJson(request);
+      if (!body || typeof body !== "object") return sendJson(response, 400, { error: "Некоректне тіло JSON." }), true;
+      const event = await changeAccess({ ...body, grant: path.endsWith("/grant") }, profile);
+      sendJson(response, 200, { success: true, event, unchanged: event === null, ...await accessView(profile) });
+      return true;
+    }
+    if (method === "GET" && path === "/api/esp/admin-log") {
+      if (!await allowed("journal.read")) return refuse("journal.read"), true;
+      const limit = Math.max(1, Math.min(500, Number(url.searchParams.get("limit")) || 100));
+      sendJson(response, 200, { events: await adminLog({ limit, before: Number(url.searchParams.get("before")) || null }) });
+      return true;
+    }
+    if (method === "GET" && path === "/api/esp/secrets") {
+      if (!await allowed("access.manage")) return refuse("access.manage"), true;
+      sendJson(response, 200, secretsStatus(env, (await registry()).senders));
+      return true;
+    }
+
+    // Each change needs its own right: adding and retiring is the registry's,
+    // a ramp step or a pause is a limit.
     const writes = {
-      "/api/esp/domains": (body) => addDomain(body, actor),
-      "/api/esp/domains/status": (body) => setDomainStatus(body, actor),
-      "/api/esp/domains/check": (body) => checkDomain(body, actor, dns),
-      "/api/esp/senders": (body) => addSender(body, actor),
-      "/api/esp/senders/status": (body) => setSenderStatus(body, actor),
-      "/api/esp/senders/update": (body) => updateSender(body, actor)
+      "/api/esp/domains": ["registry.change", (body) => addDomain(body, actor)],
+      "/api/esp/domains/status": [(body) => (body?.status === "retired" ? "registry.change" : "limits.change"), (body) => setDomainStatus(body, actor)],
+      "/api/esp/domains/check": ["registry.change", (body) => checkDomain(body, actor, dns)],
+      "/api/esp/senders": ["registry.change", (body) => addSender(body, actor)],
+      "/api/esp/senders/status": [(body) => (body?.status === "retired" ? "registry.change" : "limits.change"), (body) => setSenderStatus(body, actor)],
+      "/api/esp/senders/update": [(body) => (body?.rampStage !== undefined ? "limits.change" : "registry.change"), (body) => updateSender(body, actor)]
     };
     if (method === "POST" && writes[path]) {
-      if (!admin) return refuse(), true;
       const body = await readJson(request);
       if (!body || typeof body !== "object") {
         sendJson(response, 400, { error: "Некоректне тіло JSON." });
         return true;
       }
-      const result = await writes[path](body);
+      const [need, run] = writes[path];
+      const permission = typeof need === "function" ? need(body) : need;
+      if (!await allowed(permission)) return refuse(permission), true;
+      const result = await run(body);
       sendJson(response, path.endsWith("/check") ? 200 : 201, {
         success: true,
         ...(path.endsWith("/check") ? { checks: result } : { event: result, unchanged: result === null }),

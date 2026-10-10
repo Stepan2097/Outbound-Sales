@@ -134,3 +134,45 @@
 .esp-row-dns b {
   color: var(--ink);
 }
+
+/* ESP 10: матриця прав і журнал дій адміністраторів. */
+
+.esp-matrix {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin: 4px 0 8px;
+}
+
+.esp-matrix th,
+.esp-matrix td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+
+.esp-matrix td + td,
+.esp-matrix th + th {
+  width: 130px;
+  text-align: center;
+}
+
+.esp-log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.esp-log li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-strong);
+  overflow-wrap: anywhere;
+}

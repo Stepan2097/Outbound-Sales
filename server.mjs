@@ -10,6 +10,7 @@ import { CHANNEL_RULES, LANGUAGES, buildFallbackDrafts, draftsPromptPayload, nor
 import { contactAsProspect, contactsConfigured, contactsMissingConfig, crmKeyKind, folderContactAt, listContactFolders, listFolderContacts, searchFolderContacts, readContact, supabaseKeyKind } from "./contacts/store.mjs";
 import { handleKnowledgeLibraryApi } from "./knowledge/api.mjs";
 import { allEntries, useJournal } from "./esp/journal.mjs";
+import { logAdminAction } from "./esp/access.mjs";
 import { knowledgeExcerptsForPrompt, knowledgeFilesForProduct, loadKnowledgeLibrary } from "./knowledge/library.mjs";
 import { handleWarmupApi } from "./warmup/api.mjs";
 import { handleEspApi } from "./esp/api.mjs";
@@ -29,6 +30,13 @@ const appRoot = join(root, "app");
 const stateFilePath = process.env.STATE_FILE_PATH || join(root, ".data", "outbound-state.json");
 // The ESP journal lives beside the state, on the same volume, unless told otherwise.
 useJournal(process.env.ESP_JOURNAL_PATH || join(dirname(stateFilePath), "esp-journal.jsonl"));
+// The administrators' log (ESP 10) is the ESP journal: what an admin changes in
+// the workspace — roles, people, models, keys — is a line there, with who did it.
+// Never the key itself. A log that cannot be written costs the change nothing.
+function logAdmin(request, action, data) {
+  return logAdminAction(action, request.auth?.profile?.email || request.auth?.profile?.name || "", data)
+    .catch((error) => console.warn(`[esp] admin log: ${error.message}`));
+}
 const port = Number.parseInt(process.env.PORT ?? "4173", 10);
 // AUTH_DEV_BYPASS віддає права admin кожному запиту без входу — це лише для
 // локальної розробки й тестів. На проді прапорець ігнорується, а старт пише
@@ -1065,6 +1073,7 @@ async function handleApi(request, response, url) {
     target.modelChosenAt = modelId ? new Date().toISOString() : null;
     target.updatedAt = new Date().toISOString();
     await writePersistentWorkspaceState();
+    if (target !== request.auth.profile) await logAdmin(request, "model_chosen_for", { email: target.email, model: modelId || "робочого простору" });
     sendJson(response, 200, { ok: true, model: accountModelView(target) });
     return;
   }
@@ -1101,6 +1110,7 @@ async function handleApi(request, response, url) {
     const body = await readJson(request);
     const profile = await setWorkspaceRole(request.auth.profile, body.email, cleanText(body.role || ""));
     await writePersistentWorkspaceState();
+    await logAdmin(request, "role_changed", { email: profile.email, role: profile.role });
     sendJson(response, 200, { user: publicUserProfile(profile) });
     return;
   }
@@ -1113,6 +1123,7 @@ async function handleApi(request, response, url) {
     const body = await readJson(request);
     const result = await createWorkspaceUser(body, { role: body.role === "admin" ? "admin" : "seller" });
     await writePersistentWorkspaceState();
+    await logAdmin(request, "user_created", { email: result.profile?.email, role: result.profile?.role, existingAccount: Boolean(result.existingAccount) });
     sendJson(response, 201, {
       user: publicUserProfile(result.profile),
       existingAccount: Boolean(result.existingAccount),
@@ -1129,6 +1140,7 @@ async function handleApi(request, response, url) {
     const body = await readJson(request);
     const result = await removeWorkspaceUser(request.auth.profile, body);
     await writePersistentWorkspaceState();
+    await logAdmin(request, "user_removed", { email: String(body.email || body.userId || "") });
     sendJson(response, 200, result);
     return;
   }
@@ -1154,6 +1166,7 @@ async function handleApi(request, response, url) {
     // The key itself stays in memory by design; the model choice that came with
     // it is a setting, and is kept.
     await writePersistentWorkspaceState();
+    await logAdmin(request, "model_provider_set", { provider: "openrouter", environment: state.environment, version: state.keyMetadata.keyVersion });
     sendJson(response, 200, publicState());
     return;
   }

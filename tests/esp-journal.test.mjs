@@ -236,7 +236,7 @@ async function call({ method = "GET", path, body = null, role = "admin" }) {
   const handled = await handleEspDataApi({
     request: { method }, response: {}, url: new URL(`http://x${path}`),
     sendJson: (_response, status, payload) => { captured = { status, payload }; },
-    readJson: async () => body, actor: role === "admin" ? "admin@team.com" : "seller@team.com", role,
+    readJson: async () => body, profile: { email: role === "admin" ? "admin@team.com" : "seller@team.com", role },
     dns: { resolveMx: async () => [], resolveTxt: async () => [] }
   });
   return { handled, ...captured };
