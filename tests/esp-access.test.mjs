@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
+import { readFileSync, readdirSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { ESP_PERMISSIONS, ROLE_DEFAULTS, accessView, adminLog, can, changeAccess, logAdminAction, permissionsOf } from "../esp/access.mjs";
@@ -197,15 +199,27 @@ test("стан секретів — лише назви й так/ні: ні з�
 });
 
 test("у репозиторії немає жодного ключа: приватних ключів, ключів Google, токенів OAuth, ключів OpenRouter", () => {
-  const files = execFileSync("git", ["ls-files"], { cwd: new URL("..", import.meta.url), encoding: "utf8" }).split("\n").filter(Boolean)
-    .filter((file) => !/\.(png|jpe?g|gif|webp|ico|pdf|woff2?)$/i.test(file));
+  // Без git: деплойні ворота ганяють тести в node:20-alpine, де його немає. Обходимо
+  // теки самі, без залежностей, службових і локальних даних.
+  const root = fileURLToPath(new URL("..", import.meta.url));
+  const SKIP_DIRS = new Set([".git", "node_modules", ".data", "runs", "agent-runs"]);
+  const files = [];
+  const walk = (folder) => {
+    for (const entry of readdirSync(folder, { withFileTypes: true })) {
+      if (entry.isDirectory()) { if (!SKIP_DIRS.has(entry.name)) walk(join(folder, entry.name)); continue; }
+      if (!entry.isFile() || /\.(png|jpe?g|gif|webp|ico|pdf|woff2?|zip|gz)$/i.test(entry.name)) continue;
+      files.push(join(folder, entry.name));
+    }
+  };
+  walk(root);
   assert.ok(files.length > 50, "файли репозиторію прочитано");
   const offenders = [];
   for (const file of files) {
+    const name = relative(root, file);
+    if (name === join("esp", "secrets.mjs") || name === join("tests", "esp-access.test.mjs")) continue;
     let text;
-    try { text = execFileSync("git", ["show", `HEAD:${file}`], { cwd: new URL("..", import.meta.url), encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }); } catch { continue; }
-    if (file === "esp/secrets.mjs" || file === "tests/esp-access.test.mjs") continue;
-    if (looksLikeSecret(text)) offenders.push(file);
+    try { text = readFileSync(file, "utf8"); } catch { continue; }
+    if (looksLikeSecret(text)) offenders.push(name);
   }
   assert.deepEqual(offenders, []);
   assert.equal(looksLikeSecret("-----BEGIN PRIVATE KEY-----\nMIIE"), true);
