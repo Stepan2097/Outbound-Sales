@@ -11,6 +11,9 @@ import { api, escapeAttr, escapeHtml, onScreen, refreshIcons } from "../core.js"
 
 onScreen("account", { open: () => void loadEspFilters() });
 
+// ESP 17: a person erased on their own request stays excluded by a hash — not a category to pick by hand.
+const CATEGORY_EXTRA = { erased: "видалено на прохання людини" };
+
 export const espFiltersState = { data: null, error: "", notice: "", busy: false, check: null, checkText: "" };
 
 export async function loadEspFilters() {
@@ -46,7 +49,7 @@ export function renderEspFilters() {
 
   const list = exclusions.length
     ? `<div class="esp-list">${exclusions.slice(0, 50).map((row) => `<div class="esp-row"><div class="esp-row-main">
-        <strong>${escapeHtml(row.key)}</strong> <span class="pill tone-muted">${escapeHtml(categories[row.category] || row.category)}</span>
+        <strong>${escapeHtml(row.key)}</strong> <span class="pill tone-muted">${escapeHtml(categories[row.category] || CATEGORY_EXTRA[row.category] || row.category)}</span>
         ${row.note ? `<span class="esp-subtle">${escapeHtml(row.note)}</span>` : ""}
         <span class="esp-subtle">${escapeHtml(row.actor || "")} · ${escapeHtml(new Date(row.at).toLocaleDateString())}</span>
       </div></div>`).join("")}</div>${exclusions.length > 50 ? `<p class="esp-subtle">І ще ${exclusions.length - 50}.</p>` : ""}`
