@@ -18,6 +18,8 @@ const NAMES = [
   "escapeHtml", "escapeAttr", "uaPlural", "warmupCount",
   "WARMUP_OUTREACH_LABEL", "WARMUP_OUTREACH_TONE",
   "WARMUP_SYNC_STALE_HOURS", "inboxAccountFilter", "inboxSearch", "inboxSearchTerms", "inboxPaneKey",
+  "inboxIndexedThreads", "inboxIndexedAccounts", "inboxThreadIndex", "warmupInboxIndex",
+  "inboxRenderedMarkup", "inboxLoadPromise", "inboxSessionVersion", "inboxOpenRequest", "setInboxMarkup", "warmupInboxNextHtml", "renderWarmupInboxNext", "renderWarmupInboxList",
   "warmupAgo", "warmupStamp", "warmupHoursSince", "WARMUP_PLACEHOLDERS", "warmupPlaceholder", "warmupBodyHtml",
   "warmupPreviewHtml", "warmupProfileUrl",
   "WARMUP_UNNAMED", "WARMUP_NAME_NOISE", "warmupCleanName", "warmupParticipantUnnamed", "warmupParticipantName",
@@ -130,6 +132,7 @@ function screen({ threads = threeThreads(), accounts = [], sync = null, api, ext
     },
     clearInterval: () => {},
     refreshIcons: () => {},
+    rememberWarmupInbox: () => {},
     ...extra
   };
   const main = loadMain(NAMES, globals, LISTENERS);

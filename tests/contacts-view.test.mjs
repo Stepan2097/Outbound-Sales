@@ -15,6 +15,7 @@ import { loadMain } from "./app-main-excerpt.mjs";
 function screen({ loaded, folders, folderId }) {
   const calls = { selected: [], rendered: 0, fetched: 0 };
   const excerpt = loadMain(["loadContactFolders"], {
+    contactReads: { folders: null, session: 0 },
     contactFoldersLoaded: loaded,
     contactFolders: folders,
     contactFolderId: folderId,

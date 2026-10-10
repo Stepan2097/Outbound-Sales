@@ -1,0 +1,12 @@
+{
+  "date": "2026-10-10",
+  "environment": "disposable PostgreSQL database on server144; production CRM untouched",
+  "dataset": { "artificialContacts": 27598, "searchedFolderContacts": 27597 },
+  "queryTimeMs": { "Michael": 229.094, "Mic": 225.101, "Micheal": 1350.438, "Åndré": 2446.713, "bca": 348.832, "%_": 404.572, "no-such-contact": 4016.339 },
+  "timingScope": "single SQL calls, includes function execution; excludes public HTTP/network/auth; not p95",
+  "parityQueries": ["Michael", "Mic", "Micheal", "Åndré", "bca", "%_", "no-such-contact", "m c", "Conventus", "michael@example.com"],
+  "parity": "all ordered result IDs match JavaScript rankContactMatches on identical artificial dataset",
+  "security": { "anonExecute": false, "authenticatedExecute": false, "serviceRoleExecute": true, "securityDefiner": false },
+  "prefixExplain": { "plan": "Bitmap Index Scan outbound_contacts_search_trgm_idx / Bitmap Heap Scan", "rows": 9199, "executionMs": 47.216, "sharedHitBlocks": 530 },
+  "deployment": "CONTACTS_INDEXED_SEARCH remains off until managed CRM migration access is provided; cold-query target not met for rare/miss synthetic searches"
+}

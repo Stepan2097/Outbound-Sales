@@ -21,7 +21,7 @@ let origin = "";
  * answers a count in, and the row that comes back out of it.
  */
 function startFakeCrm(contacts) {
-  const server = createServer((request, response) => {
+  const server = createServer(async (request, response) => {
     const url = new URL(request.url, "http://crm.test");
     const send = (rows, { total = null } = {}) => {
       response.writeHead(200, {
@@ -30,6 +30,14 @@ function startFakeCrm(contacts) {
       });
       response.end(JSON.stringify(rows));
     };
+
+    if (url.pathname === "/rest/v1/rpc/outbound_search_contacts") {
+      const chunks = [];
+      for await (const chunk of request) chunks.push(chunk);
+      const { p_search: term } = JSON.parse(Buffer.concat(chunks).toString());
+      send(contacts.filter((contact) => `${contact.name} ${contact.company} ${contact.position} ${contact.email}`.toLowerCase().includes(term)).slice(0, 5));
+      return;
+    }
 
     if (url.pathname === "/rest/v1/contact_folders") {
       send([{ id: "11111111-1111-4111-8111-111111111111", name: "Mobile studios", color: "#fff", owner_id: null, is_archived: false }]);

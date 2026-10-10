@@ -211,7 +211,8 @@ class Query {
         ...(prefer.length ? { Prefer: prefer.join(",") } : {}),
         ...this.headers
       },
-      body: this.payload === undefined ? undefined : JSON.stringify(this.payload)
+      body: this.payload === undefined ? undefined : JSON.stringify(this.payload),
+      ...(this.table.startsWith("rpc/") ? { signal: AbortSignal.timeout(10000) } : {})
     });
 
     if (response.status === 204) return { response, rows: [] };
@@ -301,6 +302,10 @@ export function createRestClient({ label, resolve }) {
     },
     from(table) {
       return new Query(client, table);
+    },
+    rpc(name, args = {}) {
+      if (!/^[a-z][a-z0-9_]*$/.test(name)) throw new TypeError("Invalid RPC name");
+      return new Query(client, `rpc/${name}`).insert(args);
     }
   };
   return client;

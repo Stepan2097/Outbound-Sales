@@ -8,7 +8,7 @@ import {
 import {
   api, escapeAttr, escapeHtml, onScreen, refreshIcons, uaPlural
 } from "../core.js";
-import { recallScreen, rememberScreen } from "../cache.js";
+import { onCacheReset, recallScreen, rememberScreen } from "../cache.js";
 import {
   loadWarmupInbox, setWarmupUnread, showWarmupInboxAccount, warmupInboxUnreadFor
 } from "./inbox.js";
@@ -83,6 +83,26 @@ export const warmupState = {
   // never been told a number must not claim there is nothing to read.
   unreadReplies: null
 };
+
+const WARMUP_INITIAL = JSON.stringify(warmupState);
+
+onCacheReset(resetWarmupScreen);
+
+function resetWarmupScreen() {
+  warmupRecalled = false;
+  warmupInboxRecalled = false;
+  Object.assign(warmupState, JSON.parse(WARMUP_INITIAL));
+  // The shell can become visible before new reads settle. Erase old account
+  // names and campaign text now, while the previous session is being closed.
+  for (const id of ["warmupCampaignPanel", "warmupProfileTableBody", "warmupDetailBody", "warmupDetailSubtitle", "warmupSummary", "warmupConfigNote"]) {
+    const element = document.getElementById(id);
+    if (element) element.textContent = "";
+  }
+  const detail = document.getElementById("warmupDetailPanel");
+  if (detail) detail.hidden = true;
+  const title = document.getElementById("warmupDetailTitle");
+  if (title) title.textContent = "Акаунт";
+}
 
 export function warmupApi(path, options) {
   return api(`/api/warmup${path}`, options);

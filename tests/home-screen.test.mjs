@@ -77,6 +77,7 @@ function screen({ api, data = null, active = null } = {}) {
     },
     CSS: { escape: (value) => value },
     refreshIcons: () => {},
+    getCacheEpoch: () => 0,
     recallScreen: () => null,
     rememberScreen: () => {},
     showContactCard: (id) => clicks.push(`contact:${id}`),

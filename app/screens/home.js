@@ -8,7 +8,7 @@
 // його у свою наступну сесію. Далі — нові відповіді й акаунти, які розсилають.
 
 import { escapeAttr, escapeHtml, onScreen, refreshIcons } from "../core.js";
-import { recallScreen, rememberScreen } from "../cache.js";
+import { getCacheEpoch, onCacheReset, recallScreen, rememberScreen } from "../cache.js";
 import { showContactCard } from "../screens/contacts.js";
 import { showWarmupInboxThread } from "../screens/inbox.js";
 import { warmupApi, warmupCount } from "../screens/warmup-accounts.js";
@@ -29,6 +29,20 @@ export const homeState = {
   errors: new Map()
 };
 
+onCacheReset(resetHomeScreen);
+
+function resetHomeScreen() {
+  homeState.data = null;
+  homeState.ready = false;
+  homeState.error = "";
+  homeState.edits.clear();
+  homeState.drafting.clear();
+  homeState.busy.clear();
+  homeState.errors.clear();
+  const root = document.getElementById("homeRoot");
+  if (root) root.innerHTML = "";
+}
+
 const HOME_CACHE = "home";
 
 /** Скільки людей модель пише одночасно, коли сторінку відкрили. Решта — по черзі. */
@@ -37,19 +51,24 @@ const HOME_DRAFT_PARALLEL = 2;
 // ── читання ────────────────────────────────────────────────────────────────
 
 export async function loadHome() {
+  const session = getCacheEpoch();
   const saved = recallScreen(HOME_CACHE);
   if (!homeState.ready && saved?.value) {
     homeState.data = saved.value;
     homeState.ready = true;
     renderHome();
+  } else if (!homeState.ready) {
+    renderHome();
   }
   try {
     const payload = await warmupApi("/home");
+    if (session !== getCacheEpoch()) return;
     homeState.data = payload;
     homeState.ready = true;
     homeState.error = "";
     rememberScreen(HOME_CACHE, payload);
   } catch (error) {
+    if (session !== getCacheEpoch()) return;
     homeState.error = error?.status === 404
       ? "На цьому сервері ще немає головної сторінки."
       : (error?.message || "Головну не вдалося прочитати.");
@@ -64,11 +83,12 @@ export async function loadHome() {
  * Тут автоматизація письма: людина приходить уже до готових текстів.
  */
 async function draftMissing() {
+  const session = getCacheEpoch();
   const people = (homeState.data?.toWrite || []).filter((person) =>
     !person.draft && !person.reply && !homeState.drafting.has(person.outreachId));
   const queue = [...people];
   const worker = async () => {
-    while (queue.length) {
+    while (queue.length && session === getCacheEpoch()) {
       const person = queue.shift();
       await draftFor(person.outreachId);
     }
@@ -77,6 +97,7 @@ async function draftMissing() {
 }
 
 async function draftFor(outreachId, { force = false } = {}) {
+  const session = getCacheEpoch();
   homeState.drafting.add(outreachId);
   homeState.errors.delete(outreachId);
   renderHomeCard(outreachId);
@@ -85,15 +106,19 @@ async function draftFor(outreachId, { force = false } = {}) {
       method: "POST",
       body: JSON.stringify({ outreachId, force })
     });
+    if (session !== getCacheEpoch()) return;
     const person = homePerson(outreachId);
     if (person) person.draft = payload.draft;
     // Переписали на прохання — то й виправлене людиною поступається новому.
     if (force) homeState.edits.delete(outreachId);
   } catch (error) {
+    if (session !== getCacheEpoch()) return;
     homeState.errors.set(outreachId, error?.message || "Модель не написала повідомлення.");
   } finally {
-    homeState.drafting.delete(outreachId);
-    renderHomeCard(outreachId);
+    if (session === getCacheEpoch()) {
+      homeState.drafting.delete(outreachId);
+      renderHomeCard(outreachId);
+    }
   }
 }
 
@@ -111,6 +136,7 @@ function homeText(person) {
 // ── дії ────────────────────────────────────────────────────────────────────
 
 async function sendFirst(outreachId) {
+  const session = getCacheEpoch();
   const person = homePerson(outreachId);
   if (!person || homeState.busy.has(outreachId)) return;
   const text = homeText(person).trim();
@@ -123,18 +149,23 @@ async function sendFirst(outreachId) {
       method: "POST",
       body: JSON.stringify({ outreachId, text })
     });
+    if (session !== getCacheEpoch()) return;
     person.reply = payload.reply;
     person.goesOut = { at: payload.goesOutAt, today: payload.goesOutToday, soon: payload.goesOutSoon };
     homeState.edits.delete(outreachId);
   } catch (error) {
+    if (session !== getCacheEpoch()) return;
     homeState.errors.set(outreachId, error?.message || "Не вдалося поставити в чергу.");
   } finally {
-    homeState.busy.delete(outreachId);
-    renderHomeCard(outreachId);
+    if (session === getCacheEpoch()) {
+      homeState.busy.delete(outreachId);
+      renderHomeCard(outreachId);
+    }
   }
 }
 
 async function cancelFirst(outreachId) {
+  const session = getCacheEpoch();
   const person = homePerson(outreachId);
   if (!person?.reply || homeState.busy.has(outreachId)) return;
   homeState.busy.add(outreachId);
@@ -144,33 +175,42 @@ async function cancelFirst(outreachId) {
       method: "POST",
       body: JSON.stringify({ accountId: person.accountId, replyId: person.reply.id })
     });
+    if (session !== getCacheEpoch()) return;
     // Текст лишається в полі: скасовують, щоб виправити, а не щоб почати з нуля.
     homeState.edits.set(outreachId, person.reply.body || homeText(person));
     person.reply = null;
     person.goesOut = null;
   } catch (error) {
+    if (session !== getCacheEpoch()) return;
     homeState.errors.set(outreachId, error?.message || "Не вдалося скасувати.");
   } finally {
-    homeState.busy.delete(outreachId);
-    renderHomeCard(outreachId);
+    if (session === getCacheEpoch()) {
+      homeState.busy.delete(outreachId);
+      renderHomeCard(outreachId);
+    }
   }
 }
 
 async function dismissFirst(outreachId) {
+  const session = getCacheEpoch();
   if (homeState.busy.has(outreachId)) return;
   homeState.busy.add(outreachId);
   try {
     await warmupApi("/first-messages/dismiss", { method: "POST", body: JSON.stringify({ outreachId }) });
+    if (session !== getCacheEpoch()) return;
     const data = homeState.data;
     data.toWrite = data.toWrite.filter((person) => person.outreachId !== outreachId);
     data.toWriteTotal = Math.max(0, (Number(data.toWriteTotal) || 1) - 1);
     homeState.edits.delete(outreachId);
     renderHome();
   } catch (error) {
+    if (session !== getCacheEpoch()) return;
     homeState.errors.set(outreachId, error?.message || "Не вдалося пропустити.");
     renderHomeCard(outreachId);
   } finally {
-    homeState.busy.delete(outreachId);
+    if (session === getCacheEpoch()) {
+      homeState.busy.delete(outreachId);
+    }
   }
 }
 

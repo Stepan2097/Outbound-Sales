@@ -1,5 +1,7 @@
 import { crm } from "../warmup/db.mjs";
 import { listFolders } from "../warmup/targeting.mjs";
+import { createHash } from "node:crypto";
+import { createReadCache } from "./read-cache.mjs";
 
 /**
  * The CRM's contacts, read for the Contacts screen.
@@ -25,6 +27,32 @@ const LIST_COLUMNS = "id,name,company,position,country,email,phone,linkedin,tele
 export const MAX_PAGE = 100;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const reads = createReadCache();
+// Temporary compatibility path for installations without CRM migration rights.
+// It is not the indexed implementation and must stay disabled after migration.
+const legacyIndexes = createReadCache({ maxEntries: 4, maxBytes: 32 * 1024 * 1024, cloneValues: false });
+const MINUTE = 60000;
+
+// The authenticated caller supplies the user/workspace scope. Call sites that
+// do not have one deliberately bypass caching, including pre-write checks.
+function cacheKey(cacheScope, kind, ...parts) {
+  if (!cacheScope) return null;
+  const { url, key } = crm.config();
+  const database = createHash("sha256").update(`${url}\0${key}`).digest("hex");
+  return JSON.stringify([database, cacheScope, kind, ...parts]);
+}
+
+export function invalidateContactCaches({ contactId, folderId } = {}) {
+  if (!contactId && !folderId) { reads.invalidate(); legacyIndexes.invalidate(); return; }
+  // Search results and folder counts can contain the changed contact even if
+  // the caller does not know its old folder (for example after a CRM move).
+  reads.invalidate(["folders", "search", "counts", ...(contactId ? [`contact:${contactId}`] : []), ...(folderId ? [`folder:${folderId}`] : [])]);
+  legacyIndexes.invalidate(["search"]);
+}
+
+function contactCount({ cacheScope, folderId, term = "", fresh = false }, load) {
+  return reads.read(cacheKey(cacheScope, "count", folderId, term), { ttl: MINUTE, fresh, tags: ["counts", `folder:${folderId}`] }, load);
+}
 
 /**
  * Never ask the CRM for a uuid we have not looked at.
@@ -50,8 +78,8 @@ export function contactsMissingConfig() {
   return crm.missing();
 }
 
-export async function listContactFolders() {
-  return listFolders();
+export async function listContactFolders({ cacheScope, fresh = false } = {}) {
+  return reads.read(cacheKey(cacheScope, "folders"), { ttl: MINUTE, fresh, tags: ["folders"] }, () => listFolders());
 }
 
 /**
@@ -103,7 +131,7 @@ export function crmKeyKind() {
  * column: `fts` is built by the CRM for its own screens, and a search that
  * behaves differently here than there is worse than a simpler one.
  */
-export async function listFolderContacts({ folderId = "", search = "", limit = 25, offset = 0, queueOrder = false } = {}) {
+export async function listFolderContacts({ folderId = "", search = "", limit = 25, offset = 0, queueOrder = false, cacheScope, fresh = false } = {}) {
   // A folder is required, and not out of tidiness: without one this is a page
   // of every contact in the CRM plus an exact count of the whole table, and on
   // a real base that query comes back as a statement timeout.
@@ -127,19 +155,20 @@ export async function listFolderContacts({ folderId = "", search = "", limit = 2
 
   const [contacts, total] = await Promise.all([
     build(LIST_COLUMNS).order("created_at", { ascending: queueOrder }).order("id", { ascending: queueOrder }).limit(size).offset(from).rows(),
-    build("id").count()
+    contactCount({ cacheScope, folderId, term, fresh }, () => build("id").count())
   ]);
 
   return { contacts, total, limit: size, offset: from };
 }
 
 /** One contact, with everything the CRM knows about them. */
-export async function readContact(id) {
+export async function readContact(id, { cacheScope, fresh = false } = {}) {
   // A malformed id is nobody we have — answered as "not found" rather than
   // handed to Postgres, which would reply with a type error about a table the
   // person reading it has never heard of.
   if (!id || !UUID.test(id)) return null;
-  return crm.from("contacts").select(CONTACT_COLUMNS).eq("id", id).maybeSingle();
+  return reads.read(cacheKey(cacheScope, "contact", id), { ttl: 30000, fresh, tags: [`contact:${id}`] },
+    () => crm.from("contacts").select(CONTACT_COLUMNS).eq("id", id).maybeSingle());
 }
 
 /**
@@ -180,7 +209,7 @@ export function contactAsProspect(contact = {}) {
  * the same millisecond can swap places between two requests, and then the
  * position a seller stopped at points at a different person tomorrow.
  */
-export async function folderContactAt({ folderId = "", index = 0, search = "", contactId = "" } = {}) {
+export async function folderContactAt({ folderId = "", index = 0, search = "", contactId = "", cacheScope } = {}) {
   if (!folderId) {
     const error = new Error("Спочатку обери папку — без неї запит іде по всій базі CRM.");
     error.statusCode = 400;
@@ -188,14 +217,14 @@ export async function folderContactAt({ folderId = "", index = 0, search = "", c
   }
   if (!UUID.test(folderId)) throw badUuid("Папка", folderId);
   if (contactId) {
-    const contact = await readContact(contactId);
+    const contact = await readContact(contactId, { cacheScope });
     if (!contact || contact.folder_id !== folderId) {
       const error = new Error("Контакт більше не знаходиться в цій папці.");
       error.statusCode = 404;
       throw error;
     }
     const [total, position] = await Promise.all([
-      crm.from("contacts").select("id").eq("folder_id", folderId).count(),
+      contactCount({ cacheScope, folderId }, () => crm.from("contacts").select("id").eq("folder_id", folderId).count()),
       crm.from("contacts").select("id").eq("folder_id", folderId)
         .or(`created_at.lt.${contact.created_at},and(created_at.eq.${contact.created_at},id.lt.${contact.id})`).count()
     ]);
@@ -214,34 +243,23 @@ export async function folderContactAt({ folderId = "", index = 0, search = "", c
       .limit(1)
       .offset(position)
       .rows(),
-    build("id").count()
+    contactCount({ cacheScope, folderId, term }, () => build("id").count())
   ]);
   return { contact: rows[0] || null, total, index: position };
 }
 
-// Cache the lightweight folder index so typing does not reread thousands of rows.
-const searchIndexes = new Map();
-async function folderSearchIndex(folderId) {
-  const cached = searchIndexes.get(folderId);
-  if (cached && cached.expires > Date.now()) return cached.promise;
-  const entry = { expires: Date.now() + 60000 };
-  entry.promise = (async () => {
+const searchText = (value) => String(value || "").normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().trim();
+async function legacyFolderSearchIndex(folderId, cacheScope, fresh) {
+  return legacyIndexes.read(cacheKey(cacheScope, "legacy-index", folderId), { ttl: MINUTE, fresh, tags: ["search"] }, async () => {
     const rows = [];
     for (let offset = 0; ; offset += 1000) {
-      const page = await crm.from("contacts").select(LIST_COLUMNS).eq("folder_id", folderId)
-        .order("id").limit(1000).offset(offset).rows();
+      const page = await crm.from("contacts").select(LIST_COLUMNS).eq("folder_id", folderId).order("id").limit(1000).offset(offset).rows();
       rows.push(...page);
       if (page.length < 1000) break;
     }
     return rows;
-  })();
-  searchIndexes.set(folderId, entry);
-  if (searchIndexes.size > 4) searchIndexes.delete(searchIndexes.keys().next().value);
-  try { return await entry.promise; }
-  catch (error) { if (searchIndexes.get(folderId) === entry) searchIndexes.delete(folderId); throw error; }
+  });
 }
-
-const searchText = (value) => String(value || "").normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().trim();
 function wordSimilarity(left, right) {
   if (left === right) return 1;
   if (left.length < 3 || right.length < 3) return 0;
@@ -255,23 +273,54 @@ export function rankContactMatches(contacts, search) {
   const term = searchText(search).slice(0, 120);
   if (!term) return [];
   const tokens = term.split(/\s+/);
-  return contacts.map((contact) => {
-    const fields = [contact.name, contact.company, contact.email, contact.position].map(searchText);
+  const best = [];
+  const compare = (a, b) => b.score - a.score || String(a.contact.id).localeCompare(String(b.contact.id));
+  const keep = (contact, score) => {
+    if (!score) return;
+    const match = { contact, score };
+    if (best.length === 5 && compare(match, best[4]) >= 0) return;
+    best.push(match);
+    best.sort(compare);
+    if (best.length > 5) best.pop();
+  };
+  const directScore = (field) => field === term ? 100 : field.startsWith(term) ? 90 : field.includes(term) ? 80 : 0;
+  const fieldsByContact = contacts.map((contact) => ({
+    contact, fields: [contact.name, contact.company, contact.email, contact.position].map(searchText)
+  }));
+  for (const { contact, fields } of fieldsByContact) keep(contact, Math.max(...fields.map(directScore)));
+  // Exact/prefix/substring results always outrank a fuzzy score (at most60).
+  // Most keystrokes stop here, avoiding word-gram work across the whole folder.
+  if (best.length === 5) return best.map((item) => item.contact);
+  for (const { contact, fields } of fieldsByContact) {
+    if (fields.some((field) => directScore(field))) continue;
     const scores = fields.map((field) => {
-      if (field === term) return 100;
-      if (field.startsWith(term)) return 90;
-      if (field.includes(term)) return 80;
       const words = field.split(/[\s@._-]+/);
       const matches = tokens.map((token) => Math.max(0, ...words.map((word) => word.includes(token) ? 1 : wordSimilarity(token, word))));
       if (matches.some((score) => score < 0.5)) return 0;
       return 60 * matches.reduce((sum, score) => sum + score, 0) / tokens.length;
     });
-    return { contact, score: Math.max(...scores) };
-  }).filter((item) => item.score > 0).sort((a, b) => b.score - a.score || String(a.contact.id).localeCompare(String(b.contact.id))).slice(0, 5).map((item) => item.contact);
+    keep(contact, Math.max(...scores));
+  }
+  return best.map((item) => item.contact);
 }
 
-export async function searchFolderContacts({ folderId = "", search = "" } = {}) {
+export async function searchFolderContacts({ folderId = "", search = "", cacheScope, fresh = false } = {}) {
   if (!UUID.test(folderId)) throw badUuid("Папка", folderId);
-  if (!String(search).trim()) return { contacts: [] };
-  return { contacts: rankContactMatches(await folderSearchIndex(folderId), search) };
+  const term = searchText(search).slice(0, 120);
+  if (!term) return { contacts: [] };
+  const indexed = process.env.CONTACTS_INDEXED_SEARCH === "1";
+  return reads.read(cacheKey(cacheScope, "search", folderId, term, indexed), { ttl: MINUTE, fresh, tags: ["search", `folder:${folderId}`] }, async () => {
+    if (!indexed) return { contacts: rankContactMatches(await legacyFolderSearchIndex(folderId, cacheScope, fresh), term) };
+    try {
+      const contacts = await crm.rpc("outbound_search_contacts", { p_folder_id: folderId, p_search: term }).select(LIST_COLUMNS).rows();
+      return { contacts: contacts.slice(0, 5) };
+    } catch (error) {
+      if (error.code === "PGRST202" || error.code === "42883") {
+        const unavailable = new Error("Пошук CRM ще не оновлено: потрібна міграція outbound_search_contacts.");
+        unavailable.statusCode = 503;
+        throw unavailable;
+      }
+      throw error;
+    }
+  });
 }

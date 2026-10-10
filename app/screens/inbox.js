@@ -9,6 +9,7 @@
 import {
   authState, escapeAttr, escapeHtml, onScreen, onWorkspaceEnter, refreshIcons, uaPlural
 } from "../core.js";
+import { onCacheReset } from "../cache.js";
 import {
   showContactCard
 } from "../screens/contacts.js";
@@ -48,6 +49,39 @@ let inboxAccountFilter = null;
  * значенням, і «UA » ставало б «UA», а пробіл, який людина щойно набрала, зникав.
  */
 let inboxSearch = "";
+
+// A newly loaded dataset changes the array identity. Sorting and normalising
+// once per dataset keeps every keypress proportional to this account's rows,
+// rather than sorting all of its conversations again.
+let inboxIndexedThreads = null;
+let inboxIndexedAccounts = null;
+let inboxThreadIndex = null;
+
+function warmupInboxIndex() {
+  const inbox = warmupState.inbox;
+  if (inboxIndexedThreads === inbox.threads && inboxIndexedAccounts === inbox.accounts && inboxThreadIndex) return inboxThreadIndex;
+  const accounts = new Map();
+  const searchText = new WeakMap();
+  for (const thread of inbox.threads) {
+    const rows = accounts.get(thread.accountId) || [];
+    rows.push(thread);
+    accounts.set(thread.accountId, rows);
+    searchText.set(thread, [
+      warmupParticipantName(thread.participant || {}),
+      thread.participant?.headline,
+      warmupPlaceholder(thread.lastMessage?.body) ? "" : thread.lastMessage?.body
+    ].join(" ").toLowerCase());
+  }
+  const sentAt = (thread) => Date.parse(thread?.lastMessage?.sentAt || "") || 0;
+  for (const rows of accounts.values()) rows.sort((left, right) => sentAt(right) - sentAt(left));
+  const order = [...accounts.keys()].filter(Boolean).sort((left, right) =>
+    sentAt(accounts.get(right)[0]) - sentAt(accounts.get(left)[0])
+    || warmupInboxAccountName(left).localeCompare(warmupInboxAccountName(right), "uk"));
+  inboxIndexedThreads = inbox.threads;
+  inboxIndexedAccounts = inbox.accounts;
+  inboxThreadIndex = { accounts, searchText, order };
+  return inboxThreadIndex;
+}
 
 /** Слова пошуку: порожньо, коли в полі самі пробіли. */
 function inboxSearchTerms() {
@@ -298,13 +332,9 @@ function warmupInboxEmptyHtml(sync) {
  * click. Which account is open is `warmupInboxAccountId`.
  */
 function warmupInboxRows() {
-  const sentAt = (thread) => Date.parse(thread?.lastMessage?.sentAt || "") || 0;
   const terms = inboxSearchTerms();
-  const accountId = warmupInboxAccountId();
-  return warmupState.inbox.threads
-    .filter((thread) => thread.accountId === accountId)
-    .filter((thread) => warmupInboxMatches(thread, terms))
-    .sort((left, right) => sentAt(right) - sentAt(left));
+  const rows = warmupInboxIndex().accounts.get(warmupInboxAccountId()) || [];
+  return terms.length ? rows.filter((thread) => warmupInboxMatches(thread, terms)) : rows;
 }
 
 /**
@@ -314,12 +344,7 @@ function warmupInboxRows() {
  */
 function warmupInboxMatches(thread, terms) {
   if (!terms.length) return true;
-  const participant = thread.participant || {};
-  const haystack = [
-    warmupParticipantName(participant),
-    participant.headline,
-    warmupPlaceholder(thread.lastMessage?.body) ? "" : thread.lastMessage?.body
-  ].join(" ").toLowerCase();
+  const haystack = warmupInboxIndex().searchText.get(thread) || "";
   return terms.every((term) => haystack.includes(term));
 }
 
@@ -370,7 +395,7 @@ export function warmupInboxUnreadFor(accountId) {
  */
 function warmupInboxFilterHtml(shown) {
   if (!inboxSearchTerms().length) return "";
-  const total = warmupState.inbox.threads.filter((thread) => thread.accountId === warmupInboxAccountId()).length;
+  const total = warmupInboxIndex().accounts.get(warmupInboxAccountId())?.length || 0;
   return `<div class="warmup-inbox-filter">
     <span>Знайдено: <strong>${warmupCount(shown)}</strong> з ${warmupCount(total)}</span>
     <button class="warmup-inbox-link" type="button" data-warmup-inbox-reset>Скинути пошук</button>
@@ -408,10 +433,7 @@ function warmupInboxAccountOptions() {
  * has gone — it is the one with the freshest reply.
  */
 function warmupInboxAccountId() {
-  const options = warmupInboxAccountOptions();
-  return options.some((entry) => entry.accountId === inboxAccountFilter)
-    ? inboxAccountFilter
-    : (options[0]?.accountId ?? null);
+  return inboxAccountFilter || warmupInboxIndex().order[0] || null;
 }
 
 /**
@@ -436,12 +458,11 @@ function warmupInboxChipsHtml() {
 
 /** Where the conversation goes while none is open: what to do, and the shortest way to start. */
 function warmupThreadPlaceholderHtml() {
-  const next = warmupNextUnread();
   return `<div class="inbox-thread-empty">
     <i data-lucide="message-square"></i>
     <strong>Оберіть розмову зі списку</strong>
     <span>Тут буде вся переписка з цією людиною, від найстарішого.</span>
-    ${next ? `<button class="primary-button" type="button" data-warmup-inbox-next><span>Почати з непрочитаної: ${escapeHtml(warmupParticipantName(next.participant || {}))}</span><i data-lucide="arrow-right"></i></button>` : ""}
+    ${warmupInboxNextHtml(true)}
   </div>`;
 }
 
@@ -582,15 +603,64 @@ function warmupThreadViewHtml() {
 
   // The end of a conversation is where somebody who is working through the
   // replies stops reading, so that is where the way to the next one is.
-  const next = warmupNextUnread();
   return `${head}
     <ol class="warmup-messages">${messages.map((message) => warmupMessageHtml(message, name, account.name)).join("")}</ol>
     ${warmupOutboxHtml(account.name)}
-    ${next ? `<button class="primary-button warmup-thread-next" type="button" data-warmup-inbox-next><span>Наступна непрочитана: ${escapeHtml(warmupParticipantName(next.participant || {}))}</span><i data-lucide="arrow-right"></i></button>` : ""}`;
+    ${warmupInboxNextHtml(false)}`;
 }
 
 /** What the conversation pane showed last, so a redraw that changes nothing leaves its scroll alone. */
 let inboxPaneKey = "";
+
+// Compare the source we assigned, never innerHTML: browser normalisation and
+// Lucide replace that markup even when none of the conversation data changed.
+let inboxRenderedMarkup = new WeakMap();
+
+function setInboxMarkup(element, html) {
+  if (!element || inboxRenderedMarkup.get(element) === html) return false;
+  const scrolled = element.scrollTop;
+  element.innerHTML = html;
+  inboxRenderedMarkup.set(element, html);
+  if (typeof scrolled === "number") element.scrollTop = scrolled;
+  return true;
+}
+
+function warmupInboxNextHtml(placeholder) {
+  const next = warmupNextUnread();
+  const button = next ? `<button class="primary-button${placeholder ? "" : " warmup-thread-next"}" type="button" data-warmup-inbox-next><span>${placeholder ? "Почати з непрочитаної" : "Наступна непрочитана"}: ${escapeHtml(warmupParticipantName(next.participant || {}))}</span><i data-lucide="arrow-right"></i></button>` : "";
+  return `<div id="warmupInboxNext" data-placeholder="${placeholder}">${button}</div>`;
+}
+
+function renderWarmupInboxNext() {
+  const slot = document.getElementById("warmupInboxNext");
+  if (!slot) return;
+  const placeholder = warmupState.inbox.openThreadKey === null;
+  const html = warmupInboxNextHtml(placeholder);
+  const content = html.slice(html.indexOf(">") + 1, -6);
+  if (!setInboxMarkup(slot, content)) return;
+  // Keep the parent's source signature in step with this small update.
+  const pane = document.getElementById("warmupInboxThread");
+  const source = pane && inboxRenderedMarkup.get(pane);
+  if (source) inboxRenderedMarkup.set(pane, source.replace(/<div id="warmupInboxNext"[^>]*>[\s\S]*?<\/div>/, html));
+  refreshIcons(slot);
+}
+
+function renderWarmupInboxList() {
+  const body = document.getElementById("warmupInboxBody");
+  const search = document.getElementById("warmupInboxSearch");
+  if (!body) return;
+  if (search && search.value !== inboxSearch) search.value = inboxSearch;
+  const inbox = warmupState.inbox;
+  if (!inbox.ready || !inbox.available || inbox.error || !inbox.threads.length) return;
+  const rows = warmupInboxRows();
+  const filterLine = warmupInboxFilterHtml(rows.length);
+  const html = rows.length
+    ? `${filterLine}<div class="warmup-threads">${rows.map((thread) => warmupThreadRowHtml(thread)).join("")}</div>`
+    : `${filterLine}${inboxSearchTerms().length
+      ? '<div class="warmup-inbox-note is-calm"><strong>За цим запитом нічого не знайшлось.</strong><span>Шукається в імені, посаді й тексті останньої відповіді.</span></div>'
+      : '<div class="warmup-inbox-note is-calm"><strong>Від цього акаунта відповідей немає.</strong></div>'}`;
+  setInboxMarkup(body, html);
+}
 
 export function renderWarmupInbox() {
   const title = document.getElementById("warmupInboxTitle");
@@ -630,10 +700,9 @@ export function renderWarmupInbox() {
   // Nothing to pick from: one message across the whole panel, no accounts, no panes.
   const alone = (html, line) => {
     subtitle.textContent = line;
-    if (notice) { notice.innerHTML = html; notice.hidden = !html; }
+    if (notice) { setInboxMarkup(notice, html); notice.hidden = !html; }
     if (chips) chips.hidden = true;
     if (layout) layout.hidden = true;
-    refreshIcons();
   };
 
   if (!inbox.available) {
@@ -675,11 +744,11 @@ export function renderWarmupInbox() {
     : (sync.known ? `${openName}: листи ще не читали` : "");
   subtitle.title = sync.lastSyncedAt ? warmupStamp(sync.lastSyncedAt) : "";
   const note = warmupInboxNoteHtml(sync);
-  if (notice) { notice.innerHTML = note; notice.hidden = !note; }
+  if (notice) { setInboxMarkup(notice, note); notice.hidden = !note; }
 
   const chipsHtml = warmupInboxChipsHtml();
   if (chips) {
-    if (chips.innerHTML !== chipsHtml) chips.innerHTML = chipsHtml;
+    setInboxMarkup(chips, chipsHtml);
     chips.hidden = !chipsHtml;
   }
 
@@ -697,19 +766,7 @@ export function renderWarmupInbox() {
   // accounts above it are hidden by this class and come back with the list.
   document.getElementById("view-inbox")?.classList?.toggle?.("inbox-has-thread", open);
 
-  // The list.
-  const rows = warmupInboxRows();
-  const filterLine = warmupInboxFilterHtml(rows.length);
-  const listHtml = rows.length
-    ? `${filterLine}<div class="warmup-threads">${rows.map((thread) => warmupThreadRowHtml(thread)).join("")}</div>`
-    : `${filterLine}${inboxSearchTerms().length
-      ? '<div class="warmup-inbox-note is-calm"><strong>За цим запитом нічого не знайшлось.</strong><span>Шукається в імені, посаді, акаунті й тексті останньої відповіді.</span></div>'
-      : '<div class="warmup-inbox-note is-calm"><strong>Від цього акаунта відповідей немає.</strong></div>'}`;
-  if (body.innerHTML !== listHtml) {
-    const scrolled = body.scrollTop;
-    body.innerHTML = listHtml;
-    if (typeof scrolled === "number") body.scrollTop = scrolled;
-  }
+  renderWarmupInboxList();
 
   // The conversation, drawn only when it changed, and from the top when it is a
   // different one — a list that reloads must not throw the reader back to the
@@ -717,15 +774,14 @@ export function renderWarmupInbox() {
   if (pane) {
     const paneHtml = open ? warmupThreadViewHtml() : warmupThreadPlaceholderHtml();
     const paneKey = open ? `${inbox.openAccountId}|${inbox.openThreadKey}` : "";
-    if (pane.innerHTML !== paneHtml) {
-      const scrolled = pane.scrollTop;
-      pane.innerHTML = paneHtml;
+    const scrolled = pane.scrollTop;
+    if (setInboxMarkup(pane, paneHtml)) {
       pane.scrollTop = paneKey === inboxPaneKey && typeof scrolled === "number" ? scrolled : 0;
+      refreshIcons(pane);
     }
     inboxPaneKey = paneKey;
   }
   renderWarmupReply();
-  refreshIcons();
 }
 
 // ── Відповідь ──────────────────────────────────────────────────────────────
@@ -804,20 +860,24 @@ async function submitWarmupReply() {
   const text = area.value.trim();
   if (!text) return;
 
+  const session = inboxSessionVersion;
   inboxReplyBusy = true;
   inboxReplyError = "";
   renderWarmupReply();
   try {
     await warmupApi("/inbox/reply", { method: "POST", body: JSON.stringify({ accountId, threadKey, text }) });
+    if (session !== inboxSessionVersion) return;
     inboxDrafts.delete(`${accountId}|${threadKey}`);
     inboxReplyBusy = false;
     if (!warmupThreadIsOpen(accountId, threadKey)) return;
     area.value = "";
     // Розмова перечитується: відповідь у ній з'являється як рядок, що чекає.
     await openWarmupThread(accountId, threadKey, { refresh: true });
+    if (session !== inboxSessionVersion) return;
     const pane = document.getElementById("warmupInboxThread");
     if (pane && typeof pane.scrollHeight === "number") pane.scrollTop = pane.scrollHeight;
   } catch (error) {
+    if (session !== inboxSessionVersion) return;
     inboxReplyBusy = false;
     // Помилка належить розмові, в якій її отримали: в іншій вона нічого не означає.
     if (warmupThreadIsOpen(accountId, threadKey)) inboxReplyError = error?.message || "Не вдалося поставити відповідь у чергу.";
@@ -832,9 +892,12 @@ async function removeWarmupReply(replyId, { rewrite = false } = {}) {
   const accountId = inbox.openAccountId;
   const threadKey = inbox.openThreadKey;
   const reply = (inbox.open?.outbox || []).find((row) => row.id === replyId);
+  const session = inboxSessionVersion;
   try {
     await warmupApi("/inbox/reply/cancel", { method: "POST", body: JSON.stringify({ accountId, replyId }) });
+    if (session !== inboxSessionVersion) return;
   } catch (error) {
+    if (session !== inboxSessionVersion) return;
     if (warmupThreadIsOpen(accountId, threadKey)) {
       inboxReplyError = error?.message || "Не вдалося скасувати.";
       renderWarmupReply();
@@ -885,8 +948,10 @@ function stopWarmupBadgePoll() {
 async function refreshWarmupBadge() {
   if (!authState?.authenticated) return;
   if (document.visibilityState === "hidden") return;
+  const session = inboxSessionVersion;
   try {
     const config = await warmupApi("/config");
+    if (session !== inboxSessionVersion) return;
     // A server with no warm-up will never have an unread reply, and should not
     // be asked again for the rest of the session.
     if (config && config.configured === false) {
@@ -902,6 +967,7 @@ async function refreshWarmupBadge() {
       if (Number.isFinite(before) && before !== config.unreadReplies && warmupInboxListOnScreen()) void loadWarmupInbox();
     }
   } catch (error) {
+    if (session !== inboxSessionVersion) return;
     // A portal without the count is not a portal with a wrong count: leave the
     // badge as it was, and stop pestering a server that has no such route.
     if (error?.status === 404) stopWarmupBadgePoll();
@@ -921,40 +987,83 @@ export function startWarmupBadge() {
   refreshWarmupBadge();
 }
 
-export async function loadWarmupInbox() {
-  const inbox = warmupState.inbox;
+let inboxLoadPromise = null;
+let inboxSessionVersion = 0;
+let inboxOpenRequest = 0;
 
-  try {
-    const payload = await warmupApi("/inbox");
-    inbox.threads = Array.isArray(payload.threads) ? payload.threads : [];
-    inbox.accounts = Array.isArray(payload.accounts) ? payload.accounts : [];
-    inbox.unread = Number.isFinite(payload.unread) ? payload.unread : 0;
-    inbox.sync = payload.sync && typeof payload.sync === "object" ? payload.sync : null;
-    inbox.available = true;
-    inbox.ready = true;
-    inbox.error = "";
-    setWarmupUnread(inbox.unread);
-  } catch (error) {
-    inbox.threads = [];
-    inbox.accounts = [];
-    inbox.sync = null;
-    if (error?.status === 404) {
-      // The endpoint is not built here. That is a different sentence from "the
-      // inbox is empty", and drawing the empty one would be a lie.
-      inbox.available = false;
-      inbox.ready = false;
-      inbox.error = "";
-    } else {
+function resetWarmupInboxSession() {
+  inboxSessionVersion += 1;
+  inboxOpenRequest += 1;
+  inboxLoadPromise = null;
+  inboxAccountFilter = null;
+  inboxSearch = "";
+  inboxPaneKey = "";
+  inboxIndexedThreads = null;
+  inboxIndexedAccounts = null;
+  inboxThreadIndex = null;
+  inboxRenderedMarkup = new WeakMap();
+  inboxDrafts.clear();
+  inboxReplyKey = "";
+  inboxReplyBusy = false;
+  inboxReplyError = "";
+  Object.assign(warmupState.inbox, {
+    threads: [], accounts: [], unread: 0, sync: null, ready: false,
+    available: true, error: "", openAccountId: null, openThreadKey: null,
+    open: null, openError: "", openBusy: false
+  });
+  const area = document.getElementById("warmupInboxReplyText");
+  if (area) area.value = "";
+  const search = document.getElementById("warmupInboxSearch");
+  if (search) search.value = "";
+  setWarmupUnread(null);
+  renderWarmupInbox();
+}
+
+onCacheReset(resetWarmupInboxSession);
+
+export async function loadWarmupInbox() {
+  // Opening the screen and a badge refresh can ask together. They share only
+  // an in-flight read, never a timed cache: unread and permission data stay fresh.
+  if (inboxLoadPromise) return inboxLoadPromise;
+  const inbox = warmupState.inbox;
+  const session = inboxSessionVersion;
+  const request = (async () => {
+    try {
+      const payload = await warmupApi("/inbox");
+      if (session !== inboxSessionVersion) return;
+      inbox.threads = Array.isArray(payload.threads) ? payload.threads : [];
+      inbox.accounts = Array.isArray(payload.accounts) ? payload.accounts : [];
+      inbox.unread = Number.isFinite(payload.unread) ? payload.unread : 0;
+      inbox.sync = payload.sync && typeof payload.sync === "object" ? payload.sync : null;
       inbox.available = true;
       inbox.ready = true;
-      inbox.error = error.message || "Вхідні не вдалося прочитати.";
+      inbox.error = "";
+      setWarmupUnread(inbox.unread);
+      rememberWarmupInbox();
+    } catch (error) {
+      if (session !== inboxSessionVersion) return;
+      inbox.threads = [];
+      inbox.accounts = [];
+      inbox.sync = null;
+      if (error?.status === 404) {
+        inbox.available = false;
+        inbox.ready = false;
+        inbox.error = "";
+      } else {
+        inbox.available = true;
+        inbox.ready = true;
+        inbox.error = error.message || "Вхідні не вдалося прочитати.";
+      }
     }
+    renderWarmupInbox();
+    if (warmupState.profiles.length) renderWarmupProfiles();
+  })();
+  inboxLoadPromise = request;
+  try {
+    return await request;
+  } finally {
+    if (inboxLoadPromise === request) inboxLoadPromise = null;
   }
-  renderWarmupInbox();
-  // The accounts table carries the same unread numbers, and it was drawn before
-  // this answer arrived — so it is redrawn with it rather than sitting there
-  // saying nothing is waiting.
-  if (warmupState.profiles.length) renderWarmupProfiles();
 }
 
 function warmupThreadIsOpen(accountId, threadKey) {
@@ -969,6 +1078,7 @@ async function markWarmupThreadRead(accountId, threadKey) {
   );
   if (thread && !thread.unread) return;
 
+  const session = inboxSessionVersion;
   let payload = null;
   try {
     payload = await warmupApi("/inbox/read", {
@@ -981,6 +1091,7 @@ async function markWarmupThreadRead(accountId, threadKey) {
     return;
   }
 
+  if (session !== inboxSessionVersion) return;
   if (thread) thread.unread = false;
   warmupState.inbox.unread = Math.max(0, (warmupState.inbox.unread || 0) - 1);
   // The account this thread arrived on is one reply less busy, on the accounts
@@ -995,10 +1106,14 @@ async function markWarmupThreadRead(accountId, threadKey) {
   } else if (Number.isFinite(warmupState.unreadReplies)) {
     setWarmupUnread(warmupState.unreadReplies - 1);
   }
+  rememberWarmupInbox();
 }
 
 async function openWarmupThread(accountId, threadKey, { refresh = false } = {}) {
   const inbox = warmupState.inbox;
+  const session = inboxSessionVersion;
+  const request = ++inboxOpenRequest;
+  const isCurrent = () => session === inboxSessionVersion && request === inboxOpenRequest && warmupThreadIsOpen(accountId, threadKey);
   inbox.openAccountId = accountId;
   inbox.openThreadKey = threadKey;
   // Reloading the conversation that is already on the screen keeps showing it
@@ -1014,7 +1129,7 @@ async function openWarmupThread(accountId, threadKey, { refresh = false } = {}) 
     );
     // The reader may have gone back, or opened something else, while this was
     // in flight. Whatever is open now wins.
-    if (!warmupThreadIsOpen(accountId, threadKey)) return;
+    if (!isCurrent()) return;
     inbox.open = {
       thread: payload.thread || {},
       messages: payload.messages || [],
@@ -1023,7 +1138,7 @@ async function openWarmupThread(accountId, threadKey, { refresh = false } = {}) 
     };
     inbox.openError = "";
   } catch (error) {
-    if (!warmupThreadIsOpen(accountId, threadKey)) return;
+    if (!isCurrent()) return;
     // A 404 here means the thread, not the route — a row can be listed and then
     // be gone by the time somebody clicks it. Unless the list never answered
     // either, in which case it is the route after all.
@@ -1033,19 +1148,20 @@ async function openWarmupThread(accountId, threadKey, { refresh = false } = {}) 
         : "Цей сервер ще не вміє відкривати окремий тред.")
       : (error.message || "Розмову не вдалося прочитати.");
   } finally {
-    if (warmupThreadIsOpen(accountId, threadKey)) {
+    if (isCurrent()) {
       inbox.openBusy = false;
       renderWarmupInbox();
     }
   }
 
-  if (warmupThreadIsOpen(accountId, threadKey) && !inbox.openError) {
+  if (isCurrent() && !inbox.openError) {
     await markWarmupThreadRead(accountId, threadKey);
-    if (warmupThreadIsOpen(accountId, threadKey)) renderWarmupInbox();
+    if (isCurrent()) renderWarmupInbox();
   }
 }
 
 function closeWarmupThread() {
+  inboxOpenRequest += 1;
   const inbox = warmupState.inbox;
   inbox.openAccountId = null;
   inbox.openThreadKey = null;
@@ -1116,7 +1232,8 @@ document.getElementById("warmupInboxLayout")?.addEventListener("click", (event) 
   }
   if (event.target.closest("[data-warmup-inbox-reset]")) {
     inboxSearch = "";
-    renderWarmupInbox();
+    renderWarmupInboxList();
+    renderWarmupInboxNext();
     return;
   }
   if (event.target.closest("[data-warmup-inbox-next]")) {
@@ -1173,7 +1290,8 @@ document.getElementById("warmupInboxReplyText")?.addEventListener("keydown", (ev
 
 document.getElementById("warmupInboxSearch")?.addEventListener("input", (event) => {
   inboxSearch = event.target.value;
-  renderWarmupInbox();
+  renderWarmupInboxList();
+  renderWarmupInboxNext();
 });
 
 // Вкладка, що довго була прихована, не опитувала лічильник: при поверненні він

@@ -3,7 +3,7 @@
 // the four screens by name only — each screen registers what opening it means
 // (`onScreen`), so nothing here imports a screen.
 
-import { forgetScreens } from "./cache.js";
+import { forgetScreens, getCacheEpoch, getCacheScope, invalidateReads, invalidateScreens, setCacheScope } from "./cache.js";
 
 export let state = null;
 
@@ -18,6 +18,8 @@ export let authState = null;
 let authMode = "login";
 
 let profileTabId = null;
+
+let heartbeatTimer = null;
 
 const views = [...document.querySelectorAll(".view")];
 
@@ -37,6 +39,7 @@ export const uaPlural = (count, one, few, many) => {
 };
 
 export async function api(path, options = {}) {
+  const requestEpoch = getCacheEpoch();
   const response = await fetch(path, {
     ...options,
     headers: {
@@ -44,8 +47,18 @@ export async function api(path, options = {}) {
       ...(options.headers || {})
     }
   });
+  if (requestEpoch !== getCacheEpoch() && !path.startsWith("/api/auth/")) {
+    const failure = new Error("Session changed");
+    failure.name = "AbortError";
+    throw failure;
+  }
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
+    if (requestEpoch !== getCacheEpoch() && !path.startsWith("/api/auth/")) {
+      const failure = new Error("Session changed");
+      failure.name = "AbortError";
+      throw failure;
+    }
     if (response.status === 401 && path !== "/api/auth/status" && !path.startsWith("/api/auth/")) {
       authState = { authenticated: false, bootstrapRequired: Boolean(body.bootstrapRequired) };
       showAuthGate();
@@ -55,7 +68,17 @@ export async function api(path, options = {}) {
     failure.payload = body;
     throw failure;
   }
-  return response.json();
+  const payload = await response.json();
+  if (requestEpoch !== getCacheEpoch() && !path.startsWith("/api/auth/")) {
+    const failure = new Error("Session changed");
+    failure.name = "AbortError";
+    throw failure;
+  }
+  if (!["GET", "HEAD"].includes(String(options.method || "GET").toUpperCase()) && path !== "/api/account/heartbeat") {
+    invalidateReads("", { retryPending: true });
+    invalidateScreens();
+  }
+  return payload;
 }
 
 async function refresh() {
@@ -86,7 +109,7 @@ export async function bootApplication() {
     authMode = "reset";
     window.sessionStorage.setItem("outboundRecoveryToken", hash.get("access_token"));
   }
-  authState = await api("/api/auth/status");
+  setAuthState(await api("/api/auth/status"));
   if (!authState.authenticated) {
     if (authState.bootstrapRequired) authMode = "bootstrap";
     showAuthGate();
@@ -98,7 +121,11 @@ export async function bootApplication() {
 function showAuthGate() {
   // Whoever signs in next in this tab starts from their own answers, not from
   // the screens the last person left in memory.
-  forgetScreens();
+  if (getCacheScope()) setCacheScope("");
+  else forgetScreens();
+  state = null;
+  window.clearInterval(heartbeatTimer);
+  heartbeatTimer = null;
   document.getElementById("authGate").hidden = false;
   document.getElementById("appShell").hidden = true;
   renderAuthForm();
@@ -106,16 +133,15 @@ function showAuthGate() {
 }
 
 async function enterWorkspace() {
+  setAuthState(authState);
   document.getElementById("authGate").hidden = true;
   document.getElementById("appShell").hidden = false;
   // The screen first: it draws from memory at once and starts its own reads,
-  // which need nothing from these two. Waiting for them first was half a
+  // which need nothing from the state read. Waiting for it first was half a
   // second of empty page before the screen had even asked for its data.
   const saved = rememberedView();
   setView(saved || "home");
-  const [status] = await Promise.all([api("/api/auth/status"), refresh()]);
-  authState = status;
-  render();
+  await refresh();
   startActivityHeartbeat();
   for (const hook of enterHooks) {
     try { hook(); } catch { /* a counter that cannot be read must not stop anybody entering */ }
@@ -308,9 +334,9 @@ export function onScreen(view, hooks) {
   screenHooks.set(view, [...(screenHooks.get(view) || []), hooks]);
 }
 
-export function refreshIcons() {
+export function refreshIcons(root = document) {
   if (window.lucide) {
-    window.lucide.createIcons();
+    window.lucide.createIcons({ root });
   }
 }
 
@@ -462,8 +488,9 @@ function startActivityHeartbeat() {
     if (document.visibilityState !== "visible") return;
     api("/api/account/heartbeat", { method: "POST", body: JSON.stringify({ tabId: profileTabId }) }).catch(() => {});
   };
+  window.clearInterval(heartbeatTimer);
   beat();
-  setInterval(beat, 60000);
+  heartbeatTimer = window.setInterval(beat, 60000);
 }
 
 export function setUiNotice(value) {
@@ -471,4 +498,9 @@ export function setUiNotice(value) {
 }
 export function setAuthState(value) {
   authState = value;
+  const user = value?.user;
+  const identity = user?.id || user?.email;
+  setCacheScope(value?.authenticated && identity
+    ? JSON.stringify([window.location.origin, value.workspaceId || window.location.origin, identity, user.role || ""])
+    : "");
 }

@@ -7,7 +7,7 @@
 import {
   HISTORY_EVENT_LABEL, INVITE_NOTE_DROPPED, api, escapeAttr, escapeHtml, linkIfUrl, onScreen, refreshIcons, relativeTime, setHtml, setText, state, uaPlural
 } from "../core.js";
-import { recallScreen, rememberScreen } from "../cache.js";
+import { cachedRead, onCacheReset, onReadsInvalidated, recallScreen, rememberScreen } from "../cache.js";
 import {
   WARMUP_OUTREACH_LABEL, WARMUP_OUTREACH_TONE, warmupApi
 } from "../screens/warmup-accounts.js";
@@ -25,9 +25,10 @@ async function openContactsScreen() {
   // the CRM is read again right behind them.
   if (recallContacts()) renderContacts();
   const stale = Date.now() - contactsLoadedAt > CONTACTS_STALE_MS;
+  const selectedAtOpen = selectedContactId;
   try {
     await loadContactFolders({ force: stale });
-    if (stale && contactFolderId) await loadContactPage();
+    if (selectedAtOpen && selectedContactId === selectedAtOpen && !contactDraftsBusy) await openContact(selectedAtOpen, { keepDraftForm: true });
   } catch {
     // Помилку CRM уже видно в самому списку (contactsError).
   }
@@ -94,7 +95,7 @@ function rememberContacts() {
   if (contactsError || !contactFoldersLoaded) return;
   rememberScreen("contacts", {
     folders: contactFolders, folderId: contactFolderId, rows: crmContactRows,
-    total: contactTotal, offset: contactOffset, search: contactSearch
+    total: contactTotal, offset: contactOffset, search: contactSearch, foldersAt: contactsLoadedAt
   });
 }
 
@@ -111,6 +112,7 @@ function recallContacts() {
   contactTotal = Number(saved.total) || 0;
   contactOffset = Number(saved.offset) || 0;
   contactSearch = String(saved.search || "");
+  contactsLoadedAt = Number(saved.foldersAt) || 0;
   // Пошук, з яким цю сторінку читали, стоїть і в полі — інакше список і поле
   // говорили б різне.
   const input = document.getElementById("contactSearchInput");
@@ -121,6 +123,59 @@ function recallContacts() {
 let contactsLoading = false;
 
 let contactsError = "";
+
+// A request belongs to a selection and an authenticated session, not merely
+// to a contact ID: A → B → A must not accept the first A's late answer.
+const contactReads = {
+  session: 0, folders: null, pageController: null, pageKey: "", pagePromise: null,
+  pageGeneration: 0, cardController: null, cardGeneration: 0, historyGeneration: 0,
+  mailGeneration: 0
+};
+
+onCacheReset(resetContacts);
+onReadsInvalidated((prefix) => {
+  if (!prefix || prefix.startsWith("contacts:")) contactsLoadedAt = 0;
+});
+
+function resetContacts() {
+  contactReads.session += 1;
+  contactReads.pageGeneration += 1;
+  contactReads.cardGeneration += 1;
+  contactReads.historyGeneration += 1;
+  contactReads.mailGeneration += 1;
+  contactReads.pageController?.abort();
+  contactReads.cardController?.abort();
+  contactReads.folders = null;
+  contactReads.pagePromise = null;
+  contactReads.pageKey = "";
+  window.clearTimeout(contactSearchTimer);
+  contactFolders = [];
+  contactFoldersLoaded = false;
+  contactFolderId = null;
+  crmContactRows = [];
+  contactTotal = 0;
+  contactOffset = 0;
+  contactSearch = "";
+  selectedContactId = null;
+  contactRecord = null;
+  contactHistory = null;
+  contactHistoryFor = "";
+  contactHistoryNotice = "";
+  contactOutreach = null;
+  contactMail = null;
+  contactMailFor = "";
+  contactMailNotice = "";
+  contactDrafts = null;
+  contactDraftsBusy = false;
+  contactDraftsError = "";
+  contactDraftForm = { productId: "", language: "", instruction: "" };
+  contactsLoadedAt = 0;
+  contactsRecalled = false;
+  contactsLoading = false;
+  contactsError = "";
+  const input = document.getElementById("contactSearchInput");
+  if (input) input.value = "";
+}
 
 function historyEntryHtml(entry) {
   const when = entry.at ? relativeTime(entry.at) : "";
@@ -368,15 +423,16 @@ function contactMailHtml(email) {
 }
 
 async function loadContactMail(key) {
+  const generation = ++contactReads.mailGeneration;
   contactMailFor = key;
   contactMail = null;
   contactMailNotice = "";
   try {
     const payload = await api(`/api/esp/contacts/timeline?email=${encodeURIComponent(key)}`);
-    if (contactMailFor !== key) return;
+    if (contactMailFor !== key || generation !== contactReads.mailGeneration) return;
     contactMail = Array.isArray(payload.events) ? payload.events : [];
   } catch (error) {
-    if (contactMailFor !== key) return;
+    if (contactMailFor !== key || generation !== contactReads.mailGeneration) return;
     contactMailNotice = error?.message || "Журнал пошти не відповів.";
   }
   renderContactCard();
@@ -546,6 +602,7 @@ function contactMessagesHtml() {
 
 async function generateContactMessages() {
   const contactId = selectedContactId;
+  const generation = contactReads.cardGeneration;
   if (!contactId || !contactRecord || contactDraftsBusy) return;
   contactDraftsBusy = true;
   contactDraftsError = "";
@@ -557,13 +614,13 @@ async function generateContactMessages() {
     });
     // Людину могли перемкнути, поки модель писала: чужі тексти на чужій картці
     // гірші за відсутні.
-    if (selectedContactId !== contactId) return;
+    if (selectedContactId !== contactId || generation !== contactReads.cardGeneration) return;
     contactDrafts = payload.drafts || null;
   } catch (error) {
-    if (selectedContactId === contactId) contactDraftsError = error.message || "Не вдалося написати повідомлення.";
+    if (selectedContactId === contactId && generation === contactReads.cardGeneration) contactDraftsError = error.message || "Не вдалося написати повідомлення.";
   } finally {
-    contactDraftsBusy = false;
-    if (selectedContactId === contactId) {
+    if (generation === contactReads.cardGeneration) contactDraftsBusy = false;
+    if (selectedContactId === contactId && generation === contactReads.cardGeneration) {
       renderContactCard();
       refreshIcons();
     }
@@ -576,77 +633,101 @@ async function generateContactMessages() {
  */
 async function fetchContactFolders({ force = false } = {}) {
   if (contactFoldersLoaded && !force) return contactFolders;
-  const payload = await api("/api/contacts/folders");
+  const session = contactReads.session;
+  const payload = await cachedRead("contacts:folders", ({ signal }) => api("/api/contacts/folders", { signal }), { ttlMs: CONTACTS_STALE_MS });
+  if (session !== contactReads.session) return [];
   contactFolders = payload.folders || [];
   contactFoldersLoaded = true;
   contactsLoadedAt = Date.now();
-  // Папка, яку пам'ятала вкладка, могла зникнути з CRM — тоді береться перша.
   if (contactFolderId && !contactFolders.some((folder) => folder.id === contactFolderId)) {
     contactFolderId = null;
     contactOffset = 0;
   }
-  // Порожня CRM і CRM, прочитана не тим ключем, виглядають однаково — сервер
-  // розрізняє їх за нас, і сторінка повторює це словами.
   contactsError = contactFolders.length ? "" : payload.warning || "";
   return contactFolders;
 }
 
 export async function loadContactFolders({ force = false } = {}) {
-  // Папки могли бути прочитані ще до того, як цей екран їх намалював. Малюємо
-  // наявне, а не лишаємо порожній список.
+  if (contactReads.folders) return contactReads.folders;
   if (contactFoldersLoaded && !force) {
     if (!contactFolderId && contactFolders.length) await selectContactFolder(contactFolders[0].id);
     else renderContacts();
     return;
   }
-  contactsLoading = true;
-  contactsError = "";
-  renderContacts();
-  try {
-    await fetchContactFolders({ force });
-    if (!contactFolderId && contactFolders.length) {
-      await selectContactFolder(contactFolders[0].id);
-      return;
-    }
-  } catch (error) {
-    contactsError = error.message || "CRM не відповіла.";
-  } finally {
-    contactsLoading = false;
+  const session = contactReads.session;
+  const loading = (async () => {
+    contactsLoading = true;
+    contactsError = "";
     renderContacts();
-    refreshIcons();
-  }
+    try {
+      await fetchContactFolders({ force });
+      if (session !== contactReads.session) return;
+      if (!contactFolderId && contactFolders.length) await selectContactFolder(contactFolders[0].id);
+      else if (contactFolderId) await loadContactPage();
+    } catch (error) {
+      if (session === contactReads.session && error.name !== "AbortError") contactsError = error.message || "CRM не відповіла.";
+    } finally {
+      if (session === contactReads.session) {
+        contactsLoading = false;
+        renderContacts();
+        refreshIcons();
+      }
+    }
+  })();
+  contactReads.folders = loading;
+  try { await loading; } finally { if (contactReads.folders === loading) contactReads.folders = null; }
 }
 
-async function loadContactPage() {
-  if (!contactFolderId) return;
+function loadContactPage() {
+  if (!contactFolderId) return Promise.resolve();
+  const params = new URLSearchParams({
+    folderId: contactFolderId,
+    limit: String(CONTACT_PAGE_SIZE),
+    offset: String(contactOffset)
+  });
+  if (contactSearch) params.set("search", contactSearch);
+  const path = `/api/contacts?${params}`;
+  if (contactReads.pageKey === path && contactReads.pagePromise) return contactReads.pagePromise;
+  contactReads.pageController?.abort();
+  const controller = new AbortController();
+  contactReads.pageController = controller;
+  const generation = ++contactReads.pageGeneration;
+  contactReads.pageKey = path;
   contactsLoading = true;
   renderContacts();
-  try {
-    const params = new URLSearchParams({
-      folderId: contactFolderId,
-      limit: String(CONTACT_PAGE_SIZE),
-      offset: String(contactOffset)
-    });
-    if (contactSearch) params.set("search", contactSearch);
-    const page = await api(`/api/contacts?${params}`);
-    crmContactRows = page.contacts || [];
-    contactTotal = page.total || 0;
-    contactsError = "";
-    rememberContacts();
-  } catch (error) {
-    crmContactRows = [];
-    contactTotal = 0;
-    contactsError = error.message || "CRM не відповіла.";
-  } finally {
-    contactsLoading = false;
-    renderContacts();
-    refreshIcons();
-  }
+  const loading = (async () => {
+    try {
+      const page = await cachedRead(`contacts:page:${path}`, ({ signal }) => api(path, { signal }), { ttlMs: CONTACTS_STALE_MS, signal: controller.signal });
+      if (generation !== contactReads.pageGeneration) return;
+      crmContactRows = page.contacts || [];
+      contactTotal = page.total || 0;
+      contactsError = "";
+      rememberContacts();
+    } catch (error) {
+      if (generation !== contactReads.pageGeneration || error.name === "AbortError") return;
+      crmContactRows = [];
+      contactTotal = 0;
+      contactsError = error.message || "CRM не відповіла.";
+    } finally {
+      if (generation === contactReads.pageGeneration) {
+        contactsLoading = false;
+        contactReads.pagePromise = null;
+        renderContacts();
+        refreshIcons();
+      }
+    }
+  })();
+  contactReads.pagePromise = loading;
+  return loading;
 }
 
 async function selectContactFolder(folderId) {
+  // Folder changes cancel the previous query immediately, including its debounce.
+  window.clearTimeout(contactSearchTimer);
   contactFolderId = folderId;
   contactOffset = 0;
+  const input = document.getElementById("contactSearchInput");
+  if (input) contactSearch = input.value.trim();
   await loadContactPage();
 }
 
@@ -660,25 +741,32 @@ export function showContactCard(contactId) {
   return openContact(String(contactId));
 }
 
-async function openContact(contactId) {
+async function openContact(contactId, { keepDraftForm = false } = {}) {
+  contactReads.cardController?.abort();
+  const controller = new AbortController();
+  contactReads.cardController = controller;
+  const generation = ++contactReads.cardGeneration;
   selectedContactId = contactId;
-  contactRecord = null;
-  contactDrafts = null;
-  contactDraftsBusy = false;
-  contactDraftsError = "";
-  contactDraftForm = { productId: "", language: "", instruction: "" };
+  if (!keepDraftForm) {
+    contactRecord = null;
+    contactDrafts = null;
+    contactDraftsBusy = false;
+    contactDraftsError = "";
+    contactDraftForm = { productId: "", language: "", instruction: "" };
+  }
   void loadContactHistory(contactId);
+  if (keepDraftForm && contactRecord?.email) void loadContactMail(String(contactRecord.email).trim().toLowerCase());
   renderContacts();
   try {
-    const payload = await api(`/api/contacts/${encodeURIComponent(contactId)}`);
+    const payload = await cachedRead(`contacts:card:${contactId}`, ({ signal }) => api(`/api/contacts/${encodeURIComponent(contactId)}`, { signal }), { ttlMs: 30_000, signal: controller.signal });
     // Людину могли перемкнути, поки відповідь ішла: чужа картка з чужими текстами
     // гірша за порожню.
-    if (selectedContactId !== contactId) return;
+    if (selectedContactId !== contactId || generation !== contactReads.cardGeneration) return;
     contactRecord = payload.contact;
     contactDrafts = payload.drafts || null;
     // Продукт, мова й побажання беруться з того, що вже писали цій людині, щоб
     // повтор не починався з чужих налаштувань.
-    if (contactDrafts) {
+    if (contactDrafts && !keepDraftForm) {
       contactDraftForm = {
         productId: contactDrafts.productId || "",
         language: contactDrafts.language || "",
@@ -686,7 +774,8 @@ async function openContact(contactId) {
       };
     }
   } catch (error) {
-    if (selectedContactId !== contactId) return;
+    if (error.name === "AbortError") return;
+    if (selectedContactId !== contactId || generation !== contactReads.cardGeneration) return;
     contactsError = error.message || "Не вдалося прочитати контакт.";
   }
   renderContacts();
@@ -699,6 +788,7 @@ async function openContact(contactId) {
  * лишається на місці, а замість стрічки — одне речення чому.
  */
 async function loadContactHistory(contactId) {
+  const generation = ++contactReads.historyGeneration;
   contactHistoryFor = contactId;
   contactHistory = null;
   contactOutreach = null;
@@ -706,11 +796,11 @@ async function loadContactHistory(contactId) {
   try {
     const payload = await warmupApi(`/history?crmContactId=${encodeURIComponent(contactId)}`);
     // Людину могли перемкнути, поки відповідь ішла.
-    if (contactHistoryFor !== contactId) return;
+    if (contactHistoryFor !== contactId || generation !== contactReads.historyGeneration) return;
     contactHistory = payload.entries || [];
     contactOutreach = payload.outreach || null;
   } catch (error) {
-    if (contactHistoryFor !== contactId) return;
+    if (contactHistoryFor !== contactId || generation !== contactReads.historyGeneration) return;
     contactHistoryNotice = error.message || "Прогрів не відповів.";
   }
   renderContactCard();
@@ -760,6 +850,9 @@ let contactSearchTimer = null;
 document.getElementById("contactSearchInput").addEventListener("input", (event) => {
   const value = event.target.value.trim();
   window.clearTimeout(contactSearchTimer);
+  contactReads.pageGeneration += 1;
+  contactReads.pageController?.abort();
+  contactReads.pagePromise = null;
   contactSearchTimer = window.setTimeout(async () => {
     contactSearch = value;
     contactOffset = 0;

@@ -1,13 +1,13 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { createReadStream, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { connect as connectTcp } from "node:net";
-import { dirname, extname, join, normalize } from "node:path";
+import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CHANNEL_RULES, LANGUAGES, buildFallbackDrafts, draftsPromptPayload, normalizeDrafts, normalizeLanguage } from "./contacts/drafts.mjs";
-import { contactAsProspect, contactsConfigured, contactsMissingConfig, crmKeyKind, folderContactAt, listContactFolders, listFolderContacts, searchFolderContacts, readContact, supabaseKeyKind } from "./contacts/store.mjs";
+import { invalidateContactCaches, contactAsProspect, contactsConfigured, contactsMissingConfig, crmKeyKind, folderContactAt, listContactFolders, listFolderContacts, searchFolderContacts, readContact, supabaseKeyKind } from "./contacts/store.mjs";
 import { handleKnowledgeLibraryApi } from "./knowledge/api.mjs";
 import { allEntries, append as espAppend, useJournal } from "./esp/journal.mjs";
 import { logAdminAction } from "./esp/access.mjs";
@@ -28,6 +28,9 @@ import { postponedDue, runTick, startSequence } from "./esp/sequence.mjs";
 import { pollInboxes } from "./esp/inbound.mjs";
 import { createFileOnceSync, writeFileAtomic } from "./state/atomic-write.mjs";
 import { startScheduler } from "./warmup/scheduler.mjs";
+import { serveStaticFile } from "./state/static-files.mjs";
+import { sendJsonResponse } from "./state/json-response.mjs";
+import { shouldInvalidateContactReads } from "./contacts/invalidation.mjs";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 const appRoot = join(root, "app");
@@ -592,11 +595,17 @@ const server = createServer(async (request, response) => {
     if (url.pathname.startsWith("/api/")) {
       // The box is opened empty and filled the moment the session gate names a
       // profile, so everything the request does afterwards knows who asked.
-      await actingUserStore.run({ profile: null }, () => handleApi(request, response, url));
+      await actingUserStore.run({ profile: null, acceptEncoding: request.headers["accept-encoding"] || "" }, () => handleApi(request, response, url));
+      // CRM/contact reads may be reused only until a successful local mutation.
+      // Agent completion can create a CRM contact; draft generation changes the
+      // card payload. Authorization and send gates are never read from this cache.
+      if (response.statusCode < 400 && shouldInvalidateContactReads(request.method, url.pathname, request.contactCacheAction)) {
+        invalidateContactCaches();
+      }
       return;
     }
 
-    await serveStatic(response, url.pathname);
+    await serveStatic(request, response, url.pathname);
   } catch (error) {
     sendJson(response, Number(error?.statusCode || 500), { error: error instanceof Error ? error.message : String(error) });
   }
@@ -849,7 +858,9 @@ async function handleApi(request, response, url) {
       // thrown parse error, so they need the null the shared reader never gives.
       readJson: async (incoming) => {
         try {
-          return await readJson(incoming);
+          const body = await readJson(incoming);
+          if (url.pathname === "/api/warmup/agent") request.contactCacheAction = body?.action;
+          return body;
         } catch (error) {
           // Завелике тіло — це 413, а не «зламаний JSON».
           if (Number(error?.statusCode) === 413) throw error;
@@ -925,13 +936,15 @@ async function handleApi(request, response, url) {
   // person's whole record, and the three drafts written for them. Nothing is
   // copied into the workspace until somebody takes the contact into the queue.
   if (url.pathname === "/api/contacts" || url.pathname.startsWith("/api/contacts/")) {
+    const profile = request.auth?.profile;
+    const cacheScope = profile ? JSON.stringify([state.workspaceId, profile.id, profile.role, profile.status]) : "";
     if (!contactsConfigured()) {
       sendJson(response, 503, { error: `CRM не налаштована: не задано ${contactsMissingConfig().join(", ")}.` });
       return;
     }
     try {
       if (request.method === "GET" && url.pathname === "/api/contacts/folders") {
-        const folders = await listContactFolders();
+        const folders = await listContactFolders({ cacheScope });
         // An empty CRM and a CRM read with the wrong key look identical from
         // here — both are 200 with no rows — so when the key is the anon one,
         // say which of the two this is.
@@ -944,6 +957,7 @@ async function handleApi(request, response, url) {
 
       if (request.method === "GET" && url.pathname === "/api/contacts/search") {
         sendJson(response, 200, await searchFolderContacts({
+          cacheScope,
           folderId: cleanText(url.searchParams.get("folderId") || ""),
           search: cleanText(url.searchParams.get("search") || "").slice(0, 120)
         }));
@@ -952,6 +966,7 @@ async function handleApi(request, response, url) {
 
       if (request.method === "GET" && url.pathname === "/api/contacts") {
         sendJson(response, 200, await listFolderContacts({
+          cacheScope,
           folderId: cleanText(url.searchParams.get("folderId") || ""),
           search: cleanText(url.searchParams.get("search") || ""),
           limit: clampNumber(url.searchParams.get("limit"), 1, 100, 25),
@@ -1033,7 +1048,7 @@ async function handleApi(request, response, url) {
       const contactMatch = url.pathname.match(/^\/api\/contacts\/([^/]+)(\/messages|\/import)?$/);
       if (contactMatch) {
         const contactId = decodeURIComponent(contactMatch[1]);
-        const contact = await readContact(contactId);
+        const contact = await readContact(contactId, { cacheScope, fresh: request.method !== "GET" });
         if (!contact) {
           sendJson(response, 404, { error: "Контакт не знайдено в CRM." });
           return;
@@ -3601,6 +3616,7 @@ async function resolveAccountTarget(request, identifier, { create = false } = {}
 function publicAuthStatus(auth = null) {
   const profile = auth?.profile || null;
   return {
+    workspaceId: state.workspaceId,
     configured: Boolean(state.integrations.supabase.url && state.supabaseVault),
     // Asking for a first owner is only right when there is no user base at all.
     // A fresh deployment over an existing CRM has fourteen people already; they
@@ -3669,18 +3685,10 @@ async function updateSupabasePassword(accessToken, passwordValue) {
   await supabaseAuthRequest("user", { method: "PUT", bearer: accessToken, body: { password } });
 }
 
-async function serveStatic(response, pathname) {
-  const requested = pathname === "/" ? "/index.html" : pathname;
-  const safePath = normalize(requested).replace(/^(\.\.[/\\])+/, "");
-  const filePath = join(appRoot, safePath);
-  if (!filePath.startsWith(appRoot) || !existsSync(filePath)) {
-    response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
-    response.end("Не знайдено");
-    return;
-  }
-
-  response.writeHead(200, { "Content-Type": contentType(filePath) });
-  createReadStream(filePath).pipe(response);
+async function serveStatic(request, response, pathname) {
+  if (await serveStaticFile(request, response, appRoot, pathname, contentType)) return;
+  response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+  response.end("Не знайдено");
 }
 
 let persistTimer = null;
@@ -4211,81 +4219,94 @@ function nonSecretIntegrationSettings(settings = {}) {
   return safeSettings;
 }
 
+let publicInteractionGroups = null;
+
 function publicState() {
-  const usageSummary = summarizeUsage();
-  const products = state.products.map((product) => ({
-    ...product,
-    memory: product.memory || synthesizeProductMemory(product)
-  }));
-  const selectedProduct = products.find((product) => product.id === state.selectedProductId) || products[0] || currentProduct();
-  return {
-    workspaceId: state.workspaceId,
-    environment: state.environment,
-    openRouterEnabled: state.openRouterEnabled,
-    hasOpenRouterKey: Boolean(state.vault),
-    keyMetadata: state.keyMetadata,
-    providerHealth: state.providerHealth,
-    budgets: state.budgets,
-    providerRule: state.providerRule,
-    aiModelDefaults: state.aiModelDefaults,
-    aiRuntime: {
-      mode: state.openRouterEnabled && state.providerHealth.status === "healthy" ? "openrouter" : "mock",
+  const previousGroups = publicInteractionGroups;
+  try {
+    publicInteractionGroups = new Map();
+    for (const interaction of [...state.interactions].sort((a, b) => new Date(b.at) - new Date(a.at))) {
+      const group = publicInteractionGroups.get(interaction.prospectId) || [];
+      group.push(interaction);
+      publicInteractionGroups.set(interaction.prospectId, group);
+    }
+    const usageSummary = summarizeUsage();
+    const products = state.products.map((product) => ({
+      ...product,
+      memory: product.memory || synthesizeProductMemory(product)
+    }));
+    const selectedProduct = products.find((product) => product.id === state.selectedProductId) || products[0] || currentProduct();
+    return {
+      workspaceId: state.workspaceId,
+      environment: state.environment,
       openRouterEnabled: state.openRouterEnabled,
-      syncedOpenRouterModels: state.models.filter((model) => model.provider === "openrouter").length,
-      enabledModels: state.models.filter((model) => model.enabled).length
-    },
-    integrations: {
-      apify: redactIntegration(state.integrations.apify),
-      contactEnrichment: redactIntegration(state.integrations.contactEnrichment),
-      crm: redactIntegration(state.integrations.crm),
-      transcripts: redactIntegration(state.integrations.transcripts),
-      notifications: redactIntegration(state.integrations.notifications),
-      supabase: redactIntegration(state.integrations.supabase),
-      postgres: redactIntegration(state.integrations.postgres),
-      knowledgeDatabase: redactIntegration(state.integrations.knowledgeDatabase)
-    },
-    models: state.models,
-    tasks: state.tasks,
-    agents: state.agents,
-    agentRuns: state.agentRuns.slice(0, 30),
-    analysisProfiles: state.analysisProfiles,
-    intelligenceJobs: state.intelligenceJobs.slice(0, 20),
-    researchJobs: state.researchJobs.slice(0, 30),
-    scoringModel: state.scoringModel,
-    icp: publicIcpState(),
-    learning: publicLearningState(),
-    products,
-    selectedProductId: state.selectedProductId,
-    selectedProduct,
-    mcpSync: state.mcpSync,
-    prospects: state.prospects.map((prospect) => {
-      const hasResearchForProduct = hasProductResearchForProspect(prospect, selectedProduct);
-      const analysis = hasResearchForProduct
-        ? analyzeLead(prospect, selectedProduct)
-        : productResearchPendingAnalysis(prospect, selectedProduct);
-      const outreach = hasResearchForProduct ? publicOutreachForProspect(prospect, selectedProduct, analysis) : null;
-      const publicStatus = !hasResearchForProduct
-        ? "product_research_needed"
-        : outreach && statusAfterOutreachPlan(outreach) === "review" ? "review" : prospect.status;
-      return {
-        ...prospect,
-        status: publicStatus,
-        score: analysis.score,
-        companyProfile: hasResearchForProduct
-          ? prospect.companyProfile || prospect.leadIntelligence?.company_context || buildCompanyProfile(prospect, selectedProduct)
-          : prospect.companyProfile || prospect.leadIntelligence?.company_context || productResearchPendingCompanyProfile(prospect, selectedProduct),
-        interactions: interactionsForProspect(prospect.id),
-        outreach,
-        analysis
-      };
-    }),
-    interactions: state.interactions,
-    followUpTasks: state.followUpTasks,
-    aiActions: state.aiActions.slice(0, 25),
-    usage: state.usage,
-    usageSummary,
-    events: state.events.slice(0, 12)
-  };
+      hasOpenRouterKey: Boolean(state.vault),
+      keyMetadata: state.keyMetadata,
+      providerHealth: state.providerHealth,
+      budgets: state.budgets,
+      providerRule: state.providerRule,
+      aiModelDefaults: state.aiModelDefaults,
+      aiRuntime: {
+        mode: state.openRouterEnabled && state.providerHealth.status === "healthy" ? "openrouter" : "mock",
+        openRouterEnabled: state.openRouterEnabled,
+        syncedOpenRouterModels: state.models.filter((model) => model.provider === "openrouter").length,
+        enabledModels: state.models.filter((model) => model.enabled).length
+      },
+      integrations: {
+        apify: redactIntegration(state.integrations.apify),
+        contactEnrichment: redactIntegration(state.integrations.contactEnrichment),
+        crm: redactIntegration(state.integrations.crm),
+        transcripts: redactIntegration(state.integrations.transcripts),
+        notifications: redactIntegration(state.integrations.notifications),
+        supabase: redactIntegration(state.integrations.supabase),
+        postgres: redactIntegration(state.integrations.postgres),
+        knowledgeDatabase: redactIntegration(state.integrations.knowledgeDatabase)
+      },
+      models: state.models,
+      tasks: state.tasks,
+      agents: state.agents,
+      agentRuns: state.agentRuns.slice(0, 30),
+      analysisProfiles: state.analysisProfiles,
+      intelligenceJobs: state.intelligenceJobs.slice(0, 20),
+      researchJobs: state.researchJobs.slice(0, 30),
+      scoringModel: state.scoringModel,
+      icp: publicIcpState(),
+      learning: publicLearningState(),
+      products,
+      selectedProductId: state.selectedProductId,
+      selectedProduct,
+      mcpSync: state.mcpSync,
+      prospects: state.prospects.map((prospect) => {
+        const hasResearchForProduct = hasProductResearchForProspect(prospect, selectedProduct);
+        const analysis = hasResearchForProduct
+          ? analyzeLead(prospect, selectedProduct)
+          : productResearchPendingAnalysis(prospect, selectedProduct);
+        const outreach = hasResearchForProduct ? publicOutreachForProspect(prospect, selectedProduct, analysis) : null;
+        const publicStatus = !hasResearchForProduct
+          ? "product_research_needed"
+          : outreach && statusAfterOutreachPlan(outreach) === "review" ? "review" : prospect.status;
+        return {
+          ...prospect,
+          status: publicStatus,
+          score: analysis.score,
+          companyProfile: hasResearchForProduct
+            ? prospect.companyProfile || prospect.leadIntelligence?.company_context || buildCompanyProfile(prospect, selectedProduct)
+            : prospect.companyProfile || prospect.leadIntelligence?.company_context || productResearchPendingCompanyProfile(prospect, selectedProduct),
+          interactions: interactionsForProspect(prospect.id),
+          outreach,
+          analysis
+        };
+      }),
+      interactions: state.interactions,
+      followUpTasks: state.followUpTasks,
+      aiActions: state.aiActions.slice(0, 25),
+      usage: state.usage,
+      usageSummary,
+      events: state.events.slice(0, 12)
+    };
+  } finally {
+    publicInteractionGroups = previousGroups;
+  }
 }
 
 function hasProductResearchForProspect(prospect, product = currentProduct()) {
@@ -4450,11 +4471,7 @@ function rejectRateLimited(request, response, action, rule, options = {}) {
 }
 
 function sendJson(response, status, payload) {
-  response.writeHead(status, {
-    "Content-Type": "application/json; charset=utf-8",
-    "Cache-Control": "no-store"
-  });
-  response.end(JSON.stringify(payload));
+  sendJsonResponse(response, status, payload, actingUserStore.getStore()?.acceptEncoding || "");
 }
 
 function contentType(filePath) {
@@ -5953,6 +5970,7 @@ function productById(productId) {
 }
 
 function interactionsForProspect(prospectId) {
+  if (publicInteractionGroups) return publicInteractionGroups.get(prospectId) || [];
   return state.interactions
     .filter((interaction) => interaction.prospectId === prospectId)
     .sort((left, right) => new Date(right.at) - new Date(left.at));
