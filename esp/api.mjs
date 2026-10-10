@@ -25,7 +25,9 @@ import { DEFAULT_SIGNATURE, prepareSignature } from "./templates.mjs";
  */
 export function espRouteRight(method, path) {
   if (path === "/halt") return method === "GET" ? "replies.read" : "stop.all";
-  if (path === "/limits" || path === "/ramp" || (method === "GET" && (path.startsWith("/campaigns") || path === "/inbox"))) return "replies.read";
+  if (path === "/limits" || path === "/ramp" || (method === "GET" && (path.startsWith("/campaigns") || path === "/inbox" || path === "/alerts"))) return "replies.read";
+  // ESP 8: running the alarm check now.
+  if (path === "/alerts/check") return "limits.change";
   // ESP 7: reading the mailboxes now, rather than waiting five minutes.
   if (path === "/inbox/poll") return "limits.change";
   // ESP 13: stepping a sender's ramp up (or holding it) is a limit.
@@ -199,6 +201,22 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
   if (method === "GET" && path === "/campaigns/plan") {
     const plan = await esp.tick({ dryRun: true });
     sendJson(response, 200, { success: true, sequenceOn: Boolean(esp.sequenceOn), ...plan });
+    return true;
+  }
+
+  // ── ESP 8: the automatic pauses and the alarms ─────────────────────────
+  if (method === "GET" && path === "/alerts") {
+    const weekAgo = Date.now() - 7 * 86_400_000;
+    const alerts = (await allEntries()).filter((entry) => entry.type === "esp.alert" && new Date(entry.at).getTime() >= weekAgo)
+      .reverse().map((entry) => ({ at: entry.at, ...entry.data }));
+    sendJson(response, 200, { success: true, alerts, telegram: Boolean(esp.alertsTelegram) });
+    return true;
+  }
+
+  if (method === "POST" && path === "/alerts/check") {
+    const raised = await esp.checkAlerts();
+    if (raised.length) logged("esp.alerts.checked", { raised: raised.map((row) => row.key) });
+    sendJson(response, 200, { success: true, raised });
     return true;
   }
 

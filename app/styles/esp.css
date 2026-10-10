@@ -346,3 +346,20 @@
 @media (max-width: 640px) {
   .esp-inbox-list li { grid-template-columns: 1fr; gap: 4px; }
 }
+
+/* Тривоги ESP 8 — жовті банери, як у Snov. */
+.esp-alerts-panel { display: grid; gap: 10px; }
+
+.esp-alert {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--amber);
+  border-radius: 10px;
+  background: var(--surface-sunk);
+}
+
+.esp-alert > i { color: var(--amber); }
+.esp-alert p { margin: 4px 0; color: var(--ink); }
+.esp-alert small { color: var(--muted); }

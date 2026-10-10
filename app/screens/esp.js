@@ -9,3 +9,4 @@ import "./esp-templates.js";
 import "./esp-limits.js";
 import "./esp-campaigns.js";
 import "./esp-inbox.js";
+import "./esp-alerts.js";

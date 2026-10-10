@@ -20,7 +20,8 @@ import { DEFAULT_SIGNATURE, templateStore } from "./esp/templates.mjs";
 import { handleUnsubscribe, unsubscribeSecretFromEnv } from "./esp/unsubscribe.mjs";
 import { privacyPage } from "./esp/notice.mjs";
 import { recordAboutContact, recordFailed, recordSending, recordSent } from "./esp/messages.mjs";
-import { canSend as espCanSend, registry as espRegistry, updateSender as espUpdateSender } from "./esp/registry.mjs";
+import { canSend as espCanSend, registry as espRegistry, setSenderStatus as espSetSenderStatus, updateSender as espUpdateSender } from "./esp/registry.mjs";
+import { applyAlerts, reviewAlerts, telegramNotifier } from "./esp/alerts.mjs";
 import { applyRampReviews } from "./esp/ramp.mjs";
 import { campaignStore } from "./esp/campaigns.mjs";
 import { postponedDue, runTick, startSequence } from "./esp/sequence.mjs";
@@ -490,7 +491,15 @@ const esp = (() => {
     journal: { allEntries, recordAboutContact, append: espAppend },
     postpone
   });
-  return { connector, keyError, gate, templates, signature, unsubscribe, campaigns, halt, halted, tick, pollInbox, sequenceOn: process.env.ESP_SEQUENCE === "on" };
+  // ESP 8: the automatic pauses and the alarms, after every pass of the chain
+  // and every read of the inboxes.
+  const telegram = telegramNotifier(process.env);
+  const checkAlerts = async () => {
+    const [{ senders }, entries] = await Promise.all([espRegistry(), allEntries()]);
+    const actions = reviewAlerts({ entries, senders, campaigns: campaigns.list(), enrollmentsOf: (id) => campaigns.enrollmentsOf(id) });
+    return applyAlerts({ actions, entries, setSenderStatus: espSetSenderStatus, pauseCampaign: (id, reason) => campaigns.pauseForReview(id, reason), append: espAppend, notify: telegram.notify });
+  };
+  return { connector, keyError, gate, templates, signature, unsubscribe, campaigns, halt, halted, tick, pollInbox, checkAlerts, alertsTelegram: telegram.configured, sequenceOn: process.env.ESP_SEQUENCE === "on" };
 })();
 
 /**
@@ -605,9 +614,9 @@ server.listen(port, () => {
   startScheduler();
   // ESP 5: the cold-email chain, only when switched on (see `esp` above).
   if (esp.sequenceOn) {
-    startSequence({ tick: () => esp.tick() });
+    startSequence({ tick: async () => { const summary = await esp.tick(); await esp.checkAlerts(); return summary; } });
     // ESP 7: the inboxes every five minutes — an unsubscribe is honoured the same day, a reply stops the chain before its next letter.
-    startSequence({ intervalMs: 5 * 60_000, tick: () => esp.pollInbox() });
+    startSequence({ intervalMs: 5 * 60_000, tick: async () => { const summary = await esp.pollInbox(); await esp.checkAlerts(); return summary; } });
     // ESP 13: the ramp is looked at hourly; each sender is due once a week.
     setInterval(() => {
       void Promise.all([espRegistry(), allEntries()])

@@ -198,6 +198,18 @@ export function campaignStore({ read, write, readEnrollments, writeEnrollments, 
       return { added, skipped };
     },
 
+    /**
+     * ESP 8: a campaign paused by an alarm, with why — its source marked for
+     * checking. A person reads the note and decides; nothing resumes on its own.
+     */
+    async pauseForReview(id, reason) {
+      const campaign = find(id);
+      if (!campaign || campaign.state !== "running") return null;
+      const next = { ...campaign, state: "paused", sourceReview: { reason, at: now().toISOString() }, updatedAt: now().toISOString() };
+      await write(list().map((row) => (row.id === id ? next : row)));
+      return next;
+    },
+
     async saveEnrollment(enrollment) {
       await writeEnrollments(enrollments().map((row) => (row.id === enrollment.id ? enrollment : row)));
       return enrollment;
