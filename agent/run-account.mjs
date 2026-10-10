@@ -386,7 +386,13 @@ log(`сесію відкрито (${session.sessionId}${session.resumed ? ', п�
 
   await sendQueuedInvitations(page, portal, plan.invites?.toSend, {
     guard, leaseId: portal.leaseId,
-    onSent: (invite) => report.actions.push({ kind: 'connect', detail: `Запит до ${invite.name}` })
+    onSent: (invite) => report.actions.push({ kind: 'connect', detail: `Запит до ${invite.name}` }),
+    onMiss: async (invite, outcome) => {
+      const dialog = await page.getByRole('dialog').last().isVisible().catch(() => false);
+      const slug = String(invite.linkedin || '').split('/in/')[1]?.replace(/\W+/g, '_').slice(0, 40) || 'profile';
+      await shot(page, `miss-${outcome}-${slug}`);
+      log(`  ⚠️ ${invite.name}: ${outcome} · ${page.url()} · вікно запрошення ${dialog ? 'відкрите' : 'немає'}`);
+    }
   });
   if (plan.invites?.toCheck?.length) await checkInvitations(page, portal, plan.invites.toCheck, { guard });
 

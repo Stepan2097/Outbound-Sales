@@ -4,6 +4,12 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 // a second apart — the link loads a page of its own before showing it.
 const DIALOG_WAIT_TRIES = 12;
 const DIALOG_WAIT_MS = 1000;
+// The profile header is drawn by script after the page loads, and on a slow
+// proxy it takes seconds. 10.10.2026: three people came back `no_button` on
+// Profile 48 while their Connect and its dialog were fine when looked at by
+// hand a minute later — the header was simply not there yet.
+const CARD_WAIT_TRIES = 8;
+const CARD_WAIT_MS = 1000;
 const CONNECT = /^(connect|invite .+ to connect|підключитися|встановити контакт|приєднатися|установить контакт|подключиться)$/i;
 // LinkedIn's long accessible label names a person: «Invite Ajay Manger to
 // connect», «Надіслати запрошення учасникові Ajay Manger, щоб встановити
@@ -258,7 +264,12 @@ async function openProfile(page, invite, { sleep = wait, guard = async () => {} 
   // queued person» and stopped Profile 48's every visit on the same person.
   if (response?.status() === 404 || /^\/404\/?$/.test(new URL(page.url()).pathname)) return { gone: true };
   if (profileSlug(page.url()) !== expected) throw new VisitStopped('LinkedIn redirected away from the queued person');
-  const card = await profileCard(page, invite.name, expected);
+  let card = await profileCard(page, invite.name, expected);
+  for (let waited = 0; !card && waited < CARD_WAIT_TRIES; waited += 1) {
+    await sleep(CARD_WAIT_MS);
+    await guard();
+    card = await profileCard(page, invite.name, expected);
+  }
   return { card, gone: false };
 }
 
@@ -377,7 +388,7 @@ export async function sendInvitation(page, invite, { sleep = wait, guard = async
 
 export async function sendQueuedInvitations(page, portal, invites, {
   sleep = wait, guard = () => stopOnWarning(page, portal), leaseId = null,
-  send = sendInvitation, onSent = () => {}, pending = null
+  send = sendInvitation, onSent = () => {}, onMiss = async () => {}, pending = null
 } = {}) {
   const queue = invites ?? [];
   // One read for the whole visit: everybody this account is already waiting
@@ -397,6 +408,9 @@ export async function sendQueuedInvitations(page, portal, invites, {
       throw new VisitStopped('The queued recipient changed during preparation');
     }
     const outcome = await send(page, invite, { sleep, guard, pending: alreadyPending });
+    // The page as it stood when we gave up on this person — the only evidence
+    // of why, since the next profile replaces it.
+    if (outcome === 'no_button' || outcome === 'cannot_connect') await onMiss(invite, outcome).catch(() => {});
     const answer = await reportWithRetry(() => portal.inviteSent(invite.outreachId, outcome, leaseId), { sleep });
     if (!answer.success) throw new VisitStopped(`Invitation report refused: ${answer.error}`);
     if (outcome === 'sent') onSent(invite);

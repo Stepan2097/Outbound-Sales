@@ -14,7 +14,7 @@ const sleep = async () => {};
 const queued = { outreachId: 'invite-1', name: 'Person One', linkedin: 'https://www.linkedin.com/in/person-one/', note: '' };
 
 /** All LinkedIn URLs are intercepted. These are local synthetic pages. */
-async function profile(t, { more = false, pending = false, accepted = false, noButton = false, emailWall = false, nameless = false, connectLink = false, connectLong = false, suggestionInCard = false, acceptedUa = false, dialogDelay = 0, softGone = false, rerendersAfterSend = false, noteLimit = 200, warning = '', redirected = false, heading = 'h1', confirms = true, sentList = [] } = {}) {
+async function profile(t, { more = false, pending = false, accepted = false, noButton = false, emailWall = false, nameless = false, connectLink = false, connectLong = false, suggestionInCard = false, acceptedUa = false, dialogDelay = 0, softGone = false, rerendersAfterSend = false, nameDelay = 0, noteLimit = 200, warning = '', redirected = false, heading = 'h1', confirms = true, sentList = [] } = {}) {
   const context = await browser.newContext();
   t.after(() => context.close());
   const page = await context.newPage();
@@ -78,6 +78,7 @@ async function profile(t, { more = false, pending = false, accepted = false, noB
         if (!window.sent.length) return;
         document.querySelectorAll('[data-outbound-profile]').forEach((node) => node.removeAttribute('data-outbound-profile'));
       }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['data-outbound-profile'] });` : ''}
+      ${nameDelay ? `{ const h = document.querySelector('main section h1, main section h2'); const text = h.textContent; h.textContent = ''; setTimeout(() => { h.textContent = text; }, ${nameDelay}); }` : ''}
       ${redirected ? "history.replaceState(null,'','/in/someone-else/');" : ''}
       ${softGone ? "history.replaceState(null,'','/404/');" : ''}
       </script></body></html>` });
@@ -206,6 +207,30 @@ test('картка, яку LinkedIn перемалював після відпр
   page.setDefaultTimeout(3000);
   assert.equal(await sendInvitation(page, { ...queued, note: '' }, { sleep }), 'sent');
   assert.deepEqual(await sentNotes(page), ['']);
+});
+
+/**
+ * 10.10.2026, Profile 48: three people came back `no_button` while their
+ * Connect and its dialog were fine a minute later — the header with the name
+ * had not been drawn yet. The agent now waits for it, as it waits for the dialog.
+ */
+test('шапка профілю, що з\'являється за кілька секунд, дочікується — і запит іде, а не no_button', async (t) => {
+  const page = await profile(t, { heading: 'h2', connectLink: true, nameDelay: 3000 });
+  const realSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  assert.equal(await sendInvitation(page, { ...queued, note: '' }, { sleep: realSleep }), 'sent');
+  assert.deepEqual(await sentNotes(page), ['']);
+});
+
+test('коли людину пропущено як no_button чи cannot_connect, сторінку показують onMiss до переходу далі', async (t) => {
+  const page = await profile(t, { noButton: true });
+  const misses = [];
+  const portal = {
+    prepareInvite: async () => ({ success: true, allowed: true, invite: { ...queued }, connectsLeft: 5 }),
+    inviteSent: async () => ({ success: true })
+  };
+  await sendQueuedInvitations(page, portal, [queued], { sleep, guard: async () => {}, pending: new Set(), onMiss: async (invite, outcome) => { misses.push([invite.outreachId, outcome, page.url()]); } });
+  assert.deepEqual(misses.map(([id, outcome]) => [id, outcome]), [['invite-1', 'cannot_connect']]);
+  assert.match(misses[0][2], /person-one/, 'onMiss ran before the next profile replaced the page');
 });
 
 test('кнопка з довгою назвою, що називає саме цю людину, — наш Connect, навіть поруч із чужою', async (t) => {
