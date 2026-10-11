@@ -27,6 +27,7 @@ import { sendReplies } from './lib/outbox.mjs';
 import { AntyApi } from './lib/anty-api.mjs';
 import { settle } from './lib/login-probe.mjs';
 import { UNREACTED_BUTTON, isUnreacted } from './lib/reactions.mjs';
+import { describeMemory, freshTab, oneTab, tabMemory } from './lib/tab.mjs';
 
 // ── arguments ──────────────────────────────────────────────────────────────
 const argv = process.argv.slice(2);
@@ -205,7 +206,17 @@ const session = await portal.openSession(os.hostname());
 if (!session.success) throw new Error(session.error || 'Server refused to open the session');
 log(`сесію відкрито (${session.sessionId}${session.resumed ? ', продовжено' : ''})`);
 
-  const page = context.pages()[0] ?? (await context.newPage());
+  // One tab per stage (lib/tab.mjs): a LinkedIn tab kept for a whole visit
+  // grew to 3.6 GB and was killed for it. `page` is reassigned at each stage,
+  // and everything below reads it when it runs, not when it was defined.
+  let page = await oneTab(context);
+  report.memory = [];
+  const recycle = async (stage) => {
+    const used = await tabMemory(page);
+    report.memory.push({ stage, ...(used ?? {}) });
+    page = await freshTab(context);
+    log(`  вкладка: ${describeMemory(used)} → нова перед «${stage}»`);
+  };
   const guard = async () => {
     await stopOnWarning(page, portal);
     const fresh = await portal.plan();
@@ -248,7 +259,7 @@ log(`сесію відкрито (${session.sessionId}${session.resumed ? ', п�
     await portal.log('agent.login', `Not signed in — ${reason} at ${url}`, { url, reason, seen }, 'error');
     throw new Error(`не залогінено (${reason}): ${url}`);
   }
-  log(`✅ залогінено${me ? ' як ' + me : ''}`);
+  log(`✅ залогінено${me ? ' як ' + me : ''} · вкладка: ${describeMemory(await tabMemory(page))}`);
   await portal.health('ok', me ? `Signed in as ${me}` : 'Signed in');
   // The slug goes with the name: the name is what a person recognises, and the
   // slug is the only half that can be linked to or matched against a contact.
@@ -319,6 +330,8 @@ log(`сесію відкрито (${session.sessionId}${session.resumed ? ', п�
     }
   }
 
+  if (remaining.like > 0) await recycle('лайки');
+
   // ── likes ────────────────────────────────────────────────────────────────
   // LinkedIn's class names are hashes that change under you. The reaction
   // button's aria-label states its own state in words, so it is both the
@@ -385,6 +398,7 @@ log(`сесію відкрито (${session.sessionId}${session.resumed ? ', п�
     }
   }
 
+  if (plan.invites?.toSend?.length || plan.invites?.toCheck?.length) await recycle('запрошення');
   await sendQueuedInvitations(page, portal, plan.invites?.toSend, {
     guard, leaseId: portal.leaseId,
     onSent: (invite) => report.actions.push({ kind: 'connect', detail: `Запит до ${invite.name}` }),
@@ -418,6 +432,7 @@ log(`сесію відкрито (${session.sessionId}${session.resumed ? ', п�
   // in one place is a cap that can be changed in one place.
   const inboxWanted = !argv.includes('--no-inbox') && plan.inbox?.due === true;
   if (inboxWanted) {
+    await recycle('вхідні');
     const since = plan.inbox?.lastSyncedAt ? Date.parse(plan.inbox.lastSyncedAt) : null;
     try {
       report.inbox = await syncInbox(page, {
@@ -463,6 +478,9 @@ log(`сесію відкрито (${session.sessionId}${session.resumed ? ', п�
   }
 
   await shot(page, '6-final');
+  const last = await tabMemory(page);
+  report.memory.push({ stage: 'кінець', ...(last ?? {}) });
+  log(`  вкладка в кінці: ${describeMemory(last)}`);
 } catch (err) {
   failed = true;
   report.errors.push(err.message);
