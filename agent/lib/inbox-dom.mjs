@@ -264,7 +264,14 @@ const UNITS = {
   w: 7 * DAY, wk: 7 * DAY, wks: 7 * DAY, week: 7 * DAY, weeks: 7 * DAY,
   mo: 30 * DAY, mos: 30 * DAY, month: 30 * DAY, months: 30 * DAY,
   y: 365 * DAY, yr: 365 * DAY, yrs: 365 * DAY, year: 365 * DAY, years: 365 * DAY,
+  // A LinkedIn set to Ukrainian (11.10.2026): «5 хв», «2 год», «3 дн.», «1 тиж.».
+  с: 1000, сек: 1000, хв: MINUTE, хвилин: MINUTE, год: HOUR, годин: HOUR,
+  д: DAY, дн: DAY, дні: DAY, днів: DAY, день: DAY, тиж: 7 * DAY, тижні: 7 * DAY, тижнів: 7 * DAY,
+  міс: 30 * DAY, р: 365 * DAY, рік: 365 * DAY, роки: 365 * DAY, років: 365 * DAY,
 };
+
+// «10 жовт.», «15 вер.», «3 листопада 2025 р.» — the month by its first letters.
+const UK_MONTHS = [['січ', 0], ['лют', 1], ['бер', 2], ['квіт', 3], ['трав', 4], ['черв', 5], ['лип', 6], ['серп', 7], ['вер', 8], ['жовт', 9], ['лист', 10], ['груд', 11]];
 
 /**
  * What a LinkedIn timestamp means, in milliseconds.
@@ -295,7 +302,7 @@ export function parseStamp(raw, nowMs = Date.now()) {
   if (/^(today|сьогодні)$/i.test(text)) return { at: nowMs, precision: 'day' };
   if (/^(yesterday|вчора)$/i.test(text)) return { at: nowMs - DAY, precision: 'day' };
 
-  const rel = text.match(/^(\d+)\s*([a-z]+)\s*(ago)?$/i);
+  const rel = text.match(/^(\d+)\s*([a-zа-яіїєґ]+)\.?\s*(ago|тому)?$/i);
   if (rel && UNITS[rel[2].toLowerCase()]) {
     return { at: nowMs - Number(rel[1]) * UNITS[rel[2].toLowerCase()], precision: 'about' };
   }
@@ -318,6 +325,14 @@ export function parseStamp(raw, nowMs = Date.now()) {
     if (Number.isFinite(at)) {
       return { at: at > nowMs + DAY && !dayFirst[3] ? at - 365 * DAY : at, precision: 'day' };
     }
+  }
+
+  const ukrainian = text.match(/^(\d{1,2})\s+([а-яіїєґ]{3,12})\.?(?:,?\s*(\d{4}))?(?:\s*р\.?)?$/i);
+  const month = ukrainian && UK_MONTHS.find(([prefix]) => ukrainian[2].toLowerCase().startsWith(prefix));
+  if (month) {
+    const year = ukrainian[3] ? Number(ukrainian[3]) : new Date(nowMs).getUTCFullYear();
+    const at = Date.UTC(year, month[1], Number(ukrainian[1]), 12);
+    return { at: at > nowMs + DAY && !ukrainian[3] ? at - 365 * DAY : at, precision: 'day' };
   }
 
   // `10:32 AM` — a time with no date. On its own that is only useful next to a

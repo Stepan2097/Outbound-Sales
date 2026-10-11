@@ -57,8 +57,15 @@ async function settleMessenger(page, { timeoutMs = 30_000, pace = 1 } = {}) {
     try {
       const seen = await page.evaluate(() => ({
         threads: document.querySelectorAll('a[href*="/messaging/thread/"]').length,
+        // 11.10.2026: a list without links, in a LinkedIn set to Ukrainian, was
+        // «не дочекався месенджера» with two conversations on screen. The rows
+        // count by the shape `harvestConversations` reads them by, and the
+        // search box by its name, not by English words in its placeholder.
+        cards: [...document.querySelectorAll('li')]
+          .filter((li) => li.querySelector('time') && li.querySelector('img[alt]') && !li.querySelector('li')).length,
         chrome: Boolean(document.querySelector(
-          'input[placeholder*="essage" i], [contenteditable="true"][role="textbox"], a[href*="/messaging/thread/new"]',
+          'input[name="searchTerm"], input[placeholder*="essage" i], input[placeholder*="повідомл" i], '
+          + '[contenteditable="true"][role="textbox"], a[href*="/messaging/thread/new"]',
         )),
         login: Boolean(document.querySelector('input#username, input[name="session_key"], input[name="session_password"]')),
         chars: (document.body?.innerText ?? '').length,
@@ -67,6 +74,7 @@ async function settleMessenger(page, { timeoutMs = 30_000, pace = 1 } = {}) {
       if (seen.login) return { ok: false, reason: 'форма входу', seen };
       if (/\/checkpoint\//.test(seen.url)) return { ok: false, reason: 'checkpoint', seen };
       if (seen.threads > 0) return { ok: true, reason: `${seen.threads} посилань на розмови`, seen };
+      if (seen.cards > 0) return { ok: true, reason: `${seen.cards} рядків розмов без посилань`, seen };
       if (seen.chrome) {
         chromeSince ??= Date.now();
         if (Date.now() - chromeSince > 6000 * pace) return { ok: true, reason: 'месенджер без розмов', seen };

@@ -14,6 +14,8 @@
  * eventually disagree, and the disagreement would read as "the watcher says the
  * account is fine, the agent says it is not".
  */
+import { REACTION_BUTTON } from './reactions.mjs';
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
@@ -35,13 +37,13 @@ export async function settle(page, timeoutMs = 40000) {
       // Read every marker in one pass and keep it: when this is wrong, the
       // question is always "which marker missed", and guessing that from a
       // screenshot after the browser has closed is how an afternoon goes.
-      const seen = await page.evaluate(() => ({
+      const seen = await page.evaluate((reaction) => ({
         loginForm: Boolean(document.querySelector('input#username, input[name="session_key"], input[name="session_password"]')),
         network: Boolean(document.querySelector('a[href*="/mynetwork"]')),
-        post: Boolean(document.querySelector('button[aria-label^="Reaction button state"]')),
-        search: Boolean(document.querySelector('input[placeholder*="Search" i], .search-global-typeahead__input')),
+        post: Boolean(document.querySelector(reaction)),
+        search: Boolean(document.querySelector('input[placeholder*="Search" i], input[placeholder*="Пошук" i], .search-global-typeahead__input')),
         text: (document.body?.innerText ?? '').length,
-      }));
+      }), REACTION_BUTTON);
       if (seen.loginForm) return { signedIn: false, url, reason: 'login form', seen };
       // The nav, the search box and a post each mean signed in on their own;
       // LinkedIn's class names are hashes, so no single one of them is safe to

@@ -330,6 +330,18 @@ describe('timestamps', () => {
     assert.equal(parseStamp('Отримано', NOW).precision, 'unknown');
   });
 
+  test('a LinkedIn set to Ukrainian: «2 год», «15 вер.», «3 листопада 2025 р.»', () => {
+    assert.equal(parseStamp('2 год', NOW).at, NOW - 2 * 3600_000);
+    assert.equal(parseStamp('5 хв', NOW).at, NOW - 5 * 60_000);
+    assert.equal(parseStamp('3 дн.', NOW).at, NOW - 3 * 86_400_000);
+    assert.equal(parseStamp('15 вер.', NOW).at, Date.parse('2026-09-15T12:00:00Z'));
+    assert.equal(parseStamp('15 вер.', NOW).precision, 'day');
+    assert.equal(parseStamp('3 листопада 2025 р.', NOW).at, Date.parse('2025-11-03T12:00:00Z'));
+    // Read in September, «10 жовт.» is last October, not next month.
+    assert.equal(parseStamp('10 жовт.', NOW).at, Date.parse('2025-10-10T12:00:00Z'));
+    assert.equal(parseStamp('Отримано', NOW).precision, 'unknown');
+  });
+
   test('a date with no year means the most recent one, not next year', () => {
     // Read in September, "SEP 12" is four days ago.
     assert.ok(Math.abs(parseStamp('SEP 12', NOW).at - Date.parse('2026-09-12T12:00:00Z')) < 86_400_000);

@@ -26,6 +26,7 @@ import { syncInbox } from './lib/inbox.mjs';
 import { sendReplies } from './lib/outbox.mjs';
 import { AntyApi } from './lib/anty-api.mjs';
 import { settle } from './lib/login-probe.mjs';
+import { UNREACTED_BUTTON, isUnreacted } from './lib/reactions.mjs';
 
 // ── arguments ──────────────────────────────────────────────────────────────
 const argv = process.argv.slice(2);
@@ -321,8 +322,8 @@ log(`сесію відкрито (${session.sessionId}${session.resumed ? ', п�
   // ── likes ────────────────────────────────────────────────────────────────
   // LinkedIn's class names are hashes that change under you. The reaction
   // button's aria-label states its own state in words, so it is both the
-  // selector and the proof that a click landed.
-  const REACTION = 'button[aria-label^="Reaction button state"]';
+  // selector and the proof that a click landed — in the account's language
+  // (lib/reactions.mjs).
   if (remaining.like > 0) {
     log(`лайки: треба ${remaining.like}`);
     if (!page.url().includes('/feed')) {
@@ -334,7 +335,7 @@ log(`сесію відкрито (${session.sessionId}${session.resumed ? ', п�
       // A pinned handle, not a locator: a locator filtered on "no reaction"
       // re-resolves after the click and hands back the *next* unliked button,
       // so the verification was reading a different element every time.
-      const [btn] = await page.$$(`${REACTION}[aria-label*="no reaction"]`);
+      const [btn] = await page.$$(UNREACTED_BUTTON);
       if (!btn) {
         await page.mouse.wheel(0, rand(700, 1100));
         await sleep(rand(1500, 2500));
@@ -371,7 +372,7 @@ log(`сесію відкрито (${session.sessionId}${session.resumed ? ', п�
 
       await guard();
       const after = await btn.getAttribute('aria-label').catch(() => null);
-      if (after && !/no reaction/i.test(after)) {
+      if (after && !isUnreacted(after)) {
         if (await count('like', `лайк під постом: ${author}`)) {
           placed += 1;
           await shot(page, `4-like-${placed}`);

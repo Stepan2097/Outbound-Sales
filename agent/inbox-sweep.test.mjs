@@ -179,6 +179,22 @@ describe('a sweep of the messenger', () => {
     assert.equal(portal.calls.done.length, 1, 'мітка «дивились сьогодні» однаково пішла');
   });
 
+  /**
+   * 11.10.2026: the same list in a LinkedIn set to Ukrainian. The search box
+   * says «Шукати повідомлення», nothing on the page says "message", and the
+   * wait used to give up over two conversations on screen.
+   */
+  test('a messenger in Ukrainian is waited for and read, dates included', async (t) => {
+    if (!page) return t.skip('Chrome не знайдено');
+    inboxFixture = 'messaging-list-uk.html';
+    const portal = stubPortal();
+    const result = await sweep(portal);
+
+    assert.equal(result.suspicious, false, result.reason);
+    assert.equal(result.listed, 2, 'обидві розмови знайдені');
+    assert.equal(portal.calls.done.length, 1);
+  });
+
   test('a portal with no inbox is asked once, not twenty times', async (t) => {
     if (!page) return t.skip('Chrome не знайдено');
     inboxFixture = 'messaging-list.html';
