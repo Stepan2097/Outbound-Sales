@@ -70,12 +70,12 @@ export function anonymize(enrollment, { now = new Date() } = {}) {
 export async function runRetention({ campaigns, now = new Date(), days = retentionDays(), force = false, actor = "esp-retention" }) {
   const entries = await allEntries();
   const today = now.toISOString().slice(0, 10);
-  if (!force && entries.some((entry) => entry.type === "retention.anonymized" && String(entry.at).startsWith(today))) {
+  if (!force && entries.some((entry) => entry.type === "retention.anonymized" && (entry.data?.day ?? String(entry.at).slice(0, 10)) === today)) {
     return { skipped: true, anonymized: 0 };
   }
   const due = dueForRetention(campaigns.enrollments(), { now, days });
   for (const enrollment of due) await campaigns.saveEnrollment(anonymize(enrollment, { now }));
-  await append({ type: "retention.anonymized", actor, data: { days, count: due.length, ids: due.map((row) => anonymousId(row.email)) } });
+  await append({ type: "retention.anonymized", actor, data: { day: today, days, count: due.length, ids: due.map((row) => anonymousId(row.email)) } });
   return { skipped: false, anonymized: due.length, days };
 }
 

@@ -147,7 +147,9 @@ export async function runDailyMonitor({
 } = {}) {
   const entries = await allEntries();
   const today = now.toISOString().slice(0, 10);
-  const ranToday = entries.some((entry) => entry.type === "esp.monitor" && String(entry.at).startsWith(today));
+  // The day the run was *for* is in the line itself — the clock that stamps the
+  // line and the `now` a run was asked with may disagree around midnight.
+  const ranToday = entries.some((entry) => entry.type === "esp.monitor" && (entry.data?.day ?? String(entry.at).slice(0, 10)) === today);
   if (ranToday && !force) return { skipped: true, actions: [], domains: [] };
 
   const { domains } = await registry();
