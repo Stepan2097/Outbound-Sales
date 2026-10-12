@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="/styles/warmup-accounts.css" />
     <link rel="stylesheet" href="/styles/warmup-campaign.css" />
     <link rel="stylesheet" href="/styles/home.css" />
+    <link rel="stylesheet" href="/styles/home-triage.css" />
     <link rel="stylesheet" href="/styles/inbox.css" />
     <link rel="stylesheet" href="/styles/contacts.css" />
     <link rel="stylesheet" href="/styles/settings.css" />
@@ -63,6 +64,7 @@
           <div class="nav-group" data-nav-group="linkedin">
             <button class="nav-group-toggle" type="button" aria-expanded="true"><i data-lucide="folder-open"></i><span>LinkedIn</span><i data-lucide="chevron-down" class="nav-group-chevron"></i></button>
             <div class="nav-group-items">
+              <button class="nav-item" data-view="linkedin-home" aria-label="LinkedIn: огляд" title="LinkedIn: огляд"><i data-lucide="layout-dashboard"></i><span>Огляд</span></button>
               <button class="nav-item" data-view="warmup" aria-label="Прогрів LinkedIn" title="Прогрів LinkedIn"><i data-lucide="flame"></i><span>Прогрів</span></button>
             </div>
           </div>
@@ -96,8 +98,14 @@
           </div>
         </header>
 
+        <!-- Головна (12.10): CRM-папка, людина за людиною — малює app/screens/home-triage.js. -->
         <section class="view" id="view-home">
-          <div class="home-layout" id="homeRoot"></div>
+          <div class="triage-page" id="triageRoot"></div>
+        </section>
+
+        <!-- LinkedIn → «Огляд» — колишня головна: увага, кому написати, відповіді, акаунти (app/screens/home.js). -->
+        <section class="view" id="view-linkedin-home">
+          <div class="home-layout" id="linkedinHomeRoot"></div>
         </section>
 
         <section class="view" id="view-account">

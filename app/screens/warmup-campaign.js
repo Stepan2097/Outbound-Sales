@@ -11,6 +11,8 @@ import {
 import {
   WARMUP_CAMPAIGN_STATE_LABEL, WARMUP_CAMPAIGN_TONE, WARMUP_DEFAULT_FROM_DAY, WARMUP_EDITABLE_KINDS, WARMUP_EMPTY_FILTERS, WARMUP_KIND_LABEL, refreshWarmupAccountQueue, renderWarmupProfiles, warmupApi, warmupCount, warmupDuration, warmupState
 } from "./warmup-accounts.js";
+// «Як іде розсилка» — панель цієї ж сторінки, під кампанією.
+import "./warmup-funnel.js";
 
 /**
  * The whole campaign panel, drawn by this module rather than kept in

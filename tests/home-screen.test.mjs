@@ -20,8 +20,8 @@ const NAMES = [
 ];
 
 const LISTENERS = [
-  'document.getElementById("homeRoot")?.addEventListener("click"',
-  'document.getElementById("homeRoot")?.addEventListener("input"'
+  'document.getElementById("linkedinHomeRoot")?.addEventListener("click"',
+  'document.getElementById("linkedinHomeRoot")?.addEventListener("input"'
 ];
 
 const minutesAgo = (minutes) => new Date(Date.now() - minutes * 60000).toISOString();
@@ -65,7 +65,7 @@ function screen({ api, data = null, active = null } = {}) {
   const globals = {
     document: {
       activeElement: active,
-      getElementById: (id) => (id === "homeRoot" ? root : null),
+      getElementById: (id) => (id === "linkedinHomeRoot" ? root : null),
       querySelector: (selector) => {
         const card = /data-home-card="([^"]+)"/.exec(selector);
         if (card) {

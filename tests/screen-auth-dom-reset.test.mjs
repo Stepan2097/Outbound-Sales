@@ -30,7 +30,7 @@ test("auth reset erases Home and Warmup rendered content synchronously, before n
   assert.equal(main.get("warmupState").profiles.length, 0);
   // The campaign panel keeps its markup and listeners; what carried the last
   // person's campaigns is cleared (12.10: an empty frame stayed for the session).
-  for (const id of ["homeRoot", "warmupCampaignList", "warmupCampaignDetail", "warmupProfileTableBody", "warmupDetailBody", "warmupDetailSubtitle", "warmupSummary", "warmupConfigNote"]) {
+  for (const id of ["linkedinHomeRoot", "warmupCampaignList", "warmupCampaignDetail", "warmupProfileTableBody", "warmupDetailBody", "warmupDetailSubtitle", "warmupSummary", "warmupConfigNote"]) {
     assert.equal(getElementById(id).innerHTML, "", id);
   }
   assert.equal(getElementById("warmupCampaignPanel").innerHTML === "", false, "the panel itself is not wiped");

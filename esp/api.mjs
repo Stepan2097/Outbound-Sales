@@ -19,7 +19,7 @@ import { UNIBOX_FOLDERS, uniboxList, uniboxProblems, uniboxThread } from "./unib
 import { recordAboutContact, recordFailed, recordSending, recordSent } from "./messages.mjs";
 import { allEntries, append, contactKey } from "./journal.mjs";
 import { applyRampReviews, reviewRamp } from "./ramp.mjs";
-import { DOMAIN_DAILY_LIMIT, GAP_MINUTES, WINDOW, sendLedger, senderDailyLimit } from "./limits.mjs";
+import { DOMAIN_DAILY_LIMIT, GAP_MINUTES, WINDOW, sendDecision, sendLedger, senderDailyLimit } from "./limits.mjs";
 import { canSend, registry, updateSender } from "./registry.mjs";
 import { LetterError, assertPlainLetter } from "./letter.mjs";
 import { TEMPLATE_VARIABLES, TemplateError, prepareTemplate } from "./template.mjs";
@@ -55,6 +55,8 @@ export function espRouteRight(method, path) {
   if (path === "/people/export") return "journal.read";
   // ESP-UI 3: a test letter to oneself is part of writing one.
   if (path === "/test-send") return "templates.edit";
+  // Головна (12.10): one letter to one lead is sending to leads.
+  if (path === "/send-one") return "campaigns.launch";
   if (path === "/people/erase") return "access.manage";
   // ESP 8: running the alarm check now.
   if (path === "/alerts/check") return "limits.change";
@@ -896,6 +898,67 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
       const sent = await esp.gate.send(mailbox, letter.raw);
       await logged("test_letter_sent", { mailbox, to, messageId: String(sent?.id || "") });
       sendJson(response, 200, { success: true, ok: true, to, mailbox });
+    } catch (error) {
+      if (!(error instanceof TemplateError) && !(error instanceof LetterError) && !(error instanceof MailboxError) && !error?.code) throw error;
+      sendJson(response, 409, { success: false, code: error.code || "refused", error: error.message });
+    }
+    return true;
+  }
+
+  /**
+   * Головна (12.10, власник: «з емейлом те саме»): the letter the seller just
+   * read and edited, to this one lead, from one of our mailboxes — through
+   * everything a campaign letter goes through: the pre-send checks (ESP 6),
+   * the sender's and domain's limits and the recipient's working hours (ESP 4),
+   * the gate («Стоп усе», paused mailbox, plain text) and the journal. Until
+   * real sending is switched on (ESP_LIVE_SEND, after ESP 11) nothing leaves.
+   */
+  if (method === "POST" && path === "/send-one") {
+    const body = await readJson(request);
+    if (!body) return badRequest(sendJson, response, "Некоректне тіло JSON");
+    if (!esp.connector?.liveSend) {
+      sendJson(response, 409, { success: false, code: "sending_locked", error: "Справжню відправку ще не ввімкнено (ESP_LIVE_SEND, після приймання ESP 11) — лист піде, щойно її ввімкнуть." });
+      return true;
+    }
+    const lead = { ...(body.lead || {}), email: contactKey(body.lead?.email) };
+    if (!lead.email) return badRequest(sendJson, response, "У людини немає адреси пошти.");
+    const mailbox = contactKey(body.mailbox);
+    const allowed = mailbox ? await canSend(mailbox) : { ok: false, reason: "Оберіть скриньку, з якої піде лист." };
+    if (!allowed.ok) {
+      sendJson(response, 409, { success: false, code: "sender_unavailable", error: allowed.reason });
+      return true;
+    }
+    const entries = await allEntries();
+    const filters = esp.filters || defaultFilters();
+    const verdict = await filters.check(lead, await filters.context(entries, new Date()));
+    if (!verdict.ok) {
+      sendJson(response, 409, { success: false, code: verdict.reason, error: `Не піде: ${SKIP_REASON_LABEL[verdict.reason] || verdict.reason}${verdict.detail ? ` — ${verdict.detail}` : ""}.` });
+      return true;
+    }
+    const now = new Date();
+    const decision = sendDecision({ sender: allowed.sender, recipient: lead, ledger: sendLedger(entries, { now }), now });
+    if (!decision.ok) {
+      sendJson(response, 409, { success: false, code: decision.reason, error: decision.message, retryAt: decision.retryAt });
+      return true;
+    }
+    try {
+      const template = prepareTemplate({ subject: body.subject, body: body.body });
+      const sender = { ...DEFAULT_SIGNATURE, ...(esp.signature.read() || {}), email: mailbox };
+      const letter = composeLetter({ template, sender, lead, unsubscribe: esp.unsubscribe });
+      if (!letter.ok) {
+        sendJson(response, 409, { success: false, code: letter.reason, error: letter.message });
+        return true;
+      }
+      const sending = await recordSending({ from: mailbox, to: lead.email, subject: letter.subject, text: letter.text, variantIds: letter.variantIds }, actor);
+      try {
+        const sent = await esp.gate.send(mailbox, letter.raw);
+        await recordSent(sending, { messageId: sent.id, threadId: sent.threadId }, actor);
+      } catch (error) {
+        await recordFailed(sending, { error: error.message }, actor);
+        throw error;
+      }
+      await logged("one_letter_sent", { mailbox, to: lead.email });
+      sendJson(response, 200, { success: true, ok: true, to: lead.email, mailbox });
     } catch (error) {
       if (!(error instanceof TemplateError) && !(error instanceof LetterError) && !(error instanceof MailboxError) && !error?.code) throw error;
       sendJson(response, 409, { success: false, code: error.code || "refused", error: error.message });

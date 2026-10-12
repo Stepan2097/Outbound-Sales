@@ -38,7 +38,7 @@ function sources(dir = APP.pathname) {
   });
 }
 
-const SCREENS = [["home", "Головна"], ["warmup", "Прогрів"], ["mail-warmup", "Прогрів пошт"], ["campaigns", "Кампанії"], ["leads", "Ліди"], ["reports", "Звіти"], ["mail-settings", "Скриньки"], ["inbox", "Вхідні"], ["contacts", "Контакти"], ["account", "Налаштування"]];
+const SCREENS = [["home", "Головна"], ["linkedin-home", "Огляд"], ["warmup", "Прогрів"], ["mail-warmup", "Прогрів пошт"], ["campaigns", "Кампанії"], ["leads", "Ліди"], ["reports", "Звіти"], ["mail-settings", "Скриньки"], ["inbox", "Вхідні"], ["contacts", "Контакти"], ["account", "Налаштування"]];
 
 const REMOVED_VIEWS = ["email", "prospects", "ai", "products", "overview", "models", "routing", "budgets", "privacy", "evaluation"];
 
@@ -88,7 +88,8 @@ test("the workspace opens on «Головна»", () => {
  * and `main.js` does nothing but load them and start.
  */
 const SCREEN_FILES = {
-  home: ["screens/home.js"],
+  home: ["screens/home-triage.js"],
+  "linkedin-home": ["screens/home.js"],
   warmup: ["screens/warmup-accounts.js", "screens/warmup-campaign.js"],
   inbox: ["screens/inbox.js"],
   contacts: ["screens/contacts.js"],

@@ -3,9 +3,9 @@
 // is all it takes; the badge and the boot wait until every screen is here.
 import { bootApplication } from "./core.js";
 import "./screens/home.js";
+import "./screens/home-triage.js";
 import "./screens/warmup-accounts.js";
 import "./screens/warmup-campaign.js";
-import "./screens/warmup-funnel.js";
 import { startWarmupBadge } from "./screens/inbox.js";
 import "./screens/contacts.js";
 import "./screens/settings.js";

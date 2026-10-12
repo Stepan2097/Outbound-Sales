@@ -131,7 +131,7 @@ export function personOf(row) {
  * not written yet) and, when one is queued or did not go, that reply. People
  * whose first message went out leave the list; they are counted in `written`.
  */
-export async function firstMessageBoard(accountIds) {
+export async function firstMessageBoard(accountIds, { limit = TO_WRITE_LIMIT } = {}) {
   const rows = await acceptedRows(accountIds);
   const ids = [...new Set(rows.map((row) => row.account_id))];
   const [{ drafts, dismissed }, talking, queued] = await Promise.all([
@@ -156,7 +156,7 @@ export async function firstMessageBoard(accountIds) {
   for (const reply of queued.values()) {
     if (reply.state === "sent" && !rows.some((row) => String(row.id) === reply.outreachId)) written += 1;
   }
-  return { toWrite: waiting.slice(0, TO_WRITE_LIMIT), total: waiting.length, written };
+  return { toWrite: waiting.slice(0, limit), total: waiting.length, written };
 }
 
 /** One accepted row of this workspace, or null — anything else is not somebody to write a first message to. */

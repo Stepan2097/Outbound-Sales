@@ -103,6 +103,7 @@ const SAVED_AS = {
   scoringModel: "scoringModel",
   researchJobs: "researchJobs",
   contactDrafts: "contactDrafts",
+  triageDecisions: "triageDecisions",
   accountDossiers: "accountDossiers",
   warmupCampaigns: "warmupCampaigns",
   warmupTargeting: "warmupTargeting",

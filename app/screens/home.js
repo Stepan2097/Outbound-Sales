@@ -14,7 +14,7 @@ import { showContactCard } from "../screens/contacts.js";
 import { showWarmupInboxThread } from "../screens/inbox.js";
 import { warmupApi, warmupCount } from "../screens/warmup-accounts.js";
 
-onScreen("home", { open: () => loadHome() });
+onScreen("linkedin-home", { open: () => loadHome() });
 
 export const homeState = {
   data: null,
@@ -40,7 +40,7 @@ function resetHomeScreen() {
   homeState.drafting.clear();
   homeState.busy.clear();
   homeState.errors.clear();
-  const root = document.getElementById("homeRoot");
+  const root = document.getElementById("linkedinHomeRoot");
   if (root) root.innerHTML = "";
 }
 
@@ -440,7 +440,7 @@ function retiredLineHtml(data) {
 }
 
 export function renderHome() {
-  const root = document.getElementById("homeRoot");
+  const root = document.getElementById("linkedinHomeRoot");
   if (!root) return;
   const data = homeState.data;
   if (!homeState.ready) {
@@ -505,7 +505,7 @@ export function renderHomeCard(outreachId) {
 
 // ── руки ───────────────────────────────────────────────────────────────────
 
-document.getElementById("homeRoot")?.addEventListener("click", (event) => {
+document.getElementById("linkedinHomeRoot")?.addEventListener("click", (event) => {
   const target = event.target;
   const pick = (attribute) => target.closest?.(`[${attribute}]`);
   let hit;
@@ -525,7 +525,7 @@ document.getElementById("homeRoot")?.addEventListener("click", (event) => {
 });
 
 // Виправлене людиною лишається її текстом, а кнопка «Надіслати» оживає й гасне з ним.
-document.getElementById("homeRoot")?.addEventListener("input", (event) => {
+document.getElementById("linkedinHomeRoot")?.addEventListener("input", (event) => {
   const id = event.target?.dataset?.homeText;
   if (!id) return;
   homeState.edits.set(id, event.target.value);

@@ -10,6 +10,7 @@ import { CHANNEL_RULES, LANGUAGES, buildFallbackDrafts, draftsPromptPayload, nor
 import { invalidateContactCaches, contactAsProspect, contactsConfigured, contactsMissingConfig, crmKeyKind, folderContactAt, listContactFolders, listFolderContacts, searchFolderContacts, readContact, supabaseKeyKind } from "./contacts/store.mjs";
 import { handleKnowledgeLibraryApi } from "./knowledge/api.mjs";
 import { allEntries, append as espAppend, useJournal } from "./esp/journal.mjs";
+import { nextContact as nextTriageContact } from "./triage/queue.mjs";
 import { logAdminAction } from "./esp/access.mjs";
 import { knowledgeExcerptsForPrompt, knowledgeFilesForProduct, loadKnowledgeLibrary } from "./knowledge/library.mjs";
 import { handleWarmupApi } from "./warmup/api.mjs";
@@ -420,6 +421,9 @@ const state = {
   // reopening a contact shows what was already written for them rather than an
   // empty page and a bill for writing it again.
   contactDrafts: {},
+  // Головна (12.10): what a seller decided about a CRM contact while working a
+  // folder — «не валідний» — by contact id. Such a person is not offered again.
+  triageDecisions: {},
   // What we already know about a company, by account key — the workspace's own
   // memory of the web research, so the second person from the same company is
   // not paid for twice. It is saved to disk with everything else, because a
@@ -1172,6 +1176,91 @@ async function handleApi(request, response, url) {
       // app being broken — say which it is.
       const status = Number(error?.statusCode) || (Number(error?.status) === 503 ? 503 : 502);
       sendJson(response, status, { error: crmErrorMessage(error) });
+      return;
+    }
+  }
+
+  // ── Головна: a CRM folder worked one person at a time (12.10) ─────────────
+  if (url.pathname.startsWith("/api/triage/")) {
+    const profile = request.auth?.profile;
+    const cacheScope = profile ? JSON.stringify([state.workspaceId, profile.id, profile.role, profile.status]) : "";
+    if (!contactsConfigured()) {
+      sendJson(response, 503, { error: `CRM не налаштована: не задано ${contactsMissingConfig().join(", ")}.` });
+      return;
+    }
+    try {
+      if (request.method === "GET" && url.pathname === "/api/triage/next") {
+        const folderId = cleanText(url.searchParams.get("folderId") || "");
+        if (!folderId) { sendJson(response, 400, { error: "Оберіть папку." }); return; }
+        const skip = cleanText(url.searchParams.get("skip") || "").split(",").map((id) => id.trim()).filter(Boolean).slice(0, 300);
+        const answer = await nextTriageContact({
+          folderId,
+          cursor: clampNumber(url.searchParams.get("cursor"), 0, 10000000, 0),
+          skip,
+          decisions: state.triageDecisions,
+          emailed: await emailedAddresses(),
+          cacheScope
+        });
+        sendJson(response, 200, {
+          ...answer,
+          drafts: answer.contact ? state.contactDrafts[answer.contact.id] || null : null,
+          prospectId: answer.contact ? prospectForCrmContact(answer.contact.id)?.id || null : null
+        });
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/triage/decide") {
+        const body = await readJson(request);
+        const contactId = cleanText(body.contactId || "");
+        const decision = cleanText(body.decision || "");
+        if (!contactId || !["invalid", "clear"].includes(decision)) { sendJson(response, 400, { error: "Кого і що вирішили?" }); return; }
+        if (decision === "clear") delete state.triageDecisions[contactId];
+        else {
+          state.triageDecisions[contactId] = {
+            decision, note: cleanText(body.note || "").slice(0, 300),
+            by: profile?.email || "", at: new Date().toISOString()
+          };
+        }
+        addEvent("triage", `${decision === "invalid" ? "Marked not valid" : "Decision cleared"}: CRM contact ${contactId}.`);
+        await writePersistentWorkspaceState();
+        sendJson(response, 200, { success: true, decision: state.triageDecisions[contactId] || null });
+        return;
+      }
+
+      /**
+       * «Збагатити»: the CRM contact taken in as a lead (the same one the
+       * Contacts screen would make) and its contacts looked for — public web,
+       * and the scrapers when they are configured. Nothing is written to the
+       * CRM; what was found is shown, and the seller decides.
+       */
+      if (request.method === "POST" && url.pathname === "/api/triage/enrich") {
+        const body = await readJson(request);
+        const contact = await readContact(cleanText(body.contactId || ""), { cacheScope, fresh: true });
+        if (!contact) { sendJson(response, 404, { error: "Контакт не знайдено в CRM." }); return; }
+        const taken = takeCrmContactIntoQueue(contact);
+        if (!taken.prospect) { sendJson(response, 400, { error: taken.warning }); return; }
+        const prospect = taken.prospect;
+        prospect.contactDiscovery = await enrichProspectContacts(prospect, { phase: "contacts" });
+        prospect.updatedAt = new Date().toISOString();
+        addEvent("enrichment", `${prospect.name} enriched from Головна.`);
+        await writePersistentWorkspaceState();
+        const discovery = prospect.contactDiscovery || {};
+        sendJson(response, 200, {
+          success: true,
+          prospectId: prospect.id,
+          candidates: (discovery.candidates || []).slice(0, 30).map((item) => ({
+            type: item.type, value: item.value, source: item.source || "", confidence: item.confidence ?? null, url: item.url || null
+          })),
+          note: discovery.scraperNote || ""
+        });
+        return;
+      }
+
+      sendJson(response, 404, { error: "Невідомий маршрут головної." });
+      return;
+    } catch (error) {
+      const status = Number(error?.statusCode) || 502;
+      sendJson(response, status, { error: error?.message || "Не вдалося." });
       return;
     }
   }
@@ -2521,6 +2610,18 @@ async function handleApi(request, response, url) {
  * pasted in by hand before it was ever read from the CRM does not become a
  * second row with its own research bill.
  */
+/** Every address a cold email went to, from the ESP journal: when and from which mailbox, the last time. */
+async function emailedAddresses() {
+  const sent = new Map();
+  try {
+    for (const entry of await allEntries()) {
+      if (entry.type !== "message.sent" || !entry.contact) continue;
+      sent.set(entry.contact, { at: entry.at, from: entry.data?.from || null });
+    }
+  } catch { /* a journal that cannot be read hides nobody */ }
+  return sent;
+}
+
 function takeCrmContactIntoQueue(contact) {
   const prospect = normalizeProspect(contactAsProspect(contact));
   if (!prospect.name || !prospect.company) {
@@ -3826,6 +3927,9 @@ function applyPersistentWorkspaceState(saved = {}) {
   if (saved.contactDrafts && typeof saved.contactDrafts === "object" && !Array.isArray(saved.contactDrafts)) {
     state.contactDrafts = saved.contactDrafts;
   }
+  if (saved.triageDecisions && typeof saved.triageDecisions === "object" && !Array.isArray(saved.triageDecisions)) {
+    state.triageDecisions = saved.triageDecisions;
+  }
   if (saved.accountDossiers && typeof saved.accountDossiers === "object" && !Array.isArray(saved.accountDossiers)) {
     state.accountDossiers = saved.accountDossiers;
   }
@@ -4194,6 +4298,7 @@ async function writeWorkspaceStateNow() {
       scoringModel: state.scoringModel,
       researchJobs: state.researchJobs.slice(0, 100),
       contactDrafts: state.contactDrafts,
+      triageDecisions: state.triageDecisions,
       accountDossiers: state.accountDossiers,
       warmupCampaigns: state.warmupCampaigns,
       warmupTargeting: state.warmupTargeting,

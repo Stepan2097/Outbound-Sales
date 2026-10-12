@@ -323,6 +323,7 @@ function setView(viewName) {
   document.getElementById("pageTitle").textContent =
     {
       home: "Головна",
+      "linkedin-home": "LinkedIn · огляд",
       warmup: "Прогрів LinkedIn",
       "mail-warmup": "Прогрів пошт",
       "mail-settings": "Налаштування пошти",

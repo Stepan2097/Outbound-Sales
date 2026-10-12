@@ -1,0 +1,284 @@
+/* Головна (12.10): папка CRM, людина за людиною. */
+
+.triage-page {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.triage-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.triage-field {
+  display: grid;
+  gap: 6px;
+  min-width: 260px;
+  flex: 1;
+}
+
+.triage-field.is-narrow {
+  min-width: 140px;
+  flex: 0;
+}
+
+.triage-field span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.triage-progress {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--muted);
+}
+
+.triage-progress .pill svg {
+  width: 13px;
+  height: 13px;
+  vertical-align: -2px;
+}
+
+.triage-card {
+  display: grid;
+  grid-template-columns: minmax(300px, 1fr) minmax(0, 1.4fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.triage-person,
+.triage-channel {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+}
+
+.triage-channels {
+  display: grid;
+  gap: 14px;
+}
+
+.triage-head h2 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.triage-head p {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+
+.triage-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.triage-fields div {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--surface-strong);
+}
+
+.triage-fields dt {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.triage-fields dd {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.triage-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.triage-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--teal);
+}
+
+.triage-links svg {
+  width: 14px;
+  height: 14px;
+}
+
+.triage-note {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--surface-strong);
+}
+
+.triage-note p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  white-space: pre-line;
+}
+
+.triage-enrich {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+
+.triage-found {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.triage-found li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+
+.triage-muted {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.triage-muted svg {
+  width: 13px;
+  height: 13px;
+  vertical-align: -2px;
+}
+
+.triage-decide {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.triage-decide-right {
+  display: flex;
+  gap: 8px;
+}
+
+.triage-channel header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.triage-channel h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.triage-channel header svg {
+  color: var(--teal);
+}
+
+.triage-status {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.triage-status li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.triage-status svg {
+  width: 15px;
+  height: 15px;
+  color: var(--muted);
+}
+
+.triage-channel textarea {
+  width: 100%;
+  min-height: 120px;
+  line-height: 1.5;
+}
+
+.triage-channel input {
+  width: 100%;
+}
+
+.triage-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.triage-invite {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.triage-empty {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 48px 20px;
+  border: 1px dashed var(--line);
+  border-radius: 14px;
+  text-align: center;
+}
+
+.triage-empty > svg {
+  width: 30px;
+  height: 30px;
+  color: var(--teal);
+}
+
+.triage-empty p {
+  max-width: 520px;
+  margin: 0;
+  color: var(--muted);
+}
+
+@media (max-width: 1000px) {
+  .triage-card {
+    grid-template-columns: 1fr;
+  }
+
+  .triage-fields {
+    grid-template-columns: 1fr;
+  }
+}
+
+.triage-channel textarea,
+.triage-channel input {
+  font-family: inherit;
+  font-size: 13.5px;
+}

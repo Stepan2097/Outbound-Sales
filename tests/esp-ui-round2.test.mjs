@@ -94,3 +94,20 @@ test("with real sending on, the test goes to the person's own mailbox through th
   const unknown = await call("POST", "/test-send", { subject: "Hello", body: "Hi", mailbox: "nobody@elsewhere.com" });
   assert.equal(unknown.status, 409, "only a registered mailbox sends");
 });
+
+test("Головна: one letter to one lead is locked while real sending is off, and goes through the pre-send checks when it is on", async (t) => {
+  const locked = await setup(t, { liveSend: false });
+  const refused = await locked.call("POST", "/send-one", { lead: { email: "olena@northwind.com" }, mailbox: "anna@advantage-mail.com", subject: "Hello", body: "Hi" });
+  assert.equal(refused.status, 409);
+  assert.equal(refused.payload.code, "sending_locked");
+  assert.equal(locked.sent.length, 0);
+});
+
+test("Головна: an unverified lead does not get the letter, and is told why", async (t) => {
+  const live = await setup(t, { liveSend: true });
+  live.esp.filters = { context: async () => ({}), check: async () => ({ ok: false, reason: "not_verified", detail: "" }) };
+  const refused = await live.call("POST", "/send-one", { lead: { email: "olena@northwind.com" }, mailbox: "anna@advantage-mail.com", subject: "Hello", body: "Hi" });
+  assert.equal(refused.status, 409);
+  assert.match(refused.payload.error, /Не піде/);
+  assert.equal(live.sent.length, 0);
+});
