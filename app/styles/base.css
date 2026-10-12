@@ -1181,3 +1181,100 @@ dialog {
   gap: 8px 18px;
   justify-content: space-between;
 }
+
+/* Папки каналів у меню: LinkedIn і Пошта (розгортаються кліком по назві). */
+
+.nav-group {
+  display: grid;
+  gap: 6px;
+}
+
+.nav-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  margin-top: 6px;
+  padding: 0 10px;
+  border: 0;
+  background: transparent;
+  color: #7f9c99;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.nav-group-toggle:hover {
+  color: #edf7f5;
+}
+
+.nav-group-toggle svg {
+  width: 15px;
+  height: 15px;
+}
+
+.nav-group-chevron {
+  margin-left: auto;
+  transition: transform 0.15s ease;
+}
+
+.nav-group.is-folded .nav-group-chevron {
+  transform: rotate(-90deg);
+}
+
+.nav-group-items {
+  display: grid;
+  gap: 6px;
+  padding-left: 10px;
+  border-left: 1px solid #2f4f52;
+  margin-left: 16px;
+}
+
+.nav-group.is-folded .nav-group-items {
+  display: none;
+}
+
+@media (max-width: 1080px) {
+  /* Вузьке меню — лише іконки: замість назви папки тонка риска, усі пункти видно. */
+  .nav-group-toggle {
+    min-height: 1px;
+    height: 1px;
+    margin: 8px 14px 2px;
+    padding: 0;
+    overflow: hidden;
+    background: #2f4f52;
+    color: transparent;
+    pointer-events: none;
+  }
+
+  .nav-group-items,
+  .nav-group.is-folded .nav-group-items {
+    display: grid;
+    padding-left: 0;
+    border-left: 0;
+    margin-left: 0;
+  }
+}
+
+@media (max-width: 720px) {
+  /* Нижня панель телефона: папки зникають, пункти стоять у ряд і гортаються. */
+  .nav-group,
+  .nav-group-items,
+  .nav-group.is-folded .nav-group-items {
+    display: contents;
+  }
+
+  .nav-group-toggle {
+    display: none;
+  }
+
+  .nav-list > .nav-item,
+  .nav-group-items > .nav-item {
+    flex: 1 0 72px;
+    width: auto;
+  }
+}

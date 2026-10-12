@@ -317,6 +317,9 @@ function setView(viewName) {
   if (linkedView() && linkedView() !== viewName) window.history.replaceState(null, "", window.location.pathname + window.location.search);
   views.forEach((view) => view.classList.toggle("active", view.id === `view-${viewName}`));
   navItems.forEach((item) => item.classList.toggle("active", item.dataset.view === viewName));
+  // A screen inside a folded channel folder unfolds it: the active item is never hidden.
+  const group = navItems.find((item) => item.dataset.view === viewName)?.closest("[data-nav-group]");
+  if (group) setNavGroupOpen(group, true);
   document.getElementById("pageTitle").textContent =
     {
       home: "Головна",
@@ -397,6 +400,31 @@ export function relativeTime(value) {
   const hours = Math.round(minutes / 60);
   if (hours < 48) return `${hours} год тому`;
   return `${Math.round(hours / 24)} дн тому`;
+}
+
+/**
+ * The sidebar's channel folders — LinkedIn and Пошта. A click on a folder's
+ * name folds or unfolds it; which ones are folded is this browser's to
+ * remember (a convenience, so it may be lost and the menu still works).
+ */
+const NAV_GROUPS_KEY = "outbound:nav-groups-folded";
+
+function foldedNavGroups() {
+  try { return new Set(JSON.parse(window.localStorage.getItem(NAV_GROUPS_KEY) || "[]")); } catch { return new Set(); }
+}
+
+function setNavGroupOpen(group, open, remember = false) {
+  group.classList.toggle("is-folded", !open);
+  group.querySelector(".nav-group-toggle")?.setAttribute("aria-expanded", String(open));
+  if (!remember) return;
+  const folded = foldedNavGroups();
+  if (open) folded.delete(group.dataset.navGroup); else folded.add(group.dataset.navGroup);
+  try { window.localStorage.setItem(NAV_GROUPS_KEY, JSON.stringify([...folded])); } catch { /* лише зручність */ }
+}
+
+for (const group of document.querySelectorAll("[data-nav-group]")) {
+  if (foldedNavGroups().has(group.dataset.navGroup) && !group.querySelector(".nav-item.active")) setNavGroupOpen(group, false);
+  group.querySelector(".nav-group-toggle")?.addEventListener("click", () => setNavGroupOpen(group, group.classList.contains("is-folded"), true));
 }
 
 navItems.forEach((item) => {

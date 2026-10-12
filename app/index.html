@@ -59,11 +59,22 @@
         </div>
         <nav class="nav-list" aria-label="Робочий простір">
           <button class="nav-item active" data-view="home" aria-label="Головна" title="Головна"><i data-lucide="house"></i><span>Головна</span></button>
-          <button class="nav-item" data-view="warmup" aria-label="Прогрів" title="Прогрів"><i data-lucide="flame"></i><span>Прогрів</span></button>
-          <button class="nav-item" data-view="mail-warmup" aria-label="Прогрів пошт" title="Прогрів пошт"><i data-lucide="mail-plus"></i><span>Прогрів пошт</span></button>
-          <button class="nav-item" data-view="campaigns" aria-label="Кампанії" title="Кампанії"><i data-lucide="send"></i><span>Кампанії</span></button>
-          <button class="nav-item" data-view="leads" aria-label="Ліди" title="Ліди"><i data-lucide="users"></i><span>Ліди</span></button>
-          <button class="nav-item" data-view="reports" aria-label="Звіти" title="Звіти"><i data-lucide="chart-column"></i><span>Звіти</span></button>
+          <!-- Папки каналів: LinkedIn і Пошта. Розгортаються кліком по назві; стан — у браузері (app/core.js). -->
+          <div class="nav-group" data-nav-group="linkedin">
+            <button class="nav-group-toggle" type="button" aria-expanded="true"><i data-lucide="folder-open"></i><span>LinkedIn</span><i data-lucide="chevron-down" class="nav-group-chevron"></i></button>
+            <div class="nav-group-items">
+              <button class="nav-item" data-view="warmup" aria-label="Прогрів LinkedIn" title="Прогрів LinkedIn"><i data-lucide="flame"></i><span>Прогрів</span></button>
+            </div>
+          </div>
+          <div class="nav-group" data-nav-group="mail">
+            <button class="nav-group-toggle" type="button" aria-expanded="true"><i data-lucide="folder-open"></i><span>Пошта</span><i data-lucide="chevron-down" class="nav-group-chevron"></i></button>
+            <div class="nav-group-items">
+              <button class="nav-item" data-view="mail-warmup" aria-label="Прогрів пошт" title="Прогрів пошт"><i data-lucide="mail-plus"></i><span>Прогрів пошт</span></button>
+              <button class="nav-item" data-view="campaigns" aria-label="Кампанії" title="Кампанії"><i data-lucide="send"></i><span>Кампанії</span></button>
+              <button class="nav-item" data-view="leads" aria-label="Ліди" title="Ліди"><i data-lucide="users"></i><span>Ліди</span></button>
+              <button class="nav-item" data-view="reports" aria-label="Звіти" title="Звіти"><i data-lucide="chart-column"></i><span>Звіти</span></button>
+            </div>
+          </div>
           <button class="nav-item" data-view="inbox" aria-label="Вхідні" title="Вхідні"><i data-lucide="inbox"></i><span>Вхідні</span><span class="nav-badge" id="warmupNavBadge" hidden></span></button>
           <button class="nav-item" data-view="contacts" aria-label="Контакти" title="Контакти"><i data-lucide="contact"></i><span>Контакти</span></button>
           <button class="nav-item" data-view="account" aria-label="Налаштування" title="Налаштування"><i data-lucide="settings"></i><span>Налаштування</span></button>
