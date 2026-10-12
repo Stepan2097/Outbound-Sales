@@ -38,7 +38,7 @@ function sources(dir = APP.pathname) {
   });
 }
 
-const SCREENS = [["home", "Головна"], ["linkedin-home", "Огляд"], ["warmup", "Прогрів"], ["mail-warmup", "Прогрів пошт"], ["campaigns", "Кампанії"], ["leads", "Ліди"], ["reports", "Звіти"], ["mail-settings", "Скриньки"], ["inbox", "Вхідні"], ["contacts", "Контакти"], ["account", "Налаштування"]];
+const SCREENS = [["home", "Головна"], ["work", "По днях"], ["linkedin-home", "Огляд"], ["warmup", "Прогрів"], ["mail-warmup", "Прогрів пошт"], ["campaigns", "Кампанії"], ["leads", "Ліди"], ["reports", "Звіти"], ["mail-settings", "Скриньки"], ["inbox", "Вхідні"], ["contacts", "Контакти"], ["account", "Налаштування"]];
 
 const REMOVED_VIEWS = ["email", "prospects", "ai", "products", "overview", "models", "routing", "budgets", "privacy", "evaluation"];
 
@@ -89,6 +89,7 @@ test("the workspace opens on «Головна»", () => {
  */
 const SCREEN_FILES = {
   home: ["screens/home-triage.js"],
+  work: ["screens/work.js"],
   "linkedin-home": ["screens/home.js"],
   warmup: ["screens/warmup-accounts.js", "screens/warmup-campaign.js"],
   inbox: ["screens/inbox.js"],

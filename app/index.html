@@ -10,6 +10,7 @@
     <link rel="stylesheet" href="/styles/warmup-campaign.css" />
     <link rel="stylesheet" href="/styles/home.css" />
     <link rel="stylesheet" href="/styles/home-triage.css" />
+    <link rel="stylesheet" href="/styles/work.css" />
     <link rel="stylesheet" href="/styles/inbox.css" />
     <link rel="stylesheet" href="/styles/contacts.css" />
     <link rel="stylesheet" href="/styles/settings.css" />
@@ -60,6 +61,7 @@
         </div>
         <nav class="nav-list" aria-label="Робочий простір">
           <button class="nav-item active" data-view="home" aria-label="Головна" title="Головна"><i data-lucide="house"></i><span>Головна</span></button>
+          <button class="nav-item" data-view="work" aria-label="По днях" title="По днях: кому писали, хто відповів"><i data-lucide="calendar-days"></i><span>По днях</span></button>
           <!-- Папки каналів: LinkedIn і Пошта. Розгортаються кліком по назві; стан — у браузері (app/core.js). -->
           <div class="nav-group" data-nav-group="linkedin">
             <button class="nav-group-toggle" type="button" aria-expanded="true"><i data-lucide="folder-open"></i><span>LinkedIn</span><i data-lucide="chevron-down" class="nav-group-chevron"></i></button>
@@ -101,6 +103,11 @@
         <!-- Головна (12.10): CRM-папка, людина за людиною — малює app/screens/home-triage.js. -->
         <section class="view" id="view-home">
           <div class="triage-page" id="triageRoot"></div>
+        </section>
+
+        <!-- «По днях» (12.10): кому писали за день, хто відповів, діалог — app/screens/work.js. -->
+        <section class="view" id="view-work">
+          <div class="work-page" id="workRoot"></div>
         </section>
 
         <!-- LinkedIn → «Огляд» — колишня головна: увага, кому написати, відповіді, акаунти (app/screens/home.js). -->

@@ -11,6 +11,7 @@ import { invalidateContactCaches, contactAsProspect, contactsConfigured, contact
 import { handleKnowledgeLibraryApi } from "./knowledge/api.mjs";
 import { allEntries, append as espAppend, useJournal } from "./esp/journal.mjs";
 import { nextContact as nextTriageContact } from "./triage/queue.mjs";
+import { contactKeyOf, contactWork, dayActivity, dayOf, logWork, recentDays, useWorkLog, workEntries, workUsers } from "./triage/work-log.mjs";
 import { checkEmail } from "./contacts/email-check.mjs";
 import { contactEmails, crmPatch } from "./contacts/enrich-crm.mjs";
 import { logAdminAction } from "./esp/access.mjs";
@@ -33,7 +34,8 @@ import { applyRampReviews } from "./esp/ramp.mjs";
 import { campaignStore } from "./esp/campaigns.mjs";
 import { leadStore } from "./esp/leads.mjs";
 import { crmLeadSource } from "./esp/crm-leads.mjs";
-import { crm as warmupCrm } from "./warmup/db.mjs";
+import { anty as warmupAnty, crm as warmupCrm } from "./warmup/db.mjs";
+import { messagesForContact } from "./warmup/inbox.mjs";
 import { postponedDue, runTick, startSequence } from "./esp/sequence.mjs";
 import { pollInboxes } from "./esp/inbound.mjs";
 import { runWarmupTick, warmupMode } from "./esp/mail-warmup.mjs";
@@ -48,6 +50,8 @@ const appRoot = join(root, "app");
 const stateFilePath = process.env.STATE_FILE_PATH || join(root, ".data", "outbound-state.json");
 // The ESP journal lives beside the state, on the same volume, unless told otherwise.
 useJournal(process.env.ESP_JOURNAL_PATH || join(dirname(stateFilePath), "esp-journal.jsonl"));
+// Who did what, by day (triage/work-log.mjs) — beside the state too.
+useWorkLog(process.env.WORK_LOG_PATH || join(dirname(stateFilePath), "work-log.jsonl"));
 // The administrators' log (ESP 10) is the ESP journal: what an admin changes in
 // the workspace — roles, people, models, keys — is a line there, with who did it.
 // Never the key itself. A log that cannot be written costs the change nothing.
@@ -429,6 +433,9 @@ const state = {
   // What mail servers said about an address (contacts/email-check.mjs), by
   // address — a server is asked once a month, not every time a card opens.
   emailChecks: {},
+  // «По днях»: when each signed-in person last opened a contact's conversation
+  // there, by login and contact key — a reply after that is shown as new.
+  workSeen: {},
   // What we already know about a company, by account key — the workspace's own
   // memory of the web research, so the second person from the same company is
   // not paid for twice. It is saved to disk with everything else, because a
@@ -928,16 +935,17 @@ async function handleApi(request, response, url) {
   // LinkedIn warm-up. Its own modules, its own Anty database, mounted behind
   // the workspace sign-in the rest of the app already enforces.
   if (url.pathname === "/api/warmup" || url.pathname.startsWith("/api/warmup/")) {
+    const tap = workTap(request, url, sendJson);
     const handled = await handleWarmupApi({
       request,
       response,
       url,
-      sendJson,
+      sendJson: tap.sendJson,
       // The warm-up routes answer a malformed body with 400 rather than a
       // thrown parse error, so they need the null the shared reader never gives.
       readJson: async (incoming) => {
         try {
-          const body = await readJson(incoming);
+          const body = tap.remember(await readJson(incoming));
           if (url.pathname === "/api/warmup/agent") request.contactCacheAction = body?.action;
           return body;
         } catch (error) {
@@ -983,6 +991,7 @@ async function handleApi(request, response, url) {
       }
     });
     if (!handled) sendJson(response, 404, { success: false, error: "Unknown warm-up endpoint." });
+    else await tap.after();
     return;
   }
 
@@ -990,8 +999,10 @@ async function handleApi(request, response, url) {
   // Its own modules under esp/; the connector is picked once, from the
   // environment, and refuses to send anything real until ESP 11 is accepted.
   if (url.pathname === "/api/esp" || url.pathname.startsWith("/api/esp/")) {
-    const handled = await handleEspApi({ request, response, url, sendJson, readJson: async (incoming) => { try { return await readJson(incoming); } catch { return null; } }, esp });
+    const tap = workTap(request, url, sendJson);
+    const handled = await handleEspApi({ request, response, url, sendJson: tap.sendJson, readJson: async (incoming) => { try { return tap.remember(await readJson(incoming)); } catch { return null; } }, esp });
     if (!handled) sendJson(response, 404, { success: false, error: "Unknown ESP endpoint." });
+    else await tap.after();
     return;
   }
 
@@ -1157,6 +1168,7 @@ async function handleApi(request, response, url) {
             .slice(0, 300);
           state.contactDrafts = Object.fromEntries(kept);
           addEvent("outreach", `Drafts written for ${contact.name || "a CRM contact"} (${product.name}).`);
+          await logWork(request.auth?.profile, { action: "drafted", contactId, name: contact.name });
           await writePersistentWorkspaceState();
           sendJson(response, 200, { drafts });
           return;
@@ -1206,6 +1218,7 @@ async function handleApi(request, response, url) {
           emailed: await emailedAddresses(),
           cacheScope
         });
+        if (answer.contact) await logViewed(profile, answer.contact);
         sendJson(response, 200, {
           ...answer,
           drafts: answer.contact ? state.contactDrafts[answer.contact.id] || null : null,
@@ -1227,6 +1240,7 @@ async function handleApi(request, response, url) {
           };
         }
         addEvent("triage", `${decision === "invalid" ? "Marked not valid" : "Decision cleared"}: CRM contact ${contactId}.`);
+        if (decision === "invalid") await logWork(profile, { action: "invalid", contactId, detail: state.triageDecisions[contactId]?.note || null });
         await writePersistentWorkspaceState();
         sendJson(response, 200, { success: true, decision: state.triageDecisions[contactId] || null });
         return;
@@ -1261,6 +1275,7 @@ async function handleApi(request, response, url) {
         const { patch, added } = crmPatch(contact, { candidates, checks });
         const updated = await writeContactPatch(contact, patch);
         addEvent("enrichment", `${prospect.name} enriched from Головна${added.length ? `; CRM: ${added.map((row) => row.field).join(", ")}` : ""}.`);
+        await logWork(profile, { action: "enriched", contactId: contact.id, name: contact.name, detail: added.map((row) => `${row.field}: ${row.value}`).join("; ") || "нічого нового" });
         await writePersistentWorkspaceState();
         sendJson(response, 200, {
           success: true,
@@ -1273,6 +1288,17 @@ async function handleApi(request, response, url) {
           emails: contactEmails(updated),
           note: discovery.scraperNote || ""
         });
+        return;
+      }
+
+      // «Пропустити»: nothing changes for the person — the queue is the
+      // browser's — but the work log (triage/work-log.mjs) counts it.
+      if (request.method === "POST" && url.pathname === "/api/triage/skip") {
+        const body = await readJson(request);
+        const contactId = cleanText(body.contactId || "");
+        if (!contactId) { sendJson(response, 400, { error: "Кого пропустити?" }); return; }
+        await logWork(profile, { action: "skipped", contactId, name: cleanText(body.name || "") });
+        sendJson(response, 200, { success: true });
         return;
       }
 
@@ -1295,6 +1321,80 @@ async function handleApi(request, response, url) {
     } catch (error) {
       const status = Number(error?.statusCode) || 502;
       sendJson(response, status, { error: error?.message || "Не вдалося." });
+      return;
+    }
+  }
+
+  // ── «По днях» (12.10): whom a person wrote to on a day, who answered, and
+  // how much each login did — triage/work-log.mjs. A seller sees their own
+  // days; an administrator anybody's, or everybody's together.
+  if (url.pathname.startsWith("/api/work/")) {
+    const profile = request.auth?.profile;
+    const viewer = String(profile?.email || "").toLowerCase();
+    const admin = profile?.role === "admin";
+    try {
+      if (request.method === "GET" && url.pathname === "/api/work/day") {
+        const asked = cleanText(url.searchParams.get("date") || "");
+        const date = /^\d{4}-\d{2}-\d{2}$/.test(asked) ? asked : dayOf(new Date());
+        const wanted = cleanText(url.searchParams.get("user") || "").toLowerCase();
+        const user = admin ? wanted || viewer : viewer;
+        const entries = await workEntries();
+        const activity = dayActivity(entries, { date, user });
+        const listed = activity.contacts.slice(0, 300);
+        const bases = await baseContacts([...new Set(listed.map((item) => item.contactId).filter(Boolean))]);
+        const journal = await allEntries().catch(() => []);
+        const seen = state.workSeen[viewer] || {};
+        const contacts = await inBatches(listed, 4, async (item) => {
+          const base = item.contactId ? bases.get(item.contactId) || null : null;
+          const found = await answerFor(item, base, journal);
+          const lastSeen = seen[item.key] || "";
+          return {
+            ...item,
+            name: base?.name || item.name || item.emails[0] || "без імені",
+            company: base?.company || null, position: base?.position || null, country: base?.country || null,
+            linkedin: base?.linkedin || null, email: base?.email || item.emails[0] || null,
+            ...found,
+            fresh: Boolean(found.answer && String(found.answer.at) > lastSeen),
+            seenAt: lastSeen || null
+          };
+        });
+        const answeredBy = new Map();
+        for (const item of contacts) if (item.answer) for (const person of item.users) answeredBy.set(person, (answeredBy.get(person) || 0) + 1);
+        sendJson(response, 200, {
+          date, user, admin, viewer,
+          today: dayOf(new Date()),
+          users: admin ? workUsers(entries) : [],
+          days: recentDays(entries, { user, until: date }),
+          total: { ...activity.total, answered: contacts.filter((item) => item.answer).length, fresh: contacts.filter((item) => item.fresh).length },
+          byUser: activity.users.map((person) => ({ ...person, counts: { ...person.counts, answered: answeredBy.get(person.user) || 0 } })),
+          contacts
+        });
+        return;
+      }
+
+      // One person: who of us did what to them, ever — the conversation itself
+      // the screen reads from the warm-up history and the ESP timeline. Opening
+      // it is reading it: the answer stops being new for this login.
+      if (request.method === "GET" && url.pathname === "/api/work/contact") {
+        const key = cleanText(url.searchParams.get("key") || "");
+        const contactId = key.startsWith("id:") ? key.slice(3) : null;
+        const email = key.startsWith("email:") ? key.slice(6).toLowerCase() : null;
+        if (!contactId && !email) { sendJson(response, 400, { error: "Який контакт?" }); return; }
+        const base = contactId ? (await baseContacts([contactId])).get(contactId) || null : null;
+        const emails = [...new Set([email, base?.email, ...(contactId ? contactEmails(base || {}).map((row) => row.address) : [])].filter(Boolean).map((value) => String(value).toLowerCase()))];
+        const work = contactWork(await workEntries(), { contactId, emails });
+        state.workSeen[viewer] = { ...(state.workSeen[viewer] || {}), [key]: new Date().toISOString() };
+        const kept = Object.entries(state.workSeen[viewer]).sort((left, right) => String(right[1]).localeCompare(String(left[1]))).slice(0, 5000);
+        state.workSeen[viewer] = Object.fromEntries(kept);
+        await writePersistentWorkspaceState();
+        sendJson(response, 200, { key, contact: base, emails: emails.filter((value) => !value.startsWith("linkedin:")), work });
+        return;
+      }
+
+      sendJson(response, 404, { error: "Невідомий маршрут." });
+      return;
+    } catch (error) {
+      sendJson(response, Number(error?.statusCode) || 502, { error: error?.message || "Не вдалося." });
       return;
     }
   }
@@ -2687,6 +2787,136 @@ async function emailedAddresses() {
   return sent;
 }
 
+// ── «По днях»: who did what, read off the routes (triage/work-log.mjs) ──────
+
+const viewedToday = new Set();
+/** A card opened on Головна — once a day per login and contact. */
+async function logViewed(profile, contact) {
+  const key = `${profile?.email || ""}|${contact.id}|${dayOf(new Date())}`;
+  if (viewedToday.has(key)) return;
+  if (viewedToday.size > 20000) viewedToday.clear();
+  viewedToday.add(key);
+  await logWork(profile, { action: "viewed", contactId: contact.id, name: contact.name });
+}
+
+/** The base's contact behind an address, when one has it — so a letter and a LinkedIn message are one person. */
+async function baseContactByEmail(email) {
+  if (!email || !warmupCrm.configured()) return null;
+  try {
+    const [row] = await warmupCrm.from("contacts").select("id,name").eq("email", email).limit(1).rows();
+    return row || null;
+  } catch { return null; }
+}
+
+async function accountName(accountId) {
+  if (!accountId) return null;
+  try {
+    const [row] = await warmupAnty.from("wl_accounts").select("id,label,login").eq("id", accountId).limit(1).rows();
+    return row ? row.login?.trim() || row.label || null : null;
+  } catch { return null; }
+}
+
+/**
+ * The warm-up and mail routes are their own modules; what a person did
+ * through them is read off the request and its answer here, so they do not
+ * change. `wrap` gives the route a reader and a writer that remember both;
+ * `after` writes the line when the answer was a success.
+ */
+function workTap(request, url, sendJson) {
+  let body = null;
+  let answer = null;
+  return {
+    remember(value) { body = value; return value; },
+    sendJson(response, status, payload, ...rest) { answer = { status, payload }; return sendJson(response, status, payload, ...rest); },
+    async after() {
+      if (request.method !== "POST" || !body || !answer || answer.status >= 300 || answer.payload?.success === false) return;
+      try { await workFromRoute(request.auth?.profile, url.pathname, body, answer.payload || {}); }
+      catch (error) { console.warn(`[work-log] ${url.pathname}: ${error.message}`); }
+    }
+  };
+}
+
+async function workFromRoute(profile, path, body, payload) {
+  if (path === "/api/warmup/first-messages/send" && !payload.duplicate) {
+    const [row] = await warmupAnty.from("wl_outreach").select("id,account_id,crm_contact_id,person_name").eq("id", String(body.outreachId)).limit(1).rows();
+    if (!row) return;
+    await logWork(profile, { action: "wrote", channel: "linkedin", contactId: row.crm_contact_id, name: row.person_name, accountId: row.account_id, accountName: await accountName(row.account_id), detail: String(body.text || "").slice(0, 500) });
+  } else if (path === "/api/warmup/invites") {
+    await logWork(profile, { action: "invited", channel: "linkedin", contactId: String(body.crmContactId), accountId: String(body.accountId || ""), accountName: await accountName(body.accountId), detail: String(body.note || "").slice(0, 300) || null });
+  } else if (path === "/api/warmup/inbox/reply" && !payload.duplicate) {
+    const rows = await warmupAnty.from("wl_events").select("meta").eq("account_id", String(body.accountId)).eq("meta->>threadKey", String(body.threadKey))
+      .order("created_at", { ascending: false }).limit(50).rows();
+    const tied = rows.find((row) => row.meta?.crmContactId);
+    const name = rows.find((row) => row.meta?.participant?.name)?.meta.participant.name || null;
+    if (!tied && !name) return;
+    await logWork(profile, { action: "replied", channel: "linkedin", contactId: tied?.meta.crmContactId || null, name, email: tied ? null : `linkedin:${body.threadKey}`, accountId: String(body.accountId), accountName: await accountName(body.accountId), detail: String(body.text || "").slice(0, 500) });
+  } else if (path === "/api/esp/send-one") {
+    const email = String(payload.to || body.lead?.email || "").toLowerCase();
+    const contactId = body.lead?.crmContactId || (await baseContactByEmail(email))?.id || null;
+    await logWork(profile, { action: "wrote", channel: "email", contactId, email, name: body.lead?.name, mailbox: payload.mailbox || body.mailbox, detail: String(body.subject || "").slice(0, 300) });
+  } else if (path === "/api/esp/conversations/reply" && payload.sent) {
+    const [mailbox, email] = String(body.key || "").split("|");
+    const base = await baseContactByEmail(email);
+    await logWork(profile, { action: "replied", channel: "email", contactId: base?.id || null, email, name: base?.name, mailbox, detail: String(body.text || "").slice(0, 500) });
+  }
+}
+
+const answerCache = new Map();
+/**
+ * Did the person answer after we wrote? The newest LinkedIn message in after
+ * `since` (Anty events, by the base id), the newest letter back (ESP journal),
+ * and whether a LinkedIn request was accepted. Cached a minute per contact.
+ */
+async function answerFor(item, base, journal) {
+  const cacheKey = `${item.key}|${item.firstAt}`;
+  const cached = answerCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < 60000) return cached.value;
+  const since = item.firstAt;
+  const answers = [];
+  let accepted = null;
+  if (item.contactId && item.actions.some((row) => row.channel === "linkedin")) {
+    try {
+      const messages = await messagesForContact({ crmContactId: item.contactId, personName: base?.name, personLinkedin: base?.linkedin }, 60);
+      for (const message of messages) if (message.direction === "in" && String(message.at) > since) answers.push({ channel: "linkedin", at: message.at, text: String(message.body || "").slice(0, 240), accountId: message.accountId });
+    } catch { /* Anty unreachable: no answer is claimed */ }
+    if (item.actions.some((row) => row.action === "invited")) {
+      try {
+        const [row] = await warmupAnty.from("wl_outreach").select("status,responded_at").eq("crm_contact_id", item.contactId).limit(1).rows();
+        if (row && ["accepted", "connected"].includes(row.status) && row.responded_at && String(row.responded_at) > since) accepted = row.responded_at;
+      } catch { /* as above */ }
+    }
+  }
+  const addresses = new Set([...item.emails, base?.email].filter(Boolean).map((value) => String(value).toLowerCase()));
+  for (const entry of journal) {
+    if (!addresses.has(entry.contact) || String(entry.at) <= since) continue;
+    if (entry.type === "message.replied") answers.push({ channel: "email", at: entry.at, text: String(entry.data?.text || entry.data?.subject || "").slice(0, 240), mailbox: entry.data?.sender || null });
+    if (entry.type === "message.bounced") answers.push({ channel: "email", at: entry.at, bounced: true, text: "лист не дійшов" });
+  }
+  answers.sort((left, right) => String(right.at).localeCompare(String(left.at)));
+  const value = { answer: answers.find((row) => !row.bounced) || null, answers: answers.length, bounced: answers.some((row) => row.bounced), accepted };
+  answerCache.set(cacheKey, { at: Date.now(), value });
+  if (answerCache.size > 5000) answerCache.clear();
+  return value;
+}
+
+async function baseContacts(ids) {
+  const found = new Map();
+  if (!ids.length || !warmupCrm.configured()) return found;
+  for (let at = 0; at < ids.length; at += 100) {
+    try {
+      const rows = await warmupCrm.from("contacts").select("id,name,company,position,email,linkedin,country,custom_fields").in("id", ids.slice(at, at + 100)).rows();
+      for (const row of rows) found.set(row.id, row);
+    } catch { /* the names fall back to what the log remembered */ }
+  }
+  return found;
+}
+
+async function inBatches(items, size, task) {
+  const results = [];
+  for (let at = 0; at < items.length; at += size) results.push(...await Promise.all(items.slice(at, at + size).map(task)));
+  return results;
+}
+
 function takeCrmContactIntoQueue(contact) {
   const prospect = normalizeProspect(contactAsProspect(contact));
   if (!prospect.name || !prospect.company) {
@@ -3998,6 +4228,9 @@ function applyPersistentWorkspaceState(saved = {}) {
   if (saved.emailChecks && typeof saved.emailChecks === "object" && !Array.isArray(saved.emailChecks)) {
     state.emailChecks = saved.emailChecks;
   }
+  if (saved.workSeen && typeof saved.workSeen === "object" && !Array.isArray(saved.workSeen)) {
+    state.workSeen = saved.workSeen;
+  }
   if (saved.accountDossiers && typeof saved.accountDossiers === "object" && !Array.isArray(saved.accountDossiers)) {
     state.accountDossiers = saved.accountDossiers;
   }
@@ -4368,6 +4601,7 @@ async function writeWorkspaceStateNow() {
       contactDrafts: state.contactDrafts,
       triageDecisions: state.triageDecisions,
       emailChecks: state.emailChecks,
+      workSeen: state.workSeen,
       accountDossiers: state.accountDossiers,
       warmupCampaigns: state.warmupCampaigns,
       warmupTargeting: state.warmupTargeting,

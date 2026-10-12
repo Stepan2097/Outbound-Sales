@@ -390,3 +390,13 @@
   height: 14px;
   vertical-align: -2px;
 }
+
+/* Знайдене «Збагатити»: уже в базі. */
+.triage-stored {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(94, 201, 138, 0.18);
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 600;
+}

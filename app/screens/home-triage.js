@@ -197,7 +197,7 @@ function foundMark(item) {
   const field = { website: "website", phone: "phone", linkedin: "linkedin" }[item.type];
   if (!field) return "";
   const stored = triage.item?.contact?.[field];
-  if (sameValue(stored, item.value)) return '<span class="triage-check is-ok" title="Записано в базу">✓ у базі</span>';
+  if (sameValue(stored, item.value)) return '<span class="triage-stored" title="Записано в базу">✓ у базі</span>';
   if (stored) return `<span class="triage-muted" title="У базі вже інше значення — його не перезаписано">у базі інше: ${escapeHtml(stored)}</span>`;
   return '<span class="triage-muted" title="Джерело недостатньо впевнене, щоб записати самому">не записано — перевірте</span>';
 }
@@ -377,7 +377,11 @@ async function decideInvalid() {
 
 async function skip() {
   const contact = triage.item?.contact;
-  if (contact) triage.skip.push(String(contact.id));
+  if (contact) {
+    triage.skip.push(String(contact.id));
+    // Counted for «По днях»; the queue itself is this page's.
+    api("/api/triage/skip", { method: "POST", body: JSON.stringify({ contactId: contact.id, name: contact.name }) }).catch(() => {});
+  }
   triage.notice = "";
   await loadNext();
 }
@@ -460,7 +464,7 @@ async function sendEmail() {
   const failed = [];
   for (const row of chosen) {
     try {
-      const lead = { email: row.address, name: contact.name, company: contact.company, country: contact.country, position: contact.position, source: "CRM", sourceDate: contact.created_at, verification: row.check?.status, verifiedAt: row.check?.checkedAt };
+      const lead = { email: row.address, crmContactId: contact.id, name: contact.name, company: contact.company, country: contact.country, position: contact.position, source: "CRM", sourceDate: contact.created_at, verification: row.check?.status, verifiedAt: row.check?.checkedAt };
       const answer = await api("/api/esp/send-one", { method: "POST", body: JSON.stringify({ lead, mailbox: triage.mailbox, subject: triage.texts.subject, body: triage.texts.body }) });
       if (answer.ok) went.push(row.address); else failed.push(`${row.address}: ${answer.error || "не пішов"}`);
     } catch (error) {

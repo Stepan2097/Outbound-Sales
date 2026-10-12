@@ -47,7 +47,8 @@ const SAVED_ELSEWHERE_OR_NOTHING = {
   "/api/account/password": "пароль живе в GoTrue, а не в стані воркспейсу",
   "/api/openrouter/revoke": "ключ і його метадані — лише в пам'яті за задумом; на проді ключ повертається зі змінної середовища",
   "/api/openrouter/test": "результат перевірки з'єднання (providerHealth) перераховується при кожному старті",
-  "/api/tasks/run": "симуляція прогону: її фальшиві рядки використання свідомо не потрапляють у файл (isRealUsageRow)"
+  "/api/tasks/run": "симуляція прогону: її фальшиві рядки використання свідомо не потрапляють у файл (isRealUsageRow)",
+  "/api/triage/skip": "черга «Пропустити» живе в браузері; сервер лише дописує рядок у журнал роботи (triage/work-log.mjs, work-log.jsonl поруч зі станом)"
 };
 
 test("кожен маршрут, що змінює стан, зберігає його — або названий серед винятків із причиною", () => {
@@ -105,6 +106,7 @@ const SAVED_AS = {
   contactDrafts: "contactDrafts",
   triageDecisions: "triageDecisions",
   emailChecks: "emailChecks",
+  workSeen: "workSeen",
   accountDossiers: "accountDossiers",
   warmupCampaigns: "warmupCampaigns",
   warmupTargeting: "warmupTargeting",

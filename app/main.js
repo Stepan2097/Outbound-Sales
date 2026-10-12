@@ -4,6 +4,7 @@
 import { bootApplication } from "./core.js";
 import "./screens/home.js";
 import "./screens/home-triage.js";
+import "./screens/work.js";
 import "./screens/warmup-accounts.js";
 import "./screens/warmup-campaign.js";
 import { startWarmupBadge } from "./screens/inbox.js";
