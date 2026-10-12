@@ -35,7 +35,7 @@ function google({ token = () => ({ status: 200, body: { access_token: "ya29.toke
 
 const decode = (part) => JSON.parse(Buffer.from(part, "base64url").toString("utf8"));
 
-test("the assertion names the mailbox as its subject, asks only for send, read and labels (warm-up), and is signed by the key", () => {
+test("the assertion names the mailbox as its subject, asks only for send and read, and is signed by the key", () => {
   const account = parseServiceAccount(JSON.stringify(KEY));
   const jwt = signAssertion(account, { subject: "anna@advantage-mail.com", now: Date.UTC(2026, 9, 10, 9) });
   const [header, claims, signature] = jwt.split(".");
@@ -47,10 +47,32 @@ test("the assertion names the mailbox as its subject, asks only for send, read a
   assert.equal(body.exp - body.iat, 3600);
   assert.deepEqual(body.scope.split(" "), GMAIL_SCOPES);
   assert.ok(!body.scope.includes("mail.google.com"), "full mailbox access is not asked for");
-  assert.deepEqual(GMAIL_SCOPES.map((scope) => scope.split("/").pop()), ["gmail.send", "gmail.readonly", "gmail.modify"]);
+  assert.deepEqual(GMAIL_SCOPES.map((scope) => scope.split("/").pop()), ["gmail.send", "gmail.readonly"], "gmail.modify is not in the mail token");
   const verify = createVerify("RSA-SHA256");
   verify.update(`${header}.${claims}`);
   assert.equal(verify.verify(publicKey, signature, "base64url"), true);
+});
+
+test("прогрів пошт: gmail.modify — окремим токеном лише для міток; Workspace без нього шле й читає далі, а мітки кажуть no_modify_scope", async () => {
+  const asked = [];
+  const { fetch, calls } = google({
+    token: (init) => {
+      const scope = JSON.parse(Buffer.from(new URLSearchParams(init.body).get("assertion").split(".")[1], "base64url").toString("utf8")).scope;
+      asked.push(scope.split(" ").map((item) => item.split("/").pop()).join(","));
+      // The delegation lists only send and readonly: a token that asks for more is refused outright.
+      return scope.includes("gmail.modify")
+        ? { status: 401, body: { error: "unauthorized_client", error_description: "Client is unauthorized" } }
+        : { status: 200, body: { access_token: "ya29.mail", expires_in: 3600 } };
+    },
+    gmail: (url) => (url.endsWith("/profile") ? { status: 200, body: { emailAddress: "anna@advantage-mail.com", historyId: "1" } } : { status: 200, body: { id: "m-1", threadId: "t-1" } })
+  });
+  const connector = new GmailApiConnector({ serviceAccount: KEY, fetch, liveSend: true });
+  await assert.rejects(connector.setLabels("anna@advantage-mail.com", "m-9", { add: ["INBOX"], remove: ["SPAM"] }), (error) => error.code === "no_modify_scope" && /gmail\.modify/.test(error.message));
+  assert.equal((await connector.checkMailbox("anna@advantage-mail.com")).ok, true, "читання живе");
+  assert.equal((await connector.send("anna@advantage-mail.com", "From: a\r\n\r\nhi")).id, "m-1", "відправка жива");
+  assert.deepEqual(asked, ["gmail.modify", "gmail.send,gmail.readonly"], "токен пошти ніколи не просить gmail.modify");
+  assert.ok(calls.every((call) => !call.url.includes("/modify")), "без токена мітки й не змінювались");
+  assert.deepEqual(connector.describe().warmupScopes.map((scope) => scope.split("/").pop()), ["gmail.modify"]);
 });
 
 test("a key file that is not a service account's says what is wrong with it", () => {

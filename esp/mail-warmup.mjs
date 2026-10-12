@@ -1,6 +1,6 @@
 import { isHoliday } from "./holidays.mjs";
 import { buildLetter, messageIdFor } from "./letter.mjs";
-import { COUNTING_ZONE, localTime, seeded, sendDecision, sendLedger, senderDailyLimit } from "./limits.mjs";
+import { COUNTING_ZONE, SENDER_DAILY_CAP, localTime, seeded, sendDecision, sendLedger, senderDailyLimit } from "./limits.mjs";
 import { DOMAIN_LABEL } from "./registry.mjs";
 import { replySubject } from "./thread.mjs";
 
@@ -41,10 +41,41 @@ export const BACKOFF_MINUTES = 30;
 // Warm-up runs on our days: Kyiv working hours, Ukrainian holidays off.
 const OUR_SIDE = { timezone: COUNTING_ZONE, country: "Ukraine" };
 
+export const DEFAULT_PLAN = { start: WARMUP_START, step: WARMUP_STEP, max: WARMUP_MAX };
+// What a plan may be: at least one letter, never past a sender's daily cap.
+export const PLAN_BOUNDS = { start: [1, SENDER_DAILY_CAP], step: [0, 10], max: [1, SENDER_DAILY_CAP] };
+
+/** A plan checked and made whole, or a message saying what is wrong with it. */
+export function cleanPlan(input = {}) {
+  const plan = {};
+  for (const [key, [min, max]] of Object.entries(PLAN_BOUNDS)) {
+    const value = Number(input[key]);
+    if (!Number.isInteger(value) || value < min || value > max) {
+      return { error: `${{ start: "Старт", step: "Приріст", max: "Межа" }[key]} — ціле число від ${min} до ${max}.` };
+    }
+    plan[key] = value;
+  }
+  if (plan.max < plan.start) return { error: "Межа не може бути меншою за старт." };
+  return { plan };
+}
+
+/**
+ * The warm-up's plan now: the last one an administrator saved on the page
+ * (`warmup.plan`), or the server's defaults (`ESP_WARMUP_START`, `_STEP`,
+ * `_MAX`), or 2 / +2 / 20. A fresh domain is ramped slower by saving a smaller
+ * start and step — no code, no deploy.
+ */
+export function warmupPlan(entries = [], env = process.env) {
+  const saved = [...entries].reverse().find((entry) => entry.type === "warmup.plan");
+  if (saved) return { ...cleanPlan(saved.data).plan, savedAt: saved.at, by: saved.actor || "" };
+  const fromEnv = cleanPlan({ start: env.ESP_WARMUP_START ?? WARMUP_START, step: env.ESP_WARMUP_STEP ?? WARMUP_STEP, max: env.ESP_WARMUP_MAX ?? WARMUP_MAX });
+  return fromEnv.plan || { ...DEFAULT_PLAN };
+}
+
 /** How many letters a mailbox sends on its `day`-th day of warm-up (first day = 1). */
-export function planFor(day) {
+export function planFor(day, plan = DEFAULT_PLAN) {
   if (!(day > 0)) return 0;
-  return Math.min(WARMUP_MAX, WARMUP_START + WARMUP_STEP * (day - 1));
+  return Math.min(plan.max, plan.start + plan.step * (day - 1));
 }
 
 const dayOf = (iso) => localTime(new Date(iso), COUNTING_ZONE).date;
@@ -67,7 +98,7 @@ function addDays(date, days) {
  * weekend does not move the plan on), today's letters, and the totals the page
  * shows.
  */
-export function warmupLedger(entries, { now = new Date() } = {}) {
+export function warmupLedger(entries, { now = new Date(), plan = warmupPlan(entries) } = {}) {
   const today = dayOf(now.toISOString());
   const rows = new Map();
   const row = (email) => {
@@ -134,7 +165,7 @@ export function warmupLedger(entries, { now = new Date() } = {}) {
     // must not move its plan on.
     const worked = [...target.activeDays].filter((date) => date <= today && workingDay(date));
     target.day = worked.length;
-    target.plannedToday = target.running ? planFor(target.day) : 0;
+    target.plannedToday = target.running ? planFor(target.day, plan) : 0;
   }
   return { today, rows };
 }
@@ -169,7 +200,7 @@ export function warmupMode({ describe = {}, sequenceOn = false, env = process.en
   if (describe.mode === "stub") {
     return sequenceOn
       ? { runs: true, mode: "stub_cycle", text: "Заглушка замість Gmail, тестовий цикл (ESP_SEQUENCE=on): прогрів «шле» й «виймає зі спаму» в заглушці, у мережу нічого не йде." }
-      : { runs: false, mode: "stub", text: "Пошту ще не підключено — працює заглушка. Прогрів почнеться, коли власник дасть ключ Gmail зі scope gmail.modify і ввімкне справжню відправку (ESP_LIVE_SEND=1). «Старт» уже можна натиснути — скринька стане в чергу." };
+      : { runs: false, mode: "stub", text: "Пошту ще не підключено — працює заглушка. Прогрів почнеться, коли власник дасть ключ Gmail і ввімкне справжню відправку (ESP_LIVE_SEND=1); щоб виймати листи зі спаму, у делегуванні потрібен ще scope gmail.modify. «Старт» уже можна натиснути — скринька стане в чергу." };
   }
   if (!describe.liveSend) return { runs: false, mode: "locked", text: "Gmail підключено, але справжня відправка вимкнена (ESP_LIVE_SEND). Прогрів почнеться, щойно її ввімкнуть; «Старт» уже запам'ятовується." };
   return { runs: true, mode: "live", text: "" };
@@ -262,6 +293,7 @@ export async function runWarmupTick({ journal, senders, connector, gate, now = n
   const rescued = new Set(entries.filter((entry) => entry.type === "warmup.rescued").map((entry) => `${entry.data.mailbox}|${entry.data.gmailId}`));
 
   // (1) What arrived, and out of Spam.
+  let noScopeSaid = entries.some((entry) => entry.type === "warmup.rescue_refused" && dayOf(entry.at) === dayOf(now.toISOString()));
   for (const mailbox of live) {
     let letters = [];
     try {
@@ -289,7 +321,12 @@ export async function runWarmupTick({ journal, senders, connector, gate, now = n
           rescued.add(key);
           summary.rescued += 1;
         } catch (error) {
-          summary.errors.push({ mailbox: mailbox.email, stage: "rescue", error: error.message, code: error.status === 403 ? "no_modify_scope" : error.code || null });
+          summary.errors.push({ mailbox: mailbox.email, stage: "rescue", error: error.message, code: error.code || null });
+          // Said on the page: the owner has a scope to add, nothing else is wrong.
+          if (error.code === "no_modify_scope" && !noScopeSaid) {
+            noScopeSaid = true;
+            await journal.append({ type: "warmup.rescue_refused", actor: "esp-warmup", data: { mailbox: mailbox.email, code: error.code, error: error.message } });
+          }
         }
       }
     }
@@ -370,7 +407,9 @@ export function warmupLog(entries, { limit = 30 } = {}) {
     "warmup.sending": (data) => `${data.from} → ${data.to}: ${data.kind === "reply" ? "відповідь" : "лист"} «${data.subject}»`,
     "warmup.failed": (data) => `не пішло: ${data.error}`,
     "warmup.received": (data) => `${data.mailbox} отримала від ${data.from}${data.inSpam ? " — у спамі" : ""}`,
-    "warmup.rescued": (data) => `${data.mailbox}: лист від ${data.from} вийнято зі спаму, позначено важливим`
+    "warmup.rescued": (data) => `${data.mailbox}: лист від ${data.from} вийнято зі спаму, позначено важливим`,
+    "warmup.rescue_refused": (data) => `${data.mailbox}: Google не дав змінити мітки — немає scope gmail.modify`,
+    "warmup.plan": (data) => `план прогріву: старт ${data.start}, +${data.step} щодня, до ${data.max}`
   };
   return entries.filter((entry) => words[entry.type]).slice(-limit).reverse().map((entry) => ({
     at: entry.at, type: entry.type, actor: entry.actor || "", text: words[entry.type](entry.data || {})

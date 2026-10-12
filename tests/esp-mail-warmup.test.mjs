@@ -9,7 +9,7 @@ import { StubGmailConnector } from "../esp/gmail.mjs";
 import { pollInboxes } from "../esp/inbound.mjs";
 import { allEntries, append, useJournal } from "../esp/journal.mjs";
 import { sendLedger } from "../esp/limits.mjs";
-import { BACKOFF_MINUTES, WARMUP_MAX, planFor, runWarmupTick, warmupLedger, warmupMode, warmupView } from "../esp/mail-warmup.mjs";
+import { BACKOFF_MINUTES, WARMUP_MAX, cleanPlan, planFor, runWarmupTick, warmupLedger, warmupMode, warmupPlan, warmupView } from "../esp/mail-warmup.mjs";
 import { recordAboutContact } from "../esp/messages.mjs";
 import { addDomain, addSender, registry, registrySenderStore, setDomainStatus } from "../esp/registry.mjs";
 import { summaryReport } from "../esp/reports.mjs";
@@ -64,7 +64,7 @@ async function world(t, { annaDomain = "ramp", rampStage = 35 } = {}) {
 }
 
 test("план росте з днями: 2, 4, 6 … до 20; день — лише робочий день, коли прогрів ішов", () => {
-  assert.deepEqual([1, 2, 3, 9, 10, 30].map(planFor), [2, 4, 6, 18, 20, WARMUP_MAX]);
+  assert.deepEqual([1, 2, 3, 9, 10, 30].map((day) => planFor(day)), [2, 4, 6, 18, 20, WARMUP_MAX]);
   assert.equal(planFor(0), 0);
   const entries = [
     { seq: 1, at: at(0).toISOString(), type: "warmup.started", data: { mailbox: ANNA } },
@@ -244,4 +244,54 @@ test("маршрути: таблицю бачить команда; «Старт
   const entries = await allEntries();
   assert.deepEqual(entries.filter((entry) => entry.type.startsWith("warmup.")).map((entry) => [entry.type, entry.actor]), [["warmup.started", "admin@x.com"], ["warmup.started", "admin@x.com"], ["warmup.paused", "admin@x.com"]]);
   assert.ok(entries.some((entry) => entry.type === "admin.warmup_started"));
+});
+
+test("план налаштовується без коду: збережений на сторінці, або ESP_WARMUP_START/STEP/MAX; межі перевіряються", () => {
+  assert.deepEqual(warmupPlan([], {}), { start: 2, step: 2, max: 20 });
+  assert.deepEqual(warmupPlan([], { ESP_WARMUP_START: "1", ESP_WARMUP_STEP: "1", ESP_WARMUP_MAX: "8" }), { start: 1, step: 1, max: 8 });
+  const saved = [{ seq: 1, at: at(0).toISOString(), type: "warmup.plan", actor: "stepan@x.co", data: { start: 1, step: 1, max: 10 } }];
+  assert.deepEqual(warmupPlan(saved, { ESP_WARMUP_START: "5" }), { start: 1, step: 1, max: 10, savedAt: at(0).toISOString(), by: "stepan@x.co" }, "збережене на сторінці головніше за сервер");
+  assert.deepEqual([1, 2, 5, 20].map((day) => planFor(day, { start: 1, step: 1, max: 10 })), [1, 2, 5, 10]);
+  const started = [...saved, { seq: 2, at: at(-3).toISOString(), type: "warmup.started", data: { mailbox: ANNA } }];
+  assert.equal(warmupLedger(started, { now: at(0, 60) }).rows.get(ANNA).plannedToday, 2, "п'ятниця й понеділок — другий день за повільним планом: 2, не 4");
+  assert.match(cleanPlan({ start: 0, step: 1, max: 5 }).error, /Старт/);
+  assert.match(cleanPlan({ start: 5, step: 1, max: 3 }).error, /Межа не може бути меншою/);
+  assert.match(cleanPlan({ start: 2, step: 1, max: 99 }).error, /Межа — ціле число від 1 до 35/);
+});
+
+test("Workspace без gmail.modify: прогрів шле й відповідає далі, зі спаму не виймає, і сторінка каже чому — раз на день", async (t) => {
+  const { connector, tick, start, route } = await world(t);
+  connector.setLabels = async () => { const error = new Error("Google не дає змінювати мітки"); error.code = "no_modify_scope"; throw error; };
+  await start(ANNA, at(0, -60));
+  await start(BORIS, at(0, -60));
+  await tick(at(0));
+  route(["SPAM"]);
+  const pass = await tick(at(0, 50));
+  assert.equal(pass.rescued, 0);
+  assert.equal(pass.sent, 2, "листи йдуть далі");
+  assert.ok(pass.errors.every((error) => error.code === "no_modify_scope"));
+  await tick(at(0, 100));
+  const refused = (await allEntries()).filter((entry) => entry.type === "warmup.rescue_refused");
+  assert.equal(refused.length, 1, "раз на день, не щопроходу");
+});
+
+test("маршрут плану: лише з правом лімітів, з перевіркою, у журналі дій; GET віддає план і межі", async (t) => {
+  await world(t);
+  const esp = { connector: new StubGmailConnector(), sequenceOn: false, halted: () => false };
+  const call = async (method, path, body = {}, role = "seller") => {
+    let captured = null;
+    await handleEspApi({
+      request: { method, auth: { profile: { email: `${role}@x.com`, role } } }, response: {}, url: new URL(`http://x/api/esp${path}`),
+      sendJson: (_r, status, payload) => { captured = { status, payload }; }, readJson: async () => body, esp
+    });
+    return captured;
+  };
+  assert.equal(espRouteRight("POST", "/warmup/plan"), "limits.change");
+  assert.equal((await call("POST", "/warmup/plan", { start: 1, step: 1, max: 10 })).status, 403);
+  assert.equal((await call("POST", "/warmup/plan", { start: 1, step: 1, max: 99 }, "admin")).status, 400);
+  assert.deepEqual((await call("POST", "/warmup/plan", { start: "1", step: "1", max: "10" }, "admin")).payload.plan, { start: 1, step: 1, max: 10 });
+  const view = await call("GET", "/warmup");
+  assert.deepEqual([view.payload.plan.start, view.payload.plan.step, view.payload.plan.max, view.payload.plan.by], [1, 1, 10, "admin@x.com"]);
+  assert.deepEqual(view.payload.planBounds.max, [1, 35]);
+  assert.ok((await allEntries()).some((entry) => entry.type === "admin.warmup_plan"));
 });

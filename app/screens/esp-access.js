@@ -41,7 +41,8 @@ const ESP_ADMIN_ACTION_LABEL = {
   "admin.monitor_run": "запустив перевірку DNS і блоклистів",
   "admin.retention_run": "анонімізував неактивних лідів",
   "admin.warmup_started": "запустив прогрів пошти",
-  "admin.warmup_paused": "поставив прогрів пошти на паузу"
+  "admin.warmup_paused": "поставив прогрів пошти на паузу",
+  "admin.warmup_plan": "змінив план прогріву пошти"
 };
 
 export async function loadEspAccess() {

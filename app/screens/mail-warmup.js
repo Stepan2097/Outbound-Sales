@@ -33,9 +33,7 @@ function bannerHtml(data) {
   const lines = [];
   if (data.halted) lines.push("Натиснуто «Стоп усе» — прогрів стоїть разом з усією відправкою.");
   if (data.mode.text) lines.push(data.mode.text);
-  if (data.mode.runs && !data.scopes.some((scope) => scope.endsWith("gmail.modify"))) lines.push("Без scope gmail.modify листи зі спаму не виймаються — див. ESP_GMAIL_SETUP.md.");
-  const noScope = data.rows.some((row) => row.lastError?.code === "no_modify_scope");
-  if (noScope) lines.push("Google відмовив у зміні міток: власнику треба додати scope gmail.modify у делегуванні домену (ESP_GMAIL_SETUP.md, крок 2).");
+  if (data.rescueRefused) lines.push(`Google не дає змінювати мітки (${when(data.rescueRefused)}): листи прогріву йдуть і отримують відповіді, але зі спаму не виймаються. Власнику — додати scope gmail.modify у делегуванні домену (ESP_GMAIL_SETUP.md, крок 2).`);
   return lines.map((line) => `<div class="mail-banner" role="status"><i data-lucide="circle-alert"></i><p>${escapeHtml(line)}</p></div>`).join("");
 }
 
@@ -81,6 +79,19 @@ function tableHtml(data) {
     </table></div>`;
 }
 
+function planHtml(data) {
+  const { plan, planBounds: bounds, canChange } = data;
+  const field = (name, label, suffix) => `<label>${label}<input type="number" name="${name}" min="${bounds[name][0]}" max="${bounds[name][1]}" step="1" value="${plan[name]}" required${canChange ? "" : " disabled"} />${suffix}</label>`;
+  return `<form class="warmup-mail-plan" id="mailWarmupPlan">
+    <strong>План прогріву</strong>
+    ${field("start", "Перший день", "листів")}
+    ${field("step", "Щодня більше на", "")}
+    ${field("max", "До", "на день")}
+    ${canChange ? `<button type="submit" class="text-button"${mailWarmupState.busy ? " disabled" : ""}><i data-lucide="save"></i><span>Зберегти</span></button>` : ""}
+    <small>${plan.savedAt ? `змінено ${escapeHtml(when(plan.savedAt))}${plan.by ? ` · ${escapeHtml(plan.by)}` : ""}` : "за замовчуванням"} · для свіжого домену — менший старт і приріст. Діє на всі скриньки з наступного проходу; ліміт дня скриньки (ESP 4) однаково головніший.</small>
+  </form>`;
+}
+
 function logHtml(log) {
   if (!log.length) return '<p class="esp-subtle">Прогрів ще нічого не робив.</p>';
   return `<ol class="warmup-mail-log">${log.map((row) => `<li><time>${escapeHtml(when(row.at))}</time><span>${escapeHtml(row.text)}</span>${row.actor && !row.actor.startsWith("esp-") ? `<small>${escapeHtml(row.actor)}</small>` : ""}</li>`).join("")}</ol>`;
@@ -93,12 +104,14 @@ export function renderMailWarmup() {
   if (error && !data) { root.innerHTML = `<div class="empty-state">${escapeHtml(error)}</div>`; return; }
   if (!data) { root.innerHTML = '<div class="empty-state">Читаємо прогрів...</div>'; return; }
   const startable = data.rows.filter((row) => row.status === "never" || row.status === "paused").length;
+  const plan = data.plan;
   root.innerHTML = `
     <div class="warmup-mail-head">
-      <p>Наші скриньки пишуть одна одній живі листи за розкладом: перший день — 2 листи, далі +2 щодня до 20. Приблизно третина отримує відповідь у тому ж треді. Лист, що впав у спам, виймається у «Вхідні» й позначається важливим. Прогрів і холодні листи разом не виходять за ліміт дня скриньки й домену. У кампанії, звіти й «Вхідні» прогрів не потрапляє.</p>
+      <p>Наші скриньки пишуть одна одній живі листи за розкладом: перший робочий день — ${plan.start}, далі +${plan.step} щодня до ${plan.max}. Приблизно третина отримує відповідь у тому ж треді. Лист, що впав у спам, виймається у «Вхідні» й позначається важливим. Прогрів і холодні листи разом не виходять за ліміт дня скриньки й домену. У кампанії, звіти й «Вхідні» прогрів не потрапляє.</p>
       ${data.canChange && startable ? `<button type="button" class="primary-button" data-warmup-start-all${mailWarmupState.busy ? " disabled" : ""}><i data-lucide="play"></i><span>Запустити всі (${startable})</span></button>` : ""}
     </div>
     ${bannerHtml(data)}
+    ${planHtml(data)}
     ${notice ? `<p class="esp-notice ${error ? "is-bad" : ""}">${escapeHtml(notice)}</p>` : ""}
     ${summaryHtml(data.rows)}
     <section class="panel"><div class="panel-heading"><div><h2>Скриньки</h2><p>Статус, день прогріву, листи сьогодні проти плану, відповіді й листи, вийняті зі спаму.</p></div>
@@ -124,6 +137,13 @@ async function change(path, body, done) {
   }
   await loadMailWarmup();
 }
+
+document.getElementById("mailWarmupRoot")?.addEventListener("submit", (event) => {
+  if (event.target.id !== "mailWarmupPlan") return;
+  event.preventDefault();
+  const values = Object.fromEntries(new FormData(event.target).entries());
+  void change("plan", values, (result) => `План: старт ${result.plan.start}, +${result.plan.step} щодня, до ${result.plan.max}.`);
+});
 
 document.getElementById("mailWarmupRoot")?.addEventListener("click", (event) => {
   const start = event.target.closest("[data-warmup-start]")?.dataset.warmupStart;

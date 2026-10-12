@@ -14,7 +14,7 @@ import { composeLetter } from "./compose.mjs";
 import { ReplyError, conversations, quickReply } from "./conversations.mjs";
 import { REPLY_LABELS } from "./replies.mjs";
 import { LeadError, leadPage } from "./leads.mjs";
-import { warmupLog, warmupMode, warmupView } from "./mail-warmup.mjs";
+import { PLAN_BOUNDS, cleanPlan, warmupLog, warmupMode, warmupPlan, warmupView } from "./mail-warmup.mjs";
 import { UNIBOX_FOLDERS, uniboxList, uniboxProblems, uniboxThread } from "./unibox.mjs";
 import { recordAboutContact, recordFailed, recordSending, recordSent } from "./messages.mjs";
 import { allEntries, append, contactKey } from "./journal.mjs";
@@ -464,8 +464,20 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
       scopes: esp.connector?.describe().scopes || [],
       rows: warmupView(entries, { senders, domains }),
       log: warmupLog(entries),
+      plan: warmupPlan(entries), planBounds: PLAN_BOUNDS,
+      // Google refused the labels token: the owner has gmail.modify to add.
+      rescueRefused: [...entries].reverse().find((entry) => entry.type === "warmup.rescue_refused")?.at || null,
       canChange: await can(profile, "limits.change")
     });
+    return true;
+  }
+
+  if (method === "POST" && path === "/warmup/plan") {
+    const { plan, error } = cleanPlan((await readJson(request)) || {});
+    if (error) return badRequest(sendJson, response, error);
+    await append({ type: "warmup.plan", actor, data: plan });
+    await logged("warmup_plan", plan);
+    sendJson(response, 200, { success: true, plan });
     return true;
   }
 

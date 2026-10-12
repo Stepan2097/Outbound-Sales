@@ -28,17 +28,24 @@ const TOKEN_URI = "https://oauth2.googleapis.com/token";
 const GMAIL = "https://gmail.googleapis.com/gmail/v1/users/me";
 
 /**
- * Exactly the scopes the Workspace admin has to list for the service account
- * under domain-wide delegation. `gmail.send` to send; `gmail.readonly` to check
- * a mailbox now and to read replies and bounces later (ESP 7); `gmail.modify`
- * for the mailbox warm-up, which takes our own letters out of Spam and marks
- * them Important (labels only). Nothing that can delete or change settings.
+ * The scopes every mail token asks for — what the Workspace admin lists for
+ * the service account under domain-wide delegation. `gmail.send` to send;
+ * `gmail.readonly` to check a mailbox now and to read replies and bounces later
+ * (ESP 7). Nothing that can delete or change settings.
  */
 export const GMAIL_SCOPES = [
   "https://www.googleapis.com/auth/gmail.send",
-  "https://www.googleapis.com/auth/gmail.readonly",
-  "https://www.googleapis.com/auth/gmail.modify"
+  "https://www.googleapis.com/auth/gmail.readonly"
 ];
+
+/**
+ * The mailbox warm-up's one extra: `gmail.modify`, to take our own letters out
+ * of Spam and mark them Important (labels only). Asked for in a token of its
+ * own and only by `setLabels` — Google refuses a delegated token outright when
+ * one of its scopes is not allowed, so asking for it with the mail scopes would
+ * stop all sending and reading in a Workspace that has not added it yet.
+ */
+export const WARMUP_SCOPES = ["https://www.googleapis.com/auth/gmail.modify"];
 
 /** One header of a Gmail `format=metadata` message. */
 const metaHeader = (message, name) => (message.payload?.headers || []).find((row) => String(row.name).toLowerCase() === name)?.value || "";
@@ -131,15 +138,21 @@ export class GmailApiConnector {
       serviceAccountEmail: this.account.clientEmail,
       clientId: this.account.clientId,
       scopes: GMAIL_SCOPES,
+      warmupScopes: WARMUP_SCOPES,
       liveSend: this.liveSend
     };
   }
 
-  /** A token for this one mailbox, reused until a minute before it lapses. */
-  async accessToken(mailbox) {
-    const cached = this.tokens.get(mailbox);
+  /**
+   * A token for this one mailbox and these scopes, reused until a minute
+   * before it lapses. The mail token and the warm-up's labels token are cached
+   * apart: one refused never takes the other down.
+   */
+  async accessToken(mailbox, scopes = GMAIL_SCOPES) {
+    const key = `${mailbox} ${scopes.join(" ")}`;
+    const cached = this.tokens.get(key);
     if (cached && cached.expiresAt - 60_000 > this.now()) return cached.token;
-    const assertion = signAssertion(this.account, { subject: mailbox, now: this.now() });
+    const assertion = signAssertion(this.account, { subject: mailbox, scopes, now: this.now() });
     const response = await this.fetch(this.account.tokenUri, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -147,19 +160,19 @@ export class GmailApiConnector {
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok || !body.access_token) throw tokenRefusal(response.status, body);
-    this.tokens.set(mailbox, { token: body.access_token, expiresAt: this.now() + (Number(body.expires_in) || 3600) * 1000 });
+    this.tokens.set(key, { token: body.access_token, expiresAt: this.now() + (Number(body.expires_in) || 3600) * 1000 });
     return body.access_token;
   }
 
-  async call(mailbox, path, init = {}) {
-    const token = await this.accessToken(mailbox);
+  async call(mailbox, path, init = {}, scopes = GMAIL_SCOPES) {
+    const token = await this.accessToken(mailbox, scopes);
     const response = await this.fetch(`${GMAIL}${path}`, {
       ...init,
       headers: { authorization: `Bearer ${token}`, ...(init.body ? { "content-type": "application/json" } : {}), ...(init.headers || {}) }
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) {
-      if (response.status === 401) this.tokens.delete(mailbox);
+      if (response.status === 401) this.tokens.delete(`${mailbox} ${scopes.join(" ")}`);
       throw new MailboxError(`Gmail API відповів ${response.status}: ${body?.error?.message || "без пояснення"}.`, {
         code: "gmail_error", status: response.status, detail: body?.error?.status || null
       });
@@ -248,13 +261,24 @@ export class GmailApiConnector {
     return letters;
   }
 
-  /** Labels on one message (`gmail.modify`): the warm-up's «not spam» and «important». */
+  /**
+   * Labels on one message: the warm-up's «not spam» and «important». With its
+   * own `gmail.modify` token — a Workspace that has not allowed that scope gets
+   * `no_modify_scope` here, and its sending and reading go on untouched.
+   */
   async setLabels(value, id, { add = [], remove = [] } = {}) {
     const mailbox = normalizeMailbox(value);
-    const message = await this.call(mailbox, `/messages/${encodeURIComponent(id)}/modify`, {
-      method: "POST", body: JSON.stringify({ addLabelIds: add, removeLabelIds: remove })
-    });
-    return { id: message.id, labels: message.labelIds || [] };
+    try {
+      const message = await this.call(mailbox, `/messages/${encodeURIComponent(id)}/modify`, {
+        method: "POST", body: JSON.stringify({ addLabelIds: add, removeLabelIds: remove })
+      }, WARMUP_SCOPES);
+      return { id: message.id, labels: message.labelIds || [] };
+    } catch (error) {
+      if (error.code === "delegation_missing" || error.status === 403) {
+        throw new MailboxError("Google не дає змінювати мітки: у делегуванні домену немає scope gmail.modify — без нього прогрів не виймає листи зі спаму (ESP_GMAIL_SETUP.md).", { code: "no_modify_scope", status: error.status ?? null });
+      }
+      throw error;
+    }
   }
 
   /**
@@ -322,7 +346,7 @@ export class StubGmailConnector {
   }
 
   describe() {
-    return { mode: "stub", serviceAccountEmail: null, clientId: null, scopes: GMAIL_SCOPES, liveSend: false };
+    return { mode: "stub", serviceAccountEmail: null, clientId: null, scopes: GMAIL_SCOPES, warmupScopes: WARMUP_SCOPES, liveSend: false };
   }
 
   async checkMailbox(value) {

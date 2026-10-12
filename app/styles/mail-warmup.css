@@ -137,3 +137,33 @@
 .warmup-mail-log span {
   overflow-wrap: anywhere;
 }
+
+.warmup-mail-plan {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: 14px;
+}
+
+.warmup-mail-plan label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+
+.warmup-mail-plan input {
+  width: 70px;
+  min-height: 34px;
+}
+
+.warmup-mail-plan small {
+  flex: 1 1 100%;
+  color: var(--muted);
+  font-size: 12px;
+}
