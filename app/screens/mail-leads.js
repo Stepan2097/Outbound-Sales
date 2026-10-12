@@ -234,7 +234,7 @@ function linkedinItem(entry, card) {
     return { kind: "linkedin", icon: entry.event === "invite.accepted" ? "user-check" : "user-plus", at: entry.at, html: `<div class="leads-event-line is-linkedin">
       <p><span class="pill tone-done">LinkedIn</span> ${escapeHtml(HISTORY_EVENT_LABEL[entry.event] || entry.event)}</p>
       ${entry.meta?.note ? `<pre>${escapeHtml(entry.meta.note)}</pre>` : ""}
-      ${meta(escapeHtml([by, entry.meta?.outcome].filter(Boolean).join(" · ")))}
+      ${meta(escapeHtml([entry.accountLabel ? `з акаунта ${entry.accountLabel}` : "", by, entry.meta?.outcome].filter(Boolean).join(" · ")))}
     </div>` };
   }
   const mine = entry.direction === "out";
