@@ -424,3 +424,15 @@ test("the list still exists when the service-role endpoint refuses, and says whe
   // which is exactly what adminApi:false is there to say.
   assert.ok(!emails.includes("stranger@example.com"));
 });
+
+test("somebody deleted from the CRM's users is off the team, even after working here", async (t) => {
+  // 12.10: the panel showed fourteen against the CRM's six — logins and local
+  // profiles left behind after the CRM removed the person.
+  const workspace = await withWorkspace(t, {
+    version: 1,
+    users: [{ id: "u-stranger", email: "stranger@example.com", name: "Gone", role: "admin", status: "active", modelId: "", createdAt: new Date().toISOString() }]
+  });
+  const { body } = await workspace.call("/api/account/directory");
+  assert.equal(body.people.some((person) => person.email === "stranger@example.com"), false);
+  assert.ok(body.people.every((person) => crmProfiles.some((row) => row.email === person.email)), "every row is a CRM user");
+});

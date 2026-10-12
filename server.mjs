@@ -3007,7 +3007,18 @@ function roleFromCrm(crmProfile) {
 async function admitWorkspaceUser(user, defaults = {}) {
   const email = cleanText(user?.email || "").toLowerCase();
   const existing = findWorkspaceUserProfile(user);
-  if (existing) return existing;
+  if (existing) {
+    // Somebody deleted from the CRM's users is not on the team any more, even
+    // after working here (12.10: «оце валідні користувачі» — the six there).
+    // Another address of a CRM member's own mailbox still counts. «Pending»
+    // there does not lock out a person already inside. A CRM that cannot be
+    // read, or reads empty, locks nobody out.
+    const crmByEmail = await crmProfilesByEmail().catch(() => null);
+    if (crmByEmail?.size && ![...crmByEmail.keys()].some((known) => mailboxKey(known) === mailboxKey(email))) {
+      throw apiError("Цього акаунта більше немає серед користувачів CRM.", 403);
+    }
+    return existing;
+  }
   const crm = (await crmProfilesByEmail()).get(email) || null;
   if (!crm) throw apiError("Цього акаунта немає в базі користувачів CRM.", 403);
   const approval = cleanText(crm.approval_status || "");
@@ -3043,15 +3054,14 @@ async function workspaceDirectory({ endValue = new Date() } = {}) {
   const crmByEmail = await crmProfilesByEmail({ maxAgeMs: 0 });
   const { accounts, adminApi, adminApiError } = await directoryAccounts(crmByEmail);
 
-  // The team is the CRM's user base plus whoever already works here. A login
-  // left in Supabase Auth after its CRM profile was deleted is nobody's
-  // colleague: listing it (12.10: «вони давно були видалені») made the panel
-  // disagree with the CRM's own users page.
-  const knownHere = (user) => state.users.some((item) => item.id === user.id || item.email === cleanText(user.email || "").toLowerCase());
+  // The team is the CRM's user base — the people its own users page shows
+  // (12.10: «вони давно були видалені», «оце валідні користувачі»). A login
+  // left in Supabase Auth, or a profile left here, after the CRM deleted the
+  // person is nobody's colleague.
   // Another address of a CRM member's own mailbox (pavlo.work.101 and
   // pavlowork101+outbound) stays: it is folded into that person below.
   const crmMailboxes = new Set([...crmByEmail.keys()].map(mailboxKey));
-  const team = accounts.filter((user) => crmMailboxes.has(mailboxKey(user.email)) || knownHere(user));
+  const team = accounts.filter((user) => crmMailboxes.has(mailboxKey(user.email)));
   const people = team.map((user) => {
     const email = cleanText(user.email || "").toLowerCase();
     const metadata = user.user_metadata || {};
