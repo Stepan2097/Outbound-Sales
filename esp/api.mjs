@@ -248,6 +248,29 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
     return true;
   }
 
+  // 12.10: delete a campaign nothing went out from; archive or bring back any other.
+  if ((method === "DELETE" && path === "/campaigns") || (method === "POST" && path === "/campaigns/archive")) {
+    const body = method === "POST" ? await readJson(request) : null;
+    const id = String((method === "DELETE" ? url.searchParams.get("id") : body?.id) || "");
+    try {
+      if (method === "DELETE") {
+        const campaign = await esp.campaigns.remove(id);
+        // Its own letters go too; library templates are not its to delete.
+        for (const template of esp.templates.list().filter((row) => row.campaignId === id)) await esp.templates.remove(template.id);
+        await logged("campaign_deleted", { id, name: campaign.name });
+        sendJson(response, 200, { success: true });
+      } else {
+        const campaign = await esp.campaigns.setArchived(id, body?.archived !== false);
+        await logged(campaign.archived ? "campaign_archived" : "campaign_unarchived", { id, name: campaign.name });
+        sendJson(response, 200, { success: true, campaign });
+      }
+    } catch (error) {
+      if (!(error instanceof CampaignError)) throw error;
+      sendJson(response, error.status, { success: false, error: error.message, code: error.code });
+    }
+    return true;
+  }
+
   if (method === "POST" && path === "/campaigns/state") {
     const body = await readJson(request);
     if (!body) return badRequest(sendJson, response, "Некоректне тіло JSON");

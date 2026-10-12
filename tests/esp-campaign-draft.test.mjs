@@ -62,3 +62,25 @@ test("a running campaign still needs a letter and a mailbox: emptying them is re
   await assert.rejects(cstore.update(campaign.id, { steps: [] }), (error) => error.code === "no_steps");
   await assert.rejects(cstore.update(campaign.id, { senders: [] }), (error) => error.code === "no_senders");
 });
+
+test("a campaign nothing went out from is deleted with its people; one that sent is only archived", async () => {
+  const { tstore, cstore } = stores();
+  const empty = await cstore.create({ name: "Draft" });
+  await cstore.enroll(empty.id, [{ email: "olena@northwind.com" }]);
+  await cstore.remove(empty.id);
+  assert.equal(cstore.find(empty.id), null);
+  assert.equal(cstore.enrollmentsOf(empty.id).length, 0, "its people go with it");
+
+  const letter = (await tstore.create({ subject: "Hello", body: "Hi" })).template;
+  const sent = await cstore.create({ name: "Sent", steps: [{ templateId: letter.id }], senders: ["anna@advantage-mail.com"] });
+  await cstore.enroll(sent.id, [{ email: "ivan@acme.com" }]);
+  const [row] = cstore.enrollmentsOf(sent.id);
+  await cstore.saveEnrollment({ ...row, step: 1, lastSent: { at: new Date().toISOString() } });
+  await assert.rejects(cstore.remove(sent.id), (error) => error.code === "has_sent");
+
+  await cstore.setState(sent.id, "running");
+  await assert.rejects(cstore.setArchived(sent.id, true), (error) => error.code === "running", "a running campaign is paused first");
+  await cstore.setState(sent.id, "paused");
+  assert.equal((await cstore.setArchived(sent.id, true)).archived, true);
+  assert.equal((await cstore.setArchived(sent.id, false)).archived, false, "and it comes back as it was");
+});

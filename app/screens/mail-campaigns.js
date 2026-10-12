@@ -15,7 +15,7 @@ onScreen("campaigns", { open: () => void openCampaignsPage() });
 
 const STATE_LABEL = { draft: "Чернетка", running: "Працює", paused: "Пауза", done: "Завершена" };
 const STATE_TONE = { draft: "tone-muted", running: "tone-live", paused: "tone-warn", done: "tone-muted" };
-const FOLDERS = [["all", "Усі кампанії", "folder"], ["draft", "Чернетки", "file-pen"], ["running", "Працюють", "play"], ["paused", "На паузі", "pause"], ["done", "Завершені", "archive"]];
+const FOLDERS = [["all", "Усі кампанії", "folder"], ["draft", "Чернетки", "file-pen"], ["running", "Працюють", "play"], ["paused", "На паузі", "pause"], ["done", "Завершені", "flag"], ["archived", "Архів", "archive"]];
 const STEPS = [["sequence", "Послідовність"], ["recipients", "Одержувачі"], ["sending", "Параметри відправки"], ["review", "Перевірка"]];
 const PERSON_STATE = { active: "у ланцюжку", done: "отримав усі", stopped: "зупинено", uncertain: "невідомо, чи пішов", paused: "пауза" };
 const STOP_REASON = {
@@ -152,13 +152,17 @@ function bannersHtml() {
 function visibleCampaigns() {
   const needle = page.search.trim().toLowerCase();
   return page.campaigns
-    .filter((campaign) => page.folder === "all" || page.folder === "templates" || campaign.state === page.folder)
+    // Archived campaigns live in their own folder and nowhere else.
+    .filter((campaign) => (page.folder === "archived" ? campaign.archived : !campaign.archived))
+    .filter((campaign) => page.folder === "all" || page.folder === "templates" || page.folder === "archived" || campaign.state === page.folder)
     .filter((campaign) => !needle || campaign.name.toLowerCase().includes(needle))
     .sort((left, right) => String(right.createdAt || "").localeCompare(String(left.createdAt || "")));
 }
 
 function foldersHtml() {
-  const count = (key) => (key === "all" ? page.campaigns.length : page.campaigns.filter((campaign) => campaign.state === key).length);
+  const count = (key) => (key === "archived"
+    ? page.campaigns.filter((campaign) => campaign.archived).length
+    : page.campaigns.filter((campaign) => !campaign.archived && (key === "all" || campaign.state === key)).length);
   return `<nav class="mc-folders" aria-label="Папки кампаній">
     <div class="mc-folders-title">Папки</div>
     ${FOLDERS.map(([key, label, icon]) => `<button type="button" class="mc-folder ${page.folder === key ? "is-active" : ""}" data-mc-folder="${key}">
@@ -197,10 +201,34 @@ function campaignRowHtml(campaign) {
         ${campaign.state === "running" ? `<button type="button" role="menuitem" data-mc-state="paused" data-id="${escapeAttr(campaign.id)}"><i data-lucide="pause"></i>Пауза</button>` : ""}
         ${campaign.state === "paused" ? `<button type="button" role="menuitem" data-mc-state="running" data-id="${escapeAttr(campaign.id)}"><i data-lucide="play"></i>Продовжити</button>` : ""}
         <button type="button" role="menuitem" data-mc-copy="${escapeAttr(campaign.id)}"><i data-lucide="copy"></i>Дублювати</button>
-        ${campaign.state !== "done" && campaign.state !== "draft" ? `<button type="button" role="menuitem" data-mc-state="done" data-id="${escapeAttr(campaign.id)}"><i data-lucide="archive"></i>Завершити</button>` : ""}
+        ${campaign.state !== "done" && campaign.state !== "draft" ? `<button type="button" role="menuitem" data-mc-state="done" data-id="${escapeAttr(campaign.id)}"><i data-lucide="flag"></i>Завершити</button>` : ""}
+        ${campaign.archived
+          ? `<button type="button" role="menuitem" data-mc-archive="0" data-id="${escapeAttr(campaign.id)}"><i data-lucide="archive-restore"></i>Повернути з архіву</button>`
+          : campaign.state === "running"
+            ? '<button type="button" role="menuitem" disabled title="Працююча кампанія — спершу пауза або завершення"><i data-lucide="archive"></i>Архівувати — спершу пауза</button>'
+            : `<button type="button" role="menuitem" data-mc-archive="1" data-id="${escapeAttr(campaign.id)}"><i data-lucide="archive"></i>Архівувати</button>`}
+        ${deletable(campaign) ? `<button type="button" role="menuitem" class="mc-danger-text" data-mc-delete="${escapeAttr(campaign.id)}"><i data-lucide="trash-2"></i>Видалити</button>` : ""}
       </div>` : ""}
     </td>
   </tr>`;
+}
+
+/** Nothing has gone out of it: it can go entirely. Otherwise only the archive (the server says the same). */
+function deletable(campaign) {
+  return campaign.state !== "running" && !campaign.sent && !campaign.byStatus?.done && !campaign.byStatus?.stopped;
+}
+
+function bulkBarHtml() {
+  const chosen = page.campaigns.filter((campaign) => page.selected.has(campaign.id));
+  if (!chosen.length) return "";
+  const removable = chosen.filter(deletable).length;
+  const archivable = chosen.filter((campaign) => !campaign.archived && campaign.state !== "running").length;
+  return `<div class="mc-bulk" role="toolbar" aria-label="Дії з вибраними">
+    <span>Вибрано: <b>${chosen.length}</b></span>
+    ${archivable ? `<button type="button" data-mc="bulk-archive"><i data-lucide="archive"></i><span>Архівувати (${archivable})</span></button>` : ""}
+    ${removable ? `<button type="button" class="danger-button" data-mc="bulk-delete"><i data-lucide="trash-2"></i><span>Видалити (${removable})</span></button>` : ""}
+    <button type="button" class="text-button" data-mc="bulk-clear">Зняти вибір</button>
+  </div>`;
 }
 
 function campaignsTableHtml() {
@@ -211,7 +239,7 @@ function campaignsTableHtml() {
   }
   if (!rows.length) return '<div class="empty-state">У цій папці або за цим пошуком кампаній немає.</div>';
   const all = rows.every((campaign) => page.selected.has(campaign.id));
-  return `<div class="table-wrap mc-table-wrap"><table class="mc-table">
+  return `${bulkBarHtml()}<div class="table-wrap mc-table-wrap"><table class="mc-table">
     <thead><tr>
       <th class="mc-check"><input type="checkbox" data-mc="select-all" ${all ? "checked" : ""} aria-label="Вибрати всі" /></th>
       <th>Кампанія</th><th>Стан</th><th>Власник</th><th>Надіслано</th><th>Відповіді</th><th>Bounce</th><th>Відписки</th><th></th>
@@ -306,6 +334,9 @@ function draftName() {
 
 /** Нова чернетка й одразу конструктор — як «Create from scratch» у Snov. */
 async function createCampaign({ steps = [], name = draftName(), letters = [], senders = [], spinMode = "all" } = {}) {
+  // A second click while the first is still creating made two identical drafts (12.10).
+  if (page.creating) return;
+  page.creating = true;
   await act(async () => {
     const { campaign } = await api("/api/esp/campaigns", { method: "POST", body: JSON.stringify({ name, senders, spinMode }) });
     // Листи нової кампанії — її власні копії: правка тут не міняє ні шаблон, ні іншу кампанію.
@@ -322,7 +353,7 @@ async function createCampaign({ steps = [], name = draftName(), letters = [], se
     page.plan = null;
     page.previews = {};
     writeRoute();
-  });
+  }).finally(() => { page.creating = false; });
 }
 
 // ── конструктор (скрін 05) ──────────────────────────────────────────────────
@@ -813,6 +844,24 @@ async function changeState(id, state) {
     { success: { running: "Кампанію запущено: ланцюжок братиме її людей у вікна відправки.", paused: "Кампанію поставлено на паузу.", done: "Кампанію завершено." }[state] });
 }
 
+async function deleteCampaigns(ids) {
+  const names = ids.map((id) => `«${byId(id)?.name}»`).join(", ");
+  if (!window.confirm(`Видалити ${ids.length === 1 ? "кампанію" : `${ids.length} кампанії`} ${names}? Разом з людьми й листами цієї кампанії. Відмінити не можна.`)) return;
+  page.menuFor = null;
+  await act(async () => {
+    for (const id of ids) await api(`/api/esp/campaigns?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    ids.forEach((id) => page.selected.delete(id));
+  }, { success: ids.length === 1 ? "Кампанію видалено." : `Видалено кампаній: ${ids.length}.` });
+}
+
+async function archiveCampaigns(ids, archived) {
+  page.menuFor = null;
+  await act(async () => {
+    for (const id of ids) await api("/api/esp/campaigns/archive", { method: "POST", body: JSON.stringify({ id, archived }) });
+    ids.forEach((id) => page.selected.delete(id));
+  }, { success: archived ? `В архіві: ${ids.length}. Папка «Архів» зліва.` : "Повернуто з архіву." });
+}
+
 async function copyCampaign(id) {
   const source = byId(id);
   const letters = source.steps.map((step) => templateOf(step.templateId)).filter(Boolean);
@@ -853,6 +902,8 @@ function onClick(event) {
   }
   if (button.dataset.mcState) return changeState(button.dataset.id, button.dataset.mcState);
   if (button.dataset.mcCopy) return copyCampaign(button.dataset.mcCopy);
+  if (button.dataset.mcDelete) return deleteCampaigns([button.dataset.mcDelete]);
+  if (button.dataset.mcArchive) return archiveCampaigns([button.dataset.id], button.dataset.mcArchive === "1");
   if (button.dataset.mcStep) { readEditor(); page.step = button.dataset.mcStep; page.notice = ""; writeRoute(); return renderCampaignsPage(); }
   if (button.dataset.mcEdit !== undefined) return openEditor({ index: Number(button.dataset.mcEdit) });
   if (button.dataset.mcAb !== undefined) return openEditor({ index: Number(button.dataset.mcAb), ab: true });
@@ -887,6 +938,9 @@ function onClick(event) {
     case "chooser-back": page.chooser = { mode: "choose" }; return renderCampaignsPage();
     case "chooser-scratch": return createCampaign();
     case "export": return exportCsv();
+    case "bulk-delete": return deleteCampaigns(page.campaigns.filter((campaign) => page.selected.has(campaign.id) && deletable(campaign)).map((campaign) => campaign.id));
+    case "bulk-archive": return archiveCampaigns(page.campaigns.filter((campaign) => page.selected.has(campaign.id) && !campaign.archived && campaign.state !== "running").map((campaign) => campaign.id), true);
+    case "bulk-clear": page.selected.clear(); return renderCampaignsPage();
     case "add-mailbox": return goToSettings();
     case "halt-on": {
       const reason = window.prompt("«Стоп усе»: чому зупиняємо всю відправку?");

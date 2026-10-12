@@ -297,6 +297,36 @@ export function campaignStore({ read, write, readEnrollments, writeEnrollments, 
       return all.length - kept.length;
     },
 
+    /**
+     * 12.10, the owner: «немає можливості ні видалити ні архівувати».
+     *
+     * Deleted — only a campaign nobody has had a letter from: its people and
+     * its own letters go with it. One that has sent is history (the journal
+     * holds every letter) and can only be archived.
+     */
+    async remove(id) {
+      const campaign = find(id);
+      if (!campaign) throw new CampaignError("Такої кампанії немає.", { code: "not_found", status: 404 });
+      const rows = enrollments().filter((row) => row.campaignId === id);
+      if (rows.some((row) => row.step > 0 || row.lastSent)) {
+        throw new CampaignError("З цієї кампанії вже пішли листи — її можна лише архівувати, історія лишається.", { code: "has_sent", status: 409 });
+      }
+      if (campaign.state === "running") throw new CampaignError("Кампанія працює — спершу поставте її на паузу.", { code: "running", status: 409 });
+      await write(list().filter((row) => row.id !== id));
+      if (rows.length) await writeEnrollments(enrollments().filter((row) => row.campaignId !== id));
+      return campaign;
+    },
+
+    /** Out of sight, not out of the record: the archive folder holds it, and it comes back as it was. */
+    async setArchived(id, archived) {
+      const campaign = find(id);
+      if (!campaign) throw new CampaignError("Такої кампанії немає.", { code: "not_found", status: 404 });
+      if (archived && campaign.state === "running") throw new CampaignError("Кампанія працює — спершу поставте її на паузу або завершіть.", { code: "running", status: 409 });
+      const next = { ...campaign, archived: Boolean(archived), archivedAt: archived ? now().toISOString() : null, updatedAt: now().toISOString() };
+      await write(list().map((row) => (row.id === id ? next : row)));
+      return next;
+    },
+
     async saveEnrollment(enrollment) {
       await writeEnrollments(enrollments().map((row) => (row.id === enrollment.id ? enrollment : row)));
       return enrollment;
