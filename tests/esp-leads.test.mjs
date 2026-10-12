@@ -82,7 +82,7 @@ test("таблиця списку: пошук, сторінки, крапка в
   assert.deepEqual(olga.campaigns, [{ campaignId: "c1", name: "UK operators", status: "active", step: 1 }]);
   assert.equal(page.rows.find((row) => row.email === "ivan@beta.com").excluded.category, "client", "виключений увесь домен");
   assert.deepEqual(leadPage(store, { q: "petrov" }).rows.map((row) => row.email), ["ivan@beta.com"]);
-  assert.deepEqual([verificationTone("Catch-all"), verificationTone("undeliverable"), verificationTone("")], ["risky", "invalid", "none"]);
+  assert.deepEqual([verificationTone("Catch-all"), verificationTone("catch_all"), verificationTone("undeliverable"), verificationTone("")], ["risky", "risky", "invalid", "none"], "catch_all — так пише перевірка адрес CRM");
 });
 
 test("ESP 17: людину, яку забули, прибрано з усіх списків", async () => {

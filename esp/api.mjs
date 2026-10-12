@@ -416,7 +416,10 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
           enrollments: esp.campaigns?.enrollments() || [], campaigns: new Map((esp.campaigns?.list() || []).map((row) => [row.id, row.name])),
           excluded: await exclusions(entries)
         });
-        sendJson(response, 200, { success: true, ...page, rows, verification: null });
+        // The verifier's word for the rows on this page (the CRM folder is too big to count it whole).
+        const verification = { valid: 0, risky: 0, invalid: 0, unknown: 0, none: 0 };
+        for (const row of rows) verification[row.tone] += 1;
+        sendJson(response, 200, { success: true, ...page, rows, verification, verificationScope: "page" });
       } catch (error) {
         sendJson(response, error.status || 502, { success: false, error: error.status ? error.message : `CRM не відповіла: ${error.message}` });
       }

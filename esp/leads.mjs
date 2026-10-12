@@ -136,7 +136,7 @@ export function leadStore({ readLists, writeLists, readLeads, writeLeads, now = 
   };
 }
 
-const VERIFICATION_TONE = { valid: "valid", ok: "valid", deliverable: "valid", risky: "risky", "catch-all": "risky", catchall: "risky", accept_all: "risky", unknown: "unknown", invalid: "invalid", undeliverable: "invalid", bounced: "invalid" };
+const VERIFICATION_TONE = { valid: "valid", ok: "valid", deliverable: "valid", risky: "risky", "catch-all": "risky", catch_all: "risky", catchall: "risky", accept_all: "risky", unknown: "unknown", invalid: "invalid", undeliverable: "invalid", bounced: "invalid" };
 
 /** The verifier's word as one of four dots: green, yellow, red, grey. */
 export function verificationTone(value) {

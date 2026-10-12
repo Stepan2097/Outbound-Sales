@@ -13,6 +13,8 @@ import { showPrivacyFor } from "../screens/esp-privacy.js";
 
 const EXCLUSIONS = "exclusions";
 const PRIVACY = "privacy";
+// What the verifier said, in words — the CRM's address check writes valid / invalid / catch_all.
+const VERIFICATION_WORD = { valid: "адреса існує", invalid: "адреси немає", catch_all: "домен приймає все (catch-all)", risky: "ризикова", unknown: "невідомо" };
 const TONE_WORD = { valid: "перевірена", risky: "ризикова", invalid: "недійсна", unknown: "невідомо", none: "не перевірялась" };
 const ENROLL_WORD = { active: "у ланцюжку", paused: "на паузі", stopped: "зупинено", done: "завершено", uncertain: "невідомо" };
 const ENROLL_TONE = { active: "tone-live", paused: "tone-warn", stopped: "tone-muted", done: "tone-done", uncertain: "tone-warn" };
@@ -132,9 +134,9 @@ function sideHtml() {
     ${item(PRIVACY, "shield-check", "Запит про дані", null)}`;
 }
 
-function chipsHtml(counts) {
+function chipsHtml(counts, scope = "") {
   if (!counts) return "";
-  return `<div class="leads-chips" aria-label="Верифікація адрес">${["valid", "risky", "invalid", "unknown", "none"].filter((tone) => counts[tone]).map((tone) => `<span class="leads-chip" title="${TONE_WORD[tone]}"><i class="leads-dot is-${tone}"></i>${counts[tone]}</span>`).join("")}</div>`;
+  return `${scope === "page" ? '<span class="leads-crm-note">перевірка адрес на цій сторінці:</span>' : ""}<div class="leads-chips" aria-label="Верифікація адрес">${["valid", "risky", "invalid", "unknown", "none"].filter((tone) => counts[tone]).map((tone) => `<span class="leads-chip" title="${TONE_WORD[tone]}"><i class="leads-dot is-${tone}"></i>${counts[tone]}</span>`).join("")}</div>`;
 }
 
 function listHtml() {
@@ -162,7 +164,7 @@ function listHtml() {
         <button type="submit" class="text-button"${picked.length && campaigns.length ? "" : " disabled"}><i data-lucide="send"></i><span>Надіслати в кампанію${picked.length ? ` (${picked.length})` : ""}</span></button>
       </form>
       ${list ? `<button type="button" class="text-button" data-leads-remove${picked.length ? "" : " disabled"}><i data-lucide="user-minus"></i><span>Прибрати зі списку</span></button>` : ""}
-      ${chipsHtml(page?.verification)}
+      ${chipsHtml(page?.verification, page?.verificationScope)}
     </div>`;
   const adding = leadsState.adding && list ? `
     <form class="leads-add" id="leadsAdd">
@@ -295,7 +297,7 @@ function cardHtml() {
         ${excluded ? `<p class="mail-banner"><i data-lucide="ban"></i><span>У виключеннях назавжди: ${escapeHtml(excluded.category)}${excluded.note ? ` — ${escapeHtml(excluded.note)}` : ""}. Листів не буде.</span></p>` : ""}
         <div class="leads-details">
           ${detail("Email", `<i class="leads-dot is-${escapeAttr(lead.verification ? (lead.verification === "valid" ? "valid" : lead.verification === "invalid" ? "invalid" : "risky") : "none")}"></i>${escapeHtml(email)}`)}
-          ${detail("Верифікація", escapeHtml([lead.verification, lead.verifiedAt].filter(Boolean).join(", ")))}
+          ${detail("Верифікація", escapeHtml([VERIFICATION_WORD[lead.verification] || lead.verification, lead.verifiedAt ? String(lead.verifiedAt).slice(0, 10) : ""].filter(Boolean).join(", ")))}
           ${detail("Компанія", escapeHtml(lead.company || ""))}
           ${detail("Посада", escapeHtml(lead.position || ""))}
           ${detail("Країна", escapeHtml(lead.country || ""))}
