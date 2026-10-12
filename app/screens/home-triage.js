@@ -160,17 +160,42 @@ function linkedinHtml(item) {
   return `<section class="triage-channel">
     <header><i data-lucide="message-square"></i><h3>LinkedIn</h3></header>
     <ul class="triage-status">${status}${pendingHtml}</ul>
+    ${writable.length ? "" : '<p class="triage-muted">Чернетка першого повідомлення — надіслати її можна буде, коли людина стане другом одного з акаунтів.</p>'}
     <textarea data-triage-text="linkedin" rows="6" placeholder="Текст повідомлення в LinkedIn — «Згенерувати тексти» напише його.">${escapeHtml(triage.texts.linkedin)}</textarea>
-    <div class="triage-actions">
+    ${writable.length ? `<div class="triage-actions">
       ${writable.map((friend) => `<button type="button" class="primary-button" data-triage-send-linkedin="${escapeAttr(friend.outreachId)}" ${triage.sending ? "disabled" : ""}><i data-lucide="send"></i><span>Надіслати через ${escapeHtml(friend.accountName)}</span></button>`).join("")}
-      ${!writable.length ? `<span class="triage-muted">${friends.length ? "Через ці акаунти звідси не написати." : "Написати в LinkedIn можна лише другові."}</span>` : ""}
-      ${canInvite ? `<span class="triage-invite">
-          <select data-triage="invite-account">${accounts.map((account) => `<option value="${escapeAttr(account.id)}" ${account.id === triage.inviteAccount ? "selected" : ""}>${escapeHtml(account.label)} · запитів ще ${account.connectsLeft}</option>`).join("") || '<option value="">Немає акаунта, що може надіслати запит</option>'}</select>
-          <button type="button" data-triage="invite" ${accounts.length && !triage.sending ? "" : "disabled"}><i data-lucide="user-plus"></i><span>Запит у друзі</span></button>
-        </span>` : ""}
     </div>
-    ${writable.length ? '<p class="triage-muted">Повідомлення стане в чергу акаунта й піде в його наступній сесії, у вікні прогріву.</p>' : ""}
+    <p class="triage-muted">Повідомлення стане в чергу акаунта й піде в його наступній сесії, у вікні прогріву.</p>` : ""}
+    ${!writable.length && friends.length ? '<p class="triage-muted">Через ці акаунти звідси не написати.</p>' : ""}
+    ${canInvite ? inviteHtml(accounts) : ""}
+    ${!friends.length && !pending.length && !item.contact.linkedin ? '<p class="triage-muted">У CRM немає посилання на LinkedIn — запит у друзі нікуди надіслати. «Збагатити» може знайти профіль.</p>' : ""}
   </section>`;
+}
+
+/** How much an account can still send today, in words: «ще 2 сьогодні», or that it goes tomorrow. */
+function inviteRoom(account) {
+  return account.connectsLeft > 0 ? `сьогодні ще ${account.connectsLeft}` : "ліміт на сьогодні вичерпано — піде завтра";
+}
+
+/**
+ * Not a friend yet: a LinkedIn message can only go to a friend, so the step is
+ * a request. A request on an account with nothing left today is still taken —
+ * it waits in the account's queue and goes out tomorrow — and the line under
+ * the button says which of the two it will be.
+ */
+function inviteHtml(accounts) {
+  const chosen = accounts.find((account) => account.id === triage.inviteAccount) || accounts[0];
+  if (!accounts.length) return '<p class="triage-muted">Написати в LinkedIn можна лише другові, а запит у друзі зараз не надішле жоден акаунт.</p>';
+  return `<div class="triage-invite">
+    <p class="triage-muted">Написати в LinkedIn можна лише другові — спершу запит у друзі. Коли людина прийме його, вона повернеться сюди першою.</p>
+    <div class="triage-invite-row">
+      <label class="triage-inline"><span>З акаунта</span>
+        <select data-triage="invite-account">${accounts.map((account) => `<option value="${escapeAttr(account.id)}" ${account.id === chosen.id ? "selected" : ""}>${escapeHtml(account.label)} · ${escapeHtml(inviteRoom(account))}</option>`).join("")}</select>
+      </label>
+      <button type="button" data-triage="invite" ${triage.sending ? "disabled" : ""}><i data-lucide="user-plus"></i><span>${chosen.connectsLeft > 0 ? "Надіслати запит у друзі" : "Поставити запит на завтра"}</span></button>
+    </div>
+    <p class="triage-muted">${chosen.connectsLeft > 0 ? "Запит піде в найближчій сесії акаунта, у вікні прогріву." : `У ${escapeHtml(chosen.label)} денний ліміт запитів уже вичерпано — запит чекатиме в черзі й піде завтра.`}</p>
+  </div>`;
 }
 
 function emailHtml(item) {
@@ -371,7 +396,7 @@ root?.addEventListener("change", (event) => {
   } else if (field === "product") triage.productId = event.target.value;
   else if (field === "language") triage.language = event.target.value;
   else if (field === "mailbox") { readTexts(); triage.mailbox = event.target.value; renderTriage(); }
-  else if (field === "invite-account") triage.inviteAccount = event.target.value;
+  else if (field === "invite-account") { readTexts(); triage.inviteAccount = event.target.value; renderTriage(); }
 });
 root?.addEventListener("input", (event) => {
   const field = event.target.dataset?.triageText;

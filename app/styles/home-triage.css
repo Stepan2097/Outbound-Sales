@@ -240,9 +240,38 @@
 }
 
 .triage-invite {
-  display: inline-flex;
-  flex-wrap: wrap;
+  display: grid;
   gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.triage-invite p {
+  margin: 0;
+}
+
+.triage-invite-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px;
+}
+
+.triage-inline {
+  display: grid;
+  gap: 4px;
+}
+
+.triage-inline span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.triage-inline select {
+  width: auto;
+  min-width: 260px;
+  max-width: 100%;
 }
 
 .triage-empty {
