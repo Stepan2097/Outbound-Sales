@@ -31,7 +31,8 @@ export class CampaignError extends Error {
   }
 }
 
-function cleanSteps(steps, templates) {
+function cleanSteps(steps, templates, { allowEmpty = false } = {}) {
+  if (allowEmpty && Array.isArray(steps) && !steps.length) return [];
   if (!Array.isArray(steps) || !steps.length) throw new CampaignError("У кампанії має бути хоча б один лист.", { code: "no_steps" });
   if (steps.length > 6) throw new CampaignError("Не більше шести листів у ланцюжку.", { code: "too_many_steps" });
   return steps.map((step, index) => {
@@ -46,9 +47,9 @@ function cleanSteps(steps, templates) {
   });
 }
 
-function cleanSenders(senders) {
+function cleanSenders(senders, { allowEmpty = false } = {}) {
   const list = [...new Set((Array.isArray(senders) ? senders : []).map((email) => contactKey(email)).filter(Boolean))];
-  if (!list.length) throw new CampaignError("Оберіть хоча б одну скриньку-відправника.", { code: "no_senders" });
+  if (!list.length && !allowEmpty) throw new CampaignError("Оберіть хоча б одну скриньку-відправника.", { code: "no_senders" });
   return list;
 }
 
@@ -120,19 +121,38 @@ export function campaignStore({ read, write, readEnrollments, writeEnrollments, 
   const enrollments = () => (Array.isArray(readEnrollments()) ? readEnrollments() : []);
   const find = (id) => list().find((campaign) => campaign.id === id) || null;
 
+  /** People enrolled before the campaign had mailboxes get the least-loaded one, for good. */
+  async function assignSenders(campaign) {
+    const all = enrollments();
+    if (!campaign.senders.length || !all.some((row) => row.campaignId === campaign.id && !row.sender)) return;
+    const load = new Map(campaign.senders.map((email) => [email, 0]));
+    for (const row of all) if (row.campaignId === campaign.id && load.has(row.sender) && LIVE_ENROLMENT.has(row.status)) load.set(row.sender, load.get(row.sender) + 1);
+    await writeEnrollments(all.map((row) => {
+      if (row.campaignId !== campaign.id || row.sender) return row;
+      const sender = [...load.entries()].sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0]))[0][0];
+      load.set(sender, load.get(sender) + 1);
+      return { ...row, sender };
+    }));
+  }
+
   return {
     list,
     find,
     enrollments,
     enrollmentsOf(campaignId) { return enrollments().filter((row) => row.campaignId === campaignId); },
 
-    async create({ name, steps, senders, spinMode = "all" }) {
+    /**
+     * A draft may start empty — «Створити з нуля» opens the builder on one —
+     * and is filled step by step; what a running campaign needs (a letter, a
+     * mailbox) is asked for when it is started, not when it is named.
+     */
+    async create({ name, steps = [], senders = [], spinMode = "all" }) {
       const title = String(name ?? "").trim().slice(0, 120);
       if (!title) throw new CampaignError("Дайте кампанії назву.", { code: "no_name" });
       const at = now().toISOString();
       const campaign = {
         id: randomUUID(), name: title, state: "draft",
-        steps: cleanSteps(steps, templates()), senders: cleanSenders(senders),
+        steps: cleanSteps(steps, templates(), { allowEmpty: true }), senders: cleanSenders(senders, { allowEmpty: true }),
         // ESP 12: spintax for everybody, for half (A/B against the base text), or for nobody.
         spinMode: SPIN_MODES.includes(spinMode) ? spinMode : "all",
         createdAt: at, updatedAt: at
@@ -155,16 +175,17 @@ export function campaignStore({ read, write, readEnrollments, writeEnrollments, 
       }
       if (input.steps !== undefined) {
         if (started) throw new CampaignError("Ланцюжок уже почався — листи в ньому не змінюються.", { code: "started", status: 409 });
-        next.steps = cleanSteps(input.steps, templates());
+        next.steps = cleanSteps(input.steps, templates(), { allowEmpty: campaign.state === "draft" });
       }
       if (input.senders !== undefined) {
-        const senders = cleanSenders(input.senders);
-        const assigned = new Set(enrollments().filter((row) => row.campaignId === id && LIVE_ENROLMENT.has(row.status)).map((row) => row.sender));
+        const senders = cleanSenders(input.senders, { allowEmpty: campaign.state === "draft" });
+        const assigned = new Set(enrollments().filter((row) => row.campaignId === id && LIVE_ENROLMENT.has(row.status) && row.sender).map((row) => row.sender));
         const dropped = [...assigned].filter((email) => !senders.includes(email));
         if (dropped.length) throw new CampaignError(`Скринька ${dropped.join(", ")} уже веде людей цієї кампанії — її не прибрати, доки вони в ланцюжку.`, { code: "sender_in_use", status: 409 });
         next.senders = senders;
       }
       await write(list().map((row) => (row.id === id ? next : row)));
+      if (input.senders !== undefined) await assignSenders(next);
       return next;
     },
 
@@ -173,6 +194,12 @@ export function campaignStore({ read, write, readEnrollments, writeEnrollments, 
       const campaign = find(id);
       if (!campaign) throw new CampaignError("Такої кампанії немає.", { code: "not_found", status: 404 });
       if (campaign.state === "done") throw new CampaignError("Завершену кампанію не перезапускають — створіть нову.", { code: "done", status: 409 });
+      if (state === "running") {
+        if (!campaign.steps.length) throw new CampaignError("У кампанії ще немає жодного листа — додайте його в «Послідовності».", { code: "no_steps", status: 409 });
+        cleanSteps(campaign.steps, templates());
+        if (!campaign.senders.length) throw new CampaignError("Не обрано жодної скриньки — оберіть їх у «Параметрах відправки».", { code: "no_senders", status: 409 });
+        await assignSenders(campaign);
+      }
       const next = { ...campaign, state, updatedAt: now().toISOString() };
       await write(list().map((row) => (row.id === id ? next : row)));
       if (state === "done") {
@@ -213,8 +240,10 @@ export function campaignStore({ read, write, readEnrollments, writeEnrollments, 
         }
         const stop = blocked(lead.email);
         if (stop) { skipped.push({ email: lead.email, reason: stop }); continue; }
-        const sender = [...load.entries()].sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0]))[0][0];
-        load.set(sender, load.get(sender) + 1);
+        // A draft's people may come before its mailboxes: they get one when
+        // the mailboxes are chosen (`assignSenders`).
+        const sender = load.size ? [...load.entries()].sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0]))[0][0] : null;
+        if (sender) load.set(sender, load.get(sender) + 1);
         const enrollment = {
           id: randomUUID(), campaignId: id, email: lead.email, lead, sender,
           step: 0, status: "active", nextDueDate: null, lastSent: null,

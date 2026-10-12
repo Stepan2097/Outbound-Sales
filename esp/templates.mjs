@@ -18,7 +18,11 @@ export function templateStore({ read, write, now = () => new Date() }) {
     async create(input) {
       const prepared = prepareTemplate(input);
       const at = now().toISOString();
-      const template = { id: randomUUID(), name: prepared.name, subject: prepared.subject, body: prepared.body, createdAt: at, updatedAt: at };
+      // A letter written inside a campaign's sequence belongs to that campaign
+      // (`campaignId`) and stays out of the library; «Зберегти як шаблон» is a
+      // copy without it. The same cleaning either way.
+      const owner = String(input?.campaignId ?? "").trim().slice(0, 80);
+      const template = { id: randomUUID(), name: prepared.name, subject: prepared.subject, body: prepared.body, ...(owner ? { campaignId: owner } : {}), createdAt: at, updatedAt: at };
       await write([...list(), template]);
       return { template, removed: prepared.removed };
     },
