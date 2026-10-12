@@ -1,10 +1,10 @@
-// Налаштування → «Пошта для розсилки» (ESP 1): з чим цей сервер ходить у Gmail,
+// «Пошта» → «Налаштування пошти» → «Пошта для розсилки» (ESP 1): з чим цей сервер ходить у Gmail,
 // що вписати в консоль адміністратора Workspace, і чи можна діяти від імені
 // конкретної скриньки. Нічого звідси не надсилається — тут лише підключення.
 
 import { api, authState, escapeHtml, onScreen, refreshIcons, setHtml } from "../core.js";
 
-onScreen("account", { open: () => void loadEspConnection() });
+onScreen("mail-settings", { open: () => void loadEspConnection() });
 
 let espConnection = null;
 let espError = "";

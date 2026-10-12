@@ -73,6 +73,7 @@
               <button class="nav-item" data-view="campaigns" aria-label="Кампанії" title="Кампанії"><i data-lucide="send"></i><span>Кампанії</span></button>
               <button class="nav-item" data-view="leads" aria-label="Ліди" title="Ліди"><i data-lucide="users"></i><span>Ліди</span></button>
               <button class="nav-item" data-view="reports" aria-label="Звіти" title="Звіти"><i data-lucide="chart-column"></i><span>Звіти</span></button>
+              <button class="nav-item" data-view="mail-settings" aria-label="Скриньки, домени й доступи" title="Скриньки, домени й доступи"><i data-lucide="sliders-horizontal"></i><span>Скриньки</span></button>
             </div>
           </div>
           <button class="nav-item" data-view="inbox" aria-label="Вхідні" title="Вхідні"><i data-lucide="inbox"></i><span>Вхідні</span><span class="nav-badge" id="warmupNavBadge" hidden></span></button>
@@ -132,39 +133,6 @@
                   </form>
                 </div>
               </details>
-            </section>
-
-            <!-- ESP 1: з чим сервер ходить у Gmail; малює app/screens/esp-mailboxes.js, лише адміністраторові. -->
-            <section class="panel esp-mail-panel span-2" id="espMailPanel" hidden>
-              <div class="panel-heading">
-                <div>
-                  <h2>Пошта для розсилки</h2>
-                  <p>Скриньки, з яких підуть холодні листи: доступ через Gmail API.</p>
-                </div>
-              </div>
-              <div id="espMailBody"></div>
-            </section>
-
-            <!-- ESP 9: реєстр доменів і відправників; малює app/screens/esp-registry.js. -->
-            <section class="panel esp-registry-panel span-2" id="espRegistryPanel">
-              <div class="panel-heading">
-                <div>
-                  <h2>Пошта: домени й відправники</h2>
-                  <p>Звідки йдуть холодні листи. Кожна зміна — рядок у журналі, який лише дописується.</p>
-                </div>
-              </div>
-              <div id="espRegistryBody"></div>
-            </section>
-
-            <!-- ESP 10: доступи, журнал дій адміністраторів, секрети; малює app/screens/esp-access.js. -->
-            <section class="panel esp-access-panel span-2" id="espAccessPanel">
-              <div class="panel-heading">
-                <div>
-                  <h2>Пошта: доступи й журнал дій</h2>
-                  <p>Хто що може в холодній розсилці, що міняли адміністратори і чи задані секрети.</p>
-                </div>
-              </div>
-              <div id="espAccessBody"></div>
             </section>
 
             <section class="panel profile-admin span-2" id="accountSelfPanel">
@@ -241,6 +209,45 @@
         <!-- Прогрів пошт: наші скриньки Workspace пишуть одна одній; малює app/screens/mail-warmup.js. -->
         <section class="view" id="view-mail-warmup">
           <div class="mail-page warmup-mail-page" id="mailWarmupRoot"></div>
+        </section>
+
+        <!-- Налаштування пошти: підключення Gmail, домени й відправники, доступи й журнал дій
+             (esp-mailboxes.js, esp-registry.js, esp-access.js). У «Налаштуваннях» — лише профіль і команда. -->
+        <section class="view" id="view-mail-settings">
+          <div class="account-layout">
+            <!-- ESP 1: з чим сервер ходить у Gmail; малює app/screens/esp-mailboxes.js, лише адміністраторові. -->
+            <section class="panel esp-mail-panel span-2" id="espMailPanel" hidden>
+              <div class="panel-heading">
+                <div>
+                  <h2>Пошта для розсилки</h2>
+                  <p>Скриньки, з яких підуть холодні листи: доступ через Gmail API.</p>
+                </div>
+              </div>
+              <div id="espMailBody"></div>
+            </section>
+
+            <!-- ESP 9: реєстр доменів і відправників; малює app/screens/esp-registry.js. -->
+            <section class="panel esp-registry-panel span-2" id="espRegistryPanel">
+              <div class="panel-heading">
+                <div>
+                  <h2>Домени й відправники</h2>
+                  <p>Звідки йдуть холодні листи. Кожна зміна — рядок у журналі, який лише дописується.</p>
+                </div>
+              </div>
+              <div id="espRegistryBody"></div>
+            </section>
+
+            <!-- ESP 10: доступи, журнал дій адміністраторів, секрети; малює app/screens/esp-access.js. -->
+            <section class="panel esp-access-panel span-2" id="espAccessPanel">
+              <div class="panel-heading">
+                <div>
+                  <h2>Доступи й журнал дій</h2>
+                  <p>Хто що може в холодній розсилці, що міняли адміністратори і чи задані секрети.</p>
+                </div>
+              </div>
+              <div id="espAccessBody"></div>
+            </section>
+          </div>
         </section>
 
         <section class="view" id="view-inbox">

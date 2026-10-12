@@ -52,7 +52,7 @@ function summaryHtml(rows) {
 
 function tableHtml(data) {
   const { rows, canChange } = data;
-  if (!rows.length) return '<div class="empty-state">Скриньок-відправників ще немає — додайте їх у «Налаштування» → «Пошта: домени й відправники».</div>';
+  if (!rows.length) return '<div class="empty-state">Скриньок-відправників ще немає — додайте їх у «Пошта» → «Налаштування пошти» → «Домени й відправники».</div>';
   const action = (row) => {
     if (!canChange) return "";
     if (row.status === "running") return `<button type="button" class="text-button" data-warmup-pause="${escapeAttr(row.email)}"${mailWarmupState.busy ? " disabled" : ""}><i data-lucide="pause"></i><span>Пауза</span></button>`;

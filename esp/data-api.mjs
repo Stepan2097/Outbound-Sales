@@ -34,7 +34,7 @@ export async function handleEspDataApi({ request, response, url, sendJson, readJ
   const actor = profile?.email || profile?.name || "";
   // Who may do what is ESP 10's matrix (esp/access.mjs), not a role check here.
   const allowed = (permission) => can(profile, permission);
-  const refuse = (permission) => sendJson(response, 403, { error: `Немає права: ${permission}. Його видає адміністратор у «Налаштуваннях».` });
+  const refuse = (permission) => sendJson(response, 403, { error: `Немає права: ${permission}. Його видає адміністратор у «Налаштуваннях пошти».` });
 
   try {
     if (method === "GET" && path === "/api/esp/registry") {

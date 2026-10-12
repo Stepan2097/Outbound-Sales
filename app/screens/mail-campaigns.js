@@ -139,8 +139,8 @@ function bannersHtml() {
   if (page.alerts.length) {
     const index = Math.min(page.alertIndex, page.alerts.length - 1);
     const alert = page.alerts[index];
-    const fix = alert.kind === "pause_sender" ? "зняти паузу скриньки — у Налаштуваннях, коли причину усунуто"
-      : alert.kind === "pause_domain" ? "зняти паузу домену — у Налаштуваннях" : alert.kind === "alert" ? "нічого не зупинено — перевірте" : "запустити знову — у списку, коли джерело перевірено";
+    const fix = alert.kind === "pause_sender" ? "зняти паузу скриньки — у «Налаштуваннях пошти», коли причину усунуто"
+      : alert.kind === "pause_domain" ? "зняти паузу домену — у «Налаштуваннях пошти»" : alert.kind === "alert" ? "нічого не зупинено — перевірте" : "запустити знову — у списку, коли джерело перевірено";
     out.push(`<div class="mc-banner is-warn" role="alert"><i data-lucide="triangle-alert"></i>
       <div><strong>${escapeHtml(alert.title)}</strong> ${escapeHtml(alert.reason || "")} <span class="mc-subtle">${escapeHtml(when(alert.at))} · ${escapeHtml(fix)}</span></div>
       ${page.alerts.length > 1 ? `<div class="mc-pager"><button type="button" class="icon-button" data-mc="alert-prev" aria-label="Попередня"><i data-lucide="chevron-left"></i></button><span>${index + 1} з ${page.alerts.length}</span><button type="button" class="icon-button" data-mc="alert-next" aria-label="Наступна"><i data-lucide="chevron-right"></i></button></div>` : ""}
@@ -441,7 +441,7 @@ function sendingHtml(campaign) {
             <input type="checkbox" name="sender" value="${escapeAttr(sender.email)}" ${campaign.senders.includes(sender.email) ? "checked" : ""} ${campaign.state === "done" ? "disabled" : ""} />
             <span><strong>${escapeHtml(sender.email)}</strong><small>${sender.status === "active" ? "надсилає" : "на паузі"} · сьогодні ${sender.today} з ${sender.limit} · етап рампи ${sender.rampStage ?? "—"}</small></span>
             <span class="mc-meter"><span style="width:${percent(sender.today, sender.limit)}%"></span></span>
-          </label>`).join("") : '<p class="esp-notice is-bad">У реєстрі немає жодної активної скриньки. Додайте домен і скриньку в Налаштуваннях.</p>'}
+          </label>`).join("") : '<p class="esp-notice is-bad">У реєстрі немає жодної активної скриньки. Додайте домен і скриньку в «Пошта» → «Налаштування пошти».</p>'}
         <button type="button" class="text-button" data-mc="add-mailbox"><i data-lucide="mail-plus"></i><span>Додати скриньку</span></button>
       </fieldset>
       <fieldset class="mc-fieldset"><legend>Варіанти тексту (A/B)</legend>

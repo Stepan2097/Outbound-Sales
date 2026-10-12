@@ -1,4 +1,4 @@
-// Пошта (ESP 9): реєстр доменів і відправників у «Налаштуваннях».
+// Пошта (ESP 9): реєстр доменів і відправників у «Пошта» → «Налаштування пошти».
 //
 // Звідки йдуть холодні листи — які домени (коли зареєстровані, у якому стані:
 // старіє / рампа / активний / запас / виведений, що кажуть DNS і блоклисти), які
@@ -9,7 +9,7 @@
 
 import { api, escapeAttr, escapeHtml, onScreen, refreshIcons } from "../core.js";
 
-onScreen("account", { open: () => void loadEspRegistry() });
+onScreen("mail-settings", { open: () => void loadEspRegistry() });
 
 export const espRegistryState = { data: null, error: "", busy: false, notice: "", verify: null, monitor: null };
 
