@@ -355,6 +355,10 @@ test("дві одночасні вимоги однієї чернетки — �
   writer = { status: () => ({ ready: true }), async write(contact, choice) { asked.push({ contact, choice }); await new Promise((r) => { release = r; }); return { text: "Hi", model: "m" }; } };
   const one = ask("first-messages/draft", { outreachId: "o-1" });
   const two = ask("first-messages/draft", { outreachId: "o-1" });
+  // Until the first request has reached the model — not a fixed 50 ms, which a
+  // loaded test box (the deploy gate) does not always give — then a little
+  // longer, so the second is surely waiting on it before it is let go.
+  for (let waited = 0; !release && waited < 5000; waited += 10) await new Promise((r) => setTimeout(r, 10));
   await new Promise((r) => setTimeout(r, 50));
   release();
   const [a, b] = await Promise.all([one, two]);
