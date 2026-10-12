@@ -232,6 +232,7 @@ export const HISTORY_EVENT_LABEL = {
   "invite.cancelled": "Запит скасовано",
   "invite.reassigned": "Запит перекинуто на інший акаунт",
   "invite.failed": "Запит не вдалося надіслати",
+  "invite.accepted": "Запит прийнято",
   // The folder let the person go and will not offer them again; a seller can
   // still queue them by hand.
   "campaign.skipped": "Автопідбір більше не братиме цю людину"

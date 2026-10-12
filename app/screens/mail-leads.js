@@ -231,7 +231,7 @@ function linkedinItem(entry, card) {
   const meta = (text) => `<div class="leads-event-meta">${escapeHtml(when(entry.at))}${text ? ` · ${text}` : ""}</div>`;
   if (entry.kind === "invite") {
     const by = entry.meta?.by === "agent" ? "надіслав агент" : entry.meta?.by ? "надіслано вручну" : "";
-    return { kind: "linkedin", icon: "user-plus", at: entry.at, html: `<div class="leads-event-line is-linkedin">
+    return { kind: "linkedin", icon: entry.event === "invite.accepted" ? "user-check" : "user-plus", at: entry.at, html: `<div class="leads-event-line is-linkedin">
       <p><span class="pill tone-done">LinkedIn</span> ${escapeHtml(HISTORY_EVENT_LABEL[entry.event] || entry.event)}</p>
       ${entry.meta?.note ? `<pre>${escapeHtml(entry.meta.note)}</pre>` : ""}
       ${meta(escapeHtml([by, entry.meta?.outcome].filter(Boolean).join(" · ")))}

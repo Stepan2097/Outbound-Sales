@@ -40,6 +40,9 @@ export const INVITE_CHECKED = "invite.checked";
 export const INVITE_CANCELLED = "invite.cancelled";
 export const INVITE_REASSIGNED = "invite.reassigned";
 export const INVITE_FAILED = "invite.failed";
+// One per person when a check sees their acceptance: the person's history
+// needs the day it happened, and `invite.checked` only counts them.
+export const INVITE_ACCEPTED = "invite.accepted";
 
 /**
  * Everything the agent may report about one attempt, and nothing else.
@@ -100,7 +103,7 @@ export const INVITE_OUTCOMES = [
 export const INVITE_HELD_OUTCOMES = ["no_button", "cannot_connect", "no_note", "profile_gone", "blocked"];
 
 export const INVITE_TYPES = [
-  INVITE_REQUESTED, INVITE_SENT, INVITE_CHECKED, INVITE_CANCELLED, INVITE_REASSIGNED, INVITE_FAILED
+  INVITE_REQUESTED, INVITE_SENT, INVITE_CHECKED, INVITE_CANCELLED, INVITE_REASSIGNED, INVITE_FAILED, INVITE_ACCEPTED
 ];
 
 /**
@@ -939,9 +942,11 @@ export async function recordCheck({ account, run = null, results = [] }) {
   // which has no exit — filed the event under the wrong account's log, and
   // dropped that person out of every query that would have surfaced them again.
   const ids = [...new Set(results.map((result) => String(result?.outreachId || "")).filter(Boolean))];
-  const ours = new Set(ids.length
-    ? (await anty.from("wl_outreach").select("id").eq("account_id", account.id).in("id", ids).rows()).map((row) => row.id)
-    : []);
+  const held = ids.length
+    ? await anty.from("wl_outreach").select("id,crm_contact_id").eq("account_id", account.id).in("id", ids).rows()
+    : [];
+  const ours = new Set(held.map((row) => row.id));
+  const contactOf = new Map(held.map((row) => [row.id, row.crm_contact_id]));
 
   for (const result of results) {
     if (!result?.outreachId) continue;
@@ -951,7 +956,14 @@ export async function recordCheck({ account, run = null, results = [] }) {
     }
     if (result.state === "accepted") {
       const moved = await moveStatus({ outreachId: String(result.outreachId), to: ACCEPTED_STATUS });
-      if (moved.moved) accepted += 1;
+      if (moved.moved) {
+        accepted += 1;
+        await logEvent({
+          accountId: account.id, runId: run?.id ?? null, type: INVITE_ACCEPTED,
+          message: "Invitation accepted",
+          meta: { crmContactId: contactOf.get(String(result.outreachId)) ?? null, outreachId: String(result.outreachId) }
+        });
+      }
       else if (moved.reason === "refused") refused.push({ outreachId: result.outreachId, from: moved.from, to: ACCEPTED_STATUS });
     } else if (result.state === "gone") {
       const moved = await moveStatus({ outreachId: String(result.outreachId), to: "withdrawn" });

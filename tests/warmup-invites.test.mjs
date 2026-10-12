@@ -741,6 +741,28 @@ test("the daily check cannot turn somebody who already replied back into somebod
   assert.equal(checked.meta.refused.length, 1, "a refused move is worth seeing, not swallowing");
 });
 
+test("an acceptance the check sees is a line in that person's history, dated by the check", async () => {
+  const outreachId = await queueOne();
+  rows.wl_outreach[0].status = "pending";
+  const answer = await call({
+    method: "POST", path: "/api/warmup/agent",
+    body: { action: "invites.checked", accountId: "acc-1", results: [{ outreachId, state: "accepted" }] }
+  });
+  assert.equal(answer.payload.accepted, 1);
+  const accepted = rows.wl_events.filter((event) => event.type === "invite.accepted");
+  assert.deepEqual(accepted.map((event) => [event.account_id, event.meta.crmContactId, event.meta.outreachId]), [["acc-1", "c-1", outreachId]]);
+
+  const history = await call({ method: "GET", path: "/api/warmup/history?crmContactId=c-1" });
+  assert.equal(history.payload.entries[0].event, "invite.accepted", "newest first");
+
+  // Seen again tomorrow: the row is already accepted, so nothing moves and nothing is written twice.
+  await call({
+    method: "POST", path: "/api/warmup/agent",
+    body: { action: "invites.checked", accountId: "acc-1", results: [{ outreachId, state: "accepted" }] }
+  });
+  assert.equal(rows.wl_events.filter((event) => event.type === "invite.accepted").length, 1);
+});
+
 test("a check that changed nothing is still written down", async () => {
   await call({
     method: "POST", path: "/api/warmup/agent",
