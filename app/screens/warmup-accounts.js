@@ -112,6 +112,10 @@ export function warmupApi(path, options) {
   return api(`/api/warmup${path}`, options);
 }
 
+/** Дії прогріву й стани акаунта — українською, однаково в картці й у сесіях. */
+const WARMUP_KIND_UA = { profile_view: "Перегляди профілів", like: "Лайки", connect: "Запити в друзі", post_comment: "Коментарі", follow: "Підписки", message: "Повідомлення" };
+const WARMUP_HEALTH_LABEL = { ok: "Усе гаразд", needs_login: "Потрібен вхід", captcha: "Капча", blocked: "Заблоковано" };
+
 const WARMUP_STATUS_TONE = {
   warming: "tone-live",
   working: "tone-live",
@@ -460,20 +464,22 @@ function renderWarmupDetail() {
       : `${warmup.strategyName} · день ${warmup.day} з ${warmup.totalDays}${warmup.phase ? ` · ${warmup.phase}` : ""}`
     : "Ще не прогрівається";
 
-  const actionRows = warmup && !warmup.finished
+  // Українською, а не ключами сервера: «Profile views 8/8» і «connect: 3»
+  // читалися як лог, а не як картка людини (12.10, власник: «зробити толковіше»).
+  const tiles = warmup && !warmup.finished
     ? (warmupState.config?.actionKinds || [])
         .map(({ kind, label }) => {
           const quota = warmup.quotas[kind] ?? 0;
           const done = warmup.done[kind] ?? 0;
-          // A kind with no quota today is forbidden, not merely finished, so it
-          // gets no button rather than a disabled-looking one.
+          const name = WARMUP_KIND_UA[kind] || label;
           if (quota === 0) {
-            return `<div class="warmup-action is-off"><span>${escapeHtml(label)}</span><em>сьогодні не можна</em></div>`;
+            return `<div class="wa-tile is-off"><span class="wa-tile-name">${escapeHtml(name)}</span><span class="wa-tile-off">сьогодні не можна</span></div>`;
           }
-          return `
-            <div class="warmup-action">
-              <span>${escapeHtml(label)}</span>
-              <strong>${done}/${quota}</strong>
+          const full = done >= quota;
+          return `<div class="wa-tile ${full ? "is-done" : ""}">
+              <span class="wa-tile-name">${escapeHtml(name)}</span>
+              <strong class="wa-tile-value">${done}<small>/${quota}</small></strong>
+              <span class="wa-bar"><span style="width:${quota ? Math.min(100, Math.round((done / quota) * 100)) : 0}%"></span></span>
             </div>`;
         })
         .join("")
@@ -490,8 +496,8 @@ function renderWarmupDetail() {
     controls.push('<button class="primary-button" type="button" data-warmup-control="resume" title="Продовжити зараз, не чекаючи кінця паузи">Продовжити</button>');
     controls.push('<button class="danger-button" type="button" data-warmup-control="stop">Зупинити</button>');
   } else {
-    controls.push('<button class="text-button" type="button" data-warmup-control="warning">Прилетіло попередження</button>');
-    controls.push('<button class="danger-button" type="button" data-warmup-control="stop">Зупинити</button>');
+    controls.push('<button type="button" data-warmup-control="warning"><i data-lucide="triangle-alert"></i><span>Прилетіло попередження</span></button>');
+    controls.push('<button class="danger-button" type="button" data-warmup-control="stop"><i data-lucide="square"></i><span>Зупинити</span></button>');
   }
 
   // 12.10, the owner: a blocked account is put away by one button, and from
@@ -499,57 +505,73 @@ function renderWarmupDetail() {
   if (account.status !== "excluded") {
     controls.push(account.health === "blocked"
       ? '<button class="text-button" type="button" data-warmup-block="ok">Розблокувати</button>'
-      : '<button class="danger-button" type="button" data-warmup-block="blocked" title="LinkedIn заблокував акаунт: агент його більше не відкриває, і він ніде не висить жовтим">Позначити заблокованим</button>');
+      : '<button class="danger-button" type="button" data-warmup-block="blocked" title="LinkedIn заблокував акаунт: агент його більше не відкриває, і він ніде не висить жовтим"><i data-lucide="ban"></i><span>Позначити заблокованим</span></button>');
   }
 
   const healthOptions = (warmupState.config?.healthValues || [])
-    .map(({ value, label }) => `<option value="${escapeHtml(value)}" ${account.health === value ? "selected" : ""}>${escapeHtml(label)}</option>`)
+    .map(({ value, label }) => `<option value="${escapeHtml(value)}" ${account.health === value ? "selected" : ""}>${escapeHtml(WARMUP_HEALTH_LABEL[value] || label)}</option>`)
     .join("");
 
   const rules = warmup?.rules?.length
-    ? `<ul class="warmup-rules">${warmup.rules.map((rule) => `<li>${escapeHtml(rule)}</li>`).join("")}</ul>`
+    ? `<ul class="warmup-rules wa-rules">${warmup.rules.map((rule) => `<li>${escapeHtml(rule)}</li>`).join("")}</ul>`
     : "";
 
+  const did = (session) => Object.entries(session.actions || {})
+    .map(([kind, count]) => `${WARMUP_KIND_UA[kind] || kind} ${count}`).join(" · ");
   const sessions = detail.sessions.length
-    ? detail.sessions
-        .slice(0, 8)
-        .map((session) => {
-          const did = Object.entries(session.actions || {}).map(([kind, count]) => `${kind}: ${count}`).join(", ");
-          return `<li><strong>${new Date(session.startedAt).toLocaleString()}</strong> · ${
-            session.endedAt ? `${session.durationMin} хв` : "відкрита"
-          } · ${escapeHtml(session.source)}${did ? ` · ${escapeHtml(did)}` : ""}</li>`;
-        })
-        .join("")
-    : "<li>Сесій ще не записано.</li>";
+    ? `<div class="table-wrap"><table class="wa-sessions">
+        <thead><tr><th>Коли</th><th>Тривалість</th><th>Хто</th><th>Що зроблено</th></tr></thead>
+        <tbody>${detail.sessions.slice(0, 8).map((session) => `<tr>
+          <td>${escapeHtml(new Date(session.startedAt).toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }))}</td>
+          <td>${session.endedAt ? `${session.durationMin} хв` : '<span class="pill tone-live">іде зараз</span>'}</td>
+          <td>${escapeHtml(session.source === "agent" ? "агент" : session.source === "manual" ? "вручну" : session.source || "")}</td>
+          <td>${did(session) ? escapeHtml(did(session)) : '<span class="wa-muted">нічого не зроблено</span>'}</td>
+        </tr>`).join("")}</tbody></table></div>`
+    : '<p class="wa-muted">Сесій ще не записано.</p>';
 
   const events = detail.events.length
     ? detail.events
         .slice(0, 12)
-        .map((event) => `<li class="level-${escapeHtml(event.level)}"><span>${new Date(event.created_at).toLocaleString()}</span> ${escapeHtml(event.message)}</li>`)
+        .map((event) => `<li class="level-${escapeHtml(event.level)}"><span>${new Date(event.created_at).toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</span> ${escapeHtml(event.message)}</li>`)
         .join("")
     : "<li>У лозі ще порожньо.</li>";
 
+  const queue = warmupAccountQueueHtml(account.id);
+  const campaignTick = warmupCardCampaignHtml(account.id);
+
   body.innerHTML = `
-    <div class="warmup-detail-controls">${controls.join("")}</div>
-    ${warmupCardCampaignHtml(account.id)}
+    <div class="warmup-detail-controls wa-controls">${controls.join("")}</div>
     ${warmup?.state === "paused" && warmup.pausedUntil
       ? warmup.pauseCause === "invite_limit"
         ? `<p class="warmup-paused">Ліміт LinkedIn: з цього акаунта LinkedIn тиждень не приймає нових запитів у друзі («${escapeHtml(warmup.pauseNote || "запрошення не надіслано")}»). Ліміт рахує всі запити за останні 7 днів, зокрема надіслані поза цією системою. До ${escapeHtml(warmup.pausedUntil)} включно акаунт нічого не робить, далі прогрів продовжиться сам, а ці дні в нього не рахуються.</p>`
         : `<p class="warmup-paused">На паузі після попередження: до ${escapeHtml(warmup.pausedUntil)} включно акаунт нічого не робить. Далі прогрів продовжиться сам, а дні паузи в нього не рахуються.</p>`
       : ""}
-    ${actionRows ? `<div class="warmup-actions">${actionRows}</div>` : ""}
-    ${rules}
-    ${warmupAccountQueueHtml(account.id)}
-    <div class="warmup-health">
-      <label for="warmupHealthSelect">Стан</label>
-      <select id="warmupHealthSelect">${healthOptions}</select>
-      <input id="warmupHealthNote" type="text" placeholder="Що ти побачив?" value="${escapeHtml(account.healthNote || "")}" />
-      <button class="text-button" type="button" data-warmup-health>Зберегти</button>
-    </div>
-    <h3>Сесії</h3>
-    <ul class="warmup-sessions">${sessions}</ul>
-    <h3>Лог</h3>
-    <ul class="warmup-events">${events}</ul>
+    ${tiles ? `<section class="wa-section">
+      <h3>Сьогодні</h3>
+      <div class="wa-tiles warmup-actions">${tiles}</div>
+      ${rules}
+    </section>` : ""}
+    ${campaignTick || queue ? `<section class="wa-section">
+      <h3>Кампанія й черга</h3>
+      ${campaignTick}
+      ${queue}
+    </section>` : ""}
+    <section class="wa-section">
+      <h3>Стан акаунта</h3>
+      <div class="warmup-health wa-health">
+        <select id="warmupHealthSelect" aria-label="Стан акаунта">${healthOptions}</select>
+        <input id="warmupHealthNote" type="text" placeholder="Що ти побачив?" value="${escapeHtml(account.healthNote || "")}" />
+        <button type="button" data-warmup-health><i data-lucide="save"></i><span>Зберегти</span></button>
+      </div>
+    </section>
+    <section class="wa-section">
+      <h3>Сесії</h3>
+      ${sessions}
+    </section>
+    <details class="wa-section wa-log">
+      <summary><h3>Лог</h3><span class="wa-muted">${detail.events.length ? `останні: ${Math.min(12, detail.events.length)}` : "порожньо"}</span></summary>
+      <ul class="warmup-events">${events}</ul>
+    </details>
   `;
   refreshIcons();
 }

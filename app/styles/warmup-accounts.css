@@ -368,3 +368,180 @@
   margin: 10px 0 4px;
   font-size: 14px;
 }
+
+/* Картка акаунта (12.10, власник: «зробити толковіше»): дії зверху, «Сьогодні»
+   плитками з прогресом, далі кампанія й черга, стан, сесії таблицею, лог згорнутий. */
+.wa-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.wa-section {
+  display: grid;
+  gap: 10px;
+  padding: 14px 0 0;
+  border-top: 1px solid var(--line);
+  margin-top: 14px;
+}
+
+.wa-section h3 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.wa-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+}
+
+.wa-tile {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-strong);
+}
+
+.wa-tile-name {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.wa-tile-value {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.wa-tile-value small {
+  margin-left: 2px;
+  color: var(--muted);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.wa-bar {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--surface-sunk, var(--bg));
+  overflow: hidden;
+}
+
+.wa-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--teal);
+}
+
+.wa-tile.is-done .wa-tile-value {
+  color: var(--teal);
+}
+
+.wa-tile.is-off {
+  background: transparent;
+  border-style: dashed;
+}
+
+.wa-tile-off {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.wa-rules {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.warmup-card-campaign {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-strong);
+  color: var(--ink);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.warmup-card-campaign input[type="checkbox"] {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--teal);
+}
+
+.warmup-card-campaign span {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.wa-health {
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.wa-sessions {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.wa-sessions th {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.wa-sessions td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.wa-muted {
+  color: var(--muted);
+}
+
+.wa-log summary {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.wa-log summary::-webkit-details-marker {
+  display: none;
+}
+
+@media (max-width: 700px) {
+  .wa-health {
+    grid-template-columns: 1fr;
+  }
+}
+
+.wa-section .table-wrap > table.wa-sessions {
+  width: 100%;
+  min-width: 100%;
+}
