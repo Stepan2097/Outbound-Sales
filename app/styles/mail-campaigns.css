@@ -1,0 +1,1334 @@
+/* «Кампанії» (ESP-UI 1–3): список, створення, конструктор, редактор листа.
+   Структура — як на скрінах Snov (04, 03, 05, 08), вигляд — токени Outbound. */
+
+.mc-page {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.mc-subtle {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.mc-danger-text,
+.mc-danger-text:hover {
+  color: var(--red);
+}
+
+/* ── тулбар і банери ─────────────────────────────────────────────────────── */
+
+.mc-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.mc-toolbar-spacer {
+  flex: 1;
+}
+
+.mc-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 220px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.mc-search svg {
+  width: 16px;
+  height: 16px;
+  color: var(--muted);
+}
+
+.mc-search input {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  min-height: 34px;
+  padding: 0;
+  color: var(--ink);
+  outline: none;
+}
+
+.mc-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-strong);
+  line-height: 1.45;
+}
+
+.mc-banner > svg {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  color: var(--blue);
+}
+
+.mc-banner > div {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.mc-banner.is-warn {
+  border-color: rgba(224, 178, 94, 0.35);
+  background: rgba(224, 178, 94, 0.1);
+}
+
+.mc-banner.is-warn > svg {
+  color: var(--amber);
+}
+
+.mc-banner.is-bad {
+  border-color: rgba(239, 124, 114, 0.4);
+  background: rgba(239, 124, 114, 0.1);
+}
+
+.mc-banner.is-bad > svg {
+  color: var(--red);
+}
+
+.mc-pager {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+/* ── список: папки зліва, таблиця справа ─────────────────────────────────── */
+
+.mc-list-layout {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.mc-folders {
+  display: grid;
+  gap: 2px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.mc-folders-title {
+  padding: 4px 8px 8px;
+  font-weight: 700;
+}
+
+.mc-folder {
+  justify-content: flex-start;
+  border-color: transparent;
+  background: transparent;
+  min-height: 34px;
+}
+
+.mc-folder svg {
+  width: 16px;
+  height: 16px;
+  color: var(--muted);
+}
+
+.mc-folder span {
+  flex: 1;
+  text-align: left;
+}
+
+.mc-folder b {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.mc-folder.is-active {
+  background: var(--teal-weak);
+  border-color: transparent;
+  color: var(--teal);
+}
+
+.mc-folder.is-active svg,
+.mc-folder.is-active b {
+  color: var(--teal);
+}
+
+.mc-folders-sep {
+  height: 1px;
+  margin: 6px 4px;
+  background: var(--line);
+}
+
+.mc-list-main {
+  min-width: 0;
+}
+
+.mc-table-wrap {
+  overflow: visible;
+}
+
+.mc-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.mc-table th {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.mc-table td {
+  padding: 12px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+
+.mc-table tbody tr:hover {
+  background: var(--surface-strong);
+}
+
+.mc-table td small {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.mc-check {
+  width: 34px;
+}
+
+.mc-campaign-cell {
+  min-width: 260px;
+}
+
+.mc-link {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--teal);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: normal;
+  text-align: left;
+}
+
+.mc-link:hover {
+  background: transparent;
+  text-decoration: underline;
+}
+
+.mc-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.mc-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  overflow-wrap: anywhere;
+}
+
+.mc-meta svg {
+  width: 13px;
+  height: 13px;
+}
+
+.mc-progress,
+.mc-meter {
+  display: inline-block;
+  width: 110px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--surface-strong);
+  overflow: hidden;
+}
+
+.mc-progress span,
+.mc-meter span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--green);
+}
+
+.mc-num b {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.mc-num small {
+  display: inline;
+  margin-left: 4px;
+}
+
+.mc-row-menu {
+  position: relative;
+  width: 44px;
+  text-align: right;
+}
+
+.mc-menu,
+.mc-dropdown {
+  position: absolute;
+  z-index: 20;
+  display: grid;
+  min-width: 190px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.mc-menu {
+  top: calc(100% - 6px);
+  right: 8px;
+}
+
+.mc-menu button,
+.mc-dropdown button {
+  justify-content: flex-start;
+  border-color: transparent;
+  background: transparent;
+}
+
+.mc-menu button:hover,
+.mc-dropdown button:hover {
+  background: var(--surface-strong);
+}
+
+.mc-menu svg,
+.mc-dropdown svg {
+  width: 15px;
+  height: 15px;
+}
+
+.mc-table-note {
+  margin: 8px 2px 0;
+}
+
+.mc-empty {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 40px 20px;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  text-align: center;
+}
+
+.mc-empty > svg {
+  width: 30px;
+  height: 30px;
+  color: var(--teal);
+}
+
+.mc-empty p {
+  max-width: 460px;
+  margin: 0;
+  color: var(--muted);
+}
+
+/* ── бібліотека шаблонів ─────────────────────────────────────────────────── */
+
+.mc-library {
+  display: grid;
+  gap: 12px;
+}
+
+.mc-library-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mc-library-head p {
+  margin: 4px 0 0;
+}
+
+.mc-library-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.mc-template-card {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.mc-template-card p {
+  margin: 0;
+  color: var(--muted);
+  white-space: pre-line;
+}
+
+.mc-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* ── модальні вікна ──────────────────────────────────────────────────────── */
+
+.mc-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(3, 8, 8, 0.66);
+}
+
+.mc-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 61;
+  display: grid;
+  gap: 14px;
+  width: min(760px, calc(100vw - 32px));
+  max-height: calc(100vh - 40px);
+  padding: 22px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  transform: translate(-50%, -50%);
+}
+
+.mc-modal > header,
+.mc-modal > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.mc-modal h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.mc-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.mc-choice {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  min-height: 260px;
+  padding: 24px;
+  border-radius: 14px;
+  background: var(--surface-strong);
+  white-space: normal;
+  text-align: center;
+}
+
+.mc-choice strong {
+  font-size: 17px;
+}
+
+.mc-choice > span:last-child {
+  color: var(--muted);
+}
+
+.mc-choice-art {
+  display: grid;
+  place-items: center;
+  width: 84px;
+  height: 84px;
+  border-radius: 22px;
+  background: var(--teal-weak);
+  color: var(--teal);
+}
+
+.mc-choice-art svg {
+  width: 38px;
+  height: 38px;
+}
+
+.mc-check-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mc-back {
+  justify-self: start;
+}
+
+.mc-chooser h3 {
+  margin: 0;
+}
+
+.mc-pick-list {
+  display: grid;
+  gap: 8px;
+}
+
+.mc-pick {
+  justify-content: flex-start;
+  min-height: 52px;
+  padding: 8px 12px;
+  white-space: normal;
+  text-align: left;
+}
+
+.mc-pick > svg {
+  width: 18px;
+  height: 18px;
+  color: var(--teal);
+}
+
+.mc-pick span {
+  display: grid;
+}
+
+.mc-pick small {
+  color: var(--muted);
+}
+
+/* ── конструктор: шапка з кроками ───────────────────────────────────────── */
+
+.mc-builder-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.mc-name {
+  min-width: 180px;
+  max-width: 300px;
+  border-color: transparent;
+  background: transparent;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.mc-name:hover,
+.mc-name:focus {
+  border-color: var(--line);
+}
+
+.mc-stepper {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 0 auto;
+  padding: 0;
+  list-style: none;
+}
+
+.mc-stepper li + li::before {
+  content: "";
+  display: inline-block;
+  width: 22px;
+  height: 1px;
+  margin: 0 6px;
+  background: var(--line);
+  vertical-align: middle;
+}
+
+.mc-stepper button {
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+
+.mc-step-dot {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  background: var(--surface-strong);
+  font-weight: 700;
+}
+
+.mc-step-dot svg {
+  width: 14px;
+  height: 14px;
+}
+
+.mc-stepper .is-current button {
+  color: var(--ink);
+}
+
+.mc-stepper .is-current .mc-step-dot {
+  border: 2px solid var(--teal);
+  background: transparent;
+  color: var(--teal);
+}
+
+.mc-stepper .is-done .mc-step-dot {
+  background: var(--teal-weak);
+  color: var(--teal);
+}
+
+.mc-head-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* ── крок 1: полотно послідовності ──────────────────────────────────────── */
+
+.mc-canvas {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 0;
+  padding: 26px 110px 30px 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-sunk, var(--bg));
+}
+
+.mc-canvas-head {
+  margin-bottom: 18px;
+  text-align: center;
+}
+
+.mc-canvas-head h2 {
+  margin: 0 0 6px;
+  font-size: 22px;
+}
+
+.mc-canvas-head p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.mc-flow {
+  display: grid;
+  justify-items: center;
+  width: min(620px, 100%);
+}
+
+.mc-connector {
+  width: 2px;
+  height: 22px;
+  background: var(--line);
+}
+
+.mc-node {
+  position: relative;
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  padding: 26px 18px 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.mc-node-delay,
+.mc-node-condition {
+  width: 82%;
+  padding-top: 24px;
+  font-size: 12.5px;
+}
+
+.mc-node-condition > span:last-child {
+  color: var(--muted);
+}
+
+.mc-node-start {
+  grid-template-columns: 1fr auto;
+  align-items: center;
+}
+
+.mc-node-badge {
+  position: absolute;
+  top: -13px;
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 14px;
+  border-radius: 999px;
+  font-weight: 700;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.mc-node-badge svg {
+  width: 14px;
+  height: 14px;
+}
+
+.mc-letter .mc-node-badge {
+  position: static;
+  justify-self: start;
+  transform: none;
+}
+
+.is-green { background: rgba(94, 201, 138, 0.18); color: var(--green); }
+.is-blue { background: rgba(106, 165, 255, 0.16); color: var(--blue); }
+.is-amber { background: rgba(224, 178, 94, 0.16); color: var(--amber); }
+.is-red { background: rgba(239, 124, 114, 0.15); color: var(--red); }
+.is-violet { background: rgba(169, 150, 240, 0.16); color: var(--violet); }
+
+.mc-node-delay input {
+  width: 64px;
+  margin: 0 4px;
+  text-align: center;
+}
+
+.mc-node-body {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  min-height: 0;
+  padding: 6px 2px;
+  border: 0;
+  background: transparent;
+  white-space: normal;
+  text-align: left;
+}
+
+.mc-node-body:hover {
+  background: transparent;
+}
+
+.mc-node-body strong {
+  font-size: 14px;
+}
+
+.mc-node-body span {
+  color: var(--muted);
+  white-space: pre-line;
+}
+
+.mc-node-body.is-empty {
+  color: var(--amber);
+}
+
+.mc-node-tools {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.mc-add-menu {
+  display: grid;
+  gap: 2px;
+  width: 300px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.mc-add-menu button {
+  justify-content: flex-start;
+  border-color: transparent;
+  background: transparent;
+}
+
+.mc-add-menu button span {
+  flex: 1;
+  text-align: left;
+}
+
+.mc-add-menu button:hover {
+  background: var(--surface-strong);
+}
+
+.mc-add-menu svg {
+  width: 16px;
+  height: 16px;
+}
+
+.mc-add-note {
+  display: flex;
+  gap: 8px;
+  padding: 8px 10px 4px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.mc-add-note svg {
+  flex: none;
+  color: var(--violet);
+}
+
+.mc-palette {
+  position: absolute;
+  top: 20px;
+  right: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.mc-palette button {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  width: 80px;
+  min-height: 84px;
+  padding: 10px 6px;
+  border-radius: 12px;
+  background: var(--surface);
+  font-size: 12px;
+}
+
+.mc-palette-icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+}
+
+.mc-palette-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* ── кроки 2–4 ──────────────────────────────────────────────────────────── */
+
+.mc-step-page {
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.mc-step-intro h2 {
+  margin: 0 0 6px;
+  font-size: 20px;
+}
+
+.mc-step-intro p {
+  max-width: 760px;
+  margin: 0;
+  color: var(--muted);
+}
+
+.mc-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mc-counts span {
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--surface-strong);
+  color: var(--muted);
+}
+
+.mc-counts b {
+  color: var(--ink);
+}
+
+.mc-import {
+  display: grid;
+  gap: 10px;
+}
+
+.mc-import textarea {
+  width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+}
+
+.mc-import-actions,
+.mc-form-actions,
+.mc-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.mc-file {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-strong);
+  cursor: pointer;
+}
+
+.mc-file svg {
+  width: 16px;
+  height: 16px;
+}
+
+.mc-file input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.mc-import-result {
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--surface-strong);
+  line-height: 1.5;
+}
+
+.mc-import-result p {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+
+.mc-people td strong {
+  font-weight: 600;
+}
+
+.mc-sending {
+  display: grid;
+  gap: 14px;
+}
+
+.mc-fieldset {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.mc-fieldset legend {
+  padding: 0 6px;
+  font-weight: 700;
+}
+
+.mc-sender,
+.mc-radio {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 4px;
+}
+
+.mc-sender > span:nth-child(2),
+.mc-radio > span {
+  display: grid;
+  flex: 1;
+}
+
+.mc-sender small,
+.mc-radio small {
+  color: var(--muted);
+}
+
+.mc-rules {
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: var(--surface-strong);
+}
+
+.mc-rules h3,
+.mc-signature h3,
+.mc-preview-block h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.mc-rules ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mc-rules li {
+  display: flex;
+  gap: 8px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.mc-rules svg {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin-top: 2px;
+  color: var(--teal);
+}
+
+.mc-signature {
+  display: grid;
+  gap: 10px;
+}
+
+.mc-signature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 8px;
+}
+
+.mc-checklist {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mc-checklist li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--surface-strong);
+}
+
+.mc-checklist li span {
+  flex: 1;
+}
+
+.mc-checklist svg {
+  width: 18px;
+  height: 18px;
+}
+
+.mc-checklist .is-ok svg {
+  color: var(--green);
+}
+
+.mc-checklist .is-bad svg {
+  color: var(--amber);
+}
+
+.mc-plan {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--surface-strong);
+}
+
+.mc-plan p,
+.mc-plan small {
+  margin: 0;
+  color: var(--muted);
+}
+
+.mc-preview-block {
+  display: grid;
+  gap: 10px;
+}
+
+.mc-preview-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.mc-preview-head h3 {
+  flex: 1;
+  margin: 0;
+}
+
+.mc-letter {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.mc-letter.is-pending {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+}
+
+.mc-letter pre,
+.mc-editor-preview pre {
+  margin: 0;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--surface-strong);
+  font: 12.5px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.mc-letter-head {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+
+.mc-letter-head div {
+  display: flex;
+  gap: 8px;
+}
+
+.mc-letter-head dt {
+  width: 48px;
+  color: var(--muted);
+}
+
+.mc-letter-head dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ── редактор листа (скрін 08) ──────────────────────────────────────────── */
+
+.mc-editor {
+  width: min(920px, calc(100vw - 32px));
+}
+
+.mc-editor-name {
+  width: 100%;
+}
+
+.mc-editor-frame {
+  display: grid;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: visible;
+}
+
+.mc-subject {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.mc-subject input {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  padding: 10px 0;
+  color: var(--ink);
+  outline: none;
+}
+
+.mc-editor-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-strong);
+}
+
+.mc-tool {
+  position: relative;
+}
+
+.mc-tool > button {
+  border-color: transparent;
+  background: transparent;
+}
+
+.mc-tool > button.is-open,
+.mc-tool > button:hover {
+  background: var(--surface);
+}
+
+.mc-tool svg,
+.mc-plain svg {
+  width: 15px;
+  height: 15px;
+}
+
+.mc-dropdown {
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 260px;
+}
+
+.mc-dropdown-wide {
+  min-width: 340px;
+}
+
+.mc-dropdown button {
+  justify-content: space-between;
+}
+
+.mc-dropdown code,
+.mc-dropdown-note code {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.mc-dropdown-sep {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--line);
+}
+
+.mc-dropdown-note {
+  padding: 6px 8px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: normal;
+}
+
+.mc-plain {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 0 10px;
+  color: var(--teal);
+  font-size: 12.5px;
+}
+
+.mc-editor-frame textarea {
+  min-height: 340px;
+  border: 0;
+  border-radius: 0 0 12px 12px;
+  background: transparent;
+  padding: 14px;
+  color: var(--ink);
+  font: 13.5px/1.6 inherit;
+  resize: vertical;
+  outline: none;
+}
+
+.mc-editor-preview {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 12px;
+  background: var(--surface-strong);
+}
+
+/* ── вузький екран ──────────────────────────────────────────────────────── */
+
+@media (max-width: 900px) {
+  .mc-list-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .mc-canvas {
+    padding-right: 20px;
+  }
+
+  .mc-palette {
+    position: static;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    order: -1;
+    margin-bottom: 14px;
+  }
+
+  .mc-choice-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .mc-stepper {
+    margin: 0;
+  }
+
+  .mc-table-wrap {
+    overflow-x: auto;
+  }
+}
+
+/* Прапорці й перемикачі — свого розміру, не як поля вводу. */
+.mc-page input[type="checkbox"],
+.mc-page input[type="radio"] {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--teal);
+}
+
+.mc-check-line {
+  justify-content: flex-start;
+  color: var(--muted);
+}
+
+.mc-node-delay label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Підписи всередині label — звичайний текст, не заголовки полів. */
+.mc-page label span {
+  font-weight: 400;
+  color: inherit;
+}
+
+.mc-sender strong,
+.mc-radio strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.mc-fieldset > .text-button {
+  justify-self: start;
+}
+
+.mc-check-line,
+.mc-sender,
+.mc-radio {
+  color: var(--ink);
+}
+
+div.mc-subject {
+  min-height: 44px;
+  flex-wrap: wrap;
+}

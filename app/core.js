@@ -139,7 +139,8 @@ async function enterWorkspace() {
   // The screen first: it draws from memory at once and starts its own reads,
   // which need nothing from the state read. Waiting for it first was half a
   // second of empty page before the screen had even asked for its data.
-  const saved = rememberedView();
+  // A link to a screen wins over the tab somebody last left.
+  const saved = linkedView() || rememberedView();
   setView(saved || "home");
   await refresh();
   startActivityHeartbeat();
@@ -300,7 +301,19 @@ function rememberedView() {
   return saved && document.getElementById(`view-${saved}`) ? saved : null;
 }
 
+/**
+ * A link to a screen: «…/#campaigns/<id>/review» opens «Кампанії» on that
+ * campaign's step — what somebody sends to the owner to look at. The screen
+ * reads the rest of the address itself.
+ */
+function linkedView() {
+  const view = window.location.hash.replace(/^#/, "").split("/")[0];
+  return /^[a-z-]+$/.test(view) && document.getElementById(`view-${view}`) ? view : null;
+}
+
 function setView(viewName) {
+  // Another screen's address is not left in the bar: a reload would open it.
+  if (linkedView() && linkedView() !== viewName) window.history.replaceState(null, "", window.location.pathname + window.location.search);
   views.forEach((view) => view.classList.toggle("active", view.id === `view-${viewName}`));
   navItems.forEach((item) => item.classList.toggle("active", item.dataset.view === viewName));
   document.getElementById("pageTitle").textContent =

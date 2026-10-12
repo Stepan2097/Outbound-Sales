@@ -18,7 +18,7 @@ function harness(fetch) {
     showAuthGate: () => { gates += 1; epoch += 1; },
     document: { getElementById: () => ({ hidden: false }) },
     window: { location: { hash: "", origin: "https://workspace.example" } }, URLSearchParams,
-    rememberedView: () => "contacts", setView: () => openedScopes.push(scope),
+    rememberedView: () => "contacts", linkedView: () => null, setView: () => openedScopes.push(scope),
     render: () => { renders += 1; }, startActivityHeartbeat: () => {}, enterHooks: []
   });
   return { get: main.get, switchSession: () => { epoch += 1; }, openedScopes,

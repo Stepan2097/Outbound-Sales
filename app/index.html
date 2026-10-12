@@ -14,6 +14,7 @@
     <link rel="stylesheet" href="/styles/settings.css" />
     <link rel="stylesheet" href="/styles/esp.css" />
     <link rel="stylesheet" href="/styles/esp-registry.css" />
+    <link rel="stylesheet" href="/styles/mail-campaigns.css" />
     <script defer src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
     <script defer type="module" src="/main.js"></script>
   </head>
@@ -276,78 +277,9 @@
         </section>
 
         <section class="view" id="view-campaigns">
-          <div class="esp-layout">
-            <!-- ESP 8: автопаузи й тривоги; блоку немає, поки тривог немає. -->
-            <section class="panel esp-alerts-panel span-2" id="espAlertsPanel" hidden>
-              <div id="espAlertsBody"></div>
-            </section>
-            <section class="panel esp-campaigns-panel span-2">
-              <div class="panel-heading">
-                <div>
-                  <h2>Кампанії</h2>
-                  <p>Ланцюжок листів: день 0, далі через робочі дні; одна людина — одна скринька на весь ланцюжок.</p>
-                </div>
-                <button class="text-button" id="espCampaignNew" type="button"><i data-lucide="plus"></i><span>Нова кампанія</span></button>
-              </div>
-              <div id="espCampaignsBody"></div>
-            </section>
-            <section class="panel esp-inbox-panel span-2">
-              <div class="panel-heading">
-                <div>
-                  <h2>Що прийшло в скриньки</h2>
-                  <p>Відповідь зупиняє ланцюжок людини, автовідповідь переносить крок, bounce — за кодом, відписка — того ж дня.</p>
-                </div>
-                <button class="text-button" id="espInboxPoll" type="button"><i data-lucide="refresh-cw"></i><span>Перевірити зараз</span></button>
-              </div>
-              <div id="espInboxBody"></div>
-            </section>
-            <section class="panel esp-templates-panel">
-              <div class="panel-heading">
-                <div>
-                  <h2>Шаблони листів</h2>
-                  <p>Лише простий текст: без HTML, пікселів і переписаних посилань.</p>
-                </div>
-                <button class="text-button" id="espTemplateNew" type="button"><i data-lucide="plus"></i><span>Новий</span></button>
-              </div>
-              <div id="espTemplatesBody"></div>
-            </section>
-            <section class="panel esp-editor-panel">
-              <div class="panel-heading">
-                <div>
-                  <h2 id="espEditorTitle">Новий шаблон</h2>
-                  <p>Звідси нічого не надсилається — лише зберігається й переглядається.</p>
-                </div>
-              </div>
-              <div id="espEditorBody"></div>
-            </section>
-            <section class="panel esp-limits-panel span-2">
-              <div class="panel-heading">
-                <div>
-                  <h2>Ліміти сьогодні</h2>
-                  <p>Скільки вже надіслано проти ліміту — за журналом відправок.</p>
-                </div>
-              </div>
-              <div id="espLimitsBody"></div>
-            </section>
-            <section class="panel esp-reports-panel span-2">
-              <div class="panel-heading">
-                <div>
-                  <h2>Звіти</h2>
-                  <p>З журналу відправок: надіслано, bounce за кодами, відповіді, позитивні, відписки. Відкриттів і кліків немає — листи без пікселів і переписаних посилань.</p>
-                </div>
-              </div>
-              <div id="espReportsBody"></div>
-            </section>
-            <section class="panel esp-signature-panel span-2">
-              <div class="panel-heading">
-                <div>
-                  <h2>Підпис</h2>
-                  <p>Текстом під кожним листом: ім'я, посада, ADvantage, сайт. Для США — ще поштова адреса юрособи.</p>
-                </div>
-              </div>
-              <div id="espSignatureBody"></div>
-            </section>
-          </div>
+          <!-- Холодна пошта → «Кампанії» (ESP-UI 1–3): список, створення, конструктор у чотири кроки й редактор листа;
+               малює app/screens/mail-campaigns.js. -->
+          <div class="mc-page" id="mailCampaignsRoot"></div>
         </section>
 
         <section class="view" id="view-contacts">

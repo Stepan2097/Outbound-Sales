@@ -182,10 +182,10 @@ test("роль «лише запускає кампанії»: екран кам
   await changeAccess({ email: SELLER.email, permission: "campaigns.launch", grant: true }, ADMIN);
   assert.equal(await can(SELLER, "templates.edit"), false);
   // Кожен запит, яким екран кампаній вантажиться, — з його ж коду, щоб новий не проскочив повз тест.
-  const screen = readFileSync(new URL("../app/screens/esp-campaigns.js", import.meta.url), "utf8");
-  const load = screen.slice(screen.indexOf("export async function loadEspCampaigns"), screen.indexOf("async function loadEspPeople"));
+  const screen = readFileSync(new URL("../app/screens/mail-campaigns.js", import.meta.url), "utf8");
+  const load = screen.slice(screen.indexOf("export async function loadCampaignsPage"), screen.indexOf("async function loadPeople"));
   const paths = [...load.matchAll(/api\(["`]\/api\/esp([^"`?$]+)/g)].map((match) => match[1]);
-  assert.deepEqual(paths, ["/campaigns", "/halt", "/templates", "/limits"]);
+  assert.deepEqual(paths, ["/campaigns", "/halt", "/templates", "/limits", "/alerts"]);
   for (const path of paths) assert.equal(await can(SELLER, espRouteRight("GET", path)), true, `GET ${path}`);
   assert.equal(await can(SELLER, espRouteRight("GET", "/campaigns/people")), true, "люди кампанії");
 
