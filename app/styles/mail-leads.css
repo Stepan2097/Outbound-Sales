@@ -394,6 +394,7 @@
 .leads-event-line.is-linkedin pre {
   margin: 6px 0 0;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   font: inherit;
   color: var(--muted);
 }
