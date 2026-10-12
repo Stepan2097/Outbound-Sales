@@ -1129,7 +1129,7 @@ async function handleApi(request, response, url) {
         const contactId = decodeURIComponent(contactMatch[1]);
         const contact = await readContact(contactId, { cacheScope, fresh: request.method !== "GET" });
         if (!contact) {
-          sendJson(response, 404, { error: "Контакт не знайдено в CRM." });
+          sendJson(response, 404, { error: "Контакт не знайдено в базі." });
           return;
         }
 
@@ -1241,7 +1241,7 @@ async function handleApi(request, response, url) {
       if (request.method === "POST" && url.pathname === "/api/triage/enrich") {
         const body = await readJson(request);
         const contact = await readContact(cleanText(body.contactId || ""), { cacheScope, fresh: true });
-        if (!contact) { sendJson(response, 404, { error: "Контакт не знайдено в CRM." }); return; }
+        if (!contact) { sendJson(response, 404, { error: "Контакт не знайдено в базі." }); return; }
         const taken = takeCrmContactIntoQueue(contact);
         if (!taken.prospect) { sendJson(response, 400, { error: taken.warning }); return; }
         const prospect = taken.prospect;
@@ -1281,7 +1281,7 @@ async function handleApi(request, response, url) {
       if (request.method === "POST" && url.pathname === "/api/triage/check-emails") {
         const body = await readJson(request);
         const contact = await readContact(cleanText(body.contactId || ""), { cacheScope, fresh: true });
-        if (!contact) { sendJson(response, 404, { error: "Контакт не знайдено в CRM." }); return; }
+        if (!contact) { sendJson(response, 404, { error: "Контакт не знайдено в базі." }); return; }
         const checks = await checkEmailsCached(contactEmails(contact).map((row) => row.address));
         const { patch } = crmPatch(contact, { checks });
         const updated = await writeContactPatch(contact, patch);

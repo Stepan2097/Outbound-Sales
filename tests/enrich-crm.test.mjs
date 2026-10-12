@@ -55,3 +55,9 @@ test("the Leads page and ESP 6 read the mail server's word from the CRM", async 
   assert.equal(lead.verifiedAt, at);
   assert.equal(leadFromContact({ id: "c5", email: "x@y.com" }).verification, "", "not checked — not verified");
 });
+
+test("the company site found by the search goes into the base when the base has none, and never replaces one it has", () => {
+  const found = [{ type: "website", value: "https://apester.com", confidence: 64, source: "public web search" }];
+  assert.equal(crmPatch({ id: "c2", website: "" }, { candidates: found }).patch.website, "https://apester.com");
+  assert.equal(crmPatch({ id: "c3", website: "https://old.example" }, { candidates: found }).patch.website, undefined);
+});

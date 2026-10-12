@@ -11,7 +11,7 @@
 //   an address is verified (esp/crm-leads.mjs);
 // - LinkedIn, the site and a phone go in only from a confident source.
 
-const CONFIDENT = { linkedin: 80, website: 70, phone: 80 };
+const CONFIDENT = { linkedin: 80, website: 60, phone: 80 };
 const FIELD = { linkedin: "linkedin", website: "website", phone: "phone" };
 
 const lower = (value) => String(value ?? "").trim().toLowerCase();

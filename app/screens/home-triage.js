@@ -144,7 +144,7 @@ function fillTexts(item) {
 function foldersHtml() {
   const folders = triage.folders || [];
   return `<div class="triage-toolbar">
-    <label class="triage-field"><span>Папка CRM</span>
+    <label class="triage-field"><span>Папка бази</span>
       <select data-triage="folder">
         <option value="">${folders.length ? "Оберіть папку…" : "Папок немає"}</option>
         ${folders.map((folder) => `<option value="${escapeAttr(folder.id)}" ${folder.id === triage.folderId ? "selected" : ""}>${escapeHtml(folder.name || "без назви")}${Number.isFinite(folder.contactCount) ? ` · ${folder.contactCount}` : ""}</option>`).join("")}
@@ -173,27 +173,47 @@ function crmFieldsHtml(contact) {
     ["Компанія", contact.company], ["Посада", contact.position], ["Країна", contact.country],
     ["Пошта", contact.email], ["Телефон", contact.phone], ["Telegram", contact.telegram],
     ["Статус ліда", contact.lead_status], ["Стадія", contact.lifecycle_stage], ["Категорія", contact.category],
-    ["Додано в CRM", shortDate(contact.created_at)]
+    ["Додано в базу", shortDate(contact.created_at)]
   ].filter(([, value]) => value);
   const link = (url, label) => (url ? `<a href="${escapeAttr(/^https?:/.test(url) ? url : `https://${url}`)}" target="_blank" rel="noopener"><i data-lucide="external-link"></i>${label}</a>` : "");
   return `<dl class="triage-fields">${rows.map(([label, value]) => `<div><dt>${label}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl>
-    <div class="triage-links">${link(contact.linkedin, "LinkedIn")}${link(contact.website, "Сайт")}${link(contact.facebook, "Facebook")}</div>
-    ${contact.description ? `<div class="triage-note"><strong>Нотатка з CRM</strong><p>${escapeHtml(contact.description)}</p></div>` : ""}`;
+    <div class="triage-links">${link(contact.linkedin, "LinkedIn")}${link(contact.website, `Сайт · ${escapeHtml(String(contact.website).replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, ""))}`)}${link(contact.facebook, "Facebook")}</div>
+    ${contact.description ? `<div class="triage-note"><strong>Нотатка з бази</strong><p>${escapeHtml(contact.description)}</p></div>` : ""}`;
 }
 
 const FIELD_WORD = { email: "пошта", emails: "ще одна пошта", linkedin: "LinkedIn", website: "сайт", phone: "телефон" };
 
+const sameValue = (left, right) => {
+  const plain = (value) => {
+    const text = String(value ?? "").trim().toLowerCase().replace(/^https?:\/\/(www\.)?/, "").replace(/\/+$/, "");
+    return /^[+\d\s().-]+$/.test(text) ? text.replace(/[^\d]/g, "") : text;
+  };
+  return plain(left) !== "" && plain(left) === plain(right);
+};
+
+// Whether a found site, phone or profile is in the base now — the owner asked
+// that it go there, and the card says so next to it instead of leaving a guess.
+function foundMark(item) {
+  const field = { website: "website", phone: "phone", linkedin: "linkedin" }[item.type];
+  if (!field) return "";
+  const stored = triage.item?.contact?.[field];
+  if (sameValue(stored, item.value)) return '<span class="triage-check is-ok" title="Записано в базу">✓ у базі</span>';
+  if (stored) return `<span class="triage-muted" title="У базі вже інше значення — його не перезаписано">у базі інше: ${escapeHtml(stored)}</span>`;
+  return '<span class="triage-muted" title="Джерело недостатньо впевнене, щоб записати самому">не записано — перевірте</span>';
+}
+
 function enrichHtml() {
   const enrich = triage.enrich;
   const button = `<button type="button" data-triage="enrich" ${triage.enriching ? "disabled" : ""}><i data-lucide="sparkles"></i><span>${triage.enriching ? "Шукаємо й перевіряємо…" : "Збагатити"}</span></button>`;
-  if (!enrich) return `<div class="triage-enrich">${button}<span class="triage-muted">Знайти пошту, телефон і профілі. Знайдена пошта перевіряється на поштовому сервері; що пройшло — одразу записується в CRM.</span></div>`;
+  if (!enrich) return `<div class="triage-enrich">${button}<span class="triage-muted">Знайти пошту, телефон і профілі. Знайдена пошта перевіряється на поштовому сервері; що пройшло, і знайдений сайт, телефон, профіль — одразу записуються в базу.</span></div>`;
   if (enrich.error) return `<div class="triage-enrich">${button}<p class="esp-notice is-bad">${escapeHtml(enrich.error)}</p></div>`;
   const others = enrich.candidates.filter((item) => ["phone", "linkedin", "telegram", "whatsapp", "website"].includes(item.type));
   return `<div class="triage-enrich">${button}
     ${enrich.added?.length
-      ? `<p class="triage-added"><i data-lucide="database"></i> Додано в CRM: ${enrich.added.map((row) => `${escapeHtml(FIELD_WORD[row.field] || row.field)} <b>${escapeHtml(row.value)}</b>`).join(", ")}</p>`
-      : '<p class="triage-muted">У CRM нічого нового не додано.</p>'}
-    ${others.length ? `<ul class="triage-found">${others.map((item) => `<li><span class="pill tone-muted">${escapeHtml(item.type)}</span> <b>${escapeHtml(item.value)}</b>
+      ? `<p class="triage-added"><i data-lucide="database"></i> Додано в базу: ${enrich.added.map((row) => `${escapeHtml(FIELD_WORD[row.field] || row.field)} <b>${escapeHtml(row.value)}</b>`).join(", ")}</p>`
+      : '<p class="triage-muted">Нового для бази не знайдено — те, що знайшлося, там уже є.</p>'}
+    ${others.length ? `<ul class="triage-found">${others.map((item) => `<li><span class="pill tone-muted">${escapeHtml(FIELD_WORD[item.type] || item.type)}</span> <b>${escapeHtml(item.value)}</b>
+      ${foundMark(item)}
       <span class="triage-muted">${escapeHtml(item.source || "")}${item.confidence != null ? ` · ${escapeHtml(String(item.confidence))}` : ""}</span></li>`).join("")}</ul>` : ""}
     ${enrich.hidden ? `<p class="triage-muted">${enrich.hidden === 1 ? "Ще одну знайдену адресу поштовий сервер не підтвердив — її" : `Ще ${enrich.hidden} знайдені адреси поштові сервери не підтвердили — їх`} не показано й не збережено.</p>` : ""}
   </div>`;
@@ -219,7 +239,7 @@ function linkedinHtml(item) {
     <p class="triage-muted">Повідомлення стане в чергу акаунта й піде в його наступній сесії, у вікні прогріву.</p>` : ""}
     ${!writable.length && friends.length ? '<p class="triage-muted">Через ці акаунти звідси не написати.</p>' : ""}
     ${canInvite ? inviteHtml(accounts) : ""}
-    ${!friends.length && !pending.length && !item.contact.linkedin ? '<p class="triage-muted">У CRM немає посилання на LinkedIn — запит у друзі нікуди надіслати. «Збагатити» може знайти профіль.</p>' : ""}
+    ${!friends.length && !pending.length && !item.contact.linkedin ? '<p class="triage-muted">У базі немає посилання на LinkedIn — запит у друзі нікуди надіслати. «Збагатити» може знайти профіль.</p>' : ""}
   </section>`;
 }
 
@@ -263,7 +283,7 @@ function addressRowHtml(row) {
     <label class="triage-address" title="${escapeAttr(why)}">
       <input type="checkbox" data-triage-address="${escapeAttr(row.address)}" ${triage.selected.has(row.address) ? "checked" : ""} ${ok && !row.written ? "" : "disabled"} />
       ${mark}<b>${escapeHtml(row.address)}</b>
-      <span class="triage-muted">${row.source === "found" ? "знайдено збагаченням" : "з CRM"}</span>${sentLine}
+      <span class="triage-muted">${row.source === "found" ? "знайдено збагаченням" : "з бази"}</span>${sentLine}
     </label>
   </li>`;
 }
@@ -279,7 +299,7 @@ function emailHtml(item) {
     ${list.length
       ? `<ul class="triage-addresses">${list.map(addressRowHtml).join("")}</ul>
          ${list.length > 1 ? '<p class="triage-muted">Позначте, на які адреси писати. Усі листи підуть з однієї скриньки — вибраної нижче.</p>' : ""}`
-      : '<ul class="triage-status"><li><i data-lucide="mail-x"></i> Адреси в CRM немає — «Збагатити» може знайти й перевірити</li></ul>'}
+      : '<ul class="triage-status"><li><i data-lucide="mail-x"></i> Адреси в базі немає — «Збагатити» може знайти й перевірити</li></ul>'}
     <input data-triage-text="subject" placeholder="Тема" value="${escapeAttr(triage.texts.subject)}" />
     <textarea data-triage-text="body" rows="8" placeholder="${triage.drafting ? "Модель пише текст…" : "Текст листа. Лише простий текст; підпис і відписка додаються самі."}">${escapeHtml(triage.texts.body)}</textarea>
     <div class="triage-actions">
@@ -319,7 +339,7 @@ export function renderTriage() {
   if (!root) return;
   const item = triage.item;
   let body;
-  if (!triage.folderId) body = '<div class="triage-empty"><i data-lucide="folder-open"></i><strong>Оберіть папку CRM</strong><p>Далі — людина за людиною: спершу ті, хто вже в друзях наших LinkedIn-акаунтів, потім решта папки. Лише ті, кому ще ніхто не писав.</p></div>';
+  if (!triage.folderId) body = '<div class="triage-empty"><i data-lucide="folder-open"></i><strong>Оберіть папку бази</strong><p>Далі — людина за людиною: спершу ті, хто вже в друзях наших LinkedIn-акаунтів, потім решта папки. Лише ті, кому ще ніхто не писав.</p></div>';
   else if (triage.loading && !item) body = '<div class="empty-state">Шукаємо наступну людину…</div>';
   else if (triage.error) body = `<p class="esp-notice is-bad">${escapeHtml(triage.error)}</p>`;
   else if (item?.done || !item?.contact) body = '<div class="triage-empty"><i data-lucide="party-popper"></i><strong>У цій папці всіх уже опрацьовано</strong><p>Кожному або вже писали, або його позначено невалідним. Пропущені сьогодні повернуться після перезавантаження.</p><button type="button" data-triage="restart">Почати папку спочатку</button></div>';
