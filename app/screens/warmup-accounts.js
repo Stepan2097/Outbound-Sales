@@ -94,7 +94,11 @@ function resetWarmupScreen() {
   Object.assign(warmupState, JSON.parse(WARMUP_INITIAL));
   // The shell can become visible before new reads settle. Erase old account
   // names and campaign text now, while the previous session is being closed.
-  for (const id of ["warmupCampaignPanel", "warmupProfileTableBody", "warmupDetailBody", "warmupDetailSubtitle", "warmupSummary", "warmupConfigNote"]) {
+  // The campaign panel's own markup (and the listeners bound to it) is built
+  // once by warmup-campaign.js: only the parts that carry another person's data
+  // are cleared. Clearing the whole panel left an empty frame for the rest of
+  // the session (12.10, the owner: «тут немає блоку»).
+  for (const id of ["warmupCampaignList", "warmupCampaignDetail", "warmupCampaignFormNote", "warmupProfileTableBody", "warmupDetailBody", "warmupDetailSubtitle", "warmupSummary", "warmupConfigNote"]) {
     const element = document.getElementById(id);
     if (element) element.textContent = "";
   }

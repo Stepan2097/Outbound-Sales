@@ -102,16 +102,16 @@ const tick = () => new Promise((resolve) => setImmediate(resolve));
 
 // ── що видно ──────────────────────────────────────────────────────────────
 
-test("конвеєр: п'ять кроків від черги до відповіді, з числами й тим, що сталося сьогодні", () => {
+test("конвеєр: п'ять кроків від черги до відповіді, з числами й тим, що сталося сьогодні — у «Прогріві», не на головній", () => {
   const view = screen({ data: payload() });
   view.get("renderHome")();
-  const html = view.root.innerHTML;
+  assert.doesNotMatch(view.root.innerHTML, /home-step-label/, "12.10: конвеєр переїхав у «Прогрів»");
+  const html = view.get("homeFunnelHtml")(payload());
   const steps = [...html.matchAll(/home-step-label">([^<]+)<\/span>\s*<strong class="home-step-value">([^<]+)</g)].map((match) => `${match[1]} ${match[2]}`);
   assert.deepEqual(steps, ["У черзі 40", "Запрошено 120", "Прийняли 30", "Ми написали 12", "Відповіли 6"]);
   assert.match(html, /\+9 сьогодні/);
   assert.match(html, /25% запрошених/);
   assert.match(html, /\+2 сьогодні/);
-  assert.match(html, /Сьогодні: 9 запрошень, 2 відповідей/);
 });
 
 test("що потребує людини — над усім, з ходом у «Прогрів»; людей, відповіді й акаунти видно", () => {

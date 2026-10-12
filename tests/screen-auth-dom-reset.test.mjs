@@ -28,9 +28,12 @@ test("auth reset erases Home and Warmup rendered content synchronously, before n
   for (const reset of resets) reset();
   assert.equal(main.get("homeState").data, null);
   assert.equal(main.get("warmupState").profiles.length, 0);
-  for (const id of ["homeRoot", "warmupCampaignPanel", "warmupProfileTableBody", "warmupDetailBody", "warmupDetailSubtitle", "warmupSummary", "warmupConfigNote"]) {
+  // The campaign panel keeps its markup and listeners; what carried the last
+  // person's campaigns is cleared (12.10: an empty frame stayed for the session).
+  for (const id of ["homeRoot", "warmupCampaignList", "warmupCampaignDetail", "warmupProfileTableBody", "warmupDetailBody", "warmupDetailSubtitle", "warmupSummary", "warmupConfigNote"]) {
     assert.equal(getElementById(id).innerHTML, "", id);
   }
+  assert.equal(getElementById("warmupCampaignPanel").innerHTML === "", false, "the panel itself is not wiped");
   assert.equal(getElementById("warmupDetailPanel").hidden, true);
   assert.equal(getElementById("warmupDetailTitle").textContent, "Акаунт");
 });

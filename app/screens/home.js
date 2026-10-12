@@ -251,7 +251,7 @@ const HOME_STEPS = [
   { key: "replied", label: "Відповіли", hint: "написали у відповідь" }
 ];
 
-function homeFunnelHtml(data) {
+export function homeFunnelHtml(data) {
   const funnel = data.funnel || {};
   const today = data.today || {};
   const extra = {
@@ -451,21 +451,20 @@ export function renderHome() {
     root.innerHTML = `<div class="home-empty is-bad"><strong>${escapeHtml(homeState.error || "Головну не вдалося прочитати.")}</strong></div>`;
     return;
   }
-  const subtitle = data.today
-    ? `Сьогодні: ${warmupCount(data.today.invited || 0)} запрошень, ${warmupCount(data.today.replied || 0)} відповідей`
-    : "";
+  // «Як іде розсилка» — конвеєр LinkedIn — живе в «Прогріві» (12.10, власник:
+  // «це перенести в розділ прогрів лінкедін»); тут лишається те, що просить людину.
+  const attention = homeAttentionHtml(data);
   root.innerHTML = `
     ${homeState.error ? `<div class="home-stale">${escapeHtml(homeState.error)} Показано останнє, що було.</div>` : ""}
     <section class="panel home-panel">
       <div class="panel-heading">
         <div>
-          <h2>Як іде розсилка</h2>
-          <p>${escapeHtml(subtitle)}</p>
+          <h2>Що потребує уваги</h2>
+          ${attention ? "" : "<p>Нічого — усе йде саме.</p>"}
         </div>
         <button class="text-button" type="button" id="homeRefreshBtn"><i data-lucide="refresh-cw"></i><span>Оновити</span></button>
       </div>
-      ${homeFunnelHtml(data)}
-      ${homeAttentionHtml(data)}
+      ${attention}
     </section>
     <section class="panel home-panel home-write">${homeWriteHtml(data)}</section>
     <div class="home-columns">
