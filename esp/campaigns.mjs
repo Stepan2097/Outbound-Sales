@@ -146,7 +146,7 @@ export function campaignStore({ read, write, readEnrollments, writeEnrollments, 
      * and is filled step by step; what a running campaign needs (a letter, a
      * mailbox) is asked for when it is started, not when it is named.
      */
-    async create({ name, steps = [], senders = [], spinMode = "all" }) {
+    async create({ name, steps = [], senders = [], spinMode = "all", createdBy = "" }) {
       const title = String(name ?? "").trim().slice(0, 120);
       if (!title) throw new CampaignError("Дайте кампанії назву.", { code: "no_name" });
       const at = now().toISOString();
@@ -155,6 +155,8 @@ export function campaignStore({ read, write, readEnrollments, writeEnrollments, 
         steps: cleanSteps(steps, templates(), { allowEmpty: true }), senders: cleanSenders(senders, { allowEmpty: true }),
         // ESP 12: spintax for everybody, for half (A/B against the base text), or for nobody.
         spinMode: SPIN_MODES.includes(spinMode) ? spinMode : "all",
+        // Whose campaign it is — the team's list says it, as Snov's «Owner» does.
+        createdBy: String(createdBy || "").trim().toLowerCase().slice(0, 200),
         createdAt: at, updatedAt: at
       };
       await write([...list(), campaign]);

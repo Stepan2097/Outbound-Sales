@@ -170,10 +170,14 @@ export function renderTemplate(template, lead, sender = {}) {
   const subject = fill(template.subject);
   const body = fill(template.body);
   if (missing.size) {
+    // The letter as it would read, each empty variable left in place between
+    // ⟦ ⟧ — for a preview that shows where the hole is, not only that there is one.
+    const mark = (text) => String(text).replace(VARIABLE, (whole, name, fallback) => values[name] || (fallback !== undefined && fallback.trim()) || `⟦${name}⟧`);
     return {
       ok: false,
       reason: "empty_variable",
       variables: [...missing],
+      draft: { subject: mark(template.subject), body: mark(template.body) },
       message: `Пропущено: у ліда порожнє ${[...missing].map((name) => `{{${name}}}`).join(", ")}, а нейтральної заміни в шаблоні немає.`
     };
   }

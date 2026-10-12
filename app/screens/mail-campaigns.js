@@ -9,7 +9,7 @@
 // /limits, /alerts, /halt. Звідси лист нікому не йде: відправку веде
 // ланцюжок на сервері, і лише після приймання ESP 11.
 
-import { api, escapeAttr, escapeHtml, onScreen, refreshIcons } from "../core.js";
+import { api, authState, escapeAttr, escapeHtml, onScreen, refreshIcons } from "../core.js";
 
 onScreen("campaigns", { open: () => void openCampaignsPage() });
 
@@ -70,6 +70,7 @@ export async function loadCampaignsPage() {
     page.campaigns = campaigns.campaigns || [];
     page.halt = halt.halt;
     page.sequenceOn = Boolean(halt.sequenceOn);
+    page.liveSend = Boolean(halt.liveSend);
     page.templates = templates.templates || [];
     page.variables = templates.variables || [];
     page.signature = templates.signature || null;
@@ -184,6 +185,7 @@ function campaignRowHtml(campaign) {
       </div>
     </td>
     <td><span class="pill ${STATE_TONE[campaign.state]}">${STATE_LABEL[campaign.state]}</span></td>
+    <td class="mc-owner" title="${escapeAttr(campaign.owner || "")}">${campaign.owner ? `<i data-lucide="user"></i>${escapeHtml(campaign.owner.split("@")[0])}` : '<span class="mc-subtle">—</span>'}</td>
     <td class="mc-num">${stat(campaign.sent)}</td>
     <td class="mc-num">${stat(campaign.replied, campaign.sent)}</td>
     <td class="mc-num">${stat(campaign.bounced, campaign.sent)}</td>
@@ -212,7 +214,7 @@ function campaignsTableHtml() {
   return `<div class="table-wrap mc-table-wrap"><table class="mc-table">
     <thead><tr>
       <th class="mc-check"><input type="checkbox" data-mc="select-all" ${all ? "checked" : ""} aria-label="Вибрати всі" /></th>
-      <th>Кампанія</th><th>Стан</th><th>Надіслано</th><th>Відповіді</th><th>Bounce</th><th>Відписки</th><th></th>
+      <th>Кампанія</th><th>Стан</th><th>Власник</th><th>Надіслано</th><th>Відповіді</th><th>Bounce</th><th>Відписки</th><th></th>
     </tr></thead>
     <tbody>${rows.map(campaignRowHtml).join("")}</tbody>
   </table></div>
@@ -521,8 +523,23 @@ function planHtml() {
   </div>`;
 }
 
+/** A draft with each empty variable marked: the letter, and where it has a hole. */
+function markedHtml(text) {
+  return escapeHtml(text).replace(/⟦([a-z_]+)⟧/g, '<mark class="mc-hole" title="У цієї людини порожньо, заміни в шаблоні немає">{{$1}}</mark>');
+}
+
+function holeWarning(preview) {
+  const names = (preview.variables || []).map((name) => `{{${name}}}`).join(", ");
+  return `<p class="esp-notice is-warn"><i data-lucide="triangle-alert"></i> Цій людині лист не піде: порожнє ${escapeHtml(names)}. Додайте заміну — <code>{{${escapeHtml(preview.variables?.[0] || "first_name")}|…}}</code> — або дані людині.</p>`;
+}
+
 function previewHtml(index, preview, sample) {
   if (!preview) return `<article class="mc-letter is-pending"><span class="mc-node-badge is-blue"><i data-lucide="mail"></i>Лист ${index + 1}</span><span class="mc-subtle">Натисніть «Показати».</span></article>`;
+  if (!preview.ok && preview.draft) {
+    return `<article class="mc-letter"><span class="mc-node-badge is-blue"><i data-lucide="mail"></i>Лист ${index + 1}</span>${holeWarning(preview)}
+      <dl class="mc-letter-head"><div><dt>Кому</dt><dd>${escapeHtml(sample?.email || sampleLead().email)}</dd></div><div><dt>Тема</dt><dd>${markedHtml(index ? `Re: ${preview.draft.subject}` : preview.draft.subject)}</dd></div></dl>
+      <pre>${markedHtml(preview.draft.body)}</pre></article>`;
+  }
   if (!preview.ok) return `<article class="mc-letter"><span class="mc-node-badge is-blue"><i data-lucide="mail"></i>Лист ${index + 1}</span><p class="esp-notice is-bad">${escapeHtml(preview.error || "Цій людині лист не піде.")}</p></article>`;
   return `<article class="mc-letter">
     <span class="mc-node-badge is-blue"><i data-lucide="mail"></i>Лист ${index + 1}</span>
@@ -596,13 +613,17 @@ function editorHtml() {
         <textarea data-mc-editor="body" placeholder="Напишіть або вставте текст листа. Форматування з Google Docs знімається при збереженні.">${escapeHtml(editor.body)}</textarea>
       </div>
       ${editor.notice ? `<p class="esp-notice ${editor.tone}">${escapeHtml(editor.notice)}</p>` : ""}
+      ${page.liveSend ? "" : '<p class="mc-subtle mc-test-note"><i data-lucide="lock"></i> «Надіслати тест собі» неактивна: справжню відправку ще не ввімкнено (ESP_LIVE_SEND, після приймання ESP 11). Поки — «Переглянути й перевірити»: лист такий, як піде.</p>'}
       ${preview ? `<div class="mc-editor-preview">${preview.ok
         ? `<dl class="mc-letter-head"><div><dt>Кому</dt><dd>${escapeHtml(preview.to)}</dd></div><div><dt>Тема</dt><dd>${escapeHtml(preview.subject)}</dd></div></dl><pre>${escapeHtml(preview.text)}</pre><small class="mc-subtle">${escapeHtml(preview.contentType)} · ${preview.bytes} байт · з підписом і відпискою, як піде · нічого не надіслано</small>`
-        : `<p class="esp-notice is-bad">${escapeHtml(preview.error || "Такий лист не піде.")}</p>`}</div>` : ""}
+        : preview.draft
+          ? `${holeWarning(preview)}<dl class="mc-letter-head"><div><dt>Кому</dt><dd>${escapeHtml(preview.to)}</dd></div><div><dt>Тема</dt><dd>${markedHtml(editor.followUp ? `Re: ${preview.draft.subject}` : preview.draft.subject)}</dd></div></dl><pre>${markedHtml(preview.draft.body)}</pre>`
+          : `<p class="esp-notice is-bad">${escapeHtml(preview.error || "Такий лист не піде.")}</p>`}</div>` : ""}
       <footer>
         <button type="button" class="primary-button" data-mc="editor-save" ${editor.busy ? "disabled" : ""}><i data-lucide="save"></i><span>${editor.busy ? "Зберігаємо..." : "Зберегти"}</span></button>
         <div class="mc-toolbar-spacer"></div>
         <button type="button" data-mc="editor-preview" ${editor.busy ? "disabled" : ""}><i data-lucide="eye"></i><span>Переглянути й перевірити</span></button>
+        <button type="button" data-mc="editor-test" ${editor.busy || !page.liveSend ? "disabled" : ""} title="${escapeAttr(page.liveSend ? `Лист піде вам на ${myEmail()} з ${sampleMailbox()}, через ті самі перевірки, що й справжні` : "Справжню відправку ще не ввімкнено (ESP_LIVE_SEND, після приймання ESP 11) — тест на вашу скриньку з'явиться разом із нею")}"><i data-lucide="send"></i><span>Надіслати тест собі</span></button>
         ${editor.library ? "" : `<button type="button" data-mc="editor-save-template" ${editor.busy ? "disabled" : ""}><i data-lucide="bookmark-plus"></i><span>Зберегти як шаблон</span></button>`}
       </footer>
     </section>`;
@@ -711,6 +732,27 @@ async function previewEditor() {
   } catch (error) {
     editor.preview = { ok: false, error: error.message };
   }
+  renderCampaignsPage();
+}
+
+function myEmail() {
+  return authState?.user?.email || "вашу скриньку";
+}
+
+async function sendTest() {
+  readEditor();
+  const editor = page.editor;
+  editor.busy = true;
+  renderCampaignsPage();
+  try {
+    const answer = await api("/api/esp/test-send", { method: "POST", body: JSON.stringify({ subject: editor.subject, body: editor.body, lead: sampleLead(), mailbox: sampleMailbox() }) });
+    editor.notice = answer.ok ? `Тест надіслано на ${answer.to} з ${answer.mailbox}.` : answer.error || "Тест не пішов.";
+    editor.tone = answer.ok ? "is-ok" : "is-bad";
+  } catch (error) {
+    editor.notice = error.message || "Тест не пішов.";
+    editor.tone = "is-bad";
+  }
+  editor.busy = false;
   renderCampaignsPage();
 }
 
@@ -878,6 +920,7 @@ function onClick(event) {
     case "editor-save": return saveEditor();
     case "editor-save-template": return saveEditor({ asTemplate: true });
     case "editor-preview": return previewEditor();
+    case "editor-test": return sendTest();
     case "preview-all": return previewAll();
     case "plan":
       return act(async () => { page.plan = await api("/api/esp/campaigns/plan").catch((error) => ({ error: error.message })); }, { reload: false });

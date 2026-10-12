@@ -1332,3 +1332,39 @@ div.mc-subject {
   min-height: 44px;
   flex-wrap: wrap;
 }
+
+/* Коло 2: власник у списку, порожня змінна в перегляді, тест собі. */
+.mc-owner {
+  white-space: nowrap;
+}
+
+.mc-owner svg {
+  width: 14px;
+  height: 14px;
+  margin-right: 4px;
+  color: var(--muted);
+  vertical-align: -2px;
+}
+
+.mc-hole {
+  padding: 0 3px;
+  border-radius: 4px;
+  background: rgba(224, 178, 94, 0.28);
+  color: var(--amber);
+  font-weight: 700;
+}
+
+.esp-notice.is-warn {
+  color: var(--amber);
+}
+
+.esp-notice.is-warn svg,
+.mc-test-note svg {
+  width: 14px;
+  height: 14px;
+  vertical-align: -2px;
+}
+
+.mc-test-note {
+  margin: 0;
+}

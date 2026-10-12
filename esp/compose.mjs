@@ -32,7 +32,7 @@ export function composeLetter({ template, sender, lead, previous = null, unsubsc
     const subjectSpun = spin(template.subject, { seed, field: "subject", plain: group === "plain" });
     const bodySpun = spin(template.body, { seed, field: "body", plain: group === "plain" });
     const rendered = renderTemplate({ ...template, subject: subjectSpun.text, body: bodySpun.text }, lead, sender);
-    if (!rendered.ok) return { ok: false, reason: rendered.reason, variables: rendered.variables, message: rendered.message };
+    if (!rendered.ok) return { ok: false, reason: rendered.reason, variables: rendered.variables, message: rendered.message, draft: rendered.draft };
 
     const thread = previous ? followUpOf(previous, sender.email) : null;
     // A follow-up's subject is the thread's, whatever its template says; a

@@ -16,10 +16,10 @@ import { REPLY_LABELS } from "./replies.mjs";
 import { LeadError, leadPage } from "./leads.mjs";
 import { UNIBOX_FOLDERS, uniboxList, uniboxProblems, uniboxThread } from "./unibox.mjs";
 import { recordAboutContact, recordFailed, recordSending, recordSent } from "./messages.mjs";
-import { allEntries, append } from "./journal.mjs";
+import { allEntries, append, contactKey } from "./journal.mjs";
 import { applyRampReviews, reviewRamp } from "./ramp.mjs";
 import { DOMAIN_DAILY_LIMIT, GAP_MINUTES, WINDOW, sendLedger, senderDailyLimit } from "./limits.mjs";
-import { registry, updateSender } from "./registry.mjs";
+import { canSend, registry, updateSender } from "./registry.mjs";
 import { LetterError, assertPlainLetter } from "./letter.mjs";
 import { TEMPLATE_VARIABLES, TemplateError, prepareTemplate } from "./template.mjs";
 import { DEFAULT_SIGNATURE, prepareSignature } from "./templates.mjs";
@@ -48,6 +48,8 @@ export function espRouteRight(method, path) {
   // ESP 17: what we hold about a person is the journal's to read; forgetting
   // them for good is an administrator's alone.
   if (path === "/people/export") return "journal.read";
+  // ESP-UI 3: a test letter to oneself is part of writing one.
+  if (path === "/test-send") return "templates.edit";
   if (path === "/people/erase") return "access.manage";
   // ESP 8: running the alarm check now.
   if (path === "/alerts/check") return "limits.change";
@@ -197,7 +199,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
 
   // ── ESP 5: «стоп усе», campaigns, their people, and what goes now ───────
   if (method === "GET" && path === "/halt") {
-    sendJson(response, 200, { success: true, halt: esp.halt.read(), sequenceOn: Boolean(esp.sequenceOn) });
+    sendJson(response, 200, { success: true, halt: esp.halt.read(), sequenceOn: Boolean(esp.sequenceOn), liveSend: Boolean(esp.connector?.liveSend) });
     return true;
   }
 
@@ -218,7 +220,12 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
 
   if (method === "GET" && path === "/campaigns") {
     const entries = await allEntries();
-    sendJson(response, 200, { success: true, campaigns: esp.campaigns.list().map((campaign) => campaignSummary(campaign, esp.campaigns.enrollmentsOf(campaign.id), entries)) });
+    // A campaign made before it kept its author: the administrators' log knows who created it.
+    const authors = new Map(entries.filter((entry) => entry.type === "admin.campaign_created" && entry.data?.id).map((entry) => [entry.data.id, entry.actor]));
+    sendJson(response, 200, { success: true, campaigns: esp.campaigns.list().map((campaign) => ({
+      ...campaignSummary(campaign, esp.campaigns.enrollmentsOf(campaign.id), entries),
+      owner: campaign.createdBy || authors.get(campaign.id) || ""
+    })) });
     return true;
   }
 
@@ -226,7 +233,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
     const body = await readJson(request);
     if (!body) return badRequest(sendJson, response, "Некоректне тіло JSON");
     try {
-      const campaign = method === "POST" ? await esp.campaigns.create(body) : await esp.campaigns.update(String(body.id || ""), body);
+      const campaign = method === "POST" ? await esp.campaigns.create({ ...body, createdBy: actor }) : await esp.campaigns.update(String(body.id || ""), body);
       await logged(method === "POST" ? "campaign_created" : "campaign_updated", { id: campaign?.id ?? null, name: campaign?.name ?? null });
       sendJson(response, method === "POST" ? 201 : 200, { success: true, campaign });
     } catch (error) {
@@ -717,7 +724,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
       // with its unsubscribe headers — and not sent.
       const letter = composeLetter({ template, sender, lead, unsubscribe: esp.unsubscribe });
       if (!letter.ok) {
-        sendJson(response, 200, { success: true, ok: false, reason: letter.reason, variables: letter.variables, error: letter.message });
+        sendJson(response, 200, { success: true, ok: false, reason: letter.reason, variables: letter.variables, draft: letter.draft || null, error: letter.message });
         return true;
       }
       assertPlainLetter(letter.raw);
@@ -740,6 +747,45 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
     } catch (error) {
       if (!(error instanceof TemplateError) && !(error instanceof LetterError)) throw error;
       sendJson(response, 200, { success: true, ok: false, reason: error.code, error: error.message });
+    }
+    return true;
+  }
+
+  /**
+   * ESP-UI 3: the letter in the editor, to the person's own mailbox, through
+   * the same gate every letter goes through — «Стоп усе», a paused mailbox,
+   * plain text. Until real sending is switched on (ESP_LIVE_SEND, after the
+   * ESP 11 acceptance) nothing leaves, and the answer says so.
+   */
+  if (method === "POST" && path === "/test-send") {
+    const body = await readJson(request);
+    if (!body) return badRequest(sendJson, response, "Некоректне тіло JSON");
+    const to = contactKey(profile?.email);
+    if (!to) return badRequest(sendJson, response, "У вашого акаунта немає адреси пошти — тест нікуди надіслати.");
+    if (!esp.connector?.liveSend) {
+      sendJson(response, 409, { success: false, code: "sending_locked", error: "Справжню відправку ще не ввімкнено (ESP_LIVE_SEND, після приймання ESP 11) — тест на вашу скриньку піде, щойно її ввімкнуть." });
+      return true;
+    }
+    const mailbox = contactKey(body.mailbox);
+    const allowed = mailbox ? await canSend(mailbox) : { ok: false, reason: "Оберіть скриньку, з якої піде тест." };
+    if (!allowed.ok) {
+      sendJson(response, 409, { success: false, code: "sender_unavailable", error: allowed.reason });
+      return true;
+    }
+    try {
+      const template = prepareTemplate({ subject: body.subject, body: body.body });
+      const sender = { ...DEFAULT_SIGNATURE, ...(esp.signature.read() || {}), email: mailbox };
+      const letter = composeLetter({ template, sender, lead: { ...(body.lead || {}), email: to }, unsubscribe: esp.unsubscribe });
+      if (!letter.ok) {
+        sendJson(response, 200, { success: true, ok: false, reason: letter.reason, error: letter.message });
+        return true;
+      }
+      const sent = await esp.gate.send(mailbox, letter.raw);
+      await logged("test_letter_sent", { mailbox, to, messageId: String(sent?.id || "") });
+      sendJson(response, 200, { success: true, ok: true, to, mailbox });
+    } catch (error) {
+      if (!(error instanceof TemplateError) && !(error instanceof LetterError) && !(error instanceof MailboxError) && !error?.code) throw error;
+      sendJson(response, 409, { success: false, code: error.code || "refused", error: error.message });
     }
     return true;
   }
