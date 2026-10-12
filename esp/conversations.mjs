@@ -22,7 +22,7 @@ import { replySubject } from "./thread.mjs";
 
 const INBOUND = new Set(["message.replied", "message.autoreplied", "message.bounced", "contact.unsubscribed"]);
 
-export function conversations(entries) {
+export function conversations(entries, { all = false } = {}) {
   const sendings = new Map();
   for (const entry of entries) if (entry.type === "message.sending") sendings.set(entry.seq, entry);
   const labels = currentLabels(entries);
@@ -55,7 +55,8 @@ export function conversations(entries) {
     }
   }
   for (const row of threads.values()) row.lastAt = row.messages.at(-1)?.at || null;
-  return [...threads.values()].filter((row) => row.inbound > 0).sort((a, b) => String(b.lastAt).localeCompare(String(a.lastAt)));
+  // `all`: the threads nobody answered too — the Unibox «Надіслані» folder.
+  return [...threads.values()].filter((row) => all || row.inbound > 0).sort((a, b) => String(b.lastAt).localeCompare(String(a.lastAt)));
 }
 
 export class ReplyError extends Error {

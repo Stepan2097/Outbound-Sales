@@ -13,6 +13,7 @@ import { CampaignError, parseLeadLines } from "./campaigns.mjs";
 import { composeLetter } from "./compose.mjs";
 import { ReplyError, conversations, quickReply } from "./conversations.mjs";
 import { REPLY_LABELS } from "./replies.mjs";
+import { UNIBOX_FOLDERS, uniboxList, uniboxProblems, uniboxThread } from "./unibox.mjs";
 import { recordFailed, recordSending, recordSent } from "./messages.mjs";
 import { allEntries, append } from "./journal.mjs";
 import { applyRampReviews, reviewRamp } from "./ramp.mjs";
@@ -34,6 +35,10 @@ export function espRouteRight(method, path) {
   if (path === "/limits" || path === "/ramp" || (method === "GET" && (path.startsWith("/campaigns") || path === "/inbox" || path === "/alerts" || path === "/conversations"))) return "replies.read";
   // ESP 14: answering a lead and correcting a reply's label are the inbox's work.
   if (path === "/conversations/reply" || path === "/conversations/label") return "replies.write";
+  // ESP-UI 4, Unibox: reading and marking a conversation read are the inbox's
+  // reading; a star is the inbox's work, as a reply or a label is.
+  if (path === "/unibox" || path === "/unibox/thread" || path === "/unibox/read") return "replies.read";
+  if (path === "/unibox/star") return "replies.write";
   // ESP 17: what we hold about a person is the journal's to read; forgetting
   // them for good is an administrator's alone.
   if (path === "/people/export") return "journal.read";
@@ -298,6 +303,45 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
       mode: esp.connector?.describe().mode || "stub",
       replyOnStub: Boolean(esp.sequenceOn)
     });
+    return true;
+  }
+
+  // ── ESP-UI 4: the Unibox — folders, pages, stars, read ─────────────────
+  if (method === "GET" && (path === "/unibox" || path === "/unibox/thread")) {
+    const entries = await allEntries();
+    const leads = new Map((esp.campaigns?.enrollments() || []).map((row) => [row.email, row.lead || {}]));
+    const campaigns = new Map((esp.campaigns?.list() || []).map((row) => [row.id, row.name]));
+    if (path === "/unibox/thread") {
+      const thread = uniboxThread(entries, String(url.searchParams.get("key") || ""), { leads, campaigns });
+      if (!thread) { sendJson(response, 404, { success: false, error: "Такої розмови немає." }); return true; }
+      sendJson(response, 200, { success: true, thread, labels: REPLY_LABELS, liveSend: Boolean(esp.connector?.describe().liveSend), mode: esp.connector?.describe().mode || "stub", replyOnStub: Boolean(esp.sequenceOn) });
+      return true;
+    }
+    const params = Object.fromEntries(["folder", "label", "campaign", "sender", "q", "offset", "limit"].map((name) => [name, url.searchParams.get(name) || ""]));
+    const list = uniboxList(entries, { ...params, sender: params.sender.toLowerCase(), leads, campaigns });
+    const { senders } = await registry();
+    sendJson(response, 200, {
+      success: true, ...list, folders: UNIBOX_FOLDERS, labels: REPLY_LABELS,
+      problems: uniboxProblems({ mode: esp.connector?.describe().mode || "stub", polling: Boolean(esp.sequenceOn), senders })
+    });
+    return true;
+  }
+
+  if (method === "POST" && (path === "/unibox/star" || path === "/unibox/read")) {
+    const body = await readJson(request);
+    const keys = [...new Set((Array.isArray(body?.keys) ? body.keys : [body?.key]).map((key) => String(key || "")).filter(Boolean))].slice(0, 100);
+    if (!keys.length) return badRequest(sendJson, response, "Яка розмова?");
+    const known = new Set(conversations(await allEntries(), { all: true }).map((row) => row.key));
+    const real = keys.filter((key) => known.has(key));
+    if (!real.length) { sendJson(response, 404, { success: false, error: "Такої розмови немає." }); return true; }
+    for (const key of real) {
+      await append(path === "/unibox/star"
+        // `contact` too: the key carries the person's address, and ESP 17's
+        // erasure finds a person's lines by it.
+        ? { type: "conversation.starred", actor, contact: key.split("|")[1], data: { key, on: body?.on !== false } }
+        : { type: "conversation.read", actor, contact: key.split("|")[1], data: { key } });
+    }
+    sendJson(response, 200, { success: true, keys: real });
     return true;
   }
 

@@ -12,5 +12,5 @@ import "./esp-filters.js";
 import "./esp-privacy.js";
 import "./mail-campaigns.js";
 import "./esp-inbox.js";
-import "./esp-conversations.js";
+import "./mail-inbox.js";
 import "./esp-reports.js";

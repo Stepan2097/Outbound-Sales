@@ -15,6 +15,8 @@
     <link rel="stylesheet" href="/styles/esp.css" />
     <link rel="stylesheet" href="/styles/esp-registry.css" />
     <link rel="stylesheet" href="/styles/mail-campaigns.css" />
+    <link rel="stylesheet" href="/styles/mail.css" />
+    <link rel="stylesheet" href="/styles/mail-inbox.css" />
     <script defer src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
     <script defer type="module" src="/main.js"></script>
   </head>
@@ -186,7 +188,16 @@
         </section>
 
         <section class="view" id="view-inbox">
-          <div class="warmup-layout">
+          <!-- Вхідні = Unibox (ESP-UI 4, як екран Snov 02): ліва колонка — папки
+               холодної пошти й LinkedIn. Пошту малює app/screens/mail-inbox.js;
+               LinkedIn — app/screens/inbox.js у своїй панелі нижче. -->
+          <div class="mail-page unibox" id="unibox">
+            <div class="mail-toolbar" id="uniboxToolbar"></div>
+            <div class="mail-body">
+              <nav class="mail-side" id="uniboxSide" aria-label="Папки"></nav>
+              <div class="unibox-main">
+                <div id="uniboxMail"></div>
+                <div class="warmup-layout" id="uniboxLinkedin" hidden>
             <section class="panel warmup-inbox-panel span-2">
               <div class="panel-heading">
                 <div>
@@ -221,16 +232,9 @@
                 </div>
               </div>
             </section>
-            <!-- ESP 14: спільна вхідна холодної пошти; малює app/screens/esp-conversations.js. -->
-            <section class="panel esp-conversations-panel span-2" id="espConversationsPanel" hidden>
-              <div class="panel-heading">
-                <div>
-                  <h2>Пошта (холодні листи)</h2>
-                  <p>Усі відповіді на холодні листи в одному місці — з міткою й відповіддю від тієї ж скриньки.</p>
                 </div>
               </div>
-              <div id="espConversationsBody"></div>
-            </section>
+            </div>
           </div>
         </section>
 
