@@ -38,9 +38,9 @@ function sources(dir = APP.pathname) {
   });
 }
 
-const SCREENS = [["home", "Головна"], ["warmup", "Прогрів"], ["email", "Листи"], ["inbox", "Вхідні"], ["contacts", "Контакти"], ["account", "Налаштування"]];
+const SCREENS = [["home", "Головна"], ["warmup", "Прогрів"], ["campaigns", "Кампанії"], ["inbox", "Вхідні"], ["contacts", "Контакти"], ["account", "Налаштування"]];
 
-const REMOVED_VIEWS = ["prospects", "ai", "products", "overview", "models", "routing", "budgets", "privacy", "evaluation"];
+const REMOVED_VIEWS = ["email", "prospects", "ai", "products", "overview", "models", "routing", "budgets", "privacy", "evaluation"];
 
 // One function or element per removed screen is enough to notice it coming
 // back; these are the ones a merge would carry along with it.

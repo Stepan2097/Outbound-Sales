@@ -9,7 +9,7 @@
 
 import { api, escapeAttr, escapeHtml, onScreen, refreshIcons, setHtml } from "../core.js";
 
-onScreen("email", { open: () => void loadEspTemplates() });
+onScreen("campaigns", { open: () => void loadEspTemplates() });
 
 const REMOVED_LABEL = {
   html: "HTML-теги",
@@ -224,7 +224,7 @@ async function previewEspTemplate() {
   renderEspTemplates();
 }
 
-document.getElementById("view-email")?.addEventListener("click", async (event) => {
+document.getElementById("view-campaigns")?.addEventListener("click", async (event) => {
   const row = event.target.closest("[data-esp-template]");
   if (row) return openEspTemplate(row.dataset.espTemplate);
   if (event.target.closest("#espTemplateNew")) return openEspTemplate(null);
@@ -236,11 +236,11 @@ document.getElementById("view-email")?.addEventListener("click", async (event) =
   }
 });
 
-document.getElementById("view-email")?.addEventListener("focusin", (event) => {
+document.getElementById("view-campaigns")?.addEventListener("focusin", (event) => {
   if (event.target.id === "espTemplateSubject" || event.target.id === "espTemplateBody") espLastField = event.target.id;
 });
 
-document.getElementById("view-email")?.addEventListener("change", (event) => {
+document.getElementById("view-campaigns")?.addEventListener("change", (event) => {
   if (event.target.id !== "espVariableSelect" || !event.target.value) return;
   const field = document.getElementById(espLastField);
   const token = `{{${event.target.value}}}`;
@@ -253,7 +253,7 @@ document.getElementById("view-email")?.addEventListener("change", (event) => {
   field.setSelectionRange(start + token.length, start + token.length);
 });
 
-document.getElementById("view-email")?.addEventListener("submit", async (event) => {
+document.getElementById("view-campaigns")?.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (event.target.id === "espTemplateForm") return saveEspTemplate();
   if (event.target.id === "espPreviewForm") return previewEspTemplate();

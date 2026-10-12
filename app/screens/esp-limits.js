@@ -3,7 +3,7 @@
 
 import { api, escapeHtml, onScreen, setHtml } from "../core.js";
 
-onScreen("email", { open: () => void loadEspLimits() });
+onScreen("campaigns", { open: () => void loadEspLimits() });
 
 export async function loadEspLimits() {
   if (!document.getElementById("espLimitsBody")) return;

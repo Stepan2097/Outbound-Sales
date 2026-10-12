@@ -4,7 +4,7 @@
 
 import { api, escapeHtml, onScreen, refreshIcons, setHtml } from "../core.js";
 
-onScreen("email", { open: () => void loadEspAlerts() });
+onScreen("campaigns", { open: () => void loadEspAlerts() });
 
 export async function loadEspAlerts() {
   if (!document.getElementById("espAlertsBody")) return;

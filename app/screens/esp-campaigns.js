@@ -5,7 +5,7 @@
 
 import { api, escapeAttr, escapeHtml, onScreen, refreshIcons, setHtml } from "../core.js";
 
-onScreen("email", { open: () => void loadEspCampaigns() });
+onScreen("campaigns", { open: () => void loadEspCampaigns() });
 
 const CAMPAIGN_STATE = { draft: "чернетка", running: "працює", paused: "пауза", done: "завершена" };
 const CAMPAIGN_TONE = { draft: "tone-muted", running: "tone-live", paused: "tone-warn", done: "tone-done" };
@@ -165,7 +165,7 @@ async function act(request) {
   await loadEspCampaigns();
 }
 
-document.getElementById("view-email")?.addEventListener("click", async (event) => {
+document.getElementById("view-campaigns")?.addEventListener("click", async (event) => {
   const target = event.target;
   if (target.closest("#espCampaignNew")) {
     espCampaignsState.formOpen = !espCampaignsState.formOpen;
@@ -199,7 +199,7 @@ document.getElementById("view-email")?.addEventListener("click", async (event) =
   }
 });
 
-document.getElementById("view-email")?.addEventListener("submit", async (event) => {
+document.getElementById("view-campaigns")?.addEventListener("submit", async (event) => {
   if (event.target.id === "espCampaignForm") {
     event.preventDefault();
     const steps = [...document.querySelectorAll("[data-esp-step]")].map((row) => ({

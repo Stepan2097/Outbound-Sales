@@ -5,7 +5,7 @@
 
 import { api, escapeHtml, onScreen, refreshIcons, setHtml } from "../core.js";
 
-onScreen("email", { open: () => void loadEspInbox() });
+onScreen("campaigns", { open: () => void loadEspInbox() });
 
 const KIND = {
   "message.replied": ["відповів", "tone-live"],

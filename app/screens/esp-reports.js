@@ -7,7 +7,7 @@
 
 import { api, escapeHtml, onScreen, refreshIcons } from "../core.js";
 
-onScreen("email", { open: () => void loadEspReports() });
+onScreen("campaigns", { open: () => void loadEspReports() });
 
 const VIEWS = { senders: "Відправники", domains: "Домени", campaigns: "Кампанії" };
 const PERIODS = { 7: "7 днів", 30: "30 днів", 90: "90 днів" };
