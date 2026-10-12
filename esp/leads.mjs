@@ -152,15 +152,9 @@ export function leadPage(store, { listId = "", q = "", offset = 0, limit = 50, e
   const rows = listId ? store.leadsOf(listId) : store.leads();
   const needle = String(q || "").trim().toLowerCase();
   const matches = rows.filter((row) => !needle || [row.email, row.name, row.company, row.position, row.country, row.source].some((value) => String(value || "").toLowerCase().includes(needle)));
-  const byEmail = new Map();
-  for (const row of enrollments) {
-    if (!byEmail.has(row.email)) byEmail.set(row.email, []);
-    byEmail.get(row.email).push({ campaignId: row.campaignId, name: campaigns.get(row.campaignId) || row.campaignId, status: row.status, step: row.step });
-  }
   const size = Math.max(1, Math.min(200, Number(limit) || 50));
   const lastPage = Math.max(0, Math.ceil(matches.length / size) - 1);
   const start = Math.min(Math.floor(Math.max(0, Number(offset) || 0) / size), lastPage) * size;
-  const domainOf = (email) => `@${String(email).split("@")[1] || ""}`;
   const counts = { valid: 0, risky: 0, invalid: 0, unknown: 0, none: 0 };
   for (const row of matches) counts[verificationTone(row.verification)] += 1;
   return {
@@ -168,11 +162,26 @@ export function leadPage(store, { listId = "", q = "", offset = 0, limit = 50, e
     offset: start,
     limit: size,
     verification: counts,
-    rows: matches.slice(start, start + size).map((row) => ({
-      ...row,
-      tone: verificationTone(row.verification),
-      campaigns: byEmail.get(row.email) || [],
-      excluded: excluded.get(row.email) || excluded.get(domainOf(row.email)) || null
-    }))
+    rows: decorateLeads(matches.slice(start, start + size), { enrollments, campaigns, excluded })
   };
+}
+
+/**
+ * What the table shows beside each person, wherever the rows came from (a list
+ * here or a CRM folder): the verifier's dot, the campaigns they are in and how
+ * they stand there, and whether they — or their whole domain — are excluded.
+ */
+export function decorateLeads(rows, { enrollments = [], campaigns = new Map(), excluded = new Map() } = {}) {
+  const byEmail = new Map();
+  for (const row of enrollments) {
+    if (!byEmail.has(row.email)) byEmail.set(row.email, []);
+    byEmail.get(row.email).push({ campaignId: row.campaignId, name: campaigns.get(row.campaignId) || row.campaignId, status: row.status, step: row.step });
+  }
+  const domainOf = (email) => `@${String(email).split("@")[1] || ""}`;
+  return rows.map((row) => ({
+    ...row,
+    tone: verificationTone(row.verification),
+    campaigns: byEmail.get(row.email) || [],
+    excluded: excluded.get(row.email) || excluded.get(domainOf(row.email)) || null
+  }));
 }

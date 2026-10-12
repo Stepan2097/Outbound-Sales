@@ -1,5 +1,6 @@
-// Ліди (ESP-UI 5, як екрани Snov 07 і 01). Зліва — списки лідів із лічильниками,
-// «Усі ліди», виключення й запит про дані. Праворуч — таблиця списку: хто,
+// Ліди (ESP-UI 5, як екрани Snov 07 і 01). Зліва — папки CRM (лише люди з
+// поштою, лічильник — скільки їх), списки з вставки, виключення й запит про
+// дані. Праворуч — таблиця списку: хто,
 // адреса з крапкою верифікації, країна, джерело, у яких кампаніях. Звідси людей
 // додають вставкою з таблиці й відправляють у кампанію — через ті самі перевірки
 // перед листом (ESP 6). Клік по імені відкриває картку: деталі зліва, хронологія
@@ -26,7 +27,7 @@ const INVITE_WORD = { waiting: "чекає в черзі", queued: "у черз�
 const LABEL_TONE = { positive: "tone-live", negative: "tone-warn", referral: "tone-done", neutral: "tone-muted" };
 
 export const leadsState = {
-  view: "",          // "" — усі ліди; id списку; EXCLUSIONS; PRIVACY
+  view: "",          // "" — усі зі списків; id списку; "crm:<id папки CRM>"; EXCLUSIONS; PRIVACY
   meta: null,        // списки, лічильники, кампанії
   page: null,
   q: "",
@@ -49,13 +50,17 @@ async function openLeads() {
   if (!document.getElementById("leadsPage")) return;
   renderLeads();
   await loadMeta();
+  // Nothing pasted yet: open on the first CRM folder that has people with an address.
+  const firstCrm = (leadsState.meta?.crmFolders || []).find((row) => row.withEmail > 0);
+  if (!leadsState.view && !leadsState.meta?.lists.length && firstCrm) leadsState.view = `crm:${firstCrm.id}`;
   if (!leadsState.card && leadsState.view !== EXCLUSIONS && leadsState.view !== PRIVACY) await loadPage();
 }
 
 async function loadMeta() {
   try {
     leadsState.meta = await api("/api/esp/leads/lists");
-    if (leadsState.view && ![EXCLUSIONS, PRIVACY].includes(leadsState.view) && !leadsState.meta.lists.some((row) => row.id === leadsState.view)) leadsState.view = "";
+    const known = (view) => [EXCLUSIONS, PRIVACY].includes(view) || leadsState.meta.lists.some((row) => row.id === view) || (leadsState.meta.crmFolders || []).some((row) => `crm:${row.id}` === view);
+    if (leadsState.view && !known(leadsState.view)) leadsState.view = "";
     leadsState.error = "";
   } catch (error) {
     leadsState.error = error?.status === 403 ? "Лідів бачить команда з правом читати відповіді — його дає адміністратор." : error?.message || "Списки не прочиталися.";
@@ -65,13 +70,15 @@ async function loadMeta() {
 
 async function loadPage() {
   const params = new URLSearchParams({ offset: String(leadsState.offset) });
-  if (leadsState.view) params.set("list", leadsState.view);
+  if (leadsState.view.startsWith("crm:")) params.set("crm", leadsState.view.slice(4));
+  else if (leadsState.view) params.set("list", leadsState.view);
   if (leadsState.q) params.set("q", leadsState.q);
   try {
     leadsState.page = await api(`/api/esp/leads?${params}`);
     leadsState.offset = leadsState.page.offset;
   } catch (error) {
     leadsState.notice = error?.message || "Список не прочитався.";
+    leadsState.page = { rows: [], total: 0, offset: 0, limit: 50, verification: null };
   }
   renderLeads();
 }
@@ -104,18 +111,23 @@ function sideHtml() {
   const meta = leadsState.meta;
   const item = (view, icon, text, count) => {
     const active = !leadsState.card && leadsState.view === view;
-    return `<button type="button" class="${active ? "is-active" : ""}" data-leads-view="${escapeAttr(view)}"${active ? ' aria-current="page"' : ""}><i data-lucide="${icon}"></i><span>${escapeHtml(text)}</span>${count != null ? `<b>${count}</b>` : ""}</button>`;
+    return `<button type="button" class="${active ? "is-active" : ""}" data-leads-view="${escapeAttr(view)}" title="${escapeAttr(text)}"${active ? ' aria-current="page"' : ""}><i data-lucide="${icon}"></i><span>${escapeHtml(text)}</span>${count != null ? `<b>${count}</b>` : ""}</button>`;
   };
   const lists = (meta?.lists || []).map((list) => item(list.id, "folder", list.name, list.count)).join("");
+  // The CRM's folders, each counted by the people in it who have an address.
+  const crm = (meta?.crmFolders || []).map((folder) => item(`crm:${folder.id}`, "folder-open", folder.name, folder.withEmail ?? "—")).join("");
   return `
+    <div class="mail-side-head"><span class="mail-side-title">Папки CRM</span></div>
+    ${crm || (meta ? `<p class="leads-side-empty">${escapeHtml(meta.crmError || "У CRM немає папок.")}</p>` : "")}
+    <div class="mail-side-sep"></div>
     <div class="mail-side-head">
-      <span class="mail-side-title">Списки</span>
+      <span class="mail-side-title">Списки з вставки</span>
       <button type="button" class="icon-button" data-leads-create aria-label="Новий список" title="Новий список"><i data-lucide="folder-plus"></i></button>
     </div>
     ${leadsState.creating ? `<form class="leads-new-list" id="leadsNewList"><input name="name" placeholder="Назва списку" maxlength="80" required autofocus /><button type="submit" class="primary-button">Створити</button></form>` : ""}
     ${lists || (meta ? '<p class="leads-side-empty">Списків ще немає — створіть перший.</p>' : "")}
     <div class="mail-side-sep"></div>
-    ${item("", "users", "Усі ліди", meta?.total ?? null)}
+    ${item("", "users", "Усі зі списків", meta?.total ?? null)}
     ${item(EXCLUSIONS, "ban", "Виключення", meta?.excluded ?? null)}
     ${item(PRIVACY, "shield-check", "Запит про дані", null)}`;
 }
@@ -129,21 +141,22 @@ function listHtml() {
   const meta = leadsState.meta;
   if (leadsState.error && !meta) return `<div class="empty-state">${escapeHtml(leadsState.error)}</div>`;
   const list = meta?.lists.find((row) => row.id === leadsState.view) || null;
+  const crmFolder = leadsState.view.startsWith("crm:") ? (meta?.crmFolders || []).find((row) => `crm:${row.id}` === leadsState.view) || null : null;
   const page = leadsState.page;
   const rows = page?.rows || [];
   const picked = rows.filter((row) => leadsState.selected.has(row.id));
   const allChecked = rows.length > 0 && rows.every((row) => leadsState.selected.has(row.id));
-  const title = list ? list.name : "Усі ліди";
+  const title = crmFolder ? crmFolder.name : list ? list.name : "Усі зі списків";
   const campaigns = meta?.campaigns || [];
   const head = `
     <div class="leads-head">
       ${leadsState.renaming && list
         ? `<form class="leads-rename" id="leadsRename"><input name="name" value="${escapeAttr(list.name)}" maxlength="80" required autofocus /><button type="submit" class="primary-button">Зберегти</button><button type="button" class="text-button" data-leads-rename-cancel>Скасувати</button></form>`
-        : `<h2>${escapeHtml(title)}</h2>${list ? `<button type="button" class="icon-button" data-leads-rename aria-label="Перейменувати" title="Перейменувати"><i data-lucide="pencil"></i></button><button type="button" class="icon-button" data-leads-delete aria-label="Видалити список" title="Видалити список"><i data-lucide="trash-2"></i></button>` : ""}`}
+        : `<h2>${escapeHtml(title)}</h2>${crmFolder ? `<span class="leads-crm-note">папка CRM · з поштою ${crmFolder.withEmail ?? "—"} із ${crmFolder.contacts ?? "—"} контактів</span>` : ""}${list ? `<button type="button" class="icon-button" data-leads-rename aria-label="Перейменувати" title="Перейменувати"><i data-lucide="pencil"></i></button><button type="button" class="icon-button" data-leads-delete aria-label="Видалити список" title="Видалити список"><i data-lucide="trash-2"></i></button>` : ""}`}
     </div>`;
   const toolbar = `
     <div class="leads-toolbar">
-      <button type="button" class="primary-button" data-leads-add${list ? "" : ' disabled title="Спершу виберіть або створіть список"'}><i data-lucide="user-plus"></i><span>Додати лідів</span></button>
+      ${crmFolder ? "" : `<button type="button" class="primary-button" data-leads-add${list ? "" : ' disabled title="Спершу виберіть або створіть список"'}><i data-lucide="user-plus"></i><span>Додати лідів</span></button>`}
       <form class="leads-send" id="leadsSend">
         <select name="campaignId" aria-label="Кампанія"${picked.length && campaigns.length ? "" : " disabled"}>${campaigns.length ? campaigns.map((row) => `<option value="${escapeAttr(row.id)}">${escapeHtml(row.name)}</option>`).join("") : "<option>Кампаній немає</option>"}</select>
         <button type="submit" class="text-button"${picked.length && campaigns.length ? "" : " disabled"}><i data-lucide="send"></i><span>Надіслати в кампанію${picked.length ? ` (${picked.length})` : ""}</span></button>
@@ -171,7 +184,7 @@ function listHtml() {
       </div>
     </div>`;
   const empty = !page ? '<div class="empty-state">Читаємо список...</div>'
-    : !rows.length ? `<div class="empty-state">${leadsState.q ? "Нікого не знайдено." : list ? "У списку нікого немає — «Додати лідів»." : meta?.lists.length ? "Лідів ще немає." : "Створіть список і додайте в нього лідів."}</div>` : "";
+    : !rows.length ? `<div class="empty-state">${leadsState.q ? "Нікого не знайдено." : crmFolder ? "У цій папці CRM немає людей з поштою." : list ? "У списку нікого немає — «Додати лідів»." : meta?.lists.length ? "Лідів ще немає." : "Виберіть папку CRM ліворуч — або створіть список і вставте лідів."}</div>` : "";
   const table = rows.length ? `
     <div class="table-wrap"><table class="leads-table">
       <thead><tr><th></th><th>Лід (${page.total})</th><th>Адреса</th><th>Країна</th><th>Джерело</th><th>Кампанії</th><th>Додано</th></tr></thead>
@@ -181,7 +194,7 @@ function listHtml() {
           <td class="leads-who"><button type="button" class="leads-name" data-leads-open="${escapeAttr(row.email)}">${escapeHtml(row.name || row.email.split("@")[0])}</button><small>${escapeHtml([row.company, row.position].filter(Boolean).join(" · "))}</small></td>
           <td class="leads-email"><i class="leads-dot is-${row.tone}" title="${escapeAttr(TONE_WORD[row.tone])}${row.verifiedAt ? `, ${escapeAttr(row.verifiedAt)}` : ""}"></i>${escapeHtml(row.email)}${row.excluded ? ` <span class="pill tone-warn" title="${escapeAttr(row.excluded.note || "")}">виключено</span>` : ""}</td>
           <td>${escapeHtml(row.country || "—")}</td>
-          <td>${escapeHtml(row.source || "—")}${row.sourceDate ? `<small>${escapeHtml(row.sourceDate)}</small>` : ""}</td>
+          <td>${escapeHtml(row.crmId ? "CRM" : row.source || "—")}${row.sourceDate ? `<small>${escapeHtml(row.sourceDate)}</small>` : ""}</td>
           <td>${row.campaigns.length ? `<div class="leads-campaigns">${row.campaigns.map((item) => `<span class="pill ${ENROLL_TONE[item.status] || "tone-muted"}" title="${escapeAttr(item.name)}: ${escapeAttr(ENROLL_WORD[item.status] || item.status)}">${escapeHtml(item.name)}</span>`).join("")}</div>` : "—"}</td>
           <td class="leads-date">${escapeHtml(day(row.addedAt))}</td>
         </tr>`).join("")}</tbody>
@@ -349,7 +362,8 @@ async function act(work) {
 }
 
 function showView(view) {
-  Object.assign(leadsState, { view, card: null, offset: 0, adding: false, renaming: false, notice: "", error: "" });
+  // The table empties at once: the old list's rows must not stand under the new one's name.
+  Object.assign(leadsState, { view, card: null, offset: 0, adding: false, renaming: false, notice: "", error: "", page: null });
   leadsState.selected.clear();
   renderLeads();
   if (view !== EXCLUSIONS && view !== PRIVACY) void loadPage();

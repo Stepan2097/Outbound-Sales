@@ -56,6 +56,7 @@
 
 .mail-side {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 2px;
   padding: 8px;
   border: 1px solid var(--line);
@@ -129,7 +130,24 @@
   font-weight: 600;
 }
 
+.mail-side button {
+  min-width: 0;
+}
+
+.mail-side button > span {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mail-side button > svg {
+  flex: 0 0 auto;
+}
+
 .mail-side button b {
+  flex: 0 0 auto;
   margin-left: auto;
   font-weight: 600;
   font-variant-numeric: tabular-nums;

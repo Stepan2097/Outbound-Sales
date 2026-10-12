@@ -29,6 +29,8 @@ import { defaultFilters } from "./esp/filters.mjs";
 import { applyRampReviews } from "./esp/ramp.mjs";
 import { campaignStore } from "./esp/campaigns.mjs";
 import { leadStore } from "./esp/leads.mjs";
+import { crmLeadSource } from "./esp/crm-leads.mjs";
+import { crm as warmupCrm } from "./warmup/db.mjs";
 import { postponedDue, runTick, startSequence } from "./esp/sequence.mjs";
 import { pollInboxes } from "./esp/inbound.mjs";
 import { runWarmupTick, warmupMode } from "./esp/mail-warmup.mjs";
@@ -542,7 +544,9 @@ const esp = (() => {
     const { senders } = await espRegistry();
     return runWarmupTick({ journal: { allEntries, append: espAppend }, senders, connector, gate, now: new Date() });
   };
-  return { connector, keyError, gate, templates, signature, unsubscribe, campaigns, leads, halt, halted, tick, filters, pollInbox, checkAlerts, runMonitor, warmupTick, alertsTelegram: telegram.configured, sequenceOn: process.env.ESP_SEQUENCE === "on" };
+  // «Ліди»: the CRM's folders, read through the same cached folder list «Контакти» uses.
+  const crmLeads = crmLeadSource({ crm: warmupCrm, listFolders: () => listContactFolders() });
+  return { connector, keyError, gate, templates, signature, unsubscribe, campaigns, leads, crmLeads, halt, halted, tick, filters, pollInbox, checkAlerts, runMonitor, warmupTick, alertsTelegram: telegram.configured, sequenceOn: process.env.ESP_SEQUENCE === "on" };
 })();
 
 /**

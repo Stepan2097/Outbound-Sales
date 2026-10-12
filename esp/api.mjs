@@ -13,7 +13,7 @@ import { CampaignError, parseLeadLines } from "./campaigns.mjs";
 import { composeLetter } from "./compose.mjs";
 import { ReplyError, conversations, quickReply } from "./conversations.mjs";
 import { REPLY_LABELS } from "./replies.mjs";
-import { LeadError, leadPage } from "./leads.mjs";
+import { LeadError, decorateLeads, leadPage } from "./leads.mjs";
 import { PLAN_BOUNDS, cleanPlan, warmupLog, warmupMode, warmupPlan, warmupView } from "./mail-warmup.mjs";
 import { UNIBOX_FOLDERS, uniboxList, uniboxProblems, uniboxThread } from "./unibox.mjs";
 import { recordAboutContact, recordFailed, recordSending, recordSent } from "./messages.mjs";
@@ -75,6 +75,16 @@ export function espRouteRight(method, path) {
   if (path === "/templates" || path === "/signature" || path === "/preview") return "templates.edit";
   if (path.startsWith("/senders/")) return "limits.change";
   return "registry.change";
+}
+
+/** The CRM's folders for «Ліди», or why there are none — never a broken page. */
+async function crmFoldersFor(esp) {
+  if (!esp.crmLeads?.configured()) return { crmFolders: [], crmError: "CRM не підключено на цьому сервері." };
+  try {
+    return { crmFolders: await esp.crmLeads.folders(), crmError: null };
+  } catch (error) {
+    return { crmFolders: [], crmError: `CRM не відповіла: ${error.message}` };
+  }
 }
 
 export async function handleEspApi({ request, response, url, sendJson, readJson, esp }) {
@@ -389,8 +399,25 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
         total: all.length,
         people: new Set(all.map((row) => row.email)).size,
         excluded: (await exclusions(await allEntries())).size,
-        campaigns: (esp.campaigns?.list() || []).filter((row) => row.state !== "done").map((row) => ({ id: row.id, name: row.name, state: row.state }))
+        campaigns: (esp.campaigns?.list() || []).filter((row) => row.state !== "done").map((row) => ({ id: row.id, name: row.name, state: row.state })),
+        // The CRM's folders, each with how many of its people have an address.
+        ...(await crmFoldersFor(esp))
       });
+      return true;
+    }
+    if (method === "GET" && path === "/leads" && url.searchParams.get("crm")) {
+      if (!esp.crmLeads?.configured()) return badRequest(sendJson, response, "CRM не підключено — папок CRM не прочитати.");
+      try {
+        const page = await esp.crmLeads.page({ folderId: url.searchParams.get("crm"), q: url.searchParams.get("q") || "", offset: url.searchParams.get("offset") || 0, limit: url.searchParams.get("limit") || 50 });
+        const entries = await allEntries();
+        const rows = decorateLeads(page.rows, {
+          enrollments: esp.campaigns?.enrollments() || [], campaigns: new Map((esp.campaigns?.list() || []).map((row) => [row.id, row.name])),
+          excluded: await exclusions(entries)
+        });
+        sendJson(response, 200, { success: true, ...page, rows, verification: null });
+      } catch (error) {
+        sendJson(response, error.status || 502, { success: false, error: error.status ? error.message : `CRM не відповіла: ${error.message}` });
+      }
       return true;
     }
     if (method === "GET" && path === "/leads") {
@@ -406,8 +433,11 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
     }
     if (method === "GET" && path === "/leads/card") {
       const email = String(url.searchParams.get("email") || "").trim().toLowerCase();
-      const rows = esp.leads.leads().filter((row) => row.email === email);
-      const names = new Map(esp.leads.lists().map((row) => [row.id, row.name]));
+      const own = esp.leads.leads().filter((row) => row.email === email);
+      // The same person in CRM folders — the page shows those as lists too.
+      const fromCrm = esp.crmLeads?.configured() ? await esp.crmLeads.byEmail(email).catch(() => []) : [];
+      const rows = [...own, ...fromCrm];
+      const names = new Map([...esp.leads.lists().map((row) => [row.id, row.name]), ...fromCrm.map((row) => [row.id, row.source.replace(/^CRM: /, "CRM · ")])]);
       const campaignNames = new Map((esp.campaigns?.list() || []).map((row) => [row.id, row.name]));
       const enrolled = (esp.campaigns?.enrollments() || []).filter((row) => row.email === email);
       if (!rows.length && !enrolled.length) { sendJson(response, 404, { success: false, error: "Такого ліда немає." }); return true; }
@@ -415,7 +445,9 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
       const excluded = (await exclusions(await allEntries())).get(email) || null;
       sendJson(response, 200, {
         success: true, email, lead,
-        lists: rows.map((row) => ({ id: row.listId, name: names.get(row.listId) || "", leadId: row.id, addedAt: row.addedAt, addedBy: row.addedBy })),
+        lists: rows.map((row) => (row.crmId
+          ? { id: `crm:${row.folderId}`, name: names.get(row.id) || "CRM", leadId: row.id, addedAt: row.addedAt, addedBy: "CRM" }
+          : { id: row.listId, name: names.get(row.listId) || "", leadId: row.id, addedAt: row.addedAt, addedBy: row.addedBy })),
         campaigns: enrolled.map((row) => ({ id: row.campaignId, name: campaignNames.get(row.campaignId) || row.campaignId, status: row.status, step: row.step, sender: row.sender, reason: row.reason || null })),
         excluded
       });
@@ -455,11 +487,14 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
       }
       if (method === "POST" && path === "/leads/to-campaign") {
         const ids = new Set((Array.isArray(body.ids) ? body.ids : []).map(String));
-        const picked = esp.leads.leads().filter((row) => ids.has(row.id));
+        // CRM rows come as `crm:<contact id>` and are read fresh from the CRM.
+        const crmIds = [...ids].filter((id) => id.startsWith("crm:")).map((id) => id.slice(4));
+        const fromCrm = crmIds.length && esp.crmLeads?.configured() ? await esp.crmLeads.byIds(crmIds) : [];
+        const picked = [...esp.leads.leads().filter((row) => ids.has(row.id)), ...fromCrm];
         if (!picked.length) return badRequest(sendJson, response, "Виберіть людей у списку.");
         // One row per address: the same person in two lists goes once.
         const unique = [...new Map(picked.map((row) => [row.email, row])).values()]
-          .map(({ id, listId, addedAt, addedBy, ...lead }) => lead);
+          .map(({ id, listId, addedAt, addedBy, crmId, folderId, linkedin, ...lead }) => lead);
         return enrolChecked(String(body.campaignId || ""), unique);
       }
       if (method === "POST" && path === "/leads/note") {

@@ -458,3 +458,8 @@
     margin-left: 0;
   }
 }
+
+.leads-crm-note {
+  color: var(--muted);
+  font-size: 13px;
+}
