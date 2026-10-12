@@ -110,8 +110,9 @@ test("the team panel is the CRM's user base, not a list of invitations", async (
 
   const { status, body } = await workspace.call("/api/account/directory");
   assert.equal(status, 200);
-  // One row fewer than accounts: the two Gmail addresses are one mailbox.
-  assert.equal(body.people.length, authUsers.length - 1);
+  // Two rows fewer than accounts: the two Gmail addresses are one mailbox, and
+  // a login with no CRM profile (deleted there) is not on the team at all.
+  assert.equal(body.people.length, authUsers.length - 2);
   assert.equal(body.canSignIn, 4, "the four the CRM approved");
 
   const byEmail = new Map(body.people.map((person) => [person.email, person]));
@@ -119,11 +120,11 @@ test("the team panel is the CRM's user base, not a list of invitations", async (
   assert.equal(byEmail.get("ovchar.lilia17@gmail.com").signedInHere, false, "and they have never been here");
   assert.equal(byEmail.get("yurkevych.mark@gmail.com").role, "admin", "an admin there arrives an admin here");
   assert.equal(byEmail.get("ovchar.lilia17@gmail.com").role, "seller");
-  assert.equal(byEmail.get("stranger@example.com").blocked, "немає в базі CRM");
+  assert.equal(byEmail.has("stranger@example.com"), false, "deleted in the CRM — not listed, as on the CRM's own users page");
   assert.equal(byEmail.get("stepan@advantage-agency.co").blocked, "не підтверджений у CRM");
 
   const order = body.people.map((person) => person.email);
-  assert.deepEqual(order.slice(-2).sort(), ["stepan@advantage-agency.co", "stranger@example.com"], "whoever cannot sign in sinks");
+  assert.equal(order.at(-1), "stepan@advantage-agency.co", "whoever cannot sign in sinks");
 });
 
 /* ── Одна людина — один рядок ───────────────────────────────────────────────
@@ -380,7 +381,7 @@ test("every row carries the person's own spend and time", async (t) => {
   assert.equal(mark.costUsd, 5, "and his are his");
   assert.equal(mark.seconds, 0);
 
-  const untouched = byEmail.get("stranger@example.com");
+  const untouched = byEmail.get("ovchar.lilia17@gmail.com") && byEmail.get("developer@localhost");
   assert.equal(untouched.costUsd, 0, "nobody's numbers leak onto somebody who never worked");
   assert.equal(untouched.requests, 0);
   assert.equal(untouched.seconds, 0);

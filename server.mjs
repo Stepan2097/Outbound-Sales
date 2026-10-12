@@ -3033,7 +3033,16 @@ async function workspaceDirectory({ endValue = new Date() } = {}) {
   const crmByEmail = await crmProfilesByEmail({ maxAgeMs: 0 });
   const { accounts, adminApi, adminApiError } = await directoryAccounts(crmByEmail);
 
-  const people = accounts.map((user) => {
+  // The team is the CRM's user base plus whoever already works here. A login
+  // left in Supabase Auth after its CRM profile was deleted is nobody's
+  // colleague: listing it (12.10: «вони давно були видалені») made the panel
+  // disagree with the CRM's own users page.
+  const knownHere = (user) => state.users.some((item) => item.id === user.id || item.email === cleanText(user.email || "").toLowerCase());
+  // Another address of a CRM member's own mailbox (pavlo.work.101 and
+  // pavlowork101+outbound) stays: it is folded into that person below.
+  const crmMailboxes = new Set([...crmByEmail.keys()].map(mailboxKey));
+  const team = accounts.filter((user) => crmMailboxes.has(mailboxKey(user.email)) || knownHere(user));
+  const people = team.map((user) => {
     const email = cleanText(user.email || "").toLowerCase();
     const metadata = user.user_metadata || {};
     const known = state.users.find((item) => item.id === user.id || item.email === email) || null;
