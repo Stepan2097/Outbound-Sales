@@ -1,8 +1,9 @@
 // Вхідні = Unibox (ESP-UI 4, як екран Snov 02): усі розмови скриньок-відправників
 // з людьми — у папках, з пошуком і фільтрами, сторінками по 50; розмова
 // відкривається на місці списку, з міткою відповіді й відповіддю від тієї ж
-// скриньки в тому ж треді. Ліва колонка тримає й LinkedIn: відповіді на прогрів
-// малює app/screens/inbox.js у своїй панелі, тут вона лише показується.
+// скриньки в тому ж треді. Ліва колонка тримає й журнал скриньок (ESP 7,
+// app/screens/esp-inbox.js) і LinkedIn — відповіді на прогрів малює
+// app/screens/inbox.js у своїй панелі; тут вони лише показуються.
 //
 // Відкриттів і кліків немає: листи без пікселів і переписаних посилань.
 
@@ -28,8 +29,10 @@ export const unibox = {
   dismissed: new Set()
 };
 
+const CHANNELS = ["mail", "events", "linkedin"];
+
 function readChannel() {
-  try { return window.localStorage.getItem(CHANNEL_KEY) === "linkedin" ? "linkedin" : "mail"; } catch { return "mail"; }
+  try { const saved = window.localStorage.getItem(CHANNEL_KEY); return CHANNELS.includes(saved) ? saved : "mail"; } catch { return "mail"; }
 }
 
 function saveChannel(channel) {
@@ -49,7 +52,7 @@ async function openUnibox() {
  * account's replies or one conversation.
  */
 export function showInboxChannel(channel) {
-  unibox.channel = channel === "linkedin" ? "linkedin" : "mail";
+  unibox.channel = CHANNELS.includes(channel) ? channel : "mail";
   saveChannel(unibox.channel);
   renderUnibox();
 }
@@ -134,6 +137,7 @@ function sideHtml() {
   return `
     <div class="mail-side-title">Пошта</div>
     ${mail}
+    <button type="button" class="${unibox.channel === "events" ? "is-active" : ""}" data-unibox-events><i data-lucide="list-checks"></i><span>Журнал скриньок</span></button>
     <div class="mail-side-title">LinkedIn</div>
     <button type="button" class="${unibox.channel === "linkedin" ? "is-active" : ""}" data-unibox-linkedin><i data-lucide="message-circle"></i><span>Відповіді на прогрів</span>${linkedinNew ? `<b>${escapeHtml(linkedinNew)}</b>` : ""}</button>`;
 }
@@ -244,6 +248,7 @@ export function renderUnibox() {
   const side = document.getElementById("uniboxSide");
   const mail = document.getElementById("uniboxMail");
   const linkedin = document.getElementById("uniboxLinkedin");
+  const events = document.getElementById("uniboxEvents");
   if (!toolbar || !side || !mail || !linkedin) return;
   const onMail = unibox.channel === "mail";
   // The search keeps its caret while the list behind it is redrawn.
@@ -251,7 +256,8 @@ export function renderUnibox() {
   toolbar.hidden = !onMail;
   if (!typing) toolbar.innerHTML = toolbarHtml();
   side.innerHTML = sideHtml();
-  linkedin.hidden = onMail;
+  linkedin.hidden = unibox.channel !== "linkedin";
+  if (events) events.hidden = unibox.channel !== "events";
   mail.hidden = !onMail;
   if (onMail) mail.innerHTML = `${bannerHtml()}<div class="mail-main">${unibox.openKey ? threadHtml() : listHtml()}</div>`;
   refreshIcons(document.getElementById("unibox"));
@@ -281,6 +287,7 @@ root()?.addEventListener("click", async (event) => {
     return loadUniboxList();
   }
   if (target.closest("[data-unibox-linkedin]")) return showInboxChannel("linkedin");
+  if (target.closest("[data-unibox-events]")) return showInboxChannel("events");
   const dismiss = target.closest("[data-unibox-dismiss]")?.dataset.uniboxDismiss;
   if (dismiss) { unibox.dismissed.add(dismiss); return renderUnibox(); }
   if (target.closest("[data-unibox-refresh]")) return loadUniboxList();

@@ -1,11 +1,11 @@
-// Листи → «Що прийшло в скриньки» (ESP 7): відповіді, автовідповіді, bounce з
+// Вхідні → «Журнал скриньок» (ESP 7): відповіді, автовідповіді, bounce з
 // кодами, відписки й тривоги по сендерах — з журналу, найновіше вгорі.
-// Приблизно Unibox Snov (Inbox / Bounced), але лише події холодної пошти;
-// спільна вхідна з відповіддю звідси — ESP 14.
+// Папка Unibox поруч із листами (app/screens/mail-inbox.js), що показує, що
+// саме зробив читач скриньок із кожною подією.
 
 import { api, escapeHtml, onScreen, refreshIcons, setHtml } from "../core.js";
 
-onScreen("campaigns", { open: () => void loadEspInbox() });
+onScreen("inbox", { open: () => void loadEspInbox() });
 
 const KIND = {
   "message.replied": ["відповів", "tone-live"],
