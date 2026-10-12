@@ -212,7 +212,8 @@ test("картка людини: поля CRM, листування LinkedIn і 
   assert.match(body, /Листування в LinkedIn/);
   assert.match(body, /Запит надіслано/);
   assert.match(body, /Прийшло у відповідь/);
-  assert.match(body, /надіслав агент/);
+  // 12.10: the invitation says when and from which account — not who pressed it.
+  assert.doesNotMatch(body, /надіслав агент/);
   assert.equal(s.ids.contactCardPill.textContent, "запит надіслано");
   assert.doesNotMatch(body + s.ids.contactCardPill.textContent, /уже в лідах|тільки в CRM/i);
 });

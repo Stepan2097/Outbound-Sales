@@ -2665,8 +2665,16 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         personName: outreach?.person_name,
         personLinkedin: outreach?.person_linkedin
       });
-      // Which login each message is on, by the name the screens already use.
-      const accountIds = [...new Set(found.map((message) => message.accountId).filter(Boolean))];
+      // 12.10, the owner: of the invitation only two facts matter — when it
+      // went and from which account, and when it was accepted. The queueing,
+      // the retries and the failures belong to the account's log.
+      const story = events.filter((event) => event.type === "invite.sent" || event.type === "invite.accepted");
+      const accepted = ["accepted", "connected"].includes(outreach?.status) && outreach?.responded_at
+        && !story.some((event) => event.type === "invite.accepted")
+        ? [{ id: `accepted-${outreach.id}`, type: "invite.accepted", accountId: outreach.account_id, at: outreach.responded_at, message: "", meta: {} }]
+        : [];
+      // Which login each message and invitation is on, by the name the screens already use.
+      const accountIds = [...new Set([...found, ...story, ...accepted].map((row) => row.accountId || row.meta?.accountId).filter(Boolean))];
       const labels = new Map((accountIds.length
         ? await anty.from("wl_accounts").select("id,label,login").in("id", accountIds).rows()
         : []).map((row) => [row.id, row.login?.trim() || row.label || ""]));
@@ -2674,12 +2682,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
 
       const invite = await inviteView(outreach, events);
       const entries = [
-        ...events
-          // `invite.checked` is written on every look, including the ones that
-          // saw nothing. It belongs in the account's log, not in a person's
-          // story, where a fortnight of "checked, no change" would bury the
-          // three lines that matter.
-          .filter((event) => event.type !== "invite.checked")
+        ...[...story, ...accepted]
           .map((event) => ({
             id: event.id,
             kind: "invite",
@@ -2689,7 +2692,8 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
             at: event.at,
             event: event.type,
             body: event.message,
-            meta: event.meta
+            meta: event.meta,
+            accountLabel: labels.get(event.accountId || event.meta?.accountId) || null
           })),
         ...messages
       ].sort((left, right) => String(right.at || "").localeCompare(String(left.at || "")));

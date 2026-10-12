@@ -1089,6 +1089,7 @@ export async function inviteEvents(crmContactId, limit = 50) {
   return rows.map((row) => ({
     id: row.id,
     type: row.type,
+    accountId: row.account_id || null,
     at: row.created_at,
     level: row.level,
     message: row.message,

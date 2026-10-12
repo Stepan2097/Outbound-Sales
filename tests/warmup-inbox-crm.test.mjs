@@ -326,7 +326,7 @@ test("ESP-UI 5: a cold-email lead's card asks by address — the CRM contact wit
   assert.equal(byEmail.status, 200);
   assert.equal(byEmail.payload.contact.crmContactId, "c-1");
   assert.deepEqual(byEmail.payload.entries.map((entry) => [entry.direction, entry.body]), byId.payload.entries.map((entry) => [entry.direction, entry.body]));
-  assert.deepEqual(byEmail.payload.entries.map((entry) => entry.direction), ["in", "out"], "both sides, newest first");
+  assert.deepEqual(byEmail.payload.entries.filter((entry) => entry.kind !== "invite").map((entry) => entry.direction), ["in", "out"], "both sides, newest first");
   assert.equal(byEmail.payload.invite.status, "connected", "her reply moved the approach on");
 
   const unknown = await call({ method: "GET", path: "/api/warmup/history?email=nobody@nowhere.io" });

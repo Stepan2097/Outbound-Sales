@@ -1001,8 +1001,11 @@ test("one person's history is the invitation and the messages, newest first", as
   assert.equal(answer.payload.contact.name, "Marta Kovalenko");
 
   const kinds = answer.payload.entries.map((entry) => `${entry.kind}:${entry.event || entry.direction}`);
-  // Newest first: the reply, our message, the send, the queueing.
-  assert.deepEqual(kinds, ["message:in", "message:out", "invite:invite.sent", "invite:invite.requested"]);
+  // Newest first: the reply, our message, the send. The queueing is the
+  // account's log, not the person's story (12.10, the owner: only when and
+  // from which account it went, and when it was accepted).
+  assert.deepEqual(kinds, ["message:in", "message:out", "invite:invite.sent"]);
+  assert.equal(answer.payload.entries.find((entry) => entry.event === "invite.sent").accountLabel !== undefined, true, "the send says which account");
 
   const older = answer.payload.entries.find((entry) => entry.direction === "in");
   assert.equal(older.matchedBy, "name_or_slug", "and the screen can say this one was matched by name");

@@ -5,7 +5,7 @@
 // Telegram.
 
 import {
-  HISTORY_EVENT_LABEL, INVITE_NOTE_DROPPED, api, escapeAttr, escapeHtml, linkIfUrl, onScreen, refreshIcons, relativeTime, setHtml, setText, state, uaPlural
+  HISTORY_EVENT_LABEL, api, escapeAttr, escapeHtml, linkIfUrl, onScreen, refreshIcons, relativeTime, setHtml, setText, state, uaPlural
 } from "../core.js";
 import { cachedRead, onCacheReset, onReadsInvalidated, recallScreen, rememberScreen } from "../cache.js";
 import {
@@ -184,13 +184,11 @@ function historyEntryHtml(entry) {
   if (entry.kind === "invite") {
     return `
       <li class="history-entry is-invite">
-        <div class="history-when" title="${escapeAttr(exact)}">${escapeHtml(when)}</div>
+        <div class="history-when" title="${escapeAttr(when)}">${escapeHtml(exact || when)}</div>
         <div class="history-body">
           <strong>${escapeHtml(HISTORY_EVENT_LABEL[entry.event] || entry.event)}</strong>
-          ${entry.meta?.source === "campaign" ? `<small class="is-muted">з папки${entry.meta.campaignName ? ` «${escapeHtml(entry.meta.campaignName)}»` : ""}</small>` : ""}
+          ${entry.accountLabel ? `<small class="is-muted">${entry.event === "invite.accepted" ? "на" : "з"} акаунта ${escapeHtml(entry.accountLabel)}</small>` : ""}
           ${entry.meta?.note ? `<pre>${escapeHtml(entry.meta.note)}</pre>` : ""}
-          ${entry.meta?.by ? `<small class="is-muted">${entry.meta.by === "agent" ? "надіслав агент" : "надіслано вручну"}${entry.meta.overQuota ? " · понад денну норму" : ""}${entry.meta.duringPause ? " · під час паузи, у норму не зараховано" : ""}${entry.meta.noteDropped ? ` · без записки: ${escapeHtml(INVITE_NOTE_DROPPED[entry.meta.noteDropped] || entry.meta.noteDropped)}` : ""}</small>` : ""}
-          ${entry.meta?.outcome ? `<small class="is-muted">${escapeHtml(entry.meta.outcome)}</small>` : ""}
         </div>
       </li>
     `;
