@@ -1238,6 +1238,18 @@ dialog {
   display: none;
 }
 
+/* Згорнута папка не ховає непрочитане: Вхідні живуть у LinkedIn — крапка на назві папки. */
+.nav-group.is-folded:has(.nav-badge:not([hidden])) .nav-group-toggle > span::after {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 6px;
+  border-radius: 99px;
+  background: var(--red);
+  vertical-align: 2px;
+}
+
 @media (max-width: 1080px) {
   /* Вузьке меню — лише іконки: замість назви папки тонка риска, усі пункти видно. */
   .nav-group-toggle {

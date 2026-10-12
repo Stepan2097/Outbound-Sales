@@ -331,7 +331,7 @@ function setView(viewName) {
       campaigns: "Кампанії",
       leads: "Ліди",
       reports: "Звіти",
-      inbox: "Вхідні",
+      inbox: "Вхідні LinkedIn",
       contacts: "Контакти з CRM",
       account: "Налаштування"
     }[viewName] || "Outbound Sales OS";
