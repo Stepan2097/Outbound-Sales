@@ -24,7 +24,7 @@ const NAMES = [
   "warmupPreviewHtml", "warmupProfileUrl",
   "WARMUP_UNNAMED", "WARMUP_NAME_NOISE", "warmupCleanName", "warmupParticipantUnnamed", "warmupParticipantName",
   "warmupParticipantNameAttr", "warmupThreadAccount", "warmupAccountTitle", "warmupInboxSync", "warmupInboxNoteHtml",
-  "warmupInboxEmptyHtml", "warmupInboxRows", "warmupInboxMatches", "warmupThreadRowHtml", "warmupInboxAccountName",
+  "warmupInboxEmptyHtml", "warmupInboxRows", "warmupInboxMatches", "warmupThreadRowHtml", "warmupInboxRetired", "inboxRetiredOpen", "warmupInboxAccountName",
   "warmupInboxUnreadFor", "warmupInboxFilterHtml", "warmupInboxAccountOptions", "warmupInboxAccountId",
   "openWarmupInboxAccount", "warmupInboxChipsHtml",
   "warmupThreadPlaceholderHtml", "warmupNextUnread", "warmupMessageHtml", "warmupGoesOutText", "WARMUP_REPLY_STATE",

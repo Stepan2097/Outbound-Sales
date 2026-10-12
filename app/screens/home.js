@@ -406,7 +406,7 @@ function homeAccountsHtml(data) {
       <button class="text-button" type="button" data-home-go="warmup"><span>«Прогрів»</span><i data-lucide="arrow-right"></i></button>
     </div>`;
   if (!accounts.length) {
-    return `${head}<div class="home-empty is-small"><span>Додайте акаунти LinkedIn у «Прогріві» — без них нема кому розсилати.</span></div>`;
+    return `${head}<div class="home-empty is-small"><span>Додайте акаунти LinkedIn у «Прогріві» — без них нема кому розсилати.</span></div>${retiredLineHtml(data)}`;
   }
   return `${head}<div class="home-accounts">${accounts.map((account) => {
     const [label, tone] = account.health && account.health !== "ok"
@@ -429,7 +429,14 @@ function homeAccountsHtml(data) {
         ${account.campaigns?.length ? `<span>Кампанія: ${escapeHtml(account.campaigns.join(", "))}</span>` : '<span class="home-subtle">без кампанії</span>'}
       </div>
     </div>`;
-  }).join("")}</div>`;
+  }).join("")}</div>${retiredLineHtml(data)}`;
+}
+
+/** Blocked or excluded accounts: one quiet line, not a red row each (12.10). */
+function retiredLineHtml(data) {
+  const retired = data.retired || [];
+  if (!retired.length) return "";
+  return `<p class="home-subtle home-retired">Заблоковані й виключені — ${escapeHtml(retired.map((account) => account.name).join(", "))}. Вони не розсилають і нічого тут не просять; повернути — у «Прогріві».</p>`;
 }
 
 export function renderHome() {

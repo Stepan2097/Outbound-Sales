@@ -895,10 +895,32 @@ async function writeFirstDraft(row, choice, campaigns, writer) {
 }
 
 /** The Home screen's whole answer. Each part is read once and nothing here writes. */
+/**
+ * An account somebody put away: blocked by LinkedIn, or excluded from the
+ * warm-up. Its old conversations stay readable, but it raises nothing — no
+ * unread count, no «читали давно», no «потрібна увага» (12.10, the owner:
+ * «він заблокований, то мені вже не треба всюди пихати жовтою плашкою»).
+ */
+export function retiredAccount(account) {
+  return account?.status === "excluded" || account?.health === "blocked";
+}
+
+async function retiredAccountIds() {
+  const rows = await anty.from("wl_accounts").select("id,status,health").rows();
+  return new Set(rows.filter(retiredAccount).map((row) => row.id));
+}
+
+/** Unread replies that ask for somebody: on accounts that still work. */
+async function liveUnreadCount() {
+  const [threads, retired] = await Promise.all([listThreads({ unreadOnly: true }), retiredAccountIds()]);
+  return threads.filter((thread) => !retired.has(thread.accountId)).length;
+}
+
 async function homeView(campaigns, writer) {
   const accountRows = await anty.from("wl_accounts").select("*").rows();
   const described = await Promise.all(accountRows.map(describeAccount));
-  const live = described.filter((account) => account.status !== "excluded");
+  const live = described.filter((account) => !retiredAccount(account));
+  const retiredIds = new Set(described.filter(retiredAccount).map((account) => account.id));
   const ids = live.map((account) => account.id);
   const names = new Map(described.map((account) => [account.id, account.identity?.name || account.label || "акаунт"]));
 
@@ -977,11 +999,13 @@ async function homeView(campaigns, writer) {
     attention.push({ kind: "writer", text: "Модель для повідомлень не підключена — чернетки пишуться за шаблоном." });
   }
 
-  const unread = threads.filter((thread) => thread.unread)
+  const unread = threads.filter((thread) => thread.unread && !retiredIds.has(thread.accountId))
     .sort((left, right) => String(right.lastMessage?.sentAt || "").localeCompare(String(left.lastMessage?.sentAt || "")));
 
   return {
     date: todayIso,
+    // Put away by somebody: named once, quietly, not in «who sends» or «attention».
+    retired: described.filter(retiredAccount).map((account) => ({ id: account.id, name: names.get(account.id), health: account.health, status: account.status })),
     funnel,
     today: {
       invited: [...sentToday.values()].reduce((total, value) => total + value, 0),
@@ -1207,7 +1231,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       let unreadReplies = null;
       if (anty.configured()) {
         try {
-          unreadReplies = await unreadCount();
+          unreadReplies = await liveUnreadCount();
         } catch (error) {
           console.error("[warmup] could not count unread replies:", error.message);
         }
@@ -2962,19 +2986,22 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       const held = await listThreads({ accountId });
       const threads = unreadOnly ? held.filter((thread) => thread.unread) : held;
 
-      const accounts = await anty.from("wl_accounts").select("id,label").rows();
+      const accounts = await anty.from("wl_accounts").select("id,label,status,health").rows();
       const [identities, outreach] = await Promise.all([loginIdentities(), outreachFor(threads)]);
       const labels = new Map(accounts.map((account) => [account.id, account.label]));
+      const retired = new Set(accounts.filter(retiredAccount).map((account) => account.id));
 
       sendJson(response, 200, {
         success: true,
-        unread: held.filter((thread) => thread.unread).length,
+        unread: held.filter((thread) => thread.unread && !retired.has(thread.accountId)).length,
         // A reply belongs to the login it arrived on, and the screen groups by
         // exactly this: one heading per account, carrying its own unread count.
         accounts: summarizeAccounts(held).map((account) => ({
           ...account,
           label: labels.get(account.accountId) ?? null,
-          identity: identities.get(account.accountId)?.name ?? null
+          identity: identities.get(account.accountId)?.name ?? null,
+          // Blocked or excluded: shown apart, quietly, at the end.
+          retired: retired.has(account.accountId)
         })),
         // Top level as well as per thread: the one case this value decides —
         // an empty inbox — is the case with no thread to carry it, and
@@ -3098,7 +3125,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       const readAt = await markRead(accountId, threadKey);
       // The badge's new number, so the one screen that just changed it does not
       // have to ask for the whole config again to find out.
-      sendJson(response, 200, { success: true, readAt, unread: await unreadCount() });
+      sendJson(response, 200, { success: true, readAt, unread: await liveUnreadCount() });
       return true;
     }
 

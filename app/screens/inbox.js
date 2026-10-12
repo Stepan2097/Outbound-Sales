@@ -75,8 +75,10 @@ function warmupInboxIndex() {
   }
   const sentAt = (thread) => Date.parse(thread?.lastMessage?.sentAt || "") || 0;
   for (const rows of accounts.values()) rows.sort((left, right) => sentAt(right) - sentAt(left));
+  // A blocked or excluded account goes last: it is kept to be read, not worked.
   const order = [...accounts.keys()].filter(Boolean).sort((left, right) =>
-    sentAt(accounts.get(right)[0]) - sentAt(accounts.get(left)[0])
+    Number(warmupInboxRetired(left)) - Number(warmupInboxRetired(right))
+    || sentAt(accounts.get(right)[0]) - sentAt(accounts.get(left)[0])
     || warmupInboxAccountName(left).localeCompare(warmupInboxAccountName(right), "uk"));
   inboxIndexedThreads = inbox.threads;
   inboxIndexedAccounts = inbox.accounts;
@@ -372,6 +374,14 @@ function warmupThreadRowHtml(thread) {
     </button>`;
 }
 
+/** Blocked by LinkedIn or excluded from the warm-up — put away by a person (12.10). */
+function warmupInboxRetired(accountId) {
+  return Boolean(warmupState.inbox.accounts.find((account) => account.accountId === accountId)?.retired);
+}
+
+/** Whether the «Заблоковані» group across the top is open. Closed by default: nothing there asks for anybody. */
+let inboxRetiredOpen = false;
+
 /** The name an account goes by on this screen, from the server's summary or a thread of its own. */
 function warmupInboxAccountName(accountId) {
   const inbox = warmupState.inbox;
@@ -443,8 +453,19 @@ function warmupInboxAccountId() {
  * whole of "open just one account".
  */
 function warmupInboxChipsHtml() {
-  const options = warmupInboxAccountOptions();
+  const all = warmupInboxAccountOptions();
   const open = warmupInboxAccountId();
+  const retired = all.filter((entry) => warmupInboxRetired(entry.accountId));
+  const options = all.filter((entry) => !warmupInboxRetired(entry.accountId));
+  // The put-away accounts: one quiet button, and their chips only when asked
+  // for (or when one of them is the account that is open).
+  const showRetired = inboxRetiredOpen || retired.some((entry) => entry.accountId === open);
+  const retiredHtml = retired.length
+    ? `<button class="inbox-chip inbox-chip-retired-toggle" type="button" data-warmup-retired-toggle aria-expanded="${showRetired}">
+        <span class="inbox-chip-name">Заблоковані · ${retired.length} ${showRetired ? "▴" : "▾"}</span>
+      </button>${showRetired ? retired.map((entry) => `<button class="inbox-chip is-retired ${entry.accountId === open ? "is-active" : ""}" type="button" data-warmup-account="${escapeAttr(entry.accountId)}" aria-pressed="${entry.accountId === open}" title="Заблоковано або виключено — нових листів не буде">
+        <span class="inbox-chip-name">${escapeHtml(entry.name)}</span></button>`).join("") : ""}`
+    : "";
   return options.map((entry) => {
     const active = entry.accountId === open;
     const read = warmupInboxSync(entry.accountId);
@@ -454,7 +475,7 @@ function warmupInboxChipsHtml() {
     return `<button class="inbox-chip ${active ? "is-active" : ""}" type="button" data-warmup-account="${escapeAttr(entry.accountId)}" aria-pressed="${active}" title="${escapeAttr(title)}">
       <span class="inbox-chip-name">${escapeHtml(entry.name)}</span>${entry.unread ? `<span class="inbox-chip-count" aria-label="непрочитаних: ${entry.unread}">${warmupCount(entry.unread)}</span>` : ""}
     </button>`;
-  }).join("");
+  }).join("") + retiredHtml;
 }
 
 /** Where the conversation goes while none is open: what to do, and the shortest way to start. */
@@ -744,7 +765,11 @@ export function renderWarmupInbox() {
     ? `${openName}: листи оновлено ${warmupAgo(sync.lastSyncedAt)} · агент читає їх раз на добу${sync.window ? `, у вікні ${sync.window}` : ""}`
     : (sync.known ? `${openName}: листи ще не читали` : "");
   subtitle.title = sync.lastSyncedAt ? warmupStamp(sync.lastSyncedAt) : "";
-  const note = warmupInboxNoteHtml(sync);
+  // A put-away account is not read any more, and saying «агент зупинився» about
+  // it is a yellow alarm about something nobody needs to fix.
+  const note = warmupInboxRetired(openId)
+    ? `<div class="warmup-inbox-note is-calm"><strong>Акаунт заблоковано або виключено з прогріву.</strong><span>Агент його не відкриває — тут лише старі розмови, для перегляду.</span></div>`
+    : warmupInboxNoteHtml(sync);
   if (notice) { setInboxMarkup(notice, note); notice.hidden = !note; }
 
   const chipsHtml = warmupInboxChipsHtml();
@@ -1222,6 +1247,11 @@ document.getElementById("warmupInboxRefreshBtn")?.addEventListener("click", asyn
 
 // Акаунти зверху: один дотик — і список лише цього акаунта.
 document.getElementById("warmupInboxAccounts")?.addEventListener("click", (event) => {
+  if (event.target.closest("[data-warmup-retired-toggle]")?.dataset?.warmupRetiredToggle !== undefined) {
+    inboxRetiredOpen = !inboxRetiredOpen;
+    renderWarmupInbox();
+    return;
+  }
   const chip = event.target.closest("[data-warmup-account]");
   if (!chip?.dataset.warmupAccount) return;
   openWarmupInboxAccount(chip.dataset.warmupAccount);

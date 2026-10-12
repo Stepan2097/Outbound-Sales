@@ -16,7 +16,7 @@ const NAMES = [
   "homeState", "HOME_CACHE", "HOME_DRAFT_PARALLEL", "loadHome", "draftMissing", "draftFor", "homePerson", "homeText",
   "sendFirst", "cancelFirst", "dismissFirst", "homeAgo", "homeGoesOut", "homePercent", "HOME_STEPS", "homeFunnelHtml",
   "homeAttentionHtml", "HOME_REPLY_STATE", "homeCardInnerHtml", "homeWriteHtml", "homeRepliesHtml", "HOME_ACCOUNT_STATE",
-  "homeAccountsHtml", "renderHome", "renderHomeCard"
+  "homeAccountsHtml", "retiredLineHtml", "renderHome", "renderHomeCard"
 ];
 
 const LISTENERS = [

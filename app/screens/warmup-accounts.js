@@ -490,6 +490,14 @@ function renderWarmupDetail() {
     controls.push('<button class="danger-button" type="button" data-warmup-control="stop">Зупинити</button>');
   }
 
+  // 12.10, the owner: a blocked account is put away by one button, and from
+  // then on it raises nothing anywhere; the same button brings it back.
+  if (account.status !== "excluded") {
+    controls.push(account.health === "blocked"
+      ? '<button class="text-button" type="button" data-warmup-block="ok">Розблокувати</button>'
+      : '<button class="danger-button" type="button" data-warmup-block="blocked" title="LinkedIn заблокував акаунт: агент його більше не відкриває, і він ніде не висить жовтим">Позначити заблокованим</button>');
+  }
+
   const healthOptions = (warmupState.config?.healthValues || [])
     .map(({ value, label }) => `<option value="${escapeHtml(value)}" ${account.health === value ? "selected" : ""}>${escapeHtml(label)}</option>`)
     .join("");
@@ -841,6 +849,21 @@ document.getElementById("warmupDetailBody")?.addEventListener("click", (event) =
   const control = event.target.closest("[data-warmup-control]");
   if (control) {
     warmupControl(control.dataset.warmupControl);
+    return;
+  }
+  const block = event.target.closest("[data-warmup-block]");
+  if (block) {
+    const health = block.dataset.warmupBlock;
+    if (health === "blocked" && !window.confirm("Позначити акаунт заблокованим? Агент перестане його відкривати, а нагадування про нього зникнуть з «Вхідних» і «Головної».")) return;
+    warmupApi("/accounts/health", {
+      method: "POST",
+      body: JSON.stringify({ accountId: warmupState.selectedAccountId, health, note: health === "blocked" ? "Заблоковано в LinkedIn" : "" })
+    })
+      .then(() => loadWarmup({ full: false }))
+      .catch((error) => {
+        warmupState.error = error.message;
+        renderWarmupConfigNote();
+      });
     return;
   }
   if (event.target.closest("[data-warmup-health]")) {

@@ -741,3 +741,14 @@
     max-width: 92%;
   }
 }
+
+/* Заблоковані й виключені акаунти (12.10): окремо, тихо, в кінці. */
+.inbox-chip-retired-toggle,
+.inbox-chip.is-retired {
+  border-style: dashed;
+  color: var(--muted);
+}
+
+.inbox-chip.is-retired.is-active {
+  border-style: solid;
+}
