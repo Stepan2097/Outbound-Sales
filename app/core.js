@@ -321,6 +321,7 @@ function setView(viewName) {
     {
       home: "Головна",
       warmup: "Прогрів LinkedIn",
+      "mail-warmup": "Прогрів пошт",
       campaigns: "Кампанії",
       leads: "Ліди",
       reports: "Звіти",

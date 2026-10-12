@@ -30,13 +30,18 @@ const GMAIL = "https://gmail.googleapis.com/gmail/v1/users/me";
 /**
  * Exactly the scopes the Workspace admin has to list for the service account
  * under domain-wide delegation. `gmail.send` to send; `gmail.readonly` to check
- * a mailbox now and to read replies and bounces later (ESP 7). Nothing that
- * can delete or change settings.
+ * a mailbox now and to read replies and bounces later (ESP 7); `gmail.modify`
+ * for the mailbox warm-up, which takes our own letters out of Spam and marks
+ * them Important (labels only). Nothing that can delete or change settings.
  */
 export const GMAIL_SCOPES = [
   "https://www.googleapis.com/auth/gmail.send",
-  "https://www.googleapis.com/auth/gmail.readonly"
+  "https://www.googleapis.com/auth/gmail.readonly",
+  "https://www.googleapis.com/auth/gmail.modify"
 ];
+
+/** One header of a Gmail `format=metadata` message. */
+const metaHeader = (message, name) => (message.payload?.headers || []).find((row) => String(row.name).toLowerCase() === name)?.value || "";
 
 // The errors and the address rule are the provider contract's (esp/provider.mjs),
 // re-exported so existing imports keep working.
@@ -220,6 +225,39 @@ export class GmailApiConnector {
   }
 
   /**
+   * Mailbox warm-up: the letters our other mailboxes sent to this one in the
+   * last few days, from every folder Spam included — Gmail's search skips Spam
+   * and Trash unless asked. Headers only: the warm-up needs who, which letter
+   * and where it landed, not the text.
+   */
+  async lettersFrom(value, senders, { newerThanDays = 3 } = {}) {
+    const mailbox = normalizeMailbox(value);
+    const from = [...new Set(senders.map((email) => normalizeMailbox(email)).filter((email) => email !== mailbox))];
+    if (!from.length) return [];
+    const query = `from:(${from.join(" OR ")}) newer_than:${Math.max(1, Number(newerThanDays) || 3)}d`;
+    const list = await this.call(mailbox, `/messages?q=${encodeURIComponent(query)}&includeSpamTrash=true&maxResults=100`);
+    const letters = [];
+    for (const row of list.messages || []) {
+      const message = await this.call(mailbox, `/messages/${encodeURIComponent(row.id)}?format=metadata&metadataHeaders=From&metadataHeaders=Message-ID&metadataHeaders=Subject&metadataHeaders=In-Reply-To`);
+      letters.push({
+        id: message.id, threadId: message.threadId || null, labels: message.labelIds || [],
+        from: (metaHeader(message, "from").match(/<([^>]+)>/)?.[1] || metaHeader(message, "from")).trim().toLowerCase(),
+        messageId: metaHeader(message, "message-id"), inReplyTo: metaHeader(message, "in-reply-to"), subject: metaHeader(message, "subject")
+      });
+    }
+    return letters;
+  }
+
+  /** Labels on one message (`gmail.modify`): the warm-up's «not spam» and «important». */
+  async setLabels(value, id, { add = [], remove = [] } = {}) {
+    const mailbox = normalizeMailbox(value);
+    const message = await this.call(mailbox, `/messages/${encodeURIComponent(id)}/modify`, {
+      method: "POST", body: JSON.stringify({ addLabelIds: add, removeLabelIds: remove })
+    });
+    return { id: message.id, labels: message.labelIds || [] };
+  }
+
+  /**
    * One finished RFC 5322 message (built by ESP 2/3), sent as `mailbox`. With
    * `threadId` Gmail keeps a follow-up in the conversation it continues.
    */
@@ -246,20 +284,41 @@ export class StubGmailConnector {
     this.inboxes = new Map();
   }
 
-  /** A message arriving in `mailbox` (tests and the acceptance cycle on the stub). */
-  deliver(value, raw, { threadId = null } = {}) {
+  /**
+   * A message arriving in `mailbox` (tests and the acceptance cycle on the
+   * stub). `labels` is where it landed — `["SPAM"]` for the warm-up's tests.
+   */
+  deliver(value, raw, { threadId = null, labels = ["INBOX"] } = {}) {
     const mailbox = normalizeMailbox(value);
     if (!this.inboxes.has(mailbox)) this.inboxes.set(mailbox, []);
     const list = this.inboxes.get(mailbox);
-    const message = { id: `in-${randomUUID()}`, threadId, raw: String(raw) };
+    const message = { id: `in-${randomUUID()}`, threadId: threadId || `thread-${randomUUID()}`, raw: String(raw), labels: [...labels] };
     list.push(message);
     return message;
   }
 
   async inboxSince(value, cursor = null) {
-    const list = this.inboxes.get(normalizeMailbox(value)) || [];
+    const list = (this.inboxes.get(normalizeMailbox(value)) || []);
     const from = Number(cursor) || 0;
-    return { messages: list.slice(from), cursor: String(list.length) };
+    // Gmail's inbox read skips Spam; so does the stub's.
+    return { messages: list.slice(from).filter((message) => !message.labels?.includes("SPAM")), cursor: String(list.length) };
+  }
+
+  async lettersFrom(value, senders) {
+    const from = new Set(senders.map((email) => normalizeMailbox(email)));
+    const read = (raw, name) => (String(raw).match(new RegExp(`^${name}:\\s*(.*)$`, "im")) || [])[1]?.trim() || "";
+    return (this.inboxes.get(normalizeMailbox(value)) || []).map((message) => ({
+      id: message.id, threadId: message.threadId, labels: [...(message.labels || [])],
+      from: (read(message.raw, "From").match(/<([^>]+)>/)?.[1] || read(message.raw, "From")).toLowerCase(),
+      messageId: read(message.raw, "Message-ID"), inReplyTo: read(message.raw, "In-Reply-To"), subject: read(message.raw, "Subject")
+    })).filter((letter) => from.has(letter.from));
+  }
+
+  async setLabels(value, id, { add = [], remove = [] } = {}) {
+    const message = (this.inboxes.get(normalizeMailbox(value)) || []).find((row) => row.id === id);
+    if (!message) throw new MailboxError("Заглушка: такого листа в скриньці немає.", { code: "gmail_error", status: 404 });
+    message.labels = [...new Set([...(message.labels || []).filter((label) => !remove.includes(label)), ...add])];
+    return { id, labels: message.labels };
   }
 
   describe() {

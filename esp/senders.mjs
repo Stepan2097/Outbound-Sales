@@ -86,10 +86,13 @@ export class SenderGate {
     // finished message — whatever built it, a letter that is not plain stops
     // here, before Google is asked anything.
     assertPlainLetter(raw);
-    const paused = await this.store.pausedFor(mailbox);
+    // `purpose: "warmup"` — the mailbox warm-up, which may run on a domain that
+    // is still ageing; everything else is a cold letter and keeps the strict rule.
+    const { purpose = "cold", ...sendOptions } = options;
+    const paused = await this.store.pausedFor(mailbox, { purpose });
     if (paused) throw new SenderPaused(mailbox, paused);
     try {
-      return await this.connector.send(mailbox, raw, options);
+      return await this.connector.send(mailbox, raw, sendOptions);
     } catch (error) {
       if (!isAuthFailure(error)) throw error;
       const pause = await this.store.pause(mailbox, {

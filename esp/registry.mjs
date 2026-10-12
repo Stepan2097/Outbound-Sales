@@ -192,6 +192,27 @@ export async function setSenderStatus({ email, status, reason = "", code = null 
 }
 
 /** Whether this address may send right now, and if not, the sentence why. */
+/**
+ * The mailbox warm-up's rule (esp/mail-warmup.mjs): our own mailboxes writing
+ * to each other may start while the domain is still ageing — that is what the
+ * warm-up is for — but not on a domain in reserve, paused or retired, and not
+ * from a mailbox that is itself paused.
+ */
+export const WARMUP_DOMAIN_STATES = ["aging", "ramp", "active"];
+
+export async function canWarm(email) {
+  const key = contactKey(email);
+  const { senders, domains } = await registry();
+  const sender = senders.find((row) => row.email === key);
+  if (!sender) return { ok: false, reason: `${email} немає в реєстрі відправників.` };
+  const domain = domains.find((row) => row.domain === sender.domain);
+  if (!domain || !WARMUP_DOMAIN_STATES.includes(domain.status)) {
+    return { ok: false, reason: `${sender.email}: домен ${sender.domain} у стані «${DOMAIN_LABEL[domain?.status] || domain?.status || "немає"}» — прогрів не йде.` };
+  }
+  if (sender.status !== "active") return { ok: false, reason: `${sender.email}: ${sender.status === "paused" ? "на паузі" : "виведено"}.` };
+  return { ok: true };
+}
+
 export async function canSend(email) {
   const key = contactKey(email);
   const { senders } = await registry();
@@ -277,8 +298,8 @@ export async function checkDomain({ domain, dkimSelector = "" }, actor, dns = { 
 export function registrySenderStore(actor = "esp-gate") {
   const lastChange = (sender) => [...sender.history].reverse().find((row) => row.status === sender.status) || {};
   return {
-    async pausedFor(mailbox) {
-      const allowed = await canSend(mailbox);
+    async pausedFor(mailbox, { purpose = "cold" } = {}) {
+      const allowed = purpose === "warmup" ? await canWarm(mailbox) : await canSend(mailbox);
       if (allowed.ok) return null;
       const { senders } = await registry();
       const sender = senders.find((row) => row.email === contactKey(mailbox));

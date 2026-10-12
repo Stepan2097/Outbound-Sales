@@ -19,6 +19,7 @@
     <link rel="stylesheet" href="/styles/mail-inbox.css" />
     <link rel="stylesheet" href="/styles/mail-leads.css" />
     <link rel="stylesheet" href="/styles/mail-reports.css" />
+    <link rel="stylesheet" href="/styles/mail-warmup.css" />
     <script defer src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
     <script defer type="module" src="/main.js"></script>
   </head>
@@ -59,6 +60,7 @@
         <nav class="nav-list" aria-label="Робочий простір">
           <button class="nav-item active" data-view="home" aria-label="Головна" title="Головна"><i data-lucide="house"></i><span>Головна</span></button>
           <button class="nav-item" data-view="warmup" aria-label="Прогрів" title="Прогрів"><i data-lucide="flame"></i><span>Прогрів</span></button>
+          <button class="nav-item" data-view="mail-warmup" aria-label="Прогрів пошт" title="Прогрів пошт"><i data-lucide="mail-plus"></i><span>Прогрів пошт</span></button>
           <button class="nav-item" data-view="campaigns" aria-label="Кампанії" title="Кампанії"><i data-lucide="send"></i><span>Кампанії</span></button>
           <button class="nav-item" data-view="leads" aria-label="Ліди" title="Ліди"><i data-lucide="users"></i><span>Ліди</span></button>
           <button class="nav-item" data-view="reports" aria-label="Звіти" title="Звіти"><i data-lucide="chart-column"></i><span>Звіти</span></button>
@@ -223,6 +225,11 @@
               <div id="espReportsBody"></div>
             </section>
           </div>
+        </section>
+
+        <!-- Прогрів пошт: наші скриньки Workspace пишуть одна одній; малює app/screens/mail-warmup.js. -->
+        <section class="view" id="view-mail-warmup">
+          <div class="mail-page warmup-mail-page" id="mailWarmupRoot"></div>
         </section>
 
         <section class="view" id="view-inbox">

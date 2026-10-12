@@ -62,6 +62,8 @@ export class MicrosoftGraphConnector {
   async checkMailbox() { throw this.#notYet(); }
   async send() { throw this.#notYet(); }
   async inboxSince() { throw this.#notYet(); }
+  async lettersFrom() { throw this.#notYet(); }
+  async setLabels() { throw this.#notYet(); }
 }
 
 /**
@@ -85,6 +87,9 @@ export function providerRouter({ connectors, providerOf = () => "gmail", fallbac
     checkMailbox: (mailbox) => pick(mailbox).checkMailbox(mailbox),
     send: (mailbox, raw, options) => pick(mailbox).send(mailbox, raw, options),
     inboxSince: (mailbox, cursor) => pick(mailbox).inboxSince(mailbox, cursor),
+    // The mailbox warm-up: our letters wherever they landed, and their labels.
+    lettersFrom: (mailbox, senders, options) => pick(mailbox).lettersFrom(mailbox, senders, options),
+    setLabels: (mailbox, id, labels) => pick(mailbox).setLabels(mailbox, id, labels),
     // The stub's test hooks, when the default is the stub.
     deliver: main.deliver ? (...args) => main.deliver(...args) : undefined,
     get sent() { return main.sent; }

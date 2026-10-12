@@ -142,17 +142,19 @@ export function senderDailyLimit(sender) {
 
 /**
  * The day's sends per sender and per domain, from the ESP journal. A letter
- * counts from the moment it is attempted (`message.sending`) unless it
- * failed — an attempt still in flight is a letter, or two ticks at once would
+ * counts from the moment it is attempted (`message.sending`, or the mailbox
+ * warm-up's `warmup.sending`) unless it failed — an attempt still in flight is a letter, or two ticks at once would
  * both see room for one more.
  */
 export function sendLedger(entries, { now = new Date(), zone = COUNTING_ZONE } = {}) {
   const today = localTime(now, zone).date;
-  const failed = new Set(entries.filter((entry) => entry.type === "message.failed").map((entry) => entry.data?.sendingSeq));
+  // The mailbox warm-up's letters count too: warm-up and cold mail together stay
+  // within one sender's and one domain's daily limit.
+  const failed = new Set(entries.filter((entry) => entry.type === "message.failed" || entry.type === "warmup.failed").map((entry) => entry.data?.sendingSeq));
   const senders = new Map();
   const domains = new Map();
   for (const entry of entries) {
-    if (entry.type !== "message.sending" || failed.has(entry.seq)) continue;
+    if ((entry.type !== "message.sending" && entry.type !== "warmup.sending") || failed.has(entry.seq)) continue;
     const from = String(entry.data?.from || "").toLowerCase();
     if (!from) continue;
     const at = new Date(entry.at);

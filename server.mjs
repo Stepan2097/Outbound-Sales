@@ -31,6 +31,7 @@ import { campaignStore } from "./esp/campaigns.mjs";
 import { leadStore } from "./esp/leads.mjs";
 import { postponedDue, runTick, startSequence } from "./esp/sequence.mjs";
 import { pollInboxes } from "./esp/inbound.mjs";
+import { runWarmupTick, warmupMode } from "./esp/mail-warmup.mjs";
 import { createFileOnceSync, writeFileAtomic } from "./state/atomic-write.mjs";
 import { startScheduler } from "./warmup/scheduler.mjs";
 import { serveStaticFile } from "./state/static-files.mjs";
@@ -536,7 +537,12 @@ const esp = (() => {
     const applied = result.actions.length ? await applyAlerts({ actions: result.actions, entries: await allEntries(), ...alertDeps }) : [];
     return { ...result, applied };
   };
-  return { connector, keyError, gate, templates, signature, unsubscribe, campaigns, leads, halt, halted, tick, filters, pollInbox, checkAlerts, runMonitor, alertsTelegram: telegram.configured, sequenceOn: process.env.ESP_SEQUENCE === "on" };
+  // Прогрів пошт: our mailboxes writing to each other (esp/mail-warmup.mjs).
+  const warmupTick = async () => {
+    const { senders } = await espRegistry();
+    return runWarmupTick({ journal: { allEntries, append: espAppend }, senders, connector, gate, now: new Date() });
+  };
+  return { connector, keyError, gate, templates, signature, unsubscribe, campaigns, leads, halt, halted, tick, filters, pollInbox, checkAlerts, runMonitor, warmupTick, alertsTelegram: telegram.configured, sequenceOn: process.env.ESP_SEQUENCE === "on" };
 })();
 
 /**
@@ -668,6 +674,18 @@ server.listen(port, () => {
     };
     setTimeout(watch, 5 * 60_000).unref();
     setInterval(watch, 60 * 60_000).unref();
+  }
+  // Прогрів пошт: every two minutes, and only where letters may really go —
+  // the mode says so (live sending, or the stub's acceptance cycle). «Стоп усе»
+  // stops it like every other send. ESP_WARMUP=off turns it off.
+  if (process.env.ESP_WARMUP !== "off") {
+    startSequence({
+      intervalMs: 2 * 60_000,
+      tick: async () => {
+        if (esp.halted() || !warmupMode({ describe: esp.connector.describe(), sequenceOn: esp.sequenceOn }).runs) return {};
+        return esp.warmupTick();
+      }
+    });
   }
   // ESP 5: the cold-email chain, only when switched on (see `esp` above).
   if (esp.sequenceOn) {

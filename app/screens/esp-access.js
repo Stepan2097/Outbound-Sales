@@ -39,7 +39,9 @@ const ESP_ADMIN_ACTION_LABEL = {
   "admin.campaign_state": "змінив стан кампанії",
   "admin.campaign_leads_added": "додав людей у кампанію",
   "admin.monitor_run": "запустив перевірку DNS і блоклистів",
-  "admin.retention_run": "анонімізував неактивних лідів"
+  "admin.retention_run": "анонімізував неактивних лідів",
+  "admin.warmup_started": "запустив прогрів пошти",
+  "admin.warmup_paused": "поставив прогрів пошти на паузу"
 };
 
 export async function loadEspAccess() {

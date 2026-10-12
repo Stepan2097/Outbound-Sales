@@ -152,10 +152,15 @@ function letterFor(index, { threadId, classified }) {
  * the journal (by that id) is skipped, so a restart re-reading the inbox
  * writes nothing twice. Returns what was done.
  */
-export async function processInbound({ mailbox, message, entries, index, record, append, postpone, now = new Date() }) {
+export async function processInbound({ mailbox, message, entries, index, record, append, postpone, warmupIds = null, now = new Date() }) {
   if (entries.some((entry) => entry.data?.gmailId === message.id)) return { action: "seen" };
   const classified = classifyInbound(message.raw, { mailbox, now });
   if (classified.kind === "own") return { action: "own" };
+  // The mailbox warm-up's letters and replies between our own mailboxes are the
+  // warm-up's (esp/mail-warmup.mjs), never a lead's reply.
+  if (warmupIds?.size && [classified.messageId, classified.inReplyTo, ...(classified.references || [])].some((id) => id && warmupIds.has(id))) {
+    return { action: "warmup" };
+  }
   const letter = letterFor(index, { threadId: message.threadId, classified });
   if (!letter) return { action: "not_ours", kind: classified.kind };
   const common = { sender: mailbox, campaignId: letter.campaignId, step: letter.step, gmailId: message.id, threadId: message.threadId || null };
@@ -185,6 +190,11 @@ export async function processInbound({ mailbox, message, entries, index, record,
   return { action: "reply", contact: letter.contact };
 }
 
+/** The Message-IDs of the mailbox warm-up's letters, first ones and replies. */
+export function warmupMessageIds(entries) {
+  return new Set(entries.filter((entry) => entry.type === "warmup.sending" && entry.data?.messageId).map((entry) => entry.data.messageId));
+}
+
 /**
  * One pass over the sending mailboxes: what arrived since each one's cursor.
  * `cursors` — { read(mailbox), write(mailbox, cursor) }. A mailbox Google
@@ -198,8 +208,9 @@ export async function pollInboxes({ connector, mailboxes, cursors, journal, post
       const { messages, cursor } = await connector.inboxSince(mailbox, cursors.read(mailbox));
       const entries = [...await journal.allEntries()];
       const index = sentIndex(entries, mailbox);
+      const warmupIds = warmupMessageIds(entries);
       for (const message of messages) {
-        const result = await processInbound({ mailbox, message, entries, index, record: journal.recordAboutContact, append: journal.append, postpone, now });
+        const result = await processInbound({ mailbox, message, entries, index, record: journal.recordAboutContact, append: journal.append, postpone, warmupIds, now });
         summary.actions[result.action] = (summary.actions[result.action] || 0) + 1;
         // Seen in this pass too: a message listed twice is journalled once.
         entries.push({ data: { gmailId: message.id } });

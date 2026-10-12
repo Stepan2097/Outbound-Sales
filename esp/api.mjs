@@ -14,6 +14,7 @@ import { composeLetter } from "./compose.mjs";
 import { ReplyError, conversations, quickReply } from "./conversations.mjs";
 import { REPLY_LABELS } from "./replies.mjs";
 import { LeadError, leadPage } from "./leads.mjs";
+import { warmupLog, warmupMode, warmupView } from "./mail-warmup.mjs";
 import { UNIBOX_FOLDERS, uniboxList, uniboxProblems, uniboxThread } from "./unibox.mjs";
 import { recordAboutContact, recordFailed, recordSending, recordSent } from "./messages.mjs";
 import { allEntries, append, contactKey } from "./journal.mjs";
@@ -40,6 +41,10 @@ export function espRouteRight(method, path) {
   // reading; a star is the inbox's work, as a reply or a label is.
   if (path === "/unibox" || path === "/unibox/thread" || path === "/unibox/read") return "replies.read";
   if (path === "/unibox/star") return "replies.write";
+  // Прогрів пошт: seeing it is the team's; starting or pausing a mailbox's
+  // warm-up is its sending volume — a limit.
+  if (path === "/warmup") return method === "GET" ? "replies.read" : "limits.change";
+  if (path.startsWith("/warmup/")) return "limits.change";
   // ESP-UI 5, Leads: the lists are the team's to read; filling them and sending
   // people to a campaign is preparing a campaign; a note on a card is inbox work.
   if (method === "GET" && path.startsWith("/leads")) return "replies.read";
@@ -447,6 +452,44 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
     } catch (error) {
       return fail(error);
     }
+  }
+
+  // ── Прогрів пошт: the table, the log, «Старт» and «Пауза» ─────────────────
+  if (method === "GET" && path === "/warmup") {
+    const entries = await allEntries();
+    const { senders, domains } = await registry();
+    const mode = warmupMode({ describe: esp.connector?.describe() || { mode: "stub" }, sequenceOn: Boolean(esp.sequenceOn) });
+    sendJson(response, 200, {
+      success: true, mode, halted: Boolean(esp.halted?.()),
+      scopes: esp.connector?.describe().scopes || [],
+      rows: warmupView(entries, { senders, domains }),
+      log: warmupLog(entries),
+      canChange: await can(profile, "limits.change")
+    });
+    return true;
+  }
+
+  if (method === "POST" && (path === "/warmup/start" || path === "/warmup/pause")) {
+    const body = (await readJson(request)) || {};
+    const { senders, domains } = await registry();
+    const entries = await allEntries();
+    const rows = warmupView(entries, { senders, domains });
+    const wanted = body.all ? rows.map((row) => row.email) : [String(body.mailbox || "").trim().toLowerCase()];
+    const starting = path === "/warmup/start";
+    const changed = [];
+    const refused = [];
+    for (const email of wanted) {
+      const row = rows.find((item) => item.email === email);
+      if (!row) { refused.push({ mailbox: email, reason: "Такої скриньки немає в реєстрі відправників." }); continue; }
+      if (starting && row.blocked) { refused.push({ mailbox: email, reason: `Прогрів не почати: ${row.blocked}.` }); continue; }
+      if ((starting && row.status === "running") || (!starting && row.status !== "running")) continue;
+      await append({ type: starting ? "warmup.started" : "warmup.paused", actor, data: { mailbox: email } });
+      changed.push(email);
+    }
+    if (changed.length) await logged(starting ? "warmup_started" : "warmup_paused", { mailboxes: changed });
+    if (!body.all && refused.length) { sendJson(response, 400, { success: false, error: refused[0].reason, refused }); return true; }
+    sendJson(response, 200, { success: true, changed, refused });
+    return true;
   }
 
   // ── ESP-UI 4: the Unibox — folders, pages, stars, read ─────────────────

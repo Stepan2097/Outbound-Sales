@@ -1,0 +1,139 @@
+/* Прогрів пошт: картки з підсумком, таблиця скриньок зі «Старт» / «Пауза»,
+   журнал подій. Числа — табличні, підписи під ними — дрібні й приглушені. */
+
+.warmup-mail-page {
+  gap: 14px;
+}
+
+.warmup-mail-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.warmup-mail-head p {
+  flex: 1 1 520px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.warmup-mail-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 12px;
+}
+
+.warmup-mail-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.warmup-mail-card span:not(.warmup-mail-icon),
+.warmup-mail-card small {
+  display: block;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.warmup-mail-card strong {
+  display: block;
+  font-size: 24px;
+  font-variant-numeric: tabular-nums;
+}
+
+.warmup-mail-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--teal-weak);
+  color: var(--teal);
+}
+
+.warmup-mail-table {
+  font-size: 14px;
+}
+
+.warmup-mail-table th,
+.warmup-mail-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.warmup-mail-table td.is-number,
+.warmup-mail-table th:nth-child(n + 3):nth-child(-n + 7) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.warmup-mail-table small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.warmup-mail-table small.is-bad {
+  color: var(--red);
+}
+
+.warmup-mail-progress {
+  width: 90px;
+  height: 6px;
+  margin: 0 0 6px auto;
+  border-radius: 3px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.warmup-mail-progress span {
+  display: block;
+  height: 100%;
+  background: var(--teal);
+}
+
+.warmup-mail-action {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.warmup-mail-log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.warmup-mail-log li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.warmup-mail-log time,
+.warmup-mail-log small {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.warmup-mail-log span {
+  overflow-wrap: anywhere;
+}

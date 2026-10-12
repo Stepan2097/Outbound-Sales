@@ -35,7 +35,7 @@ function google({ token = () => ({ status: 200, body: { access_token: "ya29.toke
 
 const decode = (part) => JSON.parse(Buffer.from(part, "base64url").toString("utf8"));
 
-test("the assertion names the mailbox as its subject, asks only for send and read, and is signed by the key", () => {
+test("the assertion names the mailbox as its subject, asks only for send, read and labels (warm-up), and is signed by the key", () => {
   const account = parseServiceAccount(JSON.stringify(KEY));
   const jwt = signAssertion(account, { subject: "anna@advantage-mail.com", now: Date.UTC(2026, 9, 10, 9) });
   const [header, claims, signature] = jwt.split(".");
@@ -47,6 +47,7 @@ test("the assertion names the mailbox as its subject, asks only for send and rea
   assert.equal(body.exp - body.iat, 3600);
   assert.deepEqual(body.scope.split(" "), GMAIL_SCOPES);
   assert.ok(!body.scope.includes("mail.google.com"), "full mailbox access is not asked for");
+  assert.deepEqual(GMAIL_SCOPES.map((scope) => scope.split("/").pop()), ["gmail.send", "gmail.readonly", "gmail.modify"]);
   const verify = createVerify("RSA-SHA256");
   verify.update(`${header}.${claims}`);
   assert.equal(verify.verify(publicKey, signature, "base64url"), true);
