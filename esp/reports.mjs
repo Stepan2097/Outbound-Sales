@@ -186,3 +186,120 @@ export function toCsv(rows, columns) {
   };
   return [columns.join(","), ...rows.map((row) => columns.map((column) => cell(row[column])).join(","))].join("\n") + "\n";
 }
+
+/** The period a date falls in: the day, the Monday of its week, or the month. */
+export function periodOf(iso, bucket = "day") {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  if (bucket === "month") return date.toISOString().slice(0, 7);
+  if (bucket === "week") {
+    const monday = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() - ((date.getUTCDay() + 6) % 7)));
+    return monday.toISOString().slice(0, 10);
+  }
+  return date.toISOString().slice(0, 10);
+}
+
+/**
+ * ESP-UI 6 — the «Звіти» page (Snov screen 06), from the journal only: letters
+ * sent (first and follow-ups), delivered and bounced, the funnel people
+ * written to → replied → replied positively, unsubscribes and auto-replies,
+ * and the same over time by day, week or month. Filtered by campaign, sending
+ * mailbox and dates (inclusive). Snov's opens and clicks are not here: the
+ * letters carry no pixel and no rewritten link, so those numbers would be
+ * invented.
+ */
+export function summaryReport(entries, { campaign = "", sender = "", from = "", to = "", bucket = "day" } = {}) {
+  const labels = currentLabels(entries);
+  const mine = (data, mailbox) => (!campaign || data.campaignId === campaign) && (!sender || mailbox === sender);
+  const inRange = (iso) => {
+    const date = day(iso);
+    return (!from || date >= from) && (!to || date <= to);
+  };
+  const totals = { sent: 0, firsts: 0, followups: 0, bounced: 0, hardBounced: 0, autoreplies: 0, replies: 0, unsubscribes: 0 };
+  const people = { contacted: new Set(), replied: new Set(), positive: new Set(), unsubscribed: new Set(), autoreplied: new Set(), bounced: new Set() };
+  const series = new Map();
+  const point = (iso) => {
+    const key = periodOf(iso, bucket);
+    if (!series.has(key)) series.set(key, { period: key, sent: 0, firsts: 0, followups: 0, replies: 0, positive: 0, bounces: 0, unsubscribes: 0, autoreplies: 0 });
+    return series.get(key);
+  };
+  for (const entry of entries) {
+    const data = entry.data || {};
+    if (!inRange(entry.at)) continue;
+    if (entry.type === "message.sent" && data.from && mine(data, data.from)) {
+      const first = !(Number(data.step) > 0);
+      totals.sent += 1;
+      totals[first ? "firsts" : "followups"] += 1;
+      people.contacted.add(entry.contact);
+      const row = point(entry.at);
+      row.sent += 1;
+      row[first ? "firsts" : "followups"] += 1;
+    } else if (entry.type === "message.replied" && mine(data, data.sender)) {
+      totals.replies += 1;
+      people.replied.add(entry.contact);
+      const row = point(entry.at);
+      row.replies += 1;
+      if (labelOf(entry, labels) === "positive") { people.positive.add(entry.contact); row.positive += 1; }
+    } else if (entry.type === "message.bounced" && mine(data, data.sender)) {
+      totals.bounced += 1;
+      if (/^5\./.test(String(data.code || ""))) totals.hardBounced += 1;
+      people.bounced.add(entry.contact);
+      point(entry.at).bounces += 1;
+    } else if (entry.type === "contact.unsubscribed" && mine(data, data.sender)) {
+      totals.unsubscribes += 1;
+      people.unsubscribed.add(entry.contact);
+      point(entry.at).unsubscribes += 1;
+    } else if (entry.type === "message.autoreplied" && mine(data, data.sender)) {
+      totals.autoreplies += 1;
+      people.autoreplied.add(entry.contact);
+      point(entry.at).autoreplies += 1;
+    }
+  }
+  const contacted = people.contacted.size;
+  const delivered = Math.max(0, totals.sent - totals.bounced);
+  return {
+    totals: {
+      ...totals,
+      delivered,
+      deliveredRate: rate(delivered, totals.sent),
+      bouncedRate: rate(totals.bounced, totals.sent),
+      firstsRate: rate(totals.firsts, totals.sent),
+      followupsRate: rate(totals.followups, totals.sent)
+    },
+    funnel: {
+      contacted,
+      replied: people.replied.size,
+      positive: people.positive.size,
+      replyRate: rate(people.replied.size, contacted),
+      positiveRate: rate(people.positive.size, contacted)
+    },
+    people: {
+      unsubscribed: people.unsubscribed.size,
+      unsubscribedRate: rate(people.unsubscribed.size, contacted),
+      autoreplied: people.autoreplied.size,
+      autorepliedRate: rate(people.autoreplied.size, contacted),
+      bounced: people.bounced.size
+    },
+    series: fillPeriods(series, { from, to, bucket }),
+    bucket
+  };
+}
+
+/** Every period between the first and the last (or the asked dates), empty ones too — a chart with gaps lies. */
+function fillPeriods(series, { from, to, bucket }) {
+  const known = [...series.keys()].sort();
+  const start = periodOf(from || known[0] || "", bucket);
+  const end = periodOf(to || known.at(-1) || "", bucket);
+  if (!start || !end || start > end) return [...series.values()].sort((left, right) => left.period.localeCompare(right.period));
+  const empty = (period) => ({ period, sent: 0, firsts: 0, followups: 0, replies: 0, positive: 0, bounces: 0, unsubscribes: 0, autoreplies: 0 });
+  const out = [];
+  let cursor = bucket === "month" ? new Date(`${start}-01T00:00:00Z`) : new Date(`${start}T00:00:00Z`);
+  for (let guard = 0; guard < 4000; guard += 1) {
+    const key = periodOf(cursor.toISOString(), bucket);
+    if (key > end) break;
+    out.push(series.get(key) || empty(key));
+    if (bucket === "month") cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1));
+    else cursor = new Date(cursor.getTime() + (bucket === "week" ? 7 : 1) * 86_400_000);
+  }
+  return out;
+}

@@ -7,7 +7,7 @@ import test from "node:test";
 import { espRouteRight, handleEspApi } from "../esp/api.mjs";
 import { handleEspDataApi } from "../esp/data-api.mjs";
 import { allEntries, append, useJournal } from "../esp/journal.mjs";
-import { campaignReport, senderDailyReport, toCsv, variantKey } from "../esp/reports.mjs";
+import { campaignReport, periodOf, senderDailyReport, summaryReport, toCsv, variantKey } from "../esp/reports.mjs";
 import { DEFAULT_RETENTION_DAYS, anonymize, anonymousId, dueForRetention, redactFor, retentionDays, runRetention } from "../esp/retention.mjs";
 import { exclusions } from "../esp/filters.mjs";
 
@@ -180,4 +180,44 @@ test("маршрути: звіти — команді, CSV — файлом; а�
   const ran = await call("POST", "/retention/run", "admin");
   assert.equal(ran.payload.anonymized, 1);
   assert.ok((await allEntries()).some((entry) => entry.type === "admin.retention_run" && entry.actor === "admin@x.com"));
+});
+
+// ── ESP-UI 6: сторінка «Звіти» ────────────────────────────────────────────
+
+
+test("зведення для сторінки «Звіти»: надіслано (перші й фолоуапи), доставлено й bounce, воронка на людину, відписки й автовідповіді", () => {
+  const report = summaryReport(story());
+  assert.deepEqual([report.totals.sent, report.totals.firsts, report.totals.followups, report.totals.bounced, report.totals.hardBounced, report.totals.delivered], [6, 4, 2, 2, 1, 4]);
+  assert.equal(report.totals.deliveredRate, 66.7);
+  assert.deepEqual(report.funnel, { contacted: 4, replied: 2, positive: 1, replyRate: 50, positiveRate: 25 }, "Ольга — позитивна після правки мітки");
+  assert.deepEqual([report.people.unsubscribed, report.people.autoreplied], [1, 1]);
+  assert.equal(Object.keys(report.totals).some((key) => /open|click/i.test(key)), false, "відкриттів і кліків немає");
+});
+
+test("зведення фільтрується за кампанією, скринькою й датами; графік — без дір по днях, тижнях і місяцях", () => {
+  const entries = story();
+  assert.equal(summaryReport(entries, { sender: "boris@other.com" }).totals.sent, 1);
+  assert.equal(summaryReport(entries, { campaign: "nope" }).totals.sent, 0);
+  const byDay = summaryReport(entries, { from: "2026-10-12", to: "2026-10-15" });
+  assert.deepEqual(byDay.series.map((row) => [row.period, row.sent]), [["2026-10-12", 4], ["2026-10-13", 0], ["2026-10-14", 0], ["2026-10-15", 2]]);
+  assert.equal(byDay.series[1].replies, 1);
+  const byWeek = summaryReport(entries, { bucket: "week" });
+  assert.deepEqual(byWeek.series.map((row) => row.period), ["2026-10-12"], "12.10.2026 — понеділок");
+  assert.deepEqual([periodOf("2026-10-18T23:00:00Z", "week"), periodOf("2026-10-19T00:00:00Z", "week"), periodOf("2026-10-19T00:00:00Z", "month")], ["2026-10-12", "2026-10-19", "2026-10"]);
+  const byMonth = summaryReport(entries, { bucket: "month", from: "2026-08-01", to: "2026-10-31" });
+  assert.deepEqual(byMonth.series.map((row) => [row.period, row.sent]), [["2026-08", 0], ["2026-09", 0], ["2026-10", 6]]);
+});
+
+test("маршрут зведення: право читати відповіді; погана дата й поділ відкидаються, а не ламають звіт", async () => {
+  for (const row of story()) await append({ type: row.type, contact: row.contact, data: row.data });
+  assert.equal(espRouteRight("GET", "/reports/summary"), "replies.read");
+  let captured = null;
+  await handleEspApi({
+    request: { method: "GET", auth: { profile: { email: "seller@x.com", role: "seller" } } }, response: {},
+    url: new URL("http://x/api/esp/reports/summary?bucket=year&from=yesterday&campaign=c1"),
+    sendJson: (_r, status, payload) => { captured = { status, payload }; }, readJson: async () => ({}),
+    esp: { campaigns: { list: () => [{ id: "c1", name: "UK operators" }] } }
+  });
+  assert.equal(captured.status, 200);
+  assert.deepEqual([captured.payload.bucket, captured.payload.totals.sent, captured.payload.campaigns[0].name], ["day", 6, "UK operators"]);
 });

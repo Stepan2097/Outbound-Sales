@@ -18,6 +18,7 @@
     <link rel="stylesheet" href="/styles/mail.css" />
     <link rel="stylesheet" href="/styles/mail-inbox.css" />
     <link rel="stylesheet" href="/styles/mail-leads.css" />
+    <link rel="stylesheet" href="/styles/mail-reports.css" />
     <script defer src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
     <script defer type="module" src="/main.js"></script>
   </head>
@@ -60,6 +61,7 @@
           <button class="nav-item" data-view="warmup" aria-label="Прогрів" title="Прогрів"><i data-lucide="flame"></i><span>Прогрів</span></button>
           <button class="nav-item" data-view="campaigns" aria-label="Кампанії" title="Кампанії"><i data-lucide="send"></i><span>Кампанії</span></button>
           <button class="nav-item" data-view="leads" aria-label="Ліди" title="Ліди"><i data-lucide="users"></i><span>Ліди</span></button>
+          <button class="nav-item" data-view="reports" aria-label="Звіти" title="Звіти"><i data-lucide="chart-column"></i><span>Звіти</span></button>
           <button class="nav-item" data-view="inbox" aria-label="Вхідні" title="Вхідні"><i data-lucide="inbox"></i><span>Вхідні</span><span class="nav-badge" id="warmupNavBadge" hidden></span></button>
           <button class="nav-item" data-view="contacts" aria-label="Контакти" title="Контакти"><i data-lucide="contact"></i><span>Контакти</span></button>
           <button class="nav-item" data-view="account" aria-label="Налаштування" title="Налаштування"><i data-lucide="settings"></i><span>Налаштування</span></button>
@@ -202,6 +204,24 @@
                 </div>
               </div>
             </div>
+          </div>
+        </section>
+
+        <!-- Звіти (ESP-UI 6, як екран Snov 06): картки, воронка й графік малює
+             app/screens/mail-reports.js; таблиці по сендерах, доменах і кампаніях та
+             строк зберігання — app/screens/esp-reports.js (ESP 16). -->
+        <section class="view" id="view-reports">
+          <div class="mail-page reports-page" id="reportsPage">
+            <div id="reportsTop"></div>
+            <section class="panel esp-reports-panel">
+              <div class="panel-heading">
+                <div>
+                  <h2>По відправниках, доменах і кампаніях</h2>
+                  <p>Щодня по кожній скриньці й домену; по кампанії — внесок кожного листа, тема, версія тексту й джерело ліда.</p>
+                </div>
+              </div>
+              <div id="espReportsBody"></div>
+            </section>
           </div>
         </section>
 

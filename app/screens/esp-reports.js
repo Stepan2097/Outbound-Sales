@@ -1,4 +1,4 @@
-// Листи → «Звіти» (ESP 16): щодня по відправнику й домену, по кампанії — з
+// Звіти → таблиці (ESP 16): щодня по відправнику й домену, по кампанії — з
 // внеском кожного кроку, темою, версією тексту й джерелом ліда; CSV для таблиць.
 // Внизу — строк зберігання: скільки неактивних лідів чекають анонімізації.
 //
@@ -7,7 +7,7 @@
 
 import { api, escapeHtml, onScreen, refreshIcons } from "../core.js";
 
-onScreen("campaigns", { open: () => void loadEspReports() });
+onScreen("reports", { open: () => void loadEspReports() });
 
 const VIEWS = { senders: "Відправники", domains: "Домени", campaigns: "Кампанії" };
 const PERIODS = { 7: "7 днів", 30: "30 днів", 90: "90 днів" };

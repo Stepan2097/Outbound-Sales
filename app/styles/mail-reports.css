@@ -1,0 +1,324 @@
+/* Звіти (ESP-UI 6, екран Snov 06): картки з кільцями, воронка відповідей,
+   відписки й автовідповіді, графік по періодах. Без відкриттів і кліків. */
+
+.reports-page {
+  gap: 16px;
+}
+
+#reportsTop {
+  display: grid;
+  gap: 14px;
+}
+
+.reports-head {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.reports-csv {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  text-decoration: none;
+}
+
+.reports-filters select {
+  flex: 0 1 240px;
+}
+
+.reports-cards {
+  display: grid;
+  grid-template-columns: minmax(250px, 1fr) minmax(0, 2fr) minmax(230px, 1fr);
+  gap: 14px;
+}
+
+.reports-stack {
+  display: grid;
+  gap: 14px;
+}
+
+.reports-card {
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  min-width: 0;
+}
+
+.reports-card-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.reports-card-head span {
+  display: block;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.reports-card-head strong {
+  display: block;
+  font-size: 28px;
+  font-variant-numeric: tabular-nums;
+}
+
+.reports-ring {
+  position: relative;
+  flex: 0 0 auto;
+  width: 76px;
+  height: 76px;
+  color: var(--muted);
+}
+
+.reports-ring svg {
+  width: 100%;
+  height: 100%;
+}
+
+.reports-ring > svg + svg,
+.reports-ring > i {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 22px;
+  height: 22px;
+}
+
+.reports-legend {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 14px;
+  margin-top: 14px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.reports-legend i,
+.reports-series i {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 6px;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+
+.reports-legend b {
+  color: var(--ink);
+}
+
+.reports-funnel {
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--teal) 10%, var(--surface)), color-mix(in srgb, var(--green) 12%, var(--surface)));
+}
+
+.reports-funnel h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.reports-funnel p {
+  margin: 4px 0 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.reports-funnel-bars {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: end;
+  min-height: 210px;
+}
+
+.reports-funnel-step {
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  height: 100%;
+  padding-left: 12px;
+  border-left: 1px solid var(--line);
+}
+
+.reports-funnel-step span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.reports-funnel-step strong {
+  font-size: 26px;
+  font-variant-numeric: tabular-nums;
+}
+
+.reports-funnel-bar {
+  display: flex;
+  align-items: flex-end;
+  min-height: 120px;
+  margin-left: -12px;
+}
+
+.reports-funnel-bar > div {
+  position: relative;
+  width: 100%;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--green) 85%, white), var(--green));
+  border-radius: 6px 6px 0 0;
+}
+
+.reports-funnel-bar em {
+  position: absolute;
+  top: -14px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+  color: var(--ink);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.reports-mini {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.reports-mini span:not(.reports-mini-icon) {
+  display: block;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.reports-mini strong {
+  font-size: 22px;
+  margin-right: 6px;
+}
+
+.reports-mini small {
+  color: var(--muted);
+}
+
+.reports-mini-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--surface-strong);
+  color: var(--muted);
+}
+
+.reports-mini-icon.is-warn { color: var(--red); }
+.reports-mini-icon.is-good { color: var(--green); }
+
+.reports-chart-card {
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+}
+
+.reports-chart-head {
+  display: flex;
+  margin-bottom: 8px;
+}
+
+.reports-tabs {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.reports-tabs button {
+  padding: 7px 14px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.reports-tabs button + button {
+  border-left: 1px solid var(--line);
+}
+
+.reports-tabs button[aria-selected="true"] {
+  background: var(--teal-weak);
+  color: var(--teal);
+  font-weight: 600;
+}
+
+.reports-chart {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.reports-grid {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.reports-axis {
+  fill: var(--muted);
+  font-size: 12px;
+}
+
+.reports-empty {
+  margin: 4px 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.reports-series {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin-top: 10px;
+}
+
+.reports-series button {
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  opacity: 0.55;
+}
+
+.reports-series button.is-on {
+  color: var(--ink);
+  opacity: 1;
+}
+
+.reports-series small {
+  margin-left: 4px;
+  color: var(--muted);
+}
+
+@media (max-width: 1200px) {
+  .reports-cards {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .reports-funnel {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+}
+
+@media (max-width: 720px) {
+  .reports-cards,
+  .reports-legend {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

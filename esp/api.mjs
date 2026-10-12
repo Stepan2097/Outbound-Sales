@@ -5,7 +5,7 @@
 import { can, logAdminAction } from "./access.mjs";
 import { SKIP_REASON_LABEL, defaultFilters, exclusions, refusedAtEnrolment } from "./filters.mjs";
 import { erasePerson, exportPerson } from "./erasure.mjs";
-import { campaignReport, senderDailyReport, toCsv } from "./reports.mjs";
+import { campaignReport, senderDailyReport, summaryReport, toCsv } from "./reports.mjs";
 import { dueForRetention, retentionDays, runRetention } from "./retention.mjs";
 import { handleEspDataApi } from "./data-api.mjs";
 import { MailboxError } from "./provider.mjs";
@@ -133,6 +133,21 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
   }
 
   // ── ESP 16: reports (no opens, no clicks — there are none) and retention ─
+  // ESP-UI 6: the «Звіти» page — totals, the funnel and the chart, filtered.
+  if (method === "GET" && path === "/reports/summary") {
+    const param = (name) => String(url.searchParams.get(name) || "");
+    const bucket = ["day", "week", "month"].includes(param("bucket")) ? param("bucket") : "day";
+    const date = (value) => (/^\d{4}-\d{2}-\d{2}$/.test(value) ? value : "");
+    const report = summaryReport(await allEntries(), { campaign: param("campaign"), sender: param("sender").toLowerCase(), from: date(param("from")), to: date(param("to")), bucket });
+    const { senders } = await registry();
+    sendJson(response, 200, {
+      success: true, ...report,
+      campaigns: (esp.campaigns?.list() || []).map((row) => ({ id: row.id, name: row.name })),
+      senders: senders.map((row) => row.email).sort()
+    });
+    return true;
+  }
+
   if (method === "GET" && (path === "/reports/senders" || path === "/reports/campaigns")) {
     const entries = await allEntries();
     const csv = url.searchParams.get("format") === "csv";
