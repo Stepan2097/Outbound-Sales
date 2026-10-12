@@ -8,9 +8,15 @@
  * сервер передає їх сюди, тож тести обходяться без мережі.
  */
 
-const COLUMNS = "id,name,company,position,country,email,linkedin,folder_id,created_at";
+const COLUMNS = "id,name,company,position,country,email,linkedin,folder_id,created_at,custom_fields";
 const COUNT_TTL = 5 * 60_000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function verificationOf(contact, email) {
+  const check = contact?.custom_fields?.email_check?.[email];
+  const status = ["valid", "invalid", "catch_all"].includes(check?.status) ? check.status : "";
+  return { verification: status, verifiedAt: status ? String(check.checkedAt || "") : "" };
+}
 
 /** One CRM contact as a lead row of the page — and as a lead for a campaign. */
 export function leadFromContact(contact, folderName = "") {
@@ -26,11 +32,13 @@ export function leadFromContact(contact, folderName = "") {
     country: String(contact.country || "").trim(),
     linkedin: contact.linkedin || "",
     // Where the address came from and when, for ESP 6: the CRM folder and the
-    // day the contact was put there. The verifier's word the CRM does not have.
+    // day the contact was put there.
     source: folderName ? `CRM: ${folderName}` : "CRM",
     sourceDate: String(contact.created_at || "").slice(0, 10),
-    verification: "",
-    verifiedAt: "",
+    // The mail server's word on the address (Головна → contacts/email-check.mjs
+    // writes it into custom_fields.email_check): `valid`, `invalid`,
+    // `catch_all`, or nothing when it could not tell.
+    ...verificationOf(contact, email),
     addedAt: contact.created_at || null
   };
 }

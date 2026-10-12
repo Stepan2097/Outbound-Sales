@@ -15,6 +15,7 @@
 // are friends with (and whether that account can still write), which requests
 // are still pending, whether their address was already written to.
 
+import { contactEmails } from "../contacts/enrich-crm.mjs";
 import { listFolderContacts, readContact } from "../contacts/store.mjs";
 import { anty, crm } from "../warmup/db.mjs";
 import { firstMarks, firstMessageBoard, talkingTo } from "../warmup/first-messages.mjs";
@@ -177,7 +178,13 @@ export async function channelsFor(contact, { accounts = null, friends = null, em
     address,
     written: Boolean(address && emailed.has(address)),
     writtenAt: sent?.at || emailSentAt,
-    writtenFrom: sent?.from || null
+    writtenFrom: sent?.from || null,
+    // Every address the CRM holds for them — its own and the confirmed ones
+    // enrichment added — with what its mail server said and whether we wrote.
+    addresses: contactEmails(contact).map((row) => {
+      const went = emailed.get ? emailed.get(row.address) : null;
+      return { ...row, written: Boolean(went), writtenAt: went?.at || null, writtenFrom: went?.from || null };
+    })
   };
   return { linkedin, email };
 }

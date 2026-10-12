@@ -311,3 +311,82 @@
   font-family: inherit;
   font-size: 13.5px;
 }
+
+/* Адреси з перевіркою (12.10): ✓ — скринька існує, ! — ні, з причиною при наведенні. */
+.triage-addresses {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.triage-addresses li {
+  display: grid;
+  gap: 2px;
+}
+
+.triage-address {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.triage-address input[type="checkbox"] {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  margin: 0;
+  accent-color: var(--teal);
+}
+
+.triage-addresses li.is-off .triage-address {
+  cursor: help;
+}
+
+.triage-addresses li.is-off b {
+  color: var(--muted);
+  text-decoration: line-through;
+  text-decoration-color: rgba(239, 124, 114, 0.6);
+}
+
+.triage-check {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.triage-check.is-ok {
+  background: rgba(94, 201, 138, 0.18);
+  color: var(--green);
+}
+
+.triage-check.is-bad {
+  background: rgba(224, 178, 94, 0.2);
+  color: var(--amber);
+}
+
+.triage-check.is-pending {
+  background: var(--surface-strong);
+  color: var(--muted);
+}
+
+
+.triage-added {
+  margin: 0;
+  color: var(--green);
+}
+
+.triage-added svg {
+  width: 14px;
+  height: 14px;
+  vertical-align: -2px;
+}

@@ -22,6 +22,8 @@ const triage = {
   cursor: 0, skip: [],
   texts: { linkedin: "", subject: "", body: "" },
   enrich: null, enriching: false, drafting: false, sending: "",
+  // The addresses ticked for the letter, and which contacts already had texts written automatically.
+  selected: new Set(), autoDrafted: new Set(),
   productId: "", language: "en",
   inviteAccounts: null, mailboxes: null, liveSend: false, mailbox: "", inviteAccount: ""
 };
@@ -72,12 +74,58 @@ async function loadNext() {
     triage.item = item;
     triage.cursor = item.cursor || triage.cursor;
     fillTexts(item);
+    tickConfirmed(true);
   } catch (error) {
     triage.item = null;
     triage.error = error.message || "Не вдалося прочитати папку.";
   }
   triage.loading = false;
   renderTriage();
+  if (triage.item?.contact) void afterOpen();
+}
+
+/** The person's addresses, as the card holds them now. */
+const addresses = () => triage.item?.email?.addresses || [];
+
+/** Tick every confirmed address nobody wrote to — all of them, or only the newly confirmed ones. */
+function tickConfirmed(reset = false) {
+  if (reset) triage.selected = new Set();
+  for (const row of addresses()) {
+    if (row.check?.status === "valid" && !row.written && !triage.selected.has(row.address) && !row.seen) triage.selected.add(row.address);
+    row.seen = true;
+  }
+}
+
+/**
+ * Right after a person opens: their addresses are checked if they were not
+ * (an answer from their mail server, then «✓» or «!»), and the texts are
+ * written once if there are none yet — the card is meant to arrive ready.
+ */
+async function afterOpen() {
+  const id = triage.item.contact.id;
+  if (addresses().some((row) => !row.check)) {
+    try {
+      const { emails } = await api("/api/triage/check-emails", { method: "POST", body: JSON.stringify({ contactId: id }) });
+      if (triage.item?.contact?.id !== id) return;
+      mergeAddresses(emails);
+      tickConfirmed();
+      renderTriage();
+    } catch { /* the «перевіряємо…» stays; nothing is ticked */ }
+  }
+  const worthWriting = addresses().length || triage.item.linkedin?.friends?.length;
+  if (triage.item?.contact?.id === id && !triage.item.drafts && worthWriting && !triage.autoDrafted.has(id)) {
+    triage.autoDrafted.add(id);
+    await draftTexts({ quiet: true });
+  }
+}
+
+/** New addresses and checks from the server, keeping what the card already knew about letters sent. */
+function mergeAddresses(fresh = []) {
+  const known = new Map(addresses().map((row) => [row.address, row]));
+  triage.item.email = {
+    ...triage.item.email,
+    addresses: fresh.map((row) => ({ written: false, ...known.get(row.address), ...row, seen: known.get(row.address)?.seen }))
+  };
 }
 
 /** The ready texts: a friend's saved first message, else the model's drafts for this contact, else empty. */
@@ -133,18 +181,21 @@ function crmFieldsHtml(contact) {
     ${contact.description ? `<div class="triage-note"><strong>Нотатка з CRM</strong><p>${escapeHtml(contact.description)}</p></div>` : ""}`;
 }
 
+const FIELD_WORD = { email: "пошта", emails: "ще одна пошта", linkedin: "LinkedIn", website: "сайт", phone: "телефон" };
+
 function enrichHtml() {
   const enrich = triage.enrich;
-  const button = `<button type="button" data-triage="enrich" ${triage.enriching ? "disabled" : ""}><i data-lucide="sparkles"></i><span>${triage.enriching ? "Шукаємо…" : "Збагатити"}</span></button>`;
-  if (!enrich) return `<div class="triage-enrich">${button}<span class="triage-muted">Знайти пошту, телефон і профілі — публічний веб і скрапери, якщо підключені. У CRM нічого не пишеться.</span></div>`;
+  const button = `<button type="button" data-triage="enrich" ${triage.enriching ? "disabled" : ""}><i data-lucide="sparkles"></i><span>${triage.enriching ? "Шукаємо й перевіряємо…" : "Збагатити"}</span></button>`;
+  if (!enrich) return `<div class="triage-enrich">${button}<span class="triage-muted">Знайти пошту, телефон і профілі. Знайдена пошта перевіряється на поштовому сервері; що пройшло — одразу записується в CRM.</span></div>`;
   if (enrich.error) return `<div class="triage-enrich">${button}<p class="esp-notice is-bad">${escapeHtml(enrich.error)}</p></div>`;
-  const useful = enrich.candidates.filter((item) => ["email", "phone", "linkedin", "telegram", "whatsapp", "website"].includes(item.type));
+  const others = enrich.candidates.filter((item) => ["phone", "linkedin", "telegram", "whatsapp", "website"].includes(item.type));
   return `<div class="triage-enrich">${button}
-    ${useful.length ? `<ul class="triage-found">${useful.map((item) => `<li><span class="pill tone-muted">${escapeHtml(item.type)}</span> <b>${escapeHtml(item.value)}</b>
-      ${item.type === "email" ? `<button type="button" class="text-button" data-triage-use-email="${escapeAttr(item.value)}">Писати на цю адресу</button>` : ""}
-      <span class="triage-muted">${escapeHtml(item.source || "")}${item.confidence != null ? ` · ${escapeHtml(String(item.confidence))}` : ""}</span></li>`).join("")}</ul>`
-      : '<p class="triage-muted">Нових контактів не знайдено.</p>'}
-    ${enrich.note ? `<p class="triage-muted">${escapeHtml(enrich.note)}</p>` : ""}
+    ${enrich.added?.length
+      ? `<p class="triage-added"><i data-lucide="database"></i> Додано в CRM: ${enrich.added.map((row) => `${escapeHtml(FIELD_WORD[row.field] || row.field)} <b>${escapeHtml(row.value)}</b>`).join(", ")}</p>`
+      : '<p class="triage-muted">У CRM нічого нового не додано.</p>'}
+    ${others.length ? `<ul class="triage-found">${others.map((item) => `<li><span class="pill tone-muted">${escapeHtml(item.type)}</span> <b>${escapeHtml(item.value)}</b>
+      <span class="triage-muted">${escapeHtml(item.source || "")}${item.confidence != null ? ` · ${escapeHtml(String(item.confidence))}` : ""}</span></li>`).join("")}</ul>` : ""}
+    ${enrich.hidden ? `<p class="triage-muted">${enrich.hidden === 1 ? "Ще одну знайдену адресу поштовий сервер не підтвердив — її" : `Ще ${enrich.hidden} знайдені адреси поштові сервери не підтвердили — їх`} не показано й не збережено.</p>` : ""}
   </div>`;
 }
 
@@ -198,24 +249,42 @@ function inviteHtml(accounts) {
   </div>`;
 }
 
+/** One address as a row: a tick when its mailbox is confirmed, «!» with the reason when it is not. */
+function addressRowHtml(row) {
+  const status = row.check?.status;
+  const ok = status === "valid";
+  const why = !row.check ? "перевіряємо на поштовому сервері…" : `${row.check.reason || status}${row.check.checkedAt ? ` · перевірено ${shortDate(row.check.checkedAt)}` : ""}`;
+  const mark = !row.check
+    ? '<span class="triage-check is-pending" title="перевіряємо на поштовому сервері…">…</span>'
+    : ok ? `<span class="triage-check is-ok" title="${escapeAttr(why)}">✓</span>`
+      : `<span class="triage-check is-bad" title="${escapeAttr(why)}">!</span>`;
+  const sentLine = row.written ? ` <span class="triage-muted">· уже писали${row.writtenAt ? ` ${escapeHtml(shortDate(row.writtenAt))}` : ""}${row.writtenFrom ? ` з ${escapeHtml(row.writtenFrom)}` : ""}</span>` : "";
+  return `<li class="${ok ? "" : "is-off"}">
+    <label class="triage-address" title="${escapeAttr(why)}">
+      <input type="checkbox" data-triage-address="${escapeAttr(row.address)}" ${triage.selected.has(row.address) ? "checked" : ""} ${ok && !row.written ? "" : "disabled"} />
+      ${mark}<b>${escapeHtml(row.address)}</b>
+      <span class="triage-muted">${row.source === "found" ? "знайдено збагаченням" : "з CRM"}</span>${sentLine}
+    </label>
+  </li>`;
+}
+
 function emailHtml(item) {
-  const email = item.email || {};
-  const address = email.address || "";
+  const list = addresses();
   const mailboxes = triage.mailboxes || [];
-  const status = !address
-    ? '<li><i data-lucide="mail-x"></i> Адреси в CRM немає — «Збагатити» може знайти</li>'
-    : email.written
-      ? `<li><i data-lucide="mail-check"></i> На <b>${escapeHtml(address)}</b> уже писали${email.writtenAt ? ` ${escapeHtml(shortDate(email.writtenAt))}` : ""}${email.writtenFrom ? ` з ${escapeHtml(email.writtenFrom)}` : ""}</li>`
-      : `<li><i data-lucide="mail"></i> <b>${escapeHtml(address)}</b> · ще не писали</li>`;
+  const chosen = list.filter((row) => triage.selected.has(row.address));
   const locked = !triage.liveSend;
+  const label = chosen.length > 1 ? `Надіслати ${chosen.length} листи з ${triage.mailbox || "скриньки"}` : `Надіслати з ${triage.mailbox || "скриньки"}`;
   return `<section class="triage-channel">
     <header><i data-lucide="mail"></i><h3>Пошта</h3></header>
-    <ul class="triage-status">${status}</ul>
+    ${list.length
+      ? `<ul class="triage-addresses">${list.map(addressRowHtml).join("")}</ul>
+         ${list.length > 1 ? '<p class="triage-muted">Позначте, на які адреси писати. Усі листи підуть з однієї скриньки — вибраної нижче.</p>' : ""}`
+      : '<ul class="triage-status"><li><i data-lucide="mail-x"></i> Адреси в CRM немає — «Збагатити» може знайти й перевірити</li></ul>'}
     <input data-triage-text="subject" placeholder="Тема" value="${escapeAttr(triage.texts.subject)}" />
-    <textarea data-triage-text="body" rows="8" placeholder="Текст листа — «Згенерувати тексти» напише його. Лише простий текст; підпис і відписка додаються самі.">${escapeHtml(triage.texts.body)}</textarea>
+    <textarea data-triage-text="body" rows="8" placeholder="${triage.drafting ? "Модель пише текст…" : "Текст листа. Лише простий текст; підпис і відписка додаються самі."}">${escapeHtml(triage.texts.body)}</textarea>
     <div class="triage-actions">
       <select data-triage="mailbox" ${mailboxes.length ? "" : "disabled"}>${mailboxes.map((sender) => `<option value="${escapeAttr(sender.email)}" ${sender.email === triage.mailbox ? "selected" : ""}>${escapeHtml(sender.email)} · сьогодні ${sender.today}/${sender.limit}</option>`).join("") || '<option value="">Немає активної скриньки</option>'}</select>
-      <button type="button" class="primary-button" data-triage="send-email" ${!address || !mailboxes.length || locked || email.written || triage.sending ? "disabled" : ""} title="${escapeAttr(locked ? "Справжню відправку ще не ввімкнено (ESP_LIVE_SEND, після приймання ESP 11)" : "")}"><i data-lucide="send"></i><span>Надіслати з ${escapeHtml(triage.mailbox || "скриньки")}</span></button>
+      <button type="button" class="primary-button" data-triage="send-email" ${!chosen.length || !mailboxes.length || locked || triage.sending ? "disabled" : ""} title="${escapeAttr(locked ? "Справжню відправку ще не ввімкнено (ESP_LIVE_SEND, після приймання ESP 11)" : "")}"><i data-lucide="send"></i><span>${escapeHtml(label)}</span></button>
     </div>
     ${locked ? '<p class="triage-muted"><i data-lucide="lock"></i> Справжню відправку листів ще не ввімкнено (ESP_LIVE_SEND, після приймання ESP 11) — кнопка запрацює разом із нею.</p>' : '<p class="triage-muted">Лист пройде ті самі перевірки, що й кампанія: виключення, верифікацію, ліміти скриньки й робочі години одержувача.</p>'}
   </section>`;
@@ -293,9 +362,9 @@ async function skip() {
   await loadNext();
 }
 
-async function draftTexts() {
+async function draftTexts({ quiet = false } = {}) {
   const contact = triage.item?.contact;
-  if (!contact) return;
+  if (!contact || triage.drafting) return;
   readTexts();
   triage.drafting = true;
   renderTriage();
@@ -304,10 +373,13 @@ async function draftTexts() {
       method: "POST",
       body: JSON.stringify({ productId: triage.productId || state?.selectedProductId || "", language: triage.language })
     });
+    if (triage.item?.contact?.id !== contact.id) return;
     triage.item.drafts = drafts;
     const friendDraft = triage.item.linkedin?.friends?.find((friend) => friend.draft)?.draft;
-    triage.texts = { linkedin: drafts.linkedin?.body || friendDraft || "", subject: drafts.email?.subject || "", body: drafts.email?.body || "" };
-    say(drafts.verifyBeforeSending?.length ? `Перевірте перед відправкою: ${drafts.verifyBeforeSending.join("; ")}` : "Тексти готові — перечитайте перед відправкою.", "");
+    // What somebody already typed is not replaced by an automatic draft.
+    const keep = (field, value) => (quiet && triage.texts[field].trim() ? triage.texts[field] : value);
+    triage.texts = { linkedin: keep("linkedin", friendDraft || drafts.linkedin?.body || ""), subject: keep("subject", drafts.email?.subject || ""), body: keep("body", drafts.email?.body || "") };
+    if (!quiet || drafts.verifyBeforeSending?.length) say(drafts.verifyBeforeSending?.length ? `Перевірте перед відправкою: ${drafts.verifyBeforeSending.join("; ")}` : "Тексти готові — перечитайте перед відправкою.", "");
   } catch (error) {
     say(error.message || "Модель не написала тексти.", "is-bad");
   }
@@ -321,12 +393,22 @@ async function enrich() {
   triage.enriching = true;
   renderTriage();
   try {
-    triage.enrich = await api("/api/triage/enrich", { method: "POST", body: JSON.stringify({ contactId: contact.id }) });
+    const answer = await api("/api/triage/enrich", { method: "POST", body: JSON.stringify({ contactId: contact.id }) });
+    if (triage.item?.contact?.id !== contact.id) return;
+    triage.enrich = answer;
+    if (answer.contact) triage.item.contact = { ...triage.item.contact, ...answer.contact };
+    mergeAddresses(answer.emails);
+    tickConfirmed();
   } catch (error) {
     triage.enrich = { error: error.message || "Не вдалося збагатити.", candidates: [] };
   }
   triage.enriching = false;
   renderTriage();
+  // A found address with no letter yet: the letter is written now.
+  if (!triage.item?.drafts && addresses().length && triage.item?.contact?.id === contact.id) {
+    triage.autoDrafted.add(contact.id);
+    await draftTexts({ quiet: true });
+  }
 }
 
 async function sendLinkedin(outreachId) {
@@ -352,18 +434,26 @@ async function sendEmail() {
   const contact = triage.item.contact;
   triage.sending = "email";
   renderTriage();
-  try {
-    const lead = { email: triage.item.email.address, name: contact.name, company: contact.company, country: contact.country, position: contact.position, source: "CRM", sourceDate: contact.created_at };
-    const answer = await api("/api/esp/send-one", { method: "POST", body: JSON.stringify({ lead, mailbox: triage.mailbox, subject: triage.texts.subject, body: triage.texts.body }) });
-    triage.sending = "";
-    if (!answer.ok) { say(answer.error || "Лист не пішов.", "is-bad"); return renderTriage(); }
-    say(`Лист надіслано на ${answer.to} з ${answer.mailbox}.`);
-    await loadNext();
-  } catch (error) {
-    triage.sending = "";
-    say(error.message || "Лист не пішов.", "is-bad");
-    renderTriage();
+  // One letter per ticked address, all from the one mailbox chosen.
+  const chosen = addresses().filter((row) => triage.selected.has(row.address));
+  const went = [];
+  const failed = [];
+  for (const row of chosen) {
+    try {
+      const lead = { email: row.address, name: contact.name, company: contact.company, country: contact.country, position: contact.position, source: "CRM", sourceDate: contact.created_at, verification: row.check?.status, verifiedAt: row.check?.checkedAt };
+      const answer = await api("/api/esp/send-one", { method: "POST", body: JSON.stringify({ lead, mailbox: triage.mailbox, subject: triage.texts.subject, body: triage.texts.body }) });
+      if (answer.ok) went.push(row.address); else failed.push(`${row.address}: ${answer.error || "не пішов"}`);
+    } catch (error) {
+      failed.push(`${row.address}: ${error.message || "не пішов"}`);
+    }
   }
+  triage.sending = "";
+  if (failed.length) {
+    say(`${went.length ? `Надіслано з ${triage.mailbox}: ${went.join(", ")}. ` : ""}Не пішло — ${failed.join("; ")}`, "is-bad");
+    return renderTriage();
+  }
+  say(`Надіслано з ${triage.mailbox}: ${went.join(", ")}.`);
+  await loadNext();
 }
 
 async function invite() {
@@ -398,6 +488,13 @@ root?.addEventListener("change", (event) => {
   else if (field === "mailbox") { readTexts(); triage.mailbox = event.target.value; renderTriage(); }
   else if (field === "invite-account") { readTexts(); triage.inviteAccount = event.target.value; renderTriage(); }
 });
+root?.addEventListener("change", (event) => {
+  const address = event.target.dataset?.triageAddress;
+  if (!address) return;
+  readTexts();
+  if (event.target.checked) triage.selected.add(address); else triage.selected.delete(address);
+  renderTriage();
+});
 root?.addEventListener("input", (event) => {
   const field = event.target.dataset?.triageText;
   if (field) triage.texts[field] = event.target.value;
@@ -406,11 +503,6 @@ root?.addEventListener("click", (event) => {
   const button = event.target.closest("button");
   if (!button) return;
   if (button.dataset.triageSendLinkedin) return void sendLinkedin(button.dataset.triageSendLinkedin);
-  if (button.dataset.triageUseEmail) {
-    readTexts();
-    triage.item.email = { ...triage.item.email, address: button.dataset.triageUseEmail, written: false };
-    return renderTriage();
-  }
   switch (button.dataset.triage) {
     case "invalid": return void decideInvalid();
     case "skip": return void skip();

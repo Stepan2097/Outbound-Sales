@@ -11,6 +11,8 @@ import { invalidateContactCaches, contactAsProspect, contactsConfigured, contact
 import { handleKnowledgeLibraryApi } from "./knowledge/api.mjs";
 import { allEntries, append as espAppend, useJournal } from "./esp/journal.mjs";
 import { nextContact as nextTriageContact } from "./triage/queue.mjs";
+import { checkEmail } from "./contacts/email-check.mjs";
+import { contactEmails, crmPatch } from "./contacts/enrich-crm.mjs";
 import { logAdminAction } from "./esp/access.mjs";
 import { knowledgeExcerptsForPrompt, knowledgeFilesForProduct, loadKnowledgeLibrary } from "./knowledge/library.mjs";
 import { handleWarmupApi } from "./warmup/api.mjs";
@@ -424,6 +426,9 @@ const state = {
   // Головна (12.10): what a seller decided about a CRM contact while working a
   // folder — «не валідний» — by contact id. Such a person is not offered again.
   triageDecisions: {},
+  // What mail servers said about an address (contacts/email-check.mjs), by
+  // address — a server is asked once a month, not every time a card opens.
+  emailChecks: {},
   // What we already know about a company, by account key — the workspace's own
   // memory of the web research, so the second person from the same company is
   // not paid for twice. It is saved to disk with everything else, because a
@@ -1242,17 +1247,46 @@ async function handleApi(request, response, url) {
         const prospect = taken.prospect;
         prospect.contactDiscovery = await enrichProspectContacts(prospect, { phase: "contacts" });
         prospect.updatedAt = new Date().toISOString();
-        addEvent("enrichment", `${prospect.name} enriched from Головна.`);
-        await writePersistentWorkspaceState();
         const discovery = prospect.contactDiscovery || {};
+        const candidates = (discovery.candidates || []).slice(0, 30).map((item) => ({
+          type: item.type, value: cleanText(item.value || ""), source: item.source || "", confidence: item.confidence ?? null, url: item.url || null
+        }));
+        // 12.10, the owner: a found address is checked against its mail server
+        // and dropped if it fails; the CRM's own addresses are checked with it.
+        const checks = await checkEmailsCached([
+          ...contactEmails(contact).map((row) => row.address),
+          ...candidates.filter((item) => item.type === "email").map((item) => item.value)
+        ]);
+        const verdict = new Map(checks.map((check) => [check.email, check]));
+        const { patch, added } = crmPatch(contact, { candidates, checks });
+        const updated = await writeContactPatch(contact, patch);
+        addEvent("enrichment", `${prospect.name} enriched from Головна${added.length ? `; CRM: ${added.map((row) => row.field).join(", ")}` : ""}.`);
+        await writePersistentWorkspaceState();
         sendJson(response, 200, {
           success: true,
           prospectId: prospect.id,
-          candidates: (discovery.candidates || []).slice(0, 30).map((item) => ({
-            type: item.type, value: item.value, source: item.source || "", confidence: item.confidence ?? null, url: item.url || null
-          })),
+          // Failed or unconfirmable guesses are not shown at all.
+          candidates: candidates.filter((item) => item.type !== "email" || verdict.get(item.value.toLowerCase())?.status === "valid"),
+          hidden: candidates.filter((item) => item.type === "email" && verdict.get(item.value.toLowerCase())?.status !== "valid").length,
+          added,
+          contact: updated,
+          emails: contactEmails(updated),
           note: discovery.scraperNote || ""
         });
+        return;
+      }
+
+      // The card's addresses checked now — the CRM's own and the ones found —
+      // and the answers written into the CRM, so the Leads page and ESP 6 see them.
+      if (request.method === "POST" && url.pathname === "/api/triage/check-emails") {
+        const body = await readJson(request);
+        const contact = await readContact(cleanText(body.contactId || ""), { cacheScope, fresh: true });
+        if (!contact) { sendJson(response, 404, { error: "Контакт не знайдено в CRM." }); return; }
+        const checks = await checkEmailsCached(contactEmails(contact).map((row) => row.address));
+        const { patch } = crmPatch(contact, { checks });
+        const updated = await writeContactPatch(contact, patch);
+        await writePersistentWorkspaceState();
+        sendJson(response, 200, { success: true, emails: contactEmails(updated) });
         return;
       }
 
@@ -2611,6 +2645,37 @@ async function handleApi(request, response, url) {
  * second row with its own research bill.
  */
 /** Every address a cold email went to, from the ESP journal: when and from which mailbox, the last time. */
+/**
+ * Whether these addresses exist, from the cache when it is fresh — a month for
+ * a definite answer, a day for «could not tell» — else from their mail servers,
+ * two at a time. The server's own public host introduces it.
+ */
+async function checkEmailsCached(addresses) {
+  const helo = process.env.EMAIL_CHECK_HELO || (process.env.PUBLIC_URL ? new URL(process.env.PUBLIC_URL).hostname : undefined);
+  const fresh = (check) => check && Date.now() - Date.parse(check.checkedAt) < (check.status === "unknown" ? 1 : 30) * 86_400_000;
+  const unique = [...new Set(addresses.map((value) => cleanText(value || "").toLowerCase()).filter(Boolean))].slice(0, 8);
+  const results = [];
+  for (let at = 0; at < unique.length; at += 2) {
+    results.push(...await Promise.all(unique.slice(at, at + 2).map(async (email) => {
+      if (fresh(state.emailChecks[email])) return state.emailChecks[email];
+      const check = await checkEmail(email, helo ? { helo } : {});
+      state.emailChecks[email] = check;
+      return check;
+    })));
+  }
+  const kept = Object.entries(state.emailChecks).sort((left, right) => String(right[1].checkedAt).localeCompare(String(left[1].checkedAt))).slice(0, 5000);
+  state.emailChecks = Object.fromEntries(kept);
+  return results;
+}
+
+/** Write what changed into the CRM contact, and forget the cached reads of it. */
+async function writeContactPatch(contact, patch) {
+  if (!Object.keys(patch).length) return contact;
+  await warmupCrm.from("contacts").update(patch).eq("id", contact.id).rows();
+  invalidateContactCaches({ contactId: contact.id, folderId: contact.folder_id });
+  return { ...contact, ...patch };
+}
+
 async function emailedAddresses() {
   const sent = new Map();
   try {
@@ -3930,6 +3995,9 @@ function applyPersistentWorkspaceState(saved = {}) {
   if (saved.triageDecisions && typeof saved.triageDecisions === "object" && !Array.isArray(saved.triageDecisions)) {
     state.triageDecisions = saved.triageDecisions;
   }
+  if (saved.emailChecks && typeof saved.emailChecks === "object" && !Array.isArray(saved.emailChecks)) {
+    state.emailChecks = saved.emailChecks;
+  }
   if (saved.accountDossiers && typeof saved.accountDossiers === "object" && !Array.isArray(saved.accountDossiers)) {
     state.accountDossiers = saved.accountDossiers;
   }
@@ -4299,6 +4367,7 @@ async function writeWorkspaceStateNow() {
       researchJobs: state.researchJobs.slice(0, 100),
       contactDrafts: state.contactDrafts,
       triageDecisions: state.triageDecisions,
+      emailChecks: state.emailChecks,
       accountDossiers: state.accountDossiers,
       warmupCampaigns: state.warmupCampaigns,
       warmupTargeting: state.warmupTargeting,
