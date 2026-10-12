@@ -34,6 +34,7 @@ export const OUTREACH_COLUMNS =
 export function describeOutreach(row) {
   return {
     id: row.id,
+    crmContactId: row.crm_contact_id || null,
     personName: row.person_name,
     personCompany: row.person_company,
     personPosition: row.person_position,

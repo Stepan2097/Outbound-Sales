@@ -545,3 +545,87 @@
   width: 100%;
   min-width: 100%;
 }
+
+/* Друзі й запрошення в картці акаунта. */
+.wa-people-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.wa-people-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.wa-people-filters button {
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+
+.wa-people-filters button b {
+  margin-left: 4px;
+  font-weight: 600;
+}
+
+.wa-people-filters button.is-active {
+  background: var(--teal-weak);
+  color: var(--teal);
+}
+
+.wa-people-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 260px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-sunk, var(--bg));
+}
+
+.wa-people-search svg {
+  width: 15px;
+  height: 15px;
+  color: var(--muted);
+}
+
+.wa-people-search input {
+  flex: 1;
+  min-height: 34px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  outline: none;
+}
+
+.wa-section .table-wrap > table.wa-people {
+  width: 100%;
+  min-width: 100%;
+}
+
+.wa-people td small {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.wa-person-link {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--teal);
+  font-weight: 600;
+  white-space: normal;
+  text-align: left;
+}
+
+.wa-person-link:hover {
+  background: transparent;
+  text-decoration: underline;
+}
