@@ -28,6 +28,7 @@ import { runRetention } from "./esp/retention.mjs";
 import { defaultFilters } from "./esp/filters.mjs";
 import { applyRampReviews } from "./esp/ramp.mjs";
 import { campaignStore } from "./esp/campaigns.mjs";
+import { leadStore } from "./esp/leads.mjs";
 import { postponedDue, runTick, startSequence } from "./esp/sequence.mjs";
 import { pollInboxes } from "./esp/inbound.mjs";
 import { createFileOnceSync, writeFileAtomic } from "./state/atomic-write.mjs";
@@ -274,6 +275,8 @@ const state = {
   // the whole chain), and «стоп усе» — when on, not one letter leaves.
   espCampaigns: [],
   espEnrollments: [],
+  espLeadLists: [],
+  espLeads: [],
   espHalt: { on: false, at: null, by: null, reason: "" },
   // ESP 7: per sending mailbox, the Gmail historyId its inbox was read up to.
   espInboxCursors: {},
@@ -471,6 +474,13 @@ const esp = (() => {
     writeEnrollments: async (value) => { state.espEnrollments = value; await writePersistentWorkspaceState(); },
     templates: () => state.espTemplates
   });
+  // ESP-UI 5: lead lists, before and apart from any campaign.
+  const leads = leadStore({
+    readLists: () => state.espLeadLists,
+    writeLists: async (value) => { state.espLeadLists = value; await writePersistentWorkspaceState(); },
+    readLeads: () => state.espLeads,
+    writeLeads: async (value) => { state.espLeads = value; await writePersistentWorkspaceState(); }
+  });
   const halt = {
     read: () => state.espHalt,
     write: async (value) => { state.espHalt = value; await writePersistentWorkspaceState(); }
@@ -526,7 +536,7 @@ const esp = (() => {
     const applied = result.actions.length ? await applyAlerts({ actions: result.actions, entries: await allEntries(), ...alertDeps }) : [];
     return { ...result, applied };
   };
-  return { connector, keyError, gate, templates, signature, unsubscribe, campaigns, halt, halted, tick, filters, pollInbox, checkAlerts, runMonitor, alertsTelegram: telegram.configured, sequenceOn: process.env.ESP_SEQUENCE === "on" };
+  return { connector, keyError, gate, templates, signature, unsubscribe, campaigns, leads, halt, halted, tick, filters, pollInbox, checkAlerts, runMonitor, alertsTelegram: telegram.configured, sequenceOn: process.env.ESP_SEQUENCE === "on" };
 })();
 
 /**
@@ -3914,6 +3924,8 @@ function applyPersistentWorkspaceState(saved = {}) {
   if (Array.isArray(saved.espTemplates)) state.espTemplates = saved.espTemplates;
   if (Array.isArray(saved.espCampaigns)) state.espCampaigns = saved.espCampaigns;
   if (Array.isArray(saved.espEnrollments)) state.espEnrollments = saved.espEnrollments;
+  if (Array.isArray(saved.espLeadLists)) state.espLeadLists = saved.espLeadLists;
+  if (Array.isArray(saved.espLeads)) state.espLeads = saved.espLeads;
   if (saved.espHalt && typeof saved.espHalt === "object") state.espHalt = { ...state.espHalt, ...saved.espHalt };
   if (saved.espInboxCursors && typeof saved.espInboxCursors === "object") state.espInboxCursors = saved.espInboxCursors;
   if (saved.espSignature && typeof saved.espSignature === "object") state.espSignature = saved.espSignature;
@@ -4157,6 +4169,8 @@ async function writeWorkspaceStateNow() {
       espTemplates: state.espTemplates,
       espCampaigns: state.espCampaigns,
       espEnrollments: state.espEnrollments,
+      espLeadLists: state.espLeadLists,
+      espLeads: state.espLeads,
       espHalt: state.espHalt,
       espInboxCursors: state.espInboxCursors,
       espSignature: state.espSignature,

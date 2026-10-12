@@ -111,6 +111,8 @@ const SAVED_AS = {
   espSignature: "espSignature",
   espCampaigns: "espCampaigns",
   espEnrollments: "espEnrollments",
+  espLeadLists: "espLeadLists",
+  espLeads: "espLeads",
   espHalt: "espHalt",
   espInboxCursors: "espInboxCursors",
   providerRule: "providerRule",

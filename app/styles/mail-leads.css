@@ -1,0 +1,447 @@
+/* Ліди (ESP-UI 5, екрани Snov 07 і 01): таблиця списку з крапкою верифікації
+   біля адреси, і картка людини — деталі зліва, хронологія справа. */
+
+.leads-main {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+#leadsMain {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.leads-side-empty {
+  margin: 4px 10px 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.leads-new-list,
+.leads-rename {
+  display: flex;
+  gap: 6px;
+  padding: 4px;
+}
+
+.leads-new-list input,
+.leads-rename input {
+  flex: 1;
+  min-width: 0;
+}
+
+.leads-new-list button {
+  min-height: 36px;
+  padding: 0 10px;
+}
+
+.leads-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+}
+
+.leads-head h2 {
+  margin: 0 6px 0 0;
+  font-size: 20px;
+}
+
+.leads-head .leads-rename {
+  flex: 1;
+  max-width: 520px;
+  padding: 0;
+}
+
+.leads-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.leads-send {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.leads-send select {
+  min-height: 40px;
+  max-width: 240px;
+}
+
+.leads-chips {
+  display: flex;
+  gap: 0;
+  margin-left: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.leads-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.leads-chip + .leads-chip {
+  border-left: 1px solid var(--line);
+}
+
+.leads-dot {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  margin-right: 7px;
+  border-radius: 50%;
+  background: var(--line);
+  vertical-align: middle;
+}
+
+.leads-chip .leads-dot {
+  margin-right: 0;
+}
+
+.leads-dot.is-valid { background: var(--green); }
+.leads-dot.is-risky { background: var(--amber); }
+.leads-dot.is-invalid { background: var(--red); }
+.leads-dot.is-unknown { background: var(--muted); }
+
+.leads-add {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.leads-add label {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.leads-add textarea {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+}
+
+.leads-add-bar {
+  display: flex;
+  gap: 8px;
+}
+
+.leads-search {
+  flex: 0 1 380px;
+  min-height: 36px;
+}
+
+.leads-search input {
+  min-height: 34px;
+}
+
+.leads-table {
+  min-width: 900px;
+  font-size: 14px;
+}
+
+.leads-table th,
+.leads-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.leads-table th:first-child,
+.leads-table td:first-child {
+  width: 36px;
+  padding-right: 0;
+}
+
+.leads-table tr.is-picked td {
+  background: var(--surface-strong);
+}
+
+.leads-table small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.leads-name {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--teal);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.leads-name:hover {
+  text-decoration: underline;
+}
+
+.leads-email {
+  white-space: nowrap;
+}
+
+.leads-campaigns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.leads-campaigns .pill {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.leads-date {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* ── картка ───────────────────────────────────────────────────────────── */
+
+.leads-card-bar {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.leads-card {
+  display: grid;
+  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.leads-card-side,
+.leads-card-main {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  min-width: 0;
+}
+
+.leads-card-side h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.leads-card-sub {
+  margin: -6px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.leads-card-title {
+  margin: 8px 0 0;
+  font-size: 14px;
+}
+
+.leads-details {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.leads-detail {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 8px;
+  padding: 9px 12px;
+  font-size: 13px;
+}
+
+.leads-details .leads-detail + .leads-detail {
+  border-top: 1px solid var(--line);
+}
+
+.leads-detail span {
+  color: var(--muted);
+}
+
+.leads-detail b {
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.leads-card-side > .text-button {
+  justify-self: start;
+}
+
+.leads-note {
+  display: grid;
+  gap: 8px;
+}
+
+.leads-note textarea {
+  font-family: inherit;
+  resize: vertical;
+}
+
+.leads-note button {
+  justify-self: end;
+}
+
+.leads-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+.leads-tabs button[role="tab"] {
+  padding: 10px 14px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+}
+
+.leads-tabs button[aria-selected="true"] {
+  border-bottom-color: var(--teal);
+  color: var(--ink);
+}
+
+.leads-tabs .icon-button {
+  margin-left: auto;
+}
+
+.leads-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 4px;
+  display: grid;
+  gap: 12px;
+  position: relative;
+}
+
+.leads-timeline::before {
+  content: "";
+  position: absolute;
+  left: 19px;
+  top: 8px;
+  bottom: 8px;
+  width: 1px;
+  background: var(--line);
+}
+
+.leads-timeline li {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 12px;
+  position: relative;
+}
+
+.leads-timeline-icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.leads-timeline-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+.leads-event-card {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: 14px;
+}
+
+.leads-event-card.is-in {
+  border-left: 3px solid var(--teal);
+}
+
+.leads-event-card.is-note {
+  background: color-mix(in srgb, var(--amber) 8%, var(--surface));
+}
+
+.leads-event-card p,
+.leads-event-line p {
+  margin: 0;
+}
+
+.leads-event-meta {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.leads-event-card pre {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  line-height: 1.5;
+}
+
+.leads-event-body {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.leads-event-body summary {
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.leads-event-body[open] summary {
+  display: none;
+}
+
+.leads-event-foot {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: right;
+}
+
+.leads-event-line {
+  padding-top: 6px;
+  font-size: 14px;
+}
+
+@media (max-width: 1000px) {
+  .leads-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .leads-chips {
+    margin-left: 0;
+  }
+}

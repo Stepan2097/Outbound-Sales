@@ -1,4 +1,4 @@
-// Пошта (ESP 17): запит людини про її дані — у «Налаштуваннях».
+// Пошта (ESP 17): запит людини про її дані — у «Лідах» → «Запит про дані» і з картки ліда.
 //
 // Людина пише «що у вас про мене є?» або «видаліть мене». Тут за адресою видно,
 // звідки вона взялася (кампанія, джерело, дата), кожен лист так, як він пішов,
@@ -66,6 +66,23 @@ export function renderEspPrivacy() {
         <button type="submit" class="danger-button"${privacy.busy ? " disabled" : ""}><i data-lucide="trash-2"></i><span>Видалити</span></button>
       </form>` : ""}`;
   refreshIcons();
+}
+
+/** From a lead's card: this person's data, ready to give them or to erase. */
+export async function showPrivacyFor(email) {
+  privacy.busy = true;
+  renderEspPrivacy();
+  try {
+    await find(email);
+    privacy.notice = "";
+    privacy.error = "";
+  } catch (error) {
+    privacy.error = error?.message || "Не вдалося.";
+    privacy.notice = privacy.error;
+  } finally {
+    privacy.busy = false;
+    renderEspPrivacy();
+  }
 }
 
 async function find(email) {

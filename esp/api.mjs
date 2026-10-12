@@ -13,8 +13,9 @@ import { CampaignError, parseLeadLines } from "./campaigns.mjs";
 import { composeLetter } from "./compose.mjs";
 import { ReplyError, conversations, quickReply } from "./conversations.mjs";
 import { REPLY_LABELS } from "./replies.mjs";
+import { LeadError, leadPage } from "./leads.mjs";
 import { UNIBOX_FOLDERS, uniboxList, uniboxProblems, uniboxThread } from "./unibox.mjs";
-import { recordFailed, recordSending, recordSent } from "./messages.mjs";
+import { recordAboutContact, recordFailed, recordSending, recordSent } from "./messages.mjs";
 import { allEntries, append } from "./journal.mjs";
 import { applyRampReviews, reviewRamp } from "./ramp.mjs";
 import { DOMAIN_DAILY_LIMIT, GAP_MINUTES, WINDOW, sendLedger, senderDailyLimit } from "./limits.mjs";
@@ -39,6 +40,11 @@ export function espRouteRight(method, path) {
   // reading; a star is the inbox's work, as a reply or a label is.
   if (path === "/unibox" || path === "/unibox/thread" || path === "/unibox/read") return "replies.read";
   if (path === "/unibox/star") return "replies.write";
+  // ESP-UI 5, Leads: the lists are the team's to read; filling them and sending
+  // people to a campaign is preparing a campaign; a note on a card is inbox work.
+  if (method === "GET" && path.startsWith("/leads")) return "replies.read";
+  if (path === "/leads/note") return "replies.write";
+  if (path.startsWith("/leads")) return "campaigns.launch";
   // ESP 17: what we hold about a person is the journal's to read; forgetting
   // them for good is an administrator's alone.
   if (path === "/people/export") return "journal.read";
@@ -238,15 +244,11 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
    * Somebody who once unsubscribed or whose address bounced is not added —
    * the full pre-send checks are ESP 6, this is the floor under them.
    */
-  if (method === "POST" && path === "/campaigns/leads") {
-    const body = await readJson(request);
-    if (!body) return badRequest(sendJson, response, "Некоректне тіло JSON");
-    // ESP 6: every person through the same checks the chain runs before each
-    // letter — exclusions (unsubscribes, hard bounces, «ні», complaints, clients,
-    // partners), the 90-day rule (ESP 13), source, country, role addresses,
-    // Apple mail, verification and Google MX. Checked here first, because the
-    // checks wait on DNS and enrolment does not.
-    const { leads, rejected } = parseLeadLines(body.text);
+  /**
+   * People into a campaign, every one through the pre-send checks first (ESP 6).
+   * From pasted rows (`/campaigns/leads`) and from a lead list (`/leads/to-campaign`).
+   */
+  async function enrolChecked(campaignId, leads, rejected = []) {
     const filters = esp.filters || defaultFilters();
     const context = await filters.context(await allEntries(), new Date());
     const verdicts = new Map();
@@ -256,8 +258,8 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
     const waiting = [...verdicts.entries()].filter(([, verdict]) => !verdict.ok && !refusedAtEnrolment(verdict))
       .map(([email, verdict]) => ({ email, reason: verdict.reason, label: SKIP_REASON_LABEL[verdict.reason] || verdict.reason, detail: verdict.detail, needsRecheck: verdict.needsRecheck }));
     try {
-      const result = await esp.campaigns.enroll(String(body.id || ""), leads, { blocked: (email) => (refusedAtEnrolment(verdicts.get(email)) ? verdicts.get(email).reason : null) });
-      await logged("campaign_leads_added", { id: String(body.id || ""), added: result.added.length });
+      const result = await esp.campaigns.enroll(campaignId, leads, { blocked: (email) => (refusedAtEnrolment(verdicts.get(email)) ? verdicts.get(email).reason : null) });
+      await logged("campaign_leads_added", { id: campaignId, added: result.added.length });
       sendJson(response, 200, {
         success: true, added: result.added.length, skipped: result.skipped, rejected, waiting,
         labels: Object.fromEntries(result.skipped.map((row) => [row.email, SKIP_REASON_LABEL[row.reason] || row.reason]))
@@ -266,6 +268,19 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
       if (!(error instanceof CampaignError)) throw error;
       sendJson(response, error.status, { success: false, error: error.message, code: error.code });
     }
+    return true;
+  }
+
+  if (method === "POST" && path === "/campaigns/leads") {
+    const body = await readJson(request);
+    if (!body) return badRequest(sendJson, response, "Некоректне тіло JSON");
+    // ESP 6: every person through the same checks the chain runs before each
+    // letter — exclusions (unsubscribes, hard bounces, «ні», complaints, clients,
+    // partners), the 90-day rule (ESP 13), source, country, role addresses,
+    // Apple mail, verification and Google MX. Checked here first, because the
+    // checks wait on DNS and enrolment does not.
+    const { leads, rejected } = parseLeadLines(body.text);
+    return enrolChecked(String(body.id || ""), leads, rejected);
     return true;
   }
 
@@ -304,6 +319,112 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
       replyOnStub: Boolean(esp.sequenceOn)
     });
     return true;
+  }
+
+  // ── ESP-UI 5: lead lists, the table of a list, a person's card ─────────
+  if (path.startsWith("/leads")) {
+    if (!esp.leads) return badRequest(sendJson, response, "Списки лідів на цьому сервері не підключено.");
+    const fail = (error) => {
+      if (!(error instanceof LeadError)) throw error;
+      sendJson(response, error.status, { success: false, error: error.message, code: error.code });
+      return true;
+    };
+    if (method === "GET" && path === "/leads/lists") {
+      const all = esp.leads.leads();
+      const counts = new Map();
+      for (const row of all) counts.set(row.listId, (counts.get(row.listId) || 0) + 1);
+      sendJson(response, 200, {
+        success: true,
+        lists: esp.leads.lists().map((list) => ({ ...list, count: counts.get(list.id) || 0 })).sort((left, right) => left.name.localeCompare(right.name)),
+        total: all.length,
+        people: new Set(all.map((row) => row.email)).size,
+        excluded: (await exclusions(await allEntries())).size,
+        campaigns: (esp.campaigns?.list() || []).filter((row) => row.state !== "done").map((row) => ({ id: row.id, name: row.name, state: row.state }))
+      });
+      return true;
+    }
+    if (method === "GET" && path === "/leads") {
+      const entries = await allEntries();
+      const page = leadPage(esp.leads, {
+        listId: String(url.searchParams.get("list") || ""), q: url.searchParams.get("q") || "",
+        offset: url.searchParams.get("offset") || 0, limit: url.searchParams.get("limit") || 50,
+        enrollments: esp.campaigns?.enrollments() || [], campaigns: new Map((esp.campaigns?.list() || []).map((row) => [row.id, row.name])),
+        excluded: await exclusions(entries)
+      });
+      sendJson(response, 200, { success: true, ...page });
+      return true;
+    }
+    if (method === "GET" && path === "/leads/card") {
+      const email = String(url.searchParams.get("email") || "").trim().toLowerCase();
+      const rows = esp.leads.leads().filter((row) => row.email === email);
+      const names = new Map(esp.leads.lists().map((row) => [row.id, row.name]));
+      const campaignNames = new Map((esp.campaigns?.list() || []).map((row) => [row.id, row.name]));
+      const enrolled = (esp.campaigns?.enrollments() || []).filter((row) => row.email === email);
+      if (!rows.length && !enrolled.length) { sendJson(response, 404, { success: false, error: "Такого ліда немає." }); return true; }
+      const lead = Object.assign({}, ...[...enrolled.map((row) => row.lead || {}), ...rows].map((row) => Object.fromEntries(Object.entries(row).filter(([, value]) => value))));
+      const excluded = (await exclusions(await allEntries())).get(email) || null;
+      sendJson(response, 200, {
+        success: true, email, lead,
+        lists: rows.map((row) => ({ id: row.listId, name: names.get(row.listId) || "", leadId: row.id, addedAt: row.addedAt, addedBy: row.addedBy })),
+        campaigns: enrolled.map((row) => ({ id: row.campaignId, name: campaignNames.get(row.campaignId) || row.campaignId, status: row.status, step: row.step, sender: row.sender, reason: row.reason || null })),
+        excluded
+      });
+      return true;
+    }
+    try {
+      const body = (await readJson(request)) || {};
+      if (method === "POST" && path === "/leads/lists") {
+        const list = await esp.leads.createList(body.name, actor);
+        sendJson(response, 201, { success: true, list });
+        return true;
+      }
+      if (method === "POST" && path === "/leads/lists/rename") {
+        sendJson(response, 200, { success: true, list: await esp.leads.renameList(String(body.id || ""), body.name) });
+        return true;
+      }
+      if (method === "POST" && path === "/leads/lists/delete") {
+        const result = await esp.leads.deleteList(String(body.id || ""));
+        await logged("lead_list_deleted", { name: result.list.name, removed: result.removed });
+        sendJson(response, 200, { success: true, removed: result.removed });
+        return true;
+      }
+      if (method === "POST" && path === "/leads/add") {
+        const result = await esp.leads.addFromText(String(body.listId || ""), body.text, actor);
+        sendJson(response, 200, { success: true, ...result });
+        return true;
+      }
+      if (method === "POST" && path === "/leads/update") {
+        sendJson(response, 200, { success: true, lead: await esp.leads.updateLead(String(body.id || ""), body) });
+        return true;
+      }
+      if (method === "POST" && path === "/leads/remove") {
+        const ids = (Array.isArray(body.ids) ? body.ids : []).map(String);
+        if (!ids.length) return badRequest(sendJson, response, "Кого прибрати?");
+        sendJson(response, 200, { success: true, ...(await esp.leads.removeLeads(ids)) });
+        return true;
+      }
+      if (method === "POST" && path === "/leads/to-campaign") {
+        const ids = new Set((Array.isArray(body.ids) ? body.ids : []).map(String));
+        const picked = esp.leads.leads().filter((row) => ids.has(row.id));
+        if (!picked.length) return badRequest(sendJson, response, "Виберіть людей у списку.");
+        // One row per address: the same person in two lists goes once.
+        const unique = [...new Map(picked.map((row) => [row.email, row])).values()]
+          .map(({ id, listId, addedAt, addedBy, ...lead }) => lead);
+        return enrolChecked(String(body.campaignId || ""), unique);
+      }
+      if (method === "POST" && path === "/leads/note") {
+        const email = String(body.email || "").trim().toLowerCase();
+        const text = String(body.text || "").trim().slice(0, 4000);
+        if (!email || !text) return badRequest(sendJson, response, "Порожня нотатка.");
+        let entry;
+        try { entry = await recordAboutContact("contact.note", email, { text }, actor); }
+        catch (error) { return badRequest(sendJson, response, error.message); }
+        sendJson(response, 201, { success: true, entry });
+        return true;
+      }
+    } catch (error) {
+      return fail(error);
+    }
   }
 
   // ── ESP-UI 4: the Unibox — folders, pages, stars, read ─────────────────
@@ -362,7 +483,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
     const email = String(body?.email || "").trim().toLowerCase();
     // Irreversible: the address typed a second time, the same.
     if (!email || email !== String(body?.confirm || "").trim().toLowerCase()) return badRequest(sendJson, response, "Для видалення введіть адресу ще раз — так само.");
-    const result = await erasePerson(email, { campaigns: esp.campaigns, actor, note: String(body?.note || "") });
+    const result = await erasePerson(email, { campaigns: esp.campaigns, leads: esp.leads, actor, note: String(body?.note || "") });
     await logged("person_erased", { journalLines: result.journalLines, campaignRows: result.campaignRows });
     sendJson(response, 200, { success: true, erased: result });
     return true;

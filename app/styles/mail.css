@@ -74,6 +74,29 @@
   text-transform: uppercase;
 }
 
+.mail-side-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.mail-side-head .mail-side-title {
+  margin: 4px 10px;
+}
+
+.mail-side-head .icon-button {
+  min-height: 30px;
+  width: 30px;
+  padding: 0;
+}
+
+.mail-side-sep {
+  height: 1px;
+  margin: 6px 4px;
+  background: var(--line);
+}
+
 .mail-side-title:first-child {
   margin-top: 2px;
 }

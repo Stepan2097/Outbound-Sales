@@ -17,6 +17,7 @@
     <link rel="stylesheet" href="/styles/mail-campaigns.css" />
     <link rel="stylesheet" href="/styles/mail.css" />
     <link rel="stylesheet" href="/styles/mail-inbox.css" />
+    <link rel="stylesheet" href="/styles/mail-leads.css" />
     <script defer src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
     <script defer type="module" src="/main.js"></script>
   </head>
@@ -58,6 +59,7 @@
           <button class="nav-item active" data-view="home" aria-label="Головна" title="Головна"><i data-lucide="house"></i><span>Головна</span></button>
           <button class="nav-item" data-view="warmup" aria-label="Прогрів" title="Прогрів"><i data-lucide="flame"></i><span>Прогрів</span></button>
           <button class="nav-item" data-view="campaigns" aria-label="Кампанії" title="Кампанії"><i data-lucide="send"></i><span>Кампанії</span></button>
+          <button class="nav-item" data-view="leads" aria-label="Ліди" title="Ліди"><i data-lucide="users"></i><span>Ліди</span></button>
           <button class="nav-item" data-view="inbox" aria-label="Вхідні" title="Вхідні"><i data-lucide="inbox"></i><span>Вхідні</span><span class="nav-badge" id="warmupNavBadge" hidden></span></button>
           <button class="nav-item" data-view="contacts" aria-label="Контакти" title="Контакти"><i data-lucide="contact"></i><span>Контакти</span></button>
           <button class="nav-item" data-view="account" aria-label="Налаштування" title="Налаштування"><i data-lucide="settings"></i><span>Налаштування</span></button>
@@ -139,28 +141,6 @@
               <div id="espRegistryBody"></div>
             </section>
 
-            <!-- ESP 6: виключення, фільтр країн, перевірка списку; малює app/screens/esp-filters.js. -->
-            <section class="panel esp-filters-panel span-2" id="espFiltersPanel">
-              <div class="panel-heading">
-                <div>
-                  <h2>Пошта: виключення й перевірки перед відправкою</h2>
-                  <p>Кого ніколи не пишемо і хто з вашого списку піде, а хто ні — і чому.</p>
-                </div>
-              </div>
-              <div id="espFiltersBody"></div>
-            </section>
-
-            <!-- ESP 17: запит людини про її дані — показати й видалити; малює app/screens/esp-privacy.js. -->
-            <section class="panel esp-privacy-panel span-2" id="espPrivacyPanel">
-              <div class="panel-heading">
-                <div>
-                  <h2>Пошта: запит людини про її дані</h2>
-                  <p>Звідки адреса, що їй надсилали і що вона відповіла — і видалення назавжди, з хешем у виключеннях.</p>
-                </div>
-              </div>
-              <div id="espPrivacyBody"></div>
-            </section>
-
             <!-- ESP 10: доступи, журнал дій адміністраторів, секрети; малює app/screens/esp-access.js. -->
             <section class="panel esp-access-panel span-2" id="espAccessPanel">
               <div class="panel-heading">
@@ -184,6 +164,44 @@
                 </div>
               </details>
             </section>
+          </div>
+        </section>
+
+        <!-- Ліди (ESP-UI 5, як екрани Snov 07 і 01): списки лідів, таблиця списку, картка
+             людини з хронологією. Малює app/screens/mail-leads.js; виключення й запит про
+             дані — свої модулі (esp-filters.js, esp-privacy.js), тут лише їхнє місце. -->
+        <section class="view" id="view-leads">
+          <div class="mail-page leads-page" id="leadsPage">
+            <div class="mail-body">
+              <nav class="mail-side" id="leadsSide" aria-label="Списки лідів"></nav>
+              <div class="leads-main">
+                <div id="leadsMain"></div>
+                <div class="leads-pane" id="leadsExclusions" hidden>
+                <!-- ESP 6: виключення, фільтр країн, перевірка списку; малює app/screens/esp-filters.js. -->
+                <section class="panel esp-filters-panel span-2" id="espFiltersPanel">
+                  <div class="panel-heading">
+                    <div>
+                      <h2>Пошта: виключення й перевірки перед відправкою</h2>
+                      <p>Кого ніколи не пишемо і хто з вашого списку піде, а хто ні — і чому.</p>
+                    </div>
+                  </div>
+                  <div id="espFiltersBody"></div>
+                </section>
+                </div>
+                <div class="leads-pane" id="leadsPrivacy" hidden>
+                <!-- ESP 17: запит людини про її дані — показати й видалити; малює app/screens/esp-privacy.js. -->
+                <section class="panel esp-privacy-panel span-2" id="espPrivacyPanel">
+                  <div class="panel-heading">
+                    <div>
+                      <h2>Пошта: запит людини про її дані</h2>
+                      <p>Звідки адреса, що їй надсилали і що вона відповіла — і видалення назавжди, з хешем у виключеннях.</p>
+                    </div>
+                  </div>
+                  <div id="espPrivacyBody"></div>
+                </section>
+                </div>
+              </div>
+            </div>
           </div>
         </section>
 

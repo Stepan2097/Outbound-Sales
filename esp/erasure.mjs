@@ -75,10 +75,12 @@ export function exportPerson(email, { entries, enrollments = [], campaigns = [],
  * out, even if the rest failed), then the campaigns' rows. Irreversible —
  * the route asks for the address typed twice.
  */
-export async function erasePerson(email, { campaigns, actor, note = "" }) {
+export async function erasePerson(email, { campaigns, leads = null, actor, note = "" }) {
   const address = contactKey(email);
   if (!address) throw fail("Це не адреса пошти.");
   const event = await eraseContact(address, { actor, note });
   const rows = campaigns ? await campaigns.forget(address) : 0;
-  return { email: address, key: event.data.key, journalLines: event.data.entries.length, campaignRows: rows, at: event.at };
+  // ESP-UI 5: the lead lists hold the person too, before any campaign.
+  const listRows = leads ? await leads.forget(address) : 0;
+  return { email: address, key: event.data.key, journalLines: event.data.entries.length, campaignRows: rows, listRows, at: event.at };
 }

@@ -1,4 +1,4 @@
-// Пошта (ESP 6): виключення, фільтр країн і перевірка списку — у «Налаштуваннях».
+// Пошта (ESP 6): виключення, фільтр країн і перевірка списку — у «Лідах» → «Виключення».
 //
 // Перед кожним листом — не лише при завантаженні — його отримувач проходить
 // перевірки: глобальні виключення назавжди (відписки, «ні», hard bounce, скарги,
@@ -9,7 +9,7 @@
 
 import { api, escapeAttr, escapeHtml, onScreen, refreshIcons } from "../core.js";
 
-onScreen("account", { open: () => void loadEspFilters() });
+onScreen("leads", { open: () => void loadEspFilters() });
 
 // ESP 17: a person erased on their own request stays excluded by a hash — not a category to pick by hand.
 const CATEGORY_EXTRA = { erased: "видалено на прохання людини" };
