@@ -1,7 +1,7 @@
 import { withAccountQuota } from "./store.mjs";
 import { connectCeiling, weeklyAllowance, weeklyConnectAllowance, weeklyConnectCounts } from "./weekly.mjs";
 import { anty, crm, CONTACT_ID_BATCH, antyTeamId, crmError, leadById, queueTotal, today } from "./db.mjs";
-import { RestError } from "./rest.mjs";
+import { RestError, likeLiteral } from "./rest.mjs";
 import {
   ACTION_KINDS, ACTION_LABEL, DEFAULT_STRATEGY, dayOfRun, hasPlanOn, inWorkingMode, noteRuleOn, noteUnderRule,
   pausedDaysOn, pausedOn, planForDay, resumeCredit, runDay, totalDays, validateStrategy, workingModeOf, currentDay, fromDays, nextNoteDay, noteAllowedOnDay, toDays
@@ -2639,7 +2639,20 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
      * that happened before it.
      */
     if (method === "GET" && path === "/history") {
-      const crmContactId = url.searchParams.get("crmContactId");
+      let crmContactId = url.searchParams.get("crmContactId");
+      // ESP-UI 5: a cold-email lead is known by its address, not by a CRM id —
+      // the CRM contact with that email is the bridge to its LinkedIn story.
+      const email = String(url.searchParams.get("email") || "").trim().toLowerCase();
+      if (!crmContactId && email) {
+        if (!crm.configured()) return fail(response, sendJson, 503, "CRM не підключено — LinkedIn-історію за адресою не знайти.");
+        const [contact] = await crm.from("contacts").select("id,name,company")
+          .ilike("email", likeLiteral(email)).order("created_at", { ascending: false }).limit(1).rows();
+        if (!contact) {
+          sendJson(response, 200, { success: true, contact: null, invite: null, outreach: null, entries: [], empty: true, notInCrm: true });
+          return true;
+        }
+        crmContactId = contact.id;
+      }
       if (!crmContactId) return fail(response, sendJson, 400, "Який контакт?");
 
       const outreach = await outreachForContact(crmContactId);

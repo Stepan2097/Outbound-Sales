@@ -386,6 +386,18 @@
   border-left: 3px solid var(--teal);
 }
 
+.leads-event-card.is-linkedin,
+.leads-event-line.is-linkedin {
+  border-color: color-mix(in srgb, var(--blue) 35%, var(--line));
+}
+
+.leads-event-line.is-linkedin pre {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  font: inherit;
+  color: var(--muted);
+}
+
 .leads-event-card.is-note {
   background: color-mix(in srgb, var(--amber) 8%, var(--surface));
 }

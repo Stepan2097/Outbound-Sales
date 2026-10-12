@@ -3,9 +3,11 @@
 // адреса з крапкою верифікації, країна, джерело, у яких кампаніях. Звідси людей
 // додають вставкою з таблиці й відправляють у кампанію — через ті самі перевірки
 // перед листом (ESP 6). Клік по імені відкриває картку: деталі зліва, хронологія
-// всього, що було з людиною, і нотатки — справа. Відкриттів і кліків немає.
+// всього, що було з людиною, і нотатки — справа: листи з журналу ESP і LinkedIn —
+// запрошення й повідомлення обома боками (прогрів, через контакт CRM з цією
+// адресою). Відкриттів і кліків немає.
 
-import { api, escapeAttr, escapeHtml, onScreen, refreshIcons } from "../core.js";
+import { HISTORY_EVENT_LABEL, api, escapeAttr, escapeHtml, onScreen, refreshIcons } from "../core.js";
 import { showPrivacyFor } from "../screens/esp-privacy.js";
 
 const EXCLUSIONS = "exclusions";
@@ -19,6 +21,8 @@ const CAMPAIGN_SKIP = {
   already_in_campaign: () => "уже в цій кампанії",
   in_other_campaign: (row) => `уже в іншій кампанії${row.campaign ? ` «${row.campaign}»` : ""} — одна людина пише лише з однієї`
 };
+// Where an invitation stands (warm-up outreach status), for the card's LinkedIn line.
+const INVITE_WORD = { waiting: "чекає в черзі", queued: "у черзі", pending: "надіслано, чекає відповіді", accepted: "прийнято", connected: "у контактах", declined: "відхилено", withdrawn: "відкликано" };
 const LABEL_TONE = { positive: "tone-live", negative: "tone-warn", referral: "tone-done", neutral: "tone-muted" };
 
 export const leadsState = {
@@ -77,11 +81,13 @@ async function openCard(email) {
   leadsState.notice = "";
   renderLeads();
   try {
-    const [data, timeline] = await Promise.all([
+    const [data, timeline, linkedin] = await Promise.all([
       api(`/api/esp/leads/card?email=${encodeURIComponent(email)}`),
-      api(`/api/esp/contacts/timeline?email=${encodeURIComponent(email)}`).catch(() => ({ events: [] }))
+      api(`/api/esp/contacts/timeline?email=${encodeURIComponent(email)}`).catch(() => ({ events: [] })),
+      // LinkedIn lives in the warm-up, keyed by the CRM contact with this address.
+      api(`/api/warmup/history?email=${encodeURIComponent(email)}`).catch((error) => ({ error: error?.message || "LinkedIn-історія не прочиталась." }))
     ]);
-    Object.assign(leadsState.card, { data, events: timeline.events || [], anonymized: timeline.anonymized });
+    Object.assign(leadsState.card, { data, events: timeline.events || [], anonymized: timeline.anonymized, linkedin });
   } catch (error) {
     leadsState.card = null;
     leadsState.notice = error?.message || "Картка не відкрилась.";
@@ -220,17 +226,49 @@ function timelineItem(event, card) {
   return { kind: event.type === "message.bounced" || event.type === "message.autoreplied" ? "email" : "other", icon: event.type === "message.bounced" ? "mail-x" : "circle-dot", html: `<div class="leads-event-line"><p>${line}</p>${meta(escapeHtml(event.actor && event.actor !== "system" ? event.actor : ""))}</div>` };
 }
 
+function linkedinItem(entry, card) {
+  const name = card.data?.lead?.name || card.email;
+  const meta = (text) => `<div class="leads-event-meta">${escapeHtml(when(entry.at))}${text ? ` · ${text}` : ""}</div>`;
+  if (entry.kind === "invite") {
+    const by = entry.meta?.by === "agent" ? "надіслав агент" : entry.meta?.by ? "надіслано вручну" : "";
+    return { kind: "linkedin", icon: "user-plus", at: entry.at, html: `<div class="leads-event-line is-linkedin">
+      <p><span class="pill tone-done">LinkedIn</span> ${escapeHtml(HISTORY_EVENT_LABEL[entry.event] || entry.event)}</p>
+      ${entry.meta?.note ? `<pre>${escapeHtml(entry.meta.note)}</pre>` : ""}
+      ${meta(escapeHtml([by, entry.meta?.outcome].filter(Boolean).join(" · ")))}
+    </div>` };
+  }
+  const mine = entry.direction === "out";
+  return { kind: "linkedin", icon: mine ? "message-square" : "message-square-reply", at: entry.at, html: `<div class="leads-event-card is-linkedin${mine ? "" : " is-in"}">
+    <p><span class="pill tone-done">LinkedIn</span> <strong>${mine ? escapeHtml(entry.accountLabel || "Ми") : escapeHtml(name)}</strong> ${mine ? "написав(ла)" : "відповів(ла)"}</p>
+    ${meta(escapeHtml([entry.accountLabel ? `${mine ? "з" : "на"} ${entry.accountLabel}` : "", entry.truncated ? "обрізано" : "", entry.matchedBy === "name_or_slug" ? "збіг за ім'ям" : ""].filter(Boolean).join(" · ")))}
+    ${entry.body ? `<pre>${escapeHtml(entry.body)}</pre>` : ""}
+  </div>` };
+}
+
+function linkedinLine(linkedin) {
+  if (!linkedin) return "—";
+  if (linkedin.error) return escapeHtml(linkedin.error);
+  if (linkedin.notInCrm) return "у CRM немає контакту з цією адресою";
+  const invite = linkedin.invite;
+  if (!invite) return linkedin.entries?.length ? "є листування" : "не писали";
+  return escapeHtml([`запрошення ${INVITE_WORD[invite.status] || invite.status}`, invite.sentAt ? `надіслано ${day(invite.sentAt)}` : ""].filter(Boolean).join(", "));
+}
+
 function cardHtml() {
   const card = leadsState.card;
   if (!card.data) return '<div class="empty-state">Відкриваємо картку...</div>';
   const { lead, lists, campaigns, excluded, email } = card.data;
   const failed = new Set((card.events || []).filter((event) => event.type === "message.failed").map((event) => event.data?.sendingSeq));
-  const items = (card.events || [])
-    .filter((event) => event.type !== "message.sent")
-    .map((event) => timelineItem(event.type === "message.sending" ? { ...event, failed: failed.has(event.seq) } : event, card))
-    .filter(Boolean)
-    .reverse();
-  const counts = { all: items.length, email: items.filter((item) => item.kind === "email").length, note: items.filter((item) => item.kind === "note").length };
+  const items = [
+    ...(card.events || [])
+      .filter((event) => event.type !== "message.sent")
+      .map((event) => {
+        const item = timelineItem(event.type === "message.sending" ? { ...event, failed: failed.has(event.seq) } : event, card);
+        return item ? { ...item, at: event.at } : null;
+      }),
+    ...(card.linkedin?.entries || []).map((entry) => linkedinItem(entry, card))
+  ].filter(Boolean).sort((left, right) => String(right.at || "").localeCompare(String(left.at || "")));
+  const counts = { all: items.length, email: items.filter((item) => item.kind === "email").length, linkedin: items.filter((item) => item.kind === "linkedin").length, note: items.filter((item) => item.kind === "note").length };
   const shown = card.tab === "all" ? items : items.filter((item) => item.kind === card.tab);
   const detail = (label, value) => `<div class="leads-detail"><span>${label}</span><b>${value || "—"}</b></div>`;
   return `
@@ -251,6 +289,7 @@ function cardHtml() {
           ${detail("Часовий пояс", escapeHtml(lead.timezone || ""))}
           ${detail("Джерело", escapeHtml([lead.source, lead.sourceDate].filter(Boolean).join(", ")))}
           ${detail("Списки", lists.map((row) => `<span class="pill tone-muted">${escapeHtml(row.name)}</span>`).join(" "))}
+          ${detail("LinkedIn", linkedinLine(card.linkedin))}
         </div>
         <h3 class="leads-card-title">Кампанії</h3>
         ${campaigns.length ? campaigns.map((row) => `<div class="leads-detail"><span>${escapeHtml(row.name)}</span><b><span class="pill ${ENROLL_TONE[row.status] || "tone-muted"}">${escapeHtml(ENROLL_WORD[row.status] || row.status)}</span> лист ${Number(row.step || 0) + 1} · з ${escapeHtml(row.sender || "")}</b></div>`).join("") : '<p class="esp-subtle">Ще в жодній кампанії.</p>'}
@@ -262,11 +301,11 @@ function cardHtml() {
           <button type="submit" class="primary-button"><i data-lucide="sticky-note"></i><span>Додати нотатку</span></button>
         </form>
         <div class="leads-tabs" role="tablist">
-          ${[["all", "Усе"], ["email", "Листи"], ["note", "Нотатки"]].map(([key, text]) => `<button type="button" role="tab" aria-selected="${card.tab === key}" data-leads-tab="${key}">${text} (${counts[key]})</button>`).join("")}
+          ${[["all", "Усе"], ["email", "Листи"], ["linkedin", "LinkedIn"], ["note", "Нотатки"]].map(([key, text]) => `<button type="button" role="tab" aria-selected="${card.tab === key}" data-leads-tab="${key}">${text} (${counts[key]})</button>`).join("")}
           <button type="button" class="icon-button" data-leads-reload aria-label="Оновити" title="Оновити"><i data-lucide="refresh-cw"></i></button>
         </div>
         ${leadsState.notice ? `<p class="esp-notice">${escapeHtml(leadsState.notice)}</p>` : ""}
-        ${shown.length ? `<ol class="leads-timeline">${shown.map((item) => `<li class="is-${item.kind}"><span class="leads-timeline-icon"><i data-lucide="${item.icon}"></i></span>${item.html}</li>`).join("")}</ol>` : `<div class="empty-state">${card.tab === "note" ? "Нотаток ще немає." : "Листів цій людині ще не було."}</div>`}
+        ${shown.length ? `<ol class="leads-timeline">${shown.map((item) => `<li class="is-${item.kind}"><span class="leads-timeline-icon"><i data-lucide="${item.icon}"></i></span>${item.html}</li>`).join("")}</ol>` : `<div class="empty-state">${card.tab === "note" ? "Нотаток ще немає." : card.tab === "linkedin" ? (card.linkedin?.notInCrm ? "У LinkedIn нічого: у CRM немає контакту з цією адресою, тож прогрів цієї людини не знає." : "У LinkedIn цій людині ще не писали.") : "Листів цій людині ще не було."}</div>`}
       </section>
     </div>`;
 }

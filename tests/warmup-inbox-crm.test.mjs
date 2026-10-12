@@ -263,7 +263,7 @@ test.beforeEach(() => {
     created_at: "2026-09-10T10:00:00.000Z", responded_at: null
   }];
   rows.contacts = [
-    { id: "c-1", name: "Marta Kovalenko", company: "Fleetify", linkedin: "https://www.linkedin.com/in/marta-kovalenko/", created_at: "2026-01-01T00:00:00.000Z" },
+    { id: "c-1", name: "Marta Kovalenko", company: "Fleetify", email: "marta@fleetify.com", linkedin: "https://www.linkedin.com/in/marta-kovalenko/", created_at: "2026-01-01T00:00:00.000Z" },
     // A prefix of the next one: `ilike` finds both, and only one is her.
     { id: "c-8", name: "Olena Bondar (another)", company: "Other", linkedin: "https://linkedin.com/in/olena-bondar-2", created_at: "2026-01-02T00:00:00.000Z" },
     { id: "c-7", name: "Olena Bondar", company: "Glovo", linkedin: "https://www.linkedin.com/in/Olena-Bondar/?trk=x", created_at: "2026-01-03T00:00:00.000Z" }
@@ -317,6 +317,23 @@ test("both sides of a conversation reach the contact, each message once however 
   assert.deepEqual(events(CRM_COPIED).flatMap((row) => row.meta.eventIds).length, 3);
   const log = await call({ method: "GET", path: "/api/warmup/events?accountId=acc-1" });
   assert.equal(log.payload.events.filter((row) => row.type === CRM_COPIED).length, 0);
+});
+
+test("ESP-UI 5: a cold-email lead's card asks by address — the CRM contact with that email leads to the same LinkedIn story", async () => {
+  await thread([OURS, THEIRS]);
+  const byId = await call({ method: "GET", path: "/api/warmup/history?crmContactId=c-1" });
+  const byEmail = await call({ method: "GET", path: "/api/warmup/history?email=Marta@Fleetify.com" });
+  assert.equal(byEmail.status, 200);
+  assert.equal(byEmail.payload.contact.crmContactId, "c-1");
+  assert.deepEqual(byEmail.payload.entries.map((entry) => [entry.direction, entry.body]), byId.payload.entries.map((entry) => [entry.direction, entry.body]));
+  assert.deepEqual(byEmail.payload.entries.map((entry) => entry.direction), ["in", "out"], "both sides, newest first");
+  assert.equal(byEmail.payload.invite.status, "connected", "her reply moved the approach on");
+
+  const unknown = await call({ method: "GET", path: "/api/warmup/history?email=nobody@nowhere.io" });
+  assert.deepEqual([unknown.status, unknown.payload.notInCrm, unknown.payload.entries.length], [200, true, 0], "said plainly, not an error");
+  // `_` is a wildcard in ilike: an address with one must not find somebody else's.
+  const wildcard = await call({ method: "GET", path: "/api/warmup/history?email=marta@fleetify_com" });
+  assert.equal(wildcard.payload.notInCrm, true);
 });
 
 test("somebody this account never approached is found by the LinkedIn link on their contact", async () => {
