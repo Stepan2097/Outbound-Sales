@@ -27,6 +27,12 @@ import { isHoliday } from "./holidays.mjs";
 export const RAMP_LIMITS = [5, 10, 15, 20, 25, 30, 35];
 export const SENDER_DAILY_CAP = 35;
 export const DOMAIN_DAILY_LIMIT = 105;
+/**
+ * Mail providers' own domains: twenty-six @gmail.com mailboxes are twenty-six
+ * people's reputations, not one domain's — Gmail judges each one alone — so
+ * the domain's daily limit is for our own domains only (13.10).
+ */
+export const PUBLIC_MAIL_DOMAINS = new Set(["gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "msn.com", "yahoo.com", "icloud.com", "me.com", "proton.me", "protonmail.com", "aol.com", "gmx.com", "zoho.com", "ukr.net"]);
 export const WINDOW = { startHour: 8, endHour: 17 };
 export const GAP_MINUTES = { min: 12, max: 40 };
 // The day a limit counts in: ours. The window is the recipient's.
@@ -189,7 +195,7 @@ export function sendDecision({ sender, recipient = {}, ledger, now = new Date(),
     return refuse("sender_daily_limit", `${email} сьогодні вже надіслав ${mine.today} з ${limit} (етап рампи).`, tomorrow());
   }
   const domainToday = ledger.domains.get(domain) || 0;
-  if (domainToday >= domainLimit) {
+  if (domainToday >= domainLimit && !PUBLIC_MAIL_DOMAINS.has(domain)) {
     return refuse("domain_daily_limit", `Домен ${domain} сьогодні вже надіслав ${domainToday} з ${domainLimit}.`, tomorrow());
   }
 

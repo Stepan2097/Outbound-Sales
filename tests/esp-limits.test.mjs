@@ -192,3 +192,11 @@ test("/api/esp/limits reads the registry and the journal: each sender's day agai
   assert.deepEqual([anna.today, anna.limit], [3, 10]);
   assert.deepEqual(answer.payload.domains.map((row) => [row.domain, row.today, row.limit]), [["advantage-mail.com", 3, 105]]);
 });
+
+test("a mail provider's own domain is not one sender: many @gmail.com mailboxes do not share the domain's day", async () => {
+  const { PUBLIC_MAIL_DOMAINS } = await import("../esp/limits.mjs");
+  assert.ok(PUBLIC_MAIL_DOMAINS.has("gmail.com"));
+  const ledger = { senders: new Map(), domains: new Map([["gmail.com", DOMAIN_DAILY_LIMIT + 50]]) };
+  const answer = sendDecision({ sender: { email: "olena.advantage@gmail.com", rampStage: 5 }, recipient: { country: "UA" }, ledger, now: new Date("2026-10-14T09:00:00Z") });
+  assert.notEqual(answer.reason, "domain_daily_limit");
+});
