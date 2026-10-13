@@ -472,7 +472,7 @@ function sendingHtml(campaign) {
             <input type="checkbox" name="sender" value="${escapeAttr(sender.email)}" ${campaign.senders.includes(sender.email) ? "checked" : ""} ${campaign.state === "done" ? "disabled" : ""} />
             <span><strong>${escapeHtml(sender.email)}</strong><small>${sender.status === "active" ? "надсилає" : "на паузі"} · сьогодні ${sender.today} з ${sender.limit} · етап рампи ${sender.rampStage ?? "—"}</small></span>
             <span class="mc-meter"><span style="width:${percent(sender.today, sender.limit)}%"></span></span>
-          </label>`).join("") : '<p class="esp-notice is-bad">У реєстрі немає жодної активної скриньки. Додайте домен і скриньку в «Пошта» → «Налаштування пошти».</p>'}
+          </label>`).join("") : '<p class="esp-notice is-bad">У реєстрі немає жодної активної скриньки. Додайте скриньку: «Пошта» → «Скриньки» → «Додати скриньку».</p>'}
         <button type="button" class="text-button" data-mc="add-mailbox"><i data-lucide="mail-plus"></i><span>Додати скриньку</span></button>
       </fieldset>
       <fieldset class="mc-fieldset"><legend>Варіанти тексту (A/B)</legend>

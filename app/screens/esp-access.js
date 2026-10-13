@@ -1,5 +1,5 @@
 // Пошта (ESP 10): доступи, журнал дій адміністраторів і стан секретів — у
-// «Пошта» → «Налаштування пошти».
+// «Налаштування» → «Пошта: доступи й журнал дій» (13.10 перенесено зі «Скриньок»).
 //
 // Хто що може в холодній розсилці: запускати кампанії, міняти ліміти, бачити
 // відповіді й решту. Ролі ті самі, що в «Команді» (адміністратор і продавець); на
@@ -9,7 +9,7 @@
 
 import { api, escapeAttr, escapeHtml, onScreen, refreshIcons } from "../core.js";
 
-onScreen("mail-settings", { open: () => void loadEspAccess() });
+onScreen("account", { open: () => void loadEspAccess() });
 
 export const espAccessState = { access: null, log: null, secrets: null, error: "", notice: "", busy: false };
 

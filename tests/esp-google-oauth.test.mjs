@@ -210,7 +210,7 @@ test("«Відключити»: somebody else's only by an admin; the token is r
   assert.equal(other.status, 403);
   const done = await call("POST", "/oauth/google/disconnect", { body: { mailbox: "anna@advantage-send.com" }, profile: PAVLO });
   assert.equal(done.status, 200);
-  assert.deepEqual(done.payload.mailboxes, []);
+  assert.deepEqual(done.payload.mailboxes.map((row) => [row.email, row.status, row.via]), [["anna@advantage-send.com", "not_signed_in", "registry"]], "still listed — as a sender to sign in again");
   assert.ok(world.google.calls.some((call) => call.url.includes("/revoke")), "Google is told to forget the token too");
   const sender = (await registry()).senders.find((row) => row.email === "anna@advantage-send.com");
   assert.equal(sender.status, "paused");

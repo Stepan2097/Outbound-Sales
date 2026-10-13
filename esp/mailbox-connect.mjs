@@ -54,16 +54,24 @@ async function registerSender({ email, name, person }, actor) {
   return { sender, notes };
 }
 
-/** Each connected mailbox with what the registry says about it. */
+/**
+ * Every mailbox the platform sends from: the ones signed in through Google,
+ * and the registry's other senders (added by hand, or reached through the
+ * domain key) — those with `status: "not_signed_in"`, so the page can offer
+ * «Увійти через Google» for them. Retired senders are history, not the list.
+ */
 async function mailboxRows(esp) {
   const { senders } = await registry();
-  return esp.oauth.grants.list().map((grant) => {
-    const sender = senders.find((row) => row.email === grant.email);
-    return {
-      ...grant,
-      sender: sender ? { status: sender.status, effectiveStatus: sender.effectiveStatus || sender.status, rampStage: sender.rampStage, person: sender.person } : null
-    };
-  });
+  const senderView = (sender) => (sender ? { status: sender.status, effectiveStatus: sender.effectiveStatus || sender.status, rampStage: sender.rampStage, person: sender.person, domain: sender.domain } : null);
+  const grants = esp.oauth.grants.list();
+  const signed = new Set(grants.map((grant) => grant.email));
+  return [
+    ...grants.map((grant) => ({ ...grant, via: "google", sender: senderView(senders.find((row) => row.email === grant.email)) })),
+    ...senders.filter((sender) => !signed.has(sender.email) && sender.status !== "retired").map((sender) => ({
+      email: sender.email, name: sender.displayName || "", connectedBy: sender.addedBy || "", connectedAt: sender.addedAt || null,
+      scopes: [], status: "not_signed_in", error: null, errorAt: null, canModify: false, via: "registry", sender: senderView(sender)
+    }))
+  ].sort((left, right) => left.email.localeCompare(right.email));
 }
 
 export async function handleMailboxConnect({ method, path, url, request, response, sendJson, readJson, esp, profile, actor, logged }) {
@@ -82,6 +90,8 @@ export async function handleMailboxConnect({ method, path, url, request, respons
       missing: oauth.config.missing,
       redirectUri: oauth.redirectUri(request),
       liveSend: Boolean(oauth.connector.liveSend),
+      // A service-account key on the server: mailboxes not signed in still work through it.
+      domainKey: esp.connector?.describe?.().providers?.gmail === "gmail",
       canManage: await can(profile, "registry.change"),
       me,
       mailboxes: await mailboxRows(esp)

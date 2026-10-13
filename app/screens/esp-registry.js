@@ -9,7 +9,7 @@
 
 import { api, escapeAttr, escapeHtml, onScreen, refreshIcons } from "../core.js";
 
-onScreen("mail-settings", { open: () => void loadEspRegistry() });
+onScreen("account", { open: () => void loadEspRegistry() });
 
 export const espRegistryState = { data: null, error: "", busy: false, notice: "", verify: null, monitor: null };
 

@@ -164,6 +164,40 @@
                 </div>
               </details>
             </section>
+
+            <!-- Пошта для адміністратора (13.10 перенесено зі «Скриньок»): домени, доступи, ключ домену. -->
+            <!-- ESP 9: реєстр доменів і відправників; малює app/screens/esp-registry.js. -->
+            <section class="panel esp-registry-panel span-2" id="espRegistryPanel">
+              <div class="panel-heading">
+                <div>
+                  <h2>Пошта: домени й відправники</h2>
+                  <p>Звідки йдуть холодні листи. Кожна зміна — рядок у журналі, який лише дописується.</p>
+                </div>
+              </div>
+              <div id="espRegistryBody"></div>
+            </section>
+
+            <!-- ESP 10: доступи, журнал дій адміністраторів, секрети; малює app/screens/esp-access.js. -->
+            <section class="panel esp-access-panel span-2" id="espAccessPanel">
+              <div class="panel-heading">
+                <div>
+                  <h2>Пошта: доступи й журнал дій</h2>
+                  <p>Хто що може в холодній розсилці, що міняли адміністратори і чи задані секрети.</p>
+                </div>
+              </div>
+              <div id="espAccessBody"></div>
+            </section>
+
+            <!-- ESP 1: з чим сервер ходить у Gmail; малює app/screens/esp-mailboxes.js, лише адміністраторові. -->
+            <section class="panel esp-mail-panel span-2" id="espMailPanel" hidden>
+              <div class="panel-heading">
+                <div>
+                  <h2>Пошта: доступ через адміністратора домену</h2>
+                  <p>Необов'язково: сервісний акаунт Google з делегуванням на весь домен — тоді скриньки домену працюють без входу кожної.</p>
+                </div>
+              </div>
+              <div id="espMailBody"></div>
+            </section>
           </div>
         </section>
 
@@ -231,52 +265,10 @@
         <!-- Налаштування пошти: підключення Gmail, домени й відправники, доступи й журнал дій
              (esp-mailboxes.js, esp-registry.js, esp-access.js). У «Налаштуваннях» — лише профіль і команда. -->
         <section class="view" id="view-mail-settings">
-          <div class="account-layout">
-            <!-- 13.10: «Скриньки для розсилки» — як Email accounts в Instantly/Snov: «Додати скриньку» → «Увійти через Google»; малює app/screens/mail-accounts.js. -->
-            <section class="panel mail-accounts-panel span-2" id="mailAccountsPanel">
-              <div class="panel-heading">
-                <div>
-                  <h2>Скриньки для розсилки</h2>
-                  <p>З них ідуть холодні листи й прогрів. Скринька входить через Google — пароля платформа не бачить.</p>
-                </div>
-                <button class="primary-button" id="mailAccountsAdd" type="button"><i data-lucide="plus"></i><span>Додати скриньку</span></button>
-              </div>
-              <div id="mailAccountsBody"></div>
-            </section>
-
-            <!-- ESP 1: з чим сервер ходить у Gmail; малює app/screens/esp-mailboxes.js, лише адміністраторові. -->
-            <section class="panel esp-mail-panel span-2" id="espMailPanel" hidden>
-              <div class="panel-heading">
-                <div>
-                  <h2>Доступ через адміністратора домену</h2>
-                  <p>Необов'язково: сервісний акаунт Google з делегуванням на весь домен — тоді скриньки домену працюють без входу кожної.</p>
-                </div>
-              </div>
-              <div id="espMailBody"></div>
-            </section>
-
-            <!-- ESP 9: реєстр доменів і відправників; малює app/screens/esp-registry.js. -->
-            <section class="panel esp-registry-panel span-2" id="espRegistryPanel">
-              <div class="panel-heading">
-                <div>
-                  <h2>Домени й відправники</h2>
-                  <p>Звідки йдуть холодні листи. Кожна зміна — рядок у журналі, який лише дописується.</p>
-                </div>
-              </div>
-              <div id="espRegistryBody"></div>
-            </section>
-
-            <!-- ESP 10: доступи, журнал дій адміністраторів, секрети; малює app/screens/esp-access.js. -->
-            <section class="panel esp-access-panel span-2" id="espAccessPanel">
-              <div class="panel-heading">
-                <div>
-                  <h2>Доступи й журнал дій</h2>
-                  <p>Хто що може в холодній розсилці, що міняли адміністратори і чи задані секрети.</p>
-                </div>
-              </div>
-              <div id="espAccessBody"></div>
-            </section>
-          </div>
+          <!-- Пошта → «Скриньки» (власник 13.10: «там має бути тільки додавання пошт і список доданих»):
+               «Додати скриньку» і список — малює app/screens/mail-accounts.js. Домени, доступи й ключ
+               адміністратора домену — у «Налаштуваннях». -->
+          <div class="mail-accounts-page" id="mailAccountsRoot"></div>
         </section>
 
         <section class="view" id="view-inbox">
