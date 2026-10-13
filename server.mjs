@@ -36,6 +36,7 @@ import { campaignStore } from "./esp/campaigns.mjs";
 import { leadStore } from "./esp/leads.mjs";
 import { crmLeadSource } from "./esp/crm-leads.mjs";
 import { anty as warmupAnty, crm as warmupCrm } from "./warmup/db.mjs";
+import { likeLiteral } from "./warmup/rest.mjs";
 import { messagesForContact } from "./warmup/inbox.mjs";
 import { postponedDue, runTick, startSequence } from "./esp/sequence.mjs";
 import { pollInboxes } from "./esp/inbound.mjs";
@@ -1337,6 +1338,8 @@ async function handleApi(request, response, url) {
           try { dossier.brief = await writeCompanyBrief(prospect) || dossier.brief || null; }
           catch (error) { console.warn(`[triage] company brief: ${error.message}`); }
         }
+        try { await saveCompanyToCrm(dossier); }
+        catch (error) { console.warn(`[triage] company → CRM: ${error.message}`); }
         await writePersistentWorkspaceState();
         sendJson(response, 200, { success: true, note, company: companyView(dossier) });
         return;
@@ -3020,6 +3023,47 @@ function companyView(dossier) {
     researchedAt: dossier.researchedAt || null,
     briefBy: brief.model || null
   };
+}
+
+let companyColumnsMissingAt = 0;
+/**
+ * The company into the CRM (owner 13.10, «2»): its row in `companies` — found
+ * by the site's domain, then by name, created when there is none — with the
+ * empty name, site and LinkedIn filled (never overwritten), and the brief in
+ * `description` / `details`. Those two columns are the CRM's to add; until
+ * they exist the rest is still written and the brief waits (asked again hourly).
+ */
+async function saveCompanyToCrm(dossier) {
+  if (!dossier?.company || !warmupCrm.configured()) return null;
+  const view = companyView(dossier);
+  const domain = normalizeDomain(view.website || "");
+  let row = null;
+  if (domain) [row] = await warmupCrm.from("companies").select("id,name,website,linkedin").ilike("website", `%${likeLiteral(domain)}%`).limit(1).rows();
+  if (!row) [row] = await warmupCrm.from("companies").select("id,name,website,linkedin").ilike("name", likeLiteral(dossier.company)).limit(1).rows();
+  if (!row) {
+    [row] = await warmupCrm.from("companies").insert({ name: dossier.company, website: domain || null, linkedin: view.linkedin || null, import_source: "outbound" }).select("id,name,website,linkedin").rows();
+  }
+  if (!row?.id) return null;
+  const patch = {};
+  if (!row.website && domain) patch.website = domain;
+  if (!row.linkedin && view.linkedin) patch.linkedin = view.linkedin;
+  const brief = {
+    description: view.summary || null,
+    details: {
+      industry: view.industry, size: view.size, headquarters: view.headquarters, products: view.products, audience: view.audience,
+      apps: view.apps, signals: view.signals, website: view.website, linkedin: view.linkedin, researchedAt: view.researchedAt, source: "outbound"
+    }
+  };
+  const withBrief = Date.now() - companyColumnsMissingAt > 3600_000;
+  try {
+    await warmupCrm.from("companies").update(withBrief ? { ...patch, ...brief } : patch).eq("id", row.id).rows();
+  } catch (error) {
+    if (!withBrief || !/description|details|42703|PGRST204/i.test(`${error.code} ${error.message}`)) throw error;
+    companyColumnsMissingAt = Date.now();
+    if (Object.keys(patch).length) await warmupCrm.from("companies").update(patch).eq("id", row.id).rows();
+  }
+  dossier.crmCompanyId = row.id;
+  return row.id;
 }
 
 /** A short brief by the connected model from what the research found — and nothing else. */
