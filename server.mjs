@@ -1250,6 +1250,7 @@ async function handleApi(request, response, url) {
         sendJson(response, 200, {
           ...answer,
           drafts: answer.contact ? state.contactDrafts[answer.contact.id] || null : null,
+          company: answer.contact ? companyView(companyDossierForContact(answer.contact)) : null,
           prospectId: answer.contact ? prospectForCrmContact(answer.contact.id)?.id || null : null
         });
         return;
@@ -1316,6 +1317,28 @@ async function handleApi(request, response, url) {
           emails: contactEmails(updated),
           note: discovery.scraperNote || ""
         });
+        return;
+      }
+
+      // «Про компанію»: the company researched once (sites, news, apps — the
+      // dossier the rest of the app keeps per company), and a short brief by
+      // the connected model. A colleague at the same company is read from it.
+      if (request.method === "POST" && url.pathname === "/api/triage/company") {
+        const body = await readJson(request);
+        const contact = await readContact(cleanText(body.contactId || ""), { cacheScope });
+        if (!contact) { sendJson(response, 404, { error: "Контакт не знайдено в базі." }); return; }
+        const taken = takeCrmContactIntoQueue(contact);
+        if (!taken.prospect) { sendJson(response, 400, { error: taken.warning }); return; }
+        const prospect = taken.prospect;
+        const force = Boolean(body.force);
+        const note = await researchCompanyForProspect(prospect, { force });
+        const dossier = state.accountDossiers[accountKeyForProspect(prospect)];
+        if (dossier && (force || !dossier.brief)) {
+          try { dossier.brief = await writeCompanyBrief(prospect) || dossier.brief || null; }
+          catch (error) { console.warn(`[triage] company brief: ${error.message}`); }
+        }
+        await writePersistentWorkspaceState();
+        sendJson(response, 200, { success: true, note, company: companyView(dossier) });
         return;
       }
 
@@ -2964,6 +2987,73 @@ async function writeWarmupLetter({ kind, from, to, original = null, recent = [] 
     messages: [{ role: "system", content: system }, { role: "user", content: JSON.stringify(user) }]
   });
   return { subject: data?.subject || "", body: data?.body || "" };
+}
+
+// ── Головна: «Про компанію» (13.10) ─────────────────────────────────────────
+
+/** The saved company dossier for a CRM contact, without taking them into the queue. */
+function companyDossierForContact(contact) {
+  const prospect = normalizeProspect(contactAsProspect(contact));
+  if (!prospect.company) return null;
+  return state.accountDossiers[accountKeyForProspect(prospect)] || null;
+}
+
+/** What the card shows about the company: the model's brief, and the sources it stands on. */
+function companyView(dossier) {
+  if (!dossier) return null;
+  const brief = dossier.brief || {};
+  const signals = (dossier.publicAccountSignals?.results || []).slice(0, 5).map((row) => ({
+    title: row.title, url: row.url, publisher: row.publisher, date: row.published_at || null
+  }));
+  return {
+    name: dossier.company || "",
+    website: dossier.website || dossier.publicCompanyResearch?.domain || "",
+    linkedin: dossier.companyLinkedin || dossier.companyEnrichment?.companyLinkedinUrl || "",
+    summary: brief.summary || dossier.companyEnrichment?.description || dossier.publicCompanyResearch?.description || "",
+    industry: brief.industry || (dossier.companyEnrichment?.industries || [])[0] || "",
+    size: brief.size || (dossier.companyEnrichment?.employeeEstimate ? `~${dossier.companyEnrichment.employeeEstimate} людей` : ""),
+    headquarters: brief.headquarters || "",
+    products: (brief.products || []).slice(0, 6),
+    audience: brief.audience || "",
+    apps: (dossier.appPortfolio?.apps || []).slice(0, 6).map((app) => app.title),
+    signals,
+    researchedAt: dossier.researchedAt || null,
+    briefBy: brief.model || null
+  };
+}
+
+/** A short brief by the connected model from what the research found — and nothing else. */
+async function writeCompanyBrief(prospect) {
+  const facts = {
+    company: prospect.company,
+    website: prospect.publicCompanyResearch?.url || prospect.website || "",
+    siteTitle: prospect.publicCompanyResearch?.title || "",
+    siteDescription: prospect.publicCompanyResearch?.description || "",
+    enrichment: prospect.companyEnrichment ? { description: prospect.companyEnrichment.description, industries: prospect.companyEnrichment.industries, employees: prospect.companyEnrichment.employeeEstimate, specialties: prospect.companyEnrichment.specialties } : null,
+    apps: (prospect.appPortfolio?.apps || []).slice(0, 10).map((app) => ({ title: app.title, os: app.os, category: app.category })),
+    news: (prospect.publicAccountSignals?.results || []).slice(0, 8).map((row) => ({ title: row.title, snippet: row.snippet, date: row.published_at }))
+  };
+  if (!state.vault) return null;
+  const { data, run } = await callOpenRouterJson({
+    model: resolveModelForProfile(null, "writing"),
+    taskType: "COMPANY_BRIEF",
+    profile: "economy",
+    maxTokens: 700,
+    messages: [
+      { role: "system", content: "You brief a salesperson about a company before they write to its people. Use ONLY the facts given; when something is not in them, leave the field empty — never guess. Write in Ukrainian, plain and short. Return strict JSON: {\"summary\": \"2–3 sentences: what the company does and for whom\", \"industry\": \"\", \"size\": \"\", \"headquarters\": \"\", \"products\": [\"up to 6 product or service names\"], \"audience\": \"who their customers are\"}" },
+      { role: "user", content: JSON.stringify(facts) }
+    ]
+  });
+  return {
+    summary: cleanLongText(data?.summary || "").slice(0, 600),
+    industry: cleanText(data?.industry || "").slice(0, 80),
+    size: cleanText(data?.size || "").slice(0, 60),
+    headquarters: cleanText(data?.headquarters || "").slice(0, 80),
+    products: (Array.isArray(data?.products) ? data.products : []).map((item) => cleanText(item).slice(0, 60)).filter(Boolean).slice(0, 6),
+    audience: cleanText(data?.audience || "").slice(0, 200),
+    model: run?.modelUsed || null,
+    writtenAt: new Date().toISOString()
+  };
 }
 
 function takeCrmContactIntoQueue(contact) {

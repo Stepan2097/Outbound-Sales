@@ -18,7 +18,7 @@ const PENDING_LABEL = { pending: "запит надіслано, ще не пр�
 
 const triage = {
   folders: null, foldersError: "", folderId: "",
-  item: null, loading: false, error: "", notice: "", tone: "",
+  item: null, loading: false, error: "", notice: "", tone: "", companyLoading: "", companyError: "",
   cursor: 0, skip: [],
   texts: { linkedin: "", subject: "", body: "" },
   enrich: null, enriching: false, drafting: false, sending: "",
@@ -67,6 +67,7 @@ async function loadNext() {
   triage.loading = true;
   triage.error = "";
   triage.enrich = null;
+  triage.companyError = "";
   renderTriage();
   try {
     const params = new URLSearchParams({ folderId: triage.folderId, cursor: String(triage.cursor), skip: triage.skip.slice(-300).join(",") });
@@ -103,6 +104,8 @@ function tickConfirmed(reset = false) {
  */
 async function afterOpen() {
   const id = triage.item.contact.id;
+  // The company is looked up alongside — a colleague at the same company is already known.
+  if (triage.item.contact.company && !triage.item.company) void loadCompany(id);
   if (addresses().some((row) => !row.check)) {
     try {
       const { emails } = await api("/api/triage/check-emails", { method: "POST", body: JSON.stringify({ contactId: id }) });
@@ -117,6 +120,47 @@ async function afterOpen() {
     triage.autoDrafted.add(id);
     await draftTexts({ quiet: true });
   }
+}
+
+/** «Про компанію»: researched once per company on the server, a short brief by the connected model. */
+async function loadCompany(id, { force = false } = {}) {
+  triage.companyLoading = id;
+  triage.companyError = "";
+  renderTriage();
+  try {
+    const answer = await api("/api/triage/company", { method: "POST", body: JSON.stringify({ contactId: id, force }) });
+    if (triage.item?.contact?.id === id) triage.item.company = answer.company;
+  } catch (error) {
+    if (triage.item?.contact?.id === id) triage.companyError = error.message || "Не вдалося зібрати відомості про компанію.";
+  }
+  if (triage.companyLoading === id) triage.companyLoading = "";
+  renderTriage();
+}
+
+function companyHtml(item) {
+  if (!item.contact.company) return "";
+  const company = item.company;
+  const loading = triage.companyLoading === item.contact.id;
+  if (!company) {
+    if (loading) return '<section class="triage-company is-loading"><h3><i data-lucide="building-2"></i>Про компанію</h3><p class="triage-muted">Збираємо: сайт, новини, продукти…</p></section>';
+    return `<section class="triage-company"><h3><i data-lucide="building-2"></i>Про компанію</h3>${triage.companyError ? `<p class="esp-notice is-bad">${escapeHtml(triage.companyError)}</p>` : ""}<button type="button" data-triage="company"><i data-lucide="search"></i><span>Дізнатися про компанію</span></button></section>`;
+  }
+  const link = (url, label) => (url ? `<a href="${escapeAttr(/^https?:/.test(url) ? url : `https://${url}`)}" target="_blank" rel="noopener"><i data-lucide="external-link"></i>${label}</a>` : "");
+  const facts = [["Галузь", company.industry], ["Розмір", company.size], ["Де", company.headquarters]].filter(([, value]) => value);
+  return `<section class="triage-company">
+    <header>
+      <h3><i data-lucide="building-2"></i>Про компанію${company.name ? ` · ${escapeHtml(company.name)}` : ""}</h3>
+      <div class="triage-links">${link(company.website, "Сайт")}${link(company.linkedin, "LinkedIn")}</div>
+    </header>
+    ${company.summary ? `<p class="triage-company-summary">${escapeHtml(company.summary)}</p>` : '<p class="triage-muted">Опису компанії в публічних джерелах не знайшлося.</p>'}
+    ${facts.length ? `<div class="triage-company-facts">${facts.map(([label, value]) => `<span><small>${label}</small>${escapeHtml(value)}</span>`).join("")}</div>` : ""}
+    ${company.audience ? `<p><small class="triage-muted">Клієнти:</small> ${escapeHtml(company.audience)}</p>` : ""}
+    ${company.products.length ? `<div class="triage-company-chips"><small class="triage-muted">Продукти:</small>${company.products.map((name) => `<span class="pill tone-muted">${escapeHtml(name)}</span>`).join("")}</div>` : ""}
+    ${company.apps.length ? `<div class="triage-company-chips"><small class="triage-muted">Застосунки:</small>${company.apps.map((name) => `<span class="pill tone-muted">${escapeHtml(name)}</span>`).join("")}</div>` : ""}
+    ${company.signals.length ? `<div class="triage-company-news"><small class="triage-muted">Новини й згадки</small><ul>${company.signals.slice(0, 3).map((row) => `<li><a href="${escapeAttr(row.url)}" target="_blank" rel="noopener">${escapeHtml(row.title)}</a><small>${escapeHtml([row.publisher, row.date].filter(Boolean).join(" · "))}</small></li>`).join("")}</ul></div>` : ""}
+    <footer class="triage-muted">${company.researchedAt ? `зібрано ${escapeHtml(shortDate(company.researchedAt))}` : ""}
+      <button type="button" class="text-button" data-triage="company-refresh" ${loading ? "disabled" : ""}><i data-lucide="refresh-cw"></i><span>${loading ? "Оновлюємо…" : "Оновити"}</span></button></footer>
+  </section>`;
 }
 
 /** New addresses and checks from the server, keeping what the card already knew about letters sent. */
@@ -318,6 +362,7 @@ function cardHtml(item) {
         <div><h2>${escapeHtml(contact.name || "без імені")}</h2><p>${escapeHtml([contact.position, contact.company].filter(Boolean).join(" · "))}</p></div>
       </header>
       ${crmFieldsHtml(contact)}
+      ${companyHtml(item)}
       ${enrichHtml()}
       <div class="triage-decide">
         <button type="button" data-triage="draft" ${triage.drafting ? "disabled" : ""}><i data-lucide="wand-sparkles"></i><span>${triage.drafting ? "Пишемо…" : item.drafts ? "Переписати тексти" : "Згенерувати тексти"}</span></button>
@@ -532,6 +577,8 @@ root?.addEventListener("click", (event) => {
     case "skip": return void skip();
     case "draft": return void draftTexts();
     case "enrich": return void enrich();
+    case "company": return void loadCompany(triage.item.contact.id);
+    case "company-refresh": return void loadCompany(triage.item.contact.id, { force: true });
     case "send-email": return void sendEmail();
     case "invite": return void invite();
     case "restart": Object.assign(triage, { cursor: 0, skip: [], notice: "" }); return void loadNext();

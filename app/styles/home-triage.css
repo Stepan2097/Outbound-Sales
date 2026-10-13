@@ -400,3 +400,97 @@
   font-size: 12px;
   font-weight: 600;
 }
+
+/* «Про компанію» (13.10) */
+.triage-company {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-sunk);
+}
+
+.triage-company header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.triage-company h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 15px;
+}
+
+.triage-company h3 svg {
+  width: 16px;
+  height: 16px;
+  color: var(--teal);
+}
+
+.triage-company p {
+  margin: 0;
+}
+
+.triage-company-summary {
+  line-height: 1.5;
+}
+
+.triage-company-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.triage-company-facts span {
+  display: grid;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 13px;
+}
+
+.triage-company-facts small {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.triage-company-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.triage-company-news ul {
+  display: grid;
+  gap: 6px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+
+.triage-company-news li small {
+  display: block;
+  color: var(--muted);
+}
+
+.triage-company footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.triage-company.is-loading {
+  opacity: 0.8;
+}
