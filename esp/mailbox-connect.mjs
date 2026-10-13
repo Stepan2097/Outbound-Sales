@@ -15,7 +15,8 @@
 
 import { can } from "./access.mjs";
 import { MailboxError } from "./provider.mjs";
-import { addDomain, addSender, domainKey, registry, setSenderStatus } from "./registry.mjs";
+import { allEntries, append } from "./journal.mjs";
+import { addDomain, addSender, domainKey, isDisconnected, registry, setSenderStatus } from "./registry.mjs";
 
 /** Pauses that signing in again repairs: the connection itself was the problem. */
 const CONNECTION_CODES = new Set(["oauth_revoked", "oauth_client", "not_connected", "token_failed", "delegation_missing", "mailbox_rejected"]);
@@ -67,7 +68,7 @@ async function mailboxRows(esp) {
   const signed = new Set(grants.map((grant) => grant.email));
   return [
     ...grants.map((grant) => ({ ...grant, via: "google", sender: senderView(senders.find((row) => row.email === grant.email)) })),
-    ...senders.filter((sender) => !signed.has(sender.email) && sender.status !== "retired").map((sender) => ({
+    ...senders.filter((sender) => !signed.has(sender.email) && sender.status !== "retired" && !isDisconnected(sender)).map((sender) => ({
       email: sender.email, name: sender.displayName || "", connectedBy: sender.addedBy || "", connectedAt: sender.addedAt || null,
       scopes: [], status: "not_signed_in", error: null, errorAt: null, canModify: false, via: "registry", sender: senderView(sender)
     }))
@@ -165,6 +166,9 @@ export async function handleMailboxConnect({ method, path, url, request, respons
     try {
       await setSenderStatus({ email: mailbox, status: "paused", reason: "Скриньку відключено від платформи — листи з неї не йдуть, доки її не підключать знову.", code: "not_connected" }, actor || me);
     } catch { /* not a sender, or already so */ }
+    // Its warm-up stops too: a reconnected mailbox starts warming again only on «Старт».
+    const lastWarmup = [...await allEntries()].reverse().find((entry) => /^warmup\.(started|paused)$/.test(entry.type) && entry.data?.mailbox === mailbox);
+    if (lastWarmup?.type === "warmup.started") await append({ type: "warmup.paused", actor: actor || me, data: { mailbox, reason: "скриньку відключено" } });
     await logged("mailbox_disconnected", { mailbox });
     sendJson(response, 200, { success: true, mailboxes: await mailboxRows(esp) });
     return true;

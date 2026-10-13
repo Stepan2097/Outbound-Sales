@@ -206,11 +206,16 @@ test("«Відключити»: somebody else's only by an admin; the token is r
   const { call, world } = await routes(t);
   const state = new URL((await call("POST", "/oauth/google/start")).payload.url).searchParams.get("state");
   await call("GET", `/oauth/google/callback?state=${state}&code=c`);
+  assert.equal((await call("POST", "/warmup/start", { body: { mailbox: "anna@advantage-send.com" }, profile: PAVLO })).status, 200);
   const other = await call("POST", "/oauth/google/disconnect", { body: { mailbox: "anna@advantage-send.com" }, profile: { email: "ivan@advantage-agency.co", role: "seller" } });
   assert.equal(other.status, 403);
   const done = await call("POST", "/oauth/google/disconnect", { body: { mailbox: "anna@advantage-send.com" }, profile: PAVLO });
   assert.equal(done.status, 200);
-  assert.deepEqual(done.payload.mailboxes.map((row) => [row.email, row.status, row.via]), [["anna@advantage-send.com", "not_signed_in", "registry"]], "still listed — as a sender to sign in again");
+  assert.deepEqual(done.payload.mailboxes, [], "a disconnected mailbox leaves the list — its history stays in the registry");
+  const warm = await call("GET", "/warmup", { profile: PAVLO });
+  assert.deepEqual(warm.payload.rows.map((row) => row.email), [], "and leaves «Прогрів пошт»");
+  const { allEntries } = await import("../esp/journal.mjs");
+  assert.equal((await allEntries()).filter((entry) => entry.type === "warmup.paused").length, 1, "its warm-up is stopped");
   assert.ok(world.google.calls.some((call) => call.url.includes("/revoke")), "Google is told to forget the token too");
   const sender = (await registry()).senders.find((row) => row.email === "anna@advantage-send.com");
   assert.equal(sender.status, "paused");

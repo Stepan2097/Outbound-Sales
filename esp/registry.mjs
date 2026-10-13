@@ -191,6 +191,17 @@ export async function setSenderStatus({ email, status, reason = "", code = null 
   });
 }
 
+/**
+ * A mailbox somebody pressed «Відключити» on (esp/mailbox-connect.mjs): paused
+ * with the code `not_connected`. It is gone from «Скриньки» and «Прогрів пошт»
+ * — its history stays here — and signing in through Google again brings it back.
+ */
+export function isDisconnected(sender) {
+  if (!sender || sender.status !== "paused") return false;
+  const last = [...(sender.history || [])].reverse().find((row) => row.status === sender.status) || {};
+  return last.code === "not_connected";
+}
+
 /** Whether this address may send right now, and if not, the sentence why. */
 /**
  * The mailbox warm-up's rule (esp/mail-warmup.mjs): our own mailboxes writing

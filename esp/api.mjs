@@ -21,7 +21,7 @@ import { recordAboutContact, recordFailed, recordSending, recordSent } from "./m
 import { allEntries, append, contactKey } from "./journal.mjs";
 import { applyRampReviews, reviewRamp } from "./ramp.mjs";
 import { DOMAIN_DAILY_LIMIT, GAP_MINUTES, WINDOW, sendDecision, sendLedger, senderDailyLimit } from "./limits.mjs";
-import { canSend, registry, updateSender } from "./registry.mjs";
+import { canSend, isDisconnected, registry, updateSender } from "./registry.mjs";
 import { LetterError, assertPlainLetter } from "./letter.mjs";
 import { TEMPLATE_VARIABLES, TemplateError, prepareTemplate } from "./template.mjs";
 import { DEFAULT_SIGNATURE, prepareSignature } from "./templates.mjs";
@@ -531,7 +531,8 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
     sendJson(response, 200, {
       success: true, mode, halted: Boolean(esp.halted?.()),
       scopes: esp.connector?.describe().scopes || [],
-      rows: warmupView(entries, { senders, domains }),
+      // A mailbox disconnected from the platform is not ours to warm any more.
+      rows: warmupView(entries, { senders: senders.filter((sender) => !isDisconnected(sender)), domains }),
       log: warmupLog(entries),
       plan: warmupPlan(entries), planBounds: PLAN_BOUNDS,
       // Google refused the labels token: the owner has gmail.modify to add.
