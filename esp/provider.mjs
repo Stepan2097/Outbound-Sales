@@ -70,7 +70,7 @@ export class MicrosoftGraphConnector {
  * One connector in front of several: each mailbox goes to its provider.
  * `providerOf(mailbox)` names it; the default provider takes the rest.
  */
-export function providerRouter({ connectors, providerOf = () => "gmail", fallback = "gmail" }) {
+export function providerRouter({ connectors, providerOf = () => "gmail", fallback = "gmail", primary = () => fallback }) {
   const pick = (mailbox) => {
     const name = providerOf(normalizeMailbox(mailbox)) || fallback;
     const connector = connectors[name];
@@ -78,12 +78,16 @@ export function providerRouter({ connectors, providerOf = () => "gmail", fallbac
     return connector;
   };
   const main = connectors[fallback];
+  // What the screens and the gates read as «the» connection: the default
+  // provider, unless `primary()` names another — the per-mailbox Google
+  // sign-in once a mailbox is connected while no service-account key exists.
+  const lead = () => connectors[primary()] || main;
   return {
-    kind: main.kind,
-    get liveSend() { return main.liveSend; },
+    get kind() { return lead().kind; },
+    get liveSend() { return lead().liveSend; },
     providers: Object.keys(connectors),
     providerOf: (mailbox) => pick(mailbox).kind,
-    describe: () => ({ ...main.describe(), providers: Object.fromEntries(Object.entries(connectors).map(([name, connector]) => [name, connector.describe().mode])) }),
+    describe: () => ({ ...lead().describe(), providers: Object.fromEntries(Object.entries(connectors).map(([name, connector]) => [name, connector.describe().mode])) }),
     checkMailbox: (mailbox) => pick(mailbox).checkMailbox(mailbox),
     send: (mailbox, raw, options) => pick(mailbox).send(mailbox, raw, options),
     inboxSince: (mailbox, cursor) => pick(mailbox).inboxSince(mailbox, cursor),

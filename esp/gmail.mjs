@@ -125,7 +125,10 @@ function tokenRefusal(status, body) {
 export class GmailApiConnector {
   constructor({ serviceAccount, fetch = globalThis.fetch, now = () => Date.now(), liveSend = false }) {
     this.kind = "gmail";
-    this.account = typeof serviceAccount === "object" && serviceAccount?.privateKey ? serviceAccount : parseServiceAccount(serviceAccount);
+    // `null` for a connector whose tokens come from somewhere else — the
+    // per-mailbox Google sign-in (esp/google-oauth.mjs) overrides accessToken().
+    this.account = serviceAccount === null ? null
+      : typeof serviceAccount === "object" && serviceAccount?.privateKey ? serviceAccount : parseServiceAccount(serviceAccount);
     this.fetch = fetch;
     this.now = now;
     this.liveSend = liveSend === true;

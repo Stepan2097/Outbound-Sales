@@ -22,7 +22,7 @@ import { templateStore } from "../esp/templates.mjs";
  */
 
 const ESP = new URL("../esp/", import.meta.url);
-const PROVIDER_FILES = new Set(["gmail.mjs", "provider.mjs"]);
+const PROVIDER_FILES = new Set(["gmail.mjs", "google-oauth.mjs", "provider.mjs"]);
 
 test("no business module knows Google: only the provider files name the Gmail API or import gmail.mjs", () => {
   for (const name of readdirSync(ESP).filter((file) => file.endsWith(".mjs") && !PROVIDER_FILES.has(file))) {

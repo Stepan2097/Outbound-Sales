@@ -212,7 +212,7 @@ test("після відмови скринька чекає пів години,
 
 test("режим сторінки: заглушка, вимкнена відправка, тестовий цикл, вимкнено", () => {
   assert.deepEqual([warmupMode({ describe: { mode: "stub" } }).mode, warmupMode({ describe: { mode: "stub" } }).runs], ["stub", false]);
-  assert.match(warmupMode({ describe: { mode: "stub" } }).text, /gmail\.modify/);
+  assert.match(warmupMode({ describe: { mode: "stub" } }).text, /Увійти через Google/);
   assert.equal(warmupMode({ describe: { mode: "stub" }, sequenceOn: true }).runs, true);
   assert.deepEqual([warmupMode({ describe: { mode: "gmail", liveSend: false } }).mode, warmupMode({ describe: { mode: "gmail", liveSend: true } }).runs], ["locked", true]);
   assert.equal(warmupMode({ describe: { mode: "gmail", liveSend: true }, env: { ESP_WARMUP: "off" } }).runs, false);

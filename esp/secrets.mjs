@@ -19,8 +19,14 @@ export const ESP_SECRETS = [
   {
     name: "ESP_GMAIL_SERVICE_ACCOUNT_JSON",
     alternatives: ["ESP_GMAIL_SERVICE_ACCOUNT_BASE64"],
-    purpose: "Ключ сервісного акаунта Google Workspace з делегуванням — доступ до скриньок (ESP 1)",
-    required: true
+    purpose: "Ключ сервісного акаунта Google Workspace з делегуванням — доступ до скриньок (ESP 1); не потрібен, якщо скриньки входять через Google",
+    required: false
+  },
+  {
+    name: "ESP_GOOGLE_OAUTH_CLIENT_SECRET",
+    alternatives: [],
+    purpose: "OAuth-клієнт Google (разом з ESP_GOOGLE_OAUTH_CLIENT_ID) — кнопка «Увійти через Google» у «Скриньках»",
+    required: false
   },
   {
     name: "SPAMHAUS_DQS_KEY",

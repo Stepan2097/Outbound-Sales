@@ -8,6 +8,7 @@ import { erasePerson, exportPerson } from "./erasure.mjs";
 import { campaignReport, senderDailyReport, summaryReport, toCsv } from "./reports.mjs";
 import { dueForRetention, retentionDays, runRetention } from "./retention.mjs";
 import { handleEspDataApi } from "./data-api.mjs";
+import { handleMailboxConnect } from "./mailbox-connect.mjs";
 import { MailboxError } from "./provider.mjs";
 import { CampaignError, parseLeadLines } from "./campaigns.mjs";
 import { composeLetter } from "./compose.mjs";
@@ -76,6 +77,9 @@ export function espRouteRight(method, path) {
   if (method === "GET" && path === "/templates") return "replies.read";
   if (path === "/templates" || path === "/signature" || path === "/preview") return "templates.edit";
   if (path.startsWith("/senders/")) return "limits.change";
+  // «Увійти через Google»: anybody connects their own mailbox, as in Snov;
+  // disconnecting somebody else's is checked inside (esp/mailbox-connect.mjs).
+  if (path.startsWith("/oauth/google")) return "replies.read";
   return "registry.change";
 }
 
@@ -111,6 +115,8 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
   // What an administrator changes here goes into the administrators' log.
   const actor = profile?.email || profile?.name || "";
   const logged = (action, data) => logAdminAction(action, actor, data).catch((error) => console.warn(`[esp] admin log: ${error.message}`));
+
+  if (await handleMailboxConnect({ method, path, url, request, response, sendJson, readJson, esp, profile, actor, logged })) return true;
 
   if (method === "GET" && path === "/connection") {
     sendJson(response, 200, {
@@ -648,6 +654,8 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
     // On the stub nothing reaches anybody: journalling "sent" for it would put
     // a letter in the timeline that never left. Only the acceptance cycle
     // (ESP 11, ESP_SEQUENCE=on) answers through the stub on purpose.
+    // The stub everywhere, or for this conversation's mailbox (signed in through Google or not).
+    const stubFor = (sender) => (esp.connector?.providerOf ? esp.connector.providerOf(sender) : esp.connector?.kind) === "stub";
     if (esp.connector?.kind === "stub" && !esp.sequenceOn) {
       sendJson(response, 409, { success: false, code: "not_connected", error: "Пошту ще не підключено (працює заглушка) — відповідь нікуди б не пішла, тож її не надіслано й не записано." });
       return true;
@@ -655,6 +663,10 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
     const conversation = conversations(await allEntries()).find((row) => row.key === String(body.key));
     if (!conversation) {
       sendJson(response, 404, { success: false, error: "Такої розмови немає." });
+      return true;
+    }
+    if (stubFor(conversation.sender) && !esp.sequenceOn) {
+      sendJson(response, 409, { success: false, code: "not_connected", error: `Скриньку ${conversation.sender} не підключено (працює заглушка) — відповідь нікуди б не пішла, тож її не надіслано й не записано.` });
       return true;
     }
     const lead = (esp.campaigns?.enrollments() || []).find((row) => row.email === conversation.contact)?.lead || {};

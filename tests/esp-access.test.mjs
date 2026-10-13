@@ -218,6 +218,7 @@ test("стан секретів — лише назви й так/ні: ні з�
   const status = secretsStatus(env, [{ email: "mary@send.example.com", mailboxRef: "GMAIL_MARY_TOKEN" }, { email: "x@send.example.com", mailboxRef: "GMAIL_X" }]);
   assert.deepEqual(status.secrets.map((row) => [row.name, row.set, row.via]), [
     ["ESP_GMAIL_SERVICE_ACCOUNT_JSON", true, "ESP_GMAIL_SERVICE_ACCOUNT_BASE64"],
+    ["ESP_GOOGLE_OAUTH_CLIENT_SECRET", false, null],
     ["SPAMHAUS_DQS_KEY", false, null]
   ]);
   assert.deepEqual(status.switches, [{ name: "ESP_LIVE_SEND", purpose: status.switches[0].purpose, on: false }]);

@@ -38,7 +38,9 @@ function espConnectionHtml(connection) {
   if (!connection) return `<div class="empty-state">${escapeHtml(espError || "Читаємо підключення...")}</div>`;
   const real = connection.mode === "gmail";
   const rows = [
-    ["Підключення", real ? "Gmail API через сервісний акаунт" : "Заглушка — нікуди не надсилає, поки власник не дасть ключ"],
+    ["Підключення", real ? "Gmail API через сервісний акаунт"
+      : connection.mode === "gmail_oauth" ? "Скриньки входять через Google (панель вище); ключа сервісного акаунта немає — він і не потрібен"
+      : "Ключа сервісного акаунта немає — скриньки підключаються кнопкою «Увійти через Google» вище"],
     ...(real ? [["Сервісний акаунт", connection.serviceAccountEmail], ["Client ID для делегування", connection.clientId || "—"]] : []),
     ["Відправка", connection.liveSend ? "увімкнена" : "вимкнена до приймання ESP 11 — справжні листи не йдуть"],
     ["Посилання відписки", connection.unsubscribe?.configured

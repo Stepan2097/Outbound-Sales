@@ -5,6 +5,7 @@
 // rights, the administrators' log and the secrets' status (ESP 10); reports
 // and how long a lead's data is kept (ESP 16); a person's request about their
 // data (ESP 17).
+import "./mail-accounts.js";
 import "./esp-mailboxes.js";
 import "./esp-registry.js";
 import "./esp-access.js";

@@ -107,6 +107,7 @@ const SAVED_AS = {
   triageDecisions: "triageDecisions",
   emailChecks: "emailChecks",
   workSeen: "workSeen",
+  espMailboxGrants: "espMailboxGrants",
   accountDossiers: "accountDossiers",
   warmupCampaigns: "warmupCampaigns",
   warmupTargeting: "warmupTargeting",

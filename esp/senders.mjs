@@ -18,7 +18,9 @@ import { assertPlainLetter } from "./letter.mjs";
  * Google answers that mean "this mailbox cannot be used until somebody fixes
  * something". Not a network blip, not a 5xx, not our own `SendingLocked`.
  */
-const AUTH_CODES = new Set(["delegation_missing", "mailbox_rejected", "token_failed"]);
+// The per-mailbox Google sign-in adds its own: access withdrawn, the OAuth
+// client refused, or a mailbox nobody connected (esp/google-oauth.mjs).
+const AUTH_CODES = new Set(["delegation_missing", "mailbox_rejected", "token_failed", "oauth_revoked", "oauth_client", "not_connected"]);
 
 export function isAuthFailure(error) {
   if (!(error instanceof MailboxError)) return false;

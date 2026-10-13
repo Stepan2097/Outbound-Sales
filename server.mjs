@@ -19,6 +19,7 @@ import { knowledgeExcerptsForPrompt, knowledgeFilesForProduct, loadKnowledgeLibr
 import { handleWarmupApi } from "./warmup/api.mjs";
 import { handleEspApi } from "./esp/api.mjs";
 import { connectorFromEnv } from "./esp/gmail.mjs";
+import { GmailOAuthConnector, NotConnectedConnector, googleSignIn, grantStore, oauthConfigFromEnv, redirectUriFor } from "./esp/google-oauth.mjs";
 import { MicrosoftGraphConnector, providerOfFromEnv, providerRouter } from "./esp/provider.mjs";
 import { SenderGate } from "./esp/senders.mjs";
 import { DEFAULT_SIGNATURE, templateStore } from "./esp/templates.mjs";
@@ -433,6 +434,9 @@ const state = {
   // What mail servers said about an address (contacts/email-check.mjs), by
   // address — a server is asked once a month, not every time a card opens.
   emailChecks: {},
+  // «Увійти через Google»: each connected mailbox — who connected it, its
+  // scopes, its refresh token encrypted with the secrets key (esp/google-oauth.mjs).
+  espMailboxGrants: {},
   // «По днях»: when each signed-in person last opened a contact's conversation
   // there, by login and contact key — a reply after that is shown as new.
   workSeen: {},
@@ -460,7 +464,31 @@ const esp = (() => {
   // ESP 17: each mailbox to its provider — Google by default, Microsoft for
   // the domains in ESP_MICROSOFT_DOMAINS (not built yet: it says so).
   const { connector: google, keyError } = connectorFromEnv(process.env);
-  const connector = providerRouter({ connectors: { gmail: google, microsoft: new MicrosoftGraphConnector() }, providerOf: providerOfFromEnv(process.env) });
+  // «Увійти через Google» (13.10): each mailbox signs in itself, as in
+  // Instantly and Snov (esp/google-oauth.mjs). A signed-in mailbox goes to its
+  // own token; the rest to the service account or the stub as before — but
+  // once real sending is on with no service-account key, a mailbox nobody
+  // connected is refused in words rather than "sent" by the stub.
+  const oauthConfig = oauthConfigFromEnv(process.env);
+  const signIn = googleSignIn({ config: oauthConfig });
+  const mailboxGrants = grantStore({
+    read: () => state.espMailboxGrants,
+    write: async (value) => { state.espMailboxGrants = value; await writePersistentWorkspaceState(); },
+    encrypt: encryptSecret,
+    decrypt: decryptSecret
+  });
+  const signedIn = new GmailOAuthConnector({ signIn, grants: mailboxGrants, liveSend: process.env.ESP_LIVE_SEND === "1" });
+  const envProviderOf = providerOfFromEnv(process.env);
+  const connector = providerRouter({
+    connectors: {
+      gmail: process.env.ESP_LIVE_SEND === "1" && google.kind === "stub" ? new NotConnectedConnector() : google,
+      google_oauth: signedIn,
+      microsoft: new MicrosoftGraphConnector()
+    },
+    providerOf: (mailbox) => (mailboxGrants.has(mailbox) ? "google_oauth" : envProviderOf(mailbox)),
+    primary: () => (google.kind === "stub" && mailboxGrants.count() ? "google_oauth" : "gmail")
+  });
+  const oauth = { config: oauthConfig, signIn, grants: mailboxGrants, connector: signedIn, redirectUri: (request) => redirectUriFor(oauthConfig, request) };
   // ESP 9: a mailbox's pause lives in the sender registry (one truth, in the
   // journal, with its code) — and only a registered, active mailbox on a
   // sending domain gets past the gate at all. `espSenderPauses` is kept in the
@@ -562,7 +590,7 @@ const esp = (() => {
   };
   // «Ліди»: the CRM's folders, read through the same cached folder list «Контакти» uses.
   const crmLeads = crmLeadSource({ crm: warmupCrm, listFolders: () => listContactFolders() });
-  return { connector, keyError, gate, templates, signature, unsubscribe, campaigns, leads, crmLeads, halt, halted, tick, filters, pollInbox, checkAlerts, runMonitor, warmupTick, alertsTelegram: telegram.configured, sequenceOn: process.env.ESP_SEQUENCE === "on" };
+  return { connector, oauth, keyError, gate, templates, signature, unsubscribe, campaigns, leads, crmLeads, halt, halted, tick, filters, pollInbox, checkAlerts, runMonitor, warmupTick, alertsTelegram: telegram.configured, sequenceOn: process.env.ESP_SEQUENCE === "on" };
 })();
 
 /**
@@ -4228,6 +4256,9 @@ function applyPersistentWorkspaceState(saved = {}) {
   if (saved.emailChecks && typeof saved.emailChecks === "object" && !Array.isArray(saved.emailChecks)) {
     state.emailChecks = saved.emailChecks;
   }
+  if (saved.espMailboxGrants && typeof saved.espMailboxGrants === "object" && !Array.isArray(saved.espMailboxGrants)) {
+    state.espMailboxGrants = saved.espMailboxGrants;
+  }
   if (saved.workSeen && typeof saved.workSeen === "object" && !Array.isArray(saved.workSeen)) {
     state.workSeen = saved.workSeen;
   }
@@ -4602,6 +4633,7 @@ async function writeWorkspaceStateNow() {
       triageDecisions: state.triageDecisions,
       emailChecks: state.emailChecks,
       workSeen: state.workSeen,
+      espMailboxGrants: state.espMailboxGrants,
       accountDossiers: state.accountDossiers,
       warmupCampaigns: state.warmupCampaigns,
       warmupTargeting: state.warmupTargeting,

@@ -16,6 +16,7 @@
     <link rel="stylesheet" href="/styles/settings.css" />
     <link rel="stylesheet" href="/styles/esp.css" />
     <link rel="stylesheet" href="/styles/esp-registry.css" />
+    <link rel="stylesheet" href="/styles/mail-accounts.css" />
     <link rel="stylesheet" href="/styles/mail-campaigns.css" />
     <link rel="stylesheet" href="/styles/mail.css" />
     <link rel="stylesheet" href="/styles/mail-inbox.css" />
@@ -231,12 +232,24 @@
              (esp-mailboxes.js, esp-registry.js, esp-access.js). У «Налаштуваннях» — лише профіль і команда. -->
         <section class="view" id="view-mail-settings">
           <div class="account-layout">
+            <!-- 13.10: «Скриньки для розсилки» — як Email accounts в Instantly/Snov: «Додати скриньку» → «Увійти через Google»; малює app/screens/mail-accounts.js. -->
+            <section class="panel mail-accounts-panel span-2" id="mailAccountsPanel">
+              <div class="panel-heading">
+                <div>
+                  <h2>Скриньки для розсилки</h2>
+                  <p>З них ідуть холодні листи й прогрів. Скринька входить через Google — пароля платформа не бачить.</p>
+                </div>
+                <button class="primary-button" id="mailAccountsAdd" type="button"><i data-lucide="plus"></i><span>Додати скриньку</span></button>
+              </div>
+              <div id="mailAccountsBody"></div>
+            </section>
+
             <!-- ESP 1: з чим сервер ходить у Gmail; малює app/screens/esp-mailboxes.js, лише адміністраторові. -->
             <section class="panel esp-mail-panel span-2" id="espMailPanel" hidden>
               <div class="panel-heading">
                 <div>
-                  <h2>Пошта для розсилки</h2>
-                  <p>Скриньки, з яких підуть холодні листи: доступ через Gmail API.</p>
+                  <h2>Доступ через адміністратора домену</h2>
+                  <p>Необов'язково: сервісний акаунт Google з делегуванням на весь домен — тоді скриньки домену працюють без входу кожної.</p>
                 </div>
               </div>
               <div id="espMailBody"></div>
