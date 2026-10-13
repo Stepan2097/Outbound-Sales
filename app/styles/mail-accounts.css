@@ -233,24 +233,27 @@
 /* «Додати скриньку» */
 
 .acc-dialog {
-  width: min(560px, calc(100vw - 32px));
-  padding: 20px;
+  width: min(520px, calc(100vw - 32px));
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
 }
 
 .acc-dialog[open] {
   display: grid;
-  gap: 12px;
+  gap: 16px;
 }
 
 .acc-dialog-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
+  gap: 12px;
 }
 
 .acc-dialog-head h2 {
-  margin: 0;
-  font-size: 20px;
+  margin: 0 0 4px;
+  font-size: 22px;
 }
 
 .acc-providers {
@@ -260,63 +263,171 @@
 
 .acc-provider {
   display: grid;
-  grid-template-columns: 40px minmax(0, 1fr) auto;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 12px;
-  padding: 12px;
+  gap: 14px;
+  width: 100%;
+  min-height: 0;
+  padding: 14px 16px;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 14px;
+  background: var(--surface-sunk);
+  color: var(--ink);
+  text-align: left;
+  white-space: normal;
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.acc-provider.is-main:hover {
+  border-color: var(--teal);
   background: var(--surface-sunk);
 }
 
-.acc-provider.is-main {
-  border-color: var(--teal);
-}
-
 .acc-provider.is-later {
-  opacity: 0.6;
+  cursor: default;
+  opacity: 0.5;
 }
 
-.acc-provider > div {
+.acc-provider.is-later:hover {
+  border-color: var(--line);
+  background: var(--surface-sunk);
+}
+
+.acc-provider-text {
   display: grid;
   gap: 2px;
+  min-width: 0;
 }
 
-.acc-provider > div span {
+.acc-provider-text b {
+  font-size: 15px;
+}
+
+.acc-provider-text span {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .acc-provider-logo {
   display: grid;
   place-items: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
   background: var(--surface);
-  font-size: 20px;
-  font-weight: 800;
+}
+
+.acc-provider-logo svg {
+  width: 22px;
+  height: 22px;
 }
 
 .acc-provider-logo.is-google {
   background: #fff;
-  color: #4285f4;
 }
 
-.acc-provider-logo svg {
+.acc-provider-chevron {
+  width: 18px;
+  height: 18px;
+  color: var(--muted);
+  transition: transform 0.15s ease;
+}
+
+.acc-soon {
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.acc-provider-wrap {
+  border-radius: 14px;
+}
+
+.acc-provider-wrap.is-open {
+  border: 1px solid var(--teal);
+  background: var(--surface-sunk);
+}
+
+.acc-provider-wrap.is-open .acc-provider {
+  border-color: transparent;
+  background: transparent;
+}
+
+.acc-provider-wrap.is-open .acc-provider-chevron {
+  transform: rotate(180deg);
+}
+
+.acc-provider-body {
+  display: grid;
+  gap: 14px;
+  padding: 2px 16px 16px;
+  animation: acc-open 0.15s ease;
+}
+
+@keyframes acc-open {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Google's own sign-in button: white, the four-colour G, dark text. */
+.acc-google-signin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 46px;
+  border: 1px solid #dadce0;
+  border-radius: 999px;
+  background: #fff;
+  color: #1f1f1f;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.acc-google-signin:hover {
+  border-color: #c4c7cc;
+  background: #f6f8fb;
+  box-shadow: 0 1px 3px rgba(60, 64, 67, 0.25);
+}
+
+.acc-google-signin:disabled {
+  opacity: 0.7;
+  cursor: progress;
+}
+
+.acc-google-g svg {
+  display: block;
   width: 20px;
   height: 20px;
 }
 
-.acc-google {
+.acc-google-steps {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.acc-google-steps li {
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
 }
 
-.acc-google input {
-  flex: 1;
-  min-width: 200px;
+.acc-google-steps svg {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  color: var(--teal);
 }
 
 .acc-setup {
@@ -340,7 +451,7 @@
   margin-top: 4px;
   padding: 6px 8px;
   border-radius: 6px;
-  background: var(--surface-sunk);
+  background: var(--surface);
   overflow-wrap: anywhere;
   user-select: all;
 }
