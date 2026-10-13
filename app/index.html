@@ -80,7 +80,7 @@
               <button class="nav-item" data-view="mail-inbox" aria-label="Вхідні пошти" title="Вхідні пошти: відповіді на холодні листи"><i data-lucide="mail-open"></i><span>Вхідні</span></button>
               <button class="nav-item" data-view="leads" aria-label="Ліди" title="Ліди"><i data-lucide="users"></i><span>Ліди</span></button>
               <button class="nav-item" data-view="reports" aria-label="Звіти" title="Звіти"><i data-lucide="chart-column"></i><span>Звіти</span></button>
-              <button class="nav-item" data-view="mail-settings" aria-label="Скриньки, домени й доступи" title="Скриньки, домени й доступи"><i data-lucide="sliders-horizontal"></i><span>Скриньки</span></button>
+              <button class="nav-item" data-view="mail-settings" aria-label="Пошти, домени й доступи" title="Пошти, домени й доступи"><i data-lucide="sliders-horizontal"></i><span>Пошти</span></button>
             </div>
           </div>
           <button class="nav-item" data-view="contacts" aria-label="Контакти" title="Контакти"><i data-lucide="contact"></i><span>Контакти</span></button>
@@ -165,7 +165,7 @@
               </details>
             </section>
 
-            <!-- Пошта для адміністратора (13.10 перенесено зі «Скриньок»): домени, доступи, ключ домену. -->
+            <!-- Пошта для адміністратора (13.10 перенесено з «Пошт»): домени, доступи, ключ домену. -->
             <!-- ESP 9: реєстр доменів і відправників; малює app/screens/esp-registry.js. -->
             <section class="panel esp-registry-panel span-2" id="espRegistryPanel">
               <div class="panel-heading">
@@ -193,7 +193,7 @@
               <div class="panel-heading">
                 <div>
                   <h2>Пошта: доступ через адміністратора домену</h2>
-                  <p>Необов'язково: сервісний акаунт Google з делегуванням на весь домен — тоді скриньки домену працюють без входу кожної.</p>
+                  <p>Необов'язково: сервісний акаунт Google з делегуванням на весь домен — тоді пошти домену працюють без входу кожної.</p>
                 </div>
               </div>
               <div id="espMailBody"></div>
@@ -249,7 +249,7 @@
               <div class="panel-heading">
                 <div>
                   <h2>По відправниках, доменах і кампаніях</h2>
-                  <p>Щодня по кожній скриньці й домену; по кампанії — внесок кожного листа, тема, версія тексту й джерело ліда.</p>
+                  <p>Щодня по кожній пошті й домену; по кампанії — внесок кожного листа, тема, версія тексту й джерело ліда.</p>
                 </div>
               </div>
               <div id="espReportsBody"></div>
@@ -257,7 +257,7 @@
           </div>
         </section>
 
-        <!-- Прогрів пошт: наші скриньки Workspace пишуть одна одній; малює app/screens/mail-warmup.js. -->
+        <!-- Прогрів пошт: наші пошти Workspace пишуть одна одній; малює app/screens/mail-warmup.js. -->
         <section class="view" id="view-mail-warmup">
           <div class="mail-page warmup-mail-page" id="mailWarmupRoot"></div>
         </section>
@@ -265,8 +265,8 @@
         <!-- Налаштування пошти: підключення Gmail, домени й відправники, доступи й журнал дій
              (esp-mailboxes.js, esp-registry.js, esp-access.js). У «Налаштуваннях» — лише профіль і команда. -->
         <section class="view" id="view-mail-settings">
-          <!-- Пошта → «Скриньки» (власник 13.10: «там має бути тільки додавання пошт і список доданих»):
-               «Додати скриньку» і список — малює app/screens/mail-accounts.js. Домени, доступи й ключ
+          <!-- Пошта → «Пошти» (власник 13.10: «там має бути тільки додавання пошт і список доданих»):
+               «Додати пошту» і список — малює app/screens/mail-accounts.js. Домени, доступи й ключ
                адміністратора домену — у «Налаштуваннях». -->
           <div class="mail-accounts-page" id="mailAccountsRoot"></div>
         </section>
@@ -314,18 +314,18 @@
 
         <section class="view" id="view-mail-inbox">
           <!-- Пошта → «Вхідні» = Unibox (ESP-UI 4, як екран Snov 02): ліва колонка — папки
-               холодної пошти й журнал скриньок. Малює app/screens/mail-inbox.js. -->
+               холодної пошти й журнал пошт. Малює app/screens/mail-inbox.js. -->
           <div class="mail-page unibox" id="unibox">
             <div class="mail-toolbar" id="uniboxToolbar"></div>
             <div class="mail-body">
               <nav class="mail-side" id="uniboxSide" aria-label="Папки"></nav>
               <div class="unibox-main">
                 <div id="uniboxMail"></div>
-                <!-- ESP 7: усе, що прийшло в скриньки, рядками журналу — і «Перевірити зараз»; малює app/screens/esp-inbox.js. -->
+                <!-- ESP 7: усе, що прийшло в пошти, рядками журналу — і «Перевірити зараз»; малює app/screens/esp-inbox.js. -->
                 <section class="panel esp-inbox-panel" id="uniboxEvents" hidden>
                   <div class="panel-heading">
                     <div>
-                      <h2>Журнал скриньок</h2>
+                      <h2>Журнал пошт</h2>
                       <p>Відповідь зупиняє ланцюжок людини, автовідповідь переносить крок, bounce — за кодом, відписка — того ж дня.</p>
                     </div>
                     <button class="text-button" id="espInboxPoll" type="button"><i data-lucide="refresh-cw"></i><span>Перевірити зараз</span></button>

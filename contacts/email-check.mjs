@@ -24,8 +24,8 @@ const ADDRESS = /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-
 const ROLE = /^(info|sales|support|hello|contact|admin|office|marketing|hr|jobs|careers|team|help|noreply|no-reply|billing|press|partners?)$/i;
 
 export const EMAIL_CHECK_LABEL = {
-  valid: "скринька існує",
-  invalid: "такої скриньки немає",
+  valid: "пошта існує",
+  invalid: "такої пошти немає",
   catch_all: "сервер приймає будь-яку адресу — існування не перевірити",
   unknown: "перевірити не вдалося"
 };
@@ -111,11 +111,11 @@ export async function checkEmail(value, { resolveMx = dnsResolveMx, resolveA = r
     if (real.code >= 500) {
       // 5.1.x / 550 user unknown — the server says no. A 5.7.x is a policy on us, not on them.
       if (/5\.7\.\d/.test(real.text)) return result(email, "unknown", "поштовий сервер відхилив перевірку (політика)", { role, mx: host, detail: real.text });
-      return result(email, "invalid", "поштовий сервер каже: такої скриньки немає", { role, mx: host, detail: real.text });
+      return result(email, "invalid", "поштовий сервер каже: такої пошти немає", { role, mx: host, detail: real.text });
     }
     if (real.code >= 400) return result(email, "unknown", "поштовий сервер просить повторити пізніше (сірий список)", { role, mx: host, detail: real.text });
     if (fake && fake.code < 300) return result(email, "catch_all", EMAIL_CHECK_LABEL.catch_all, { role, mx: host });
-    return result(email, "valid", role ? "скринька існує, але це спільна адреса (info@, sales@…)" : EMAIL_CHECK_LABEL.valid, { role, mx: host });
+    return result(email, "valid", role ? "пошта існує, але це спільна адреса (info@, sales@…)" : EMAIL_CHECK_LABEL.valid, { role, mx: host });
   }
   return result(email, "unknown", "поштовий сервер не відповів", { role, mx: exchanges[0] });
 }

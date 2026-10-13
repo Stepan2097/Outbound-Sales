@@ -45,7 +45,7 @@ test("a mailbox the server has is valid; one it does not have is invalid and hid
   const [real, guessed] = await checkEmails(["Gal.Shapira@apester.com", "gshapira@apester.com"], options);
   assert.equal(real.status, "valid");
   assert.equal(guessed.status, "invalid");
-  assert.match(guessed.reason, /такої скриньки немає/);
+  assert.match(guessed.reason, /такої пошти немає/);
 });
 
 test("a server that accepts any address proves nothing: catch-all, not valid", async (t) => {

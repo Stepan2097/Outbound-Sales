@@ -24,9 +24,9 @@ const STOP_REASON = {
   no_answer_from_provider: "Gmail не відповів — перевір «Надіслані»"
 };
 const SKIP_REASON = {
-  not_due: "ще не день", sender_daily_limit: "ліміт скриньки", domain_daily_limit: "ліміт домену", outside_window: "поза вікном одержувача",
-  weekend: "вихідний", holiday: "свято в країні одержувача", too_soon: "інтервал між листами", sender_unavailable: "скринька не надсилає",
-  sender_paused: "скринька на паузі", already_sent: "уже надіслано", provider_refused: "Gmail відмовив", company_daily_limit: "2 нових з компанії на день"
+  not_due: "ще не день", sender_daily_limit: "ліміт пошти", domain_daily_limit: "ліміт домену", outside_window: "поза вікном одержувача",
+  weekend: "вихідний", holiday: "свято в країні одержувача", too_soon: "інтервал між листами", sender_unavailable: "пошта не надсилає",
+  sender_paused: "пошта на паузі", already_sent: "уже надіслано", provider_refused: "Gmail відмовив", company_daily_limit: "2 нових з компанії на день"
 };
 const SPIN_MODES = [["all", "Усім", "кожен отримує свої варіанти речень і тем"], ["half", "A/B — половині", "половина бачить базовий текст: видно, чи варіанти кращі"], ["off", "Нікому", "завжди перший варіант"]];
 const SKIP_CHOOSER_KEY = "outbound.campaigns.skipChooser";
@@ -139,7 +139,7 @@ function bannersHtml() {
   if (page.alerts.length) {
     const index = Math.min(page.alertIndex, page.alerts.length - 1);
     const alert = page.alerts[index];
-    const fix = alert.kind === "pause_sender" ? "зняти паузу скриньки — у «Налаштуваннях пошти», коли причину усунуто"
+    const fix = alert.kind === "pause_sender" ? "зняти паузу пошти — у «Налаштуваннях пошти», коли причину усунуто"
       : alert.kind === "pause_domain" ? "зняти паузу домену — у «Налаштуваннях пошти»" : alert.kind === "alert" ? "нічого не зупинено — перевірте" : "запустити знову — у списку, коли джерело перевірено";
     out.push(`<div class="mc-banner is-warn" role="alert"><i data-lucide="triangle-alert"></i>
       <div><strong>${escapeHtml(alert.title)}</strong> ${escapeHtml(alert.reason || "")} <span class="mc-subtle">${escapeHtml(when(alert.at))} · ${escapeHtml(fix)}</span></div>
@@ -184,7 +184,7 @@ function campaignRowHtml(campaign) {
       <div class="mc-meta">
         <span><i data-lucide="users"></i>Одержувачів: ${campaign.people}</span>${campaign.people ? `<span class="mc-progress" title="Пройшли ланцюжок: ${done} з ${campaign.people}"><span style="width:${progress}%"></span></span>` : ""}
         <span><i data-lucide="mail"></i>${campaign.steps.length} ${campaign.steps.length === 1 ? "лист" : campaign.steps.length < 5 ? "листи" : "листів"}${campaign.spinMode === "half" ? " · A/B" : ""}</span>
-        <span><i data-lucide="at-sign"></i>${campaign.senders.length ? escapeHtml(campaign.senders.join(", ")) : "скриньки не обрано"}</span>
+        <span><i data-lucide="at-sign"></i>${campaign.senders.length ? escapeHtml(campaign.senders.join(", ")) : "пошти не обрано"}</span>
         <span><i data-lucide="calendar"></i>${escapeHtml(when(campaign.createdAt))}</span>
       </div>
     </td>
@@ -272,7 +272,7 @@ function listHtml() {
     <div class="mc-toolbar">
       <button class="primary-button" type="button" data-mc="create"><i data-lucide="circle-plus"></i><span>Створити кампанію</span></button>
       <button type="button" data-mc="export"><i data-lucide="download"></i><span>${page.selected.size ? `Експорт статистики (${page.selected.size})` : "Експорт статистики"}</span></button>
-      <button type="button" data-mc="add-mailbox"><i data-lucide="mail-plus"></i><span>Додати скриньку</span></button>
+      <button type="button" data-mc="add-mailbox"><i data-lucide="mail-plus"></i><span>Додати пошту</span></button>
       <div class="mc-toolbar-spacer"></div>
       <label class="mc-search"><i data-lucide="search"></i><input type="search" data-mc-input="search" placeholder="Пошук кампанії" value="${escapeAttr(page.search)}" /></label>
       ${page.halt?.on ? "" : `<button type="button" class="danger-button" data-mc="halt-on"><i data-lucide="octagon-x"></i><span>Стоп усе</span></button>`}
@@ -313,7 +313,7 @@ function chooserHtml() {
         <button type="button" class="mc-choice" data-mc="chooser-scratch">
           <span class="mc-choice-art"><i data-lucide="file-plus"></i></span>
           <strong>З нуля</strong>
-          <span>Покроково: листи й затримки, одержувачі, скриньки, перевірка.</span>
+          <span>Покроково: листи й затримки, одержувачі, пошти, перевірка.</span>
         </button>
       </div>
       <label class="mc-check-line"><input type="checkbox" data-mc-input="skip-chooser" ${readSkipChooser() ? "checked" : ""} /> Більше не показувати — одразу з нуля</label>`;
@@ -400,7 +400,7 @@ function sequenceHtml(campaign) {
         <span>Відповів, bounce або відписався — ланцюжок для людини зупиняється. Автовідповідь «у відпустці» переносить наступний лист. Колега з тієї ж компанії відповів — пауза.</span></div>`;
   }).join("");
   return `<section class="mc-canvas">
-    <div class="mc-canvas-head"><h2>Автоматизуйте розсилку</h2><p>Ланцюжок, який пройде кожна людина: лист, затримка в робочих днях, наступний лист — з тієї самої скриньки, у тому ж треді.</p></div>
+    <div class="mc-canvas-head"><h2>Автоматизуйте розсилку</h2><p>Ланцюжок, який пройде кожна людина: лист, затримка в робочих днях, наступний лист — з тієї самої пошти, у тому ж треді.</p></div>
     ${locked ? '<p class="esp-notice">Ланцюжок уже почався — листи й затримки не змінюються, інакше люди отримали б різне.</p>' : ""}
     <div class="mc-flow">
       <div class="mc-node mc-node-start"><span class="mc-node-badge is-green">Старт</span>
@@ -447,10 +447,10 @@ function recipientsHtml(campaign) {
       ${result.rejected.length ? `<p>Рядків без адреси: ${result.rejected.length}.</p>` : ""}
     </div>` : ""}
     ${page.people.length ? `<div class="table-wrap"><table class="mc-table mc-people">
-      <thead><tr><th>Людина</th><th>Скринька</th><th>Лист</th><th>Стан</th><th>Наступний</th></tr></thead>
+      <thead><tr><th>Людина</th><th>Пошта</th><th>Лист</th><th>Стан</th><th>Наступний</th></tr></thead>
       <tbody>${shown.map((person) => `<tr>
         <td><strong>${escapeHtml(person.email)}</strong><small>${escapeHtml([person.name, person.company, person.country].filter(Boolean).join(" · "))}</small></td>
-        <td>${escapeHtml(person.sender || "— після вибору скриньок")}</td>
+        <td>${escapeHtml(person.sender || "— після вибору пошт")}</td>
         <td>${person.step} / ${campaign.steps.length}</td>
         <td>${escapeHtml(PERSON_STATE[person.status] || person.status)}${person.reason ? `<small>${escapeHtml(STOP_REASON[person.reason] || person.reason)}</small>` : ""}${person.recheck ? "<small>на повторну перевірку</small>" : ""}</td>
         <td>${escapeHtml(person.nextDueDate || (person.status === "active" ? "з першим вікном" : "—"))}</td>
@@ -465,15 +465,15 @@ function sendingHtml(campaign) {
   const signature = page.signature || {};
   const window_ = limits?.window || { startHour: 8, endHour: 17 };
   return `<section class="mc-step-page">
-    <div class="mc-step-intro"><h2>Параметри відправки</h2><p>З яких скриньок іде кампанія і як. Людина отримує весь ланцюжок з однієї скриньки; нові люди розподіляються на найменш завантажену.</p></div>
+    <div class="mc-step-intro"><h2>Параметри відправки</h2><p>З яких пошт іде кампанія і як. Людина отримує весь ланцюжок з однієї пошти; нові люди розподіляються на найменш завантажену.</p></div>
     <form class="mc-sending" data-mc-form="sending">
-      <fieldset class="mc-fieldset"><legend>Скриньки</legend>
+      <fieldset class="mc-fieldset"><legend>Пошти</legend>
         ${usable.length ? usable.map((sender) => `<label class="mc-sender">
             <input type="checkbox" name="sender" value="${escapeAttr(sender.email)}" ${campaign.senders.includes(sender.email) ? "checked" : ""} ${campaign.state === "done" ? "disabled" : ""} />
             <span><strong>${escapeHtml(sender.email)}</strong><small>${sender.status === "active" ? "надсилає" : "на паузі"} · сьогодні ${sender.today} з ${sender.limit} · етап рампи ${sender.rampStage ?? "—"}</small></span>
             <span class="mc-meter"><span style="width:${percent(sender.today, sender.limit)}%"></span></span>
-          </label>`).join("") : '<p class="esp-notice is-bad">У реєстрі немає жодної активної скриньки. Додайте скриньку: «Пошта» → «Скриньки» → «Додати скриньку».</p>'}
-        <button type="button" class="text-button" data-mc="add-mailbox"><i data-lucide="mail-plus"></i><span>Додати скриньку</span></button>
+          </label>`).join("") : '<p class="esp-notice is-bad">У реєстрі немає жодної активної пошти. Додайте пошту: «Пошта» → «Пошти» → «Додати пошту».</p>'}
+        <button type="button" class="text-button" data-mc="add-mailbox"><i data-lucide="mail-plus"></i><span>Додати пошту</span></button>
       </fieldset>
       <fieldset class="mc-fieldset"><legend>Варіанти тексту (A/B)</legend>
         ${SPIN_MODES.map(([value, label, hint]) => `<label class="mc-radio"><input type="radio" name="spinMode" value="${value}" ${(campaign.spinMode || "all") === value ? "checked" : ""} ${started() ? "disabled" : ""} /><span><strong>${label}</strong><small>${hint}</small></span></label>`).join("")}
@@ -485,8 +485,8 @@ function sendingHtml(campaign) {
       <h3>Як іде відправка — однаково для всіх кампаній</h3>
       <ul>
         <li><i data-lucide="clock"></i>Пн–Пт, ${String(window_.startHour).padStart(2, "0")}:00–${window_.endHour}:00 за часом одержувача; державні свята його країни пропускаються.</li>
-        <li><i data-lucide="timer"></i>Між листами однієї скриньки — ${limits?.gapMinutes?.min ?? 12}–${limits?.gapMinutes?.max ?? 40} хв, перший лист дня — не на відкритті вікна. Пропущене не доганяється.</li>
-        <li><i data-lucide="gauge"></i>Скринька — до свого етапу рампи (5 → 35 на день), домен — до ${limits?.domainLimit ?? 105} на день.</li>
+        <li><i data-lucide="timer"></i>Між листами однієї пошти — ${limits?.gapMinutes?.min ?? 12}–${limits?.gapMinutes?.max ?? 40} хв, перший лист дня — не на відкритті вікна. Пропущене не доганяється.</li>
+        <li><i data-lucide="gauge"></i>Пошта — до свого етапу рампи (5 → 35 на день), домен — до ${limits?.domainLimit ?? 105} на день.</li>
         <li><i data-lucide="building-2"></i>З однієї компанії — до 2 нових людей на день; повторно людині — не раніше ніж через 90 днів.</li>
         <li><i data-lucide="file-text"></i>Лише простий текст, посилання для відписки в один клік; без пікселів і переписаних посилань.</li>
       </ul>
@@ -511,8 +511,8 @@ function reviewChecks(campaign) {
     [campaign.steps.length > 0, campaign.steps.length ? `${campaign.steps.length} ${campaign.steps.length === 1 ? "лист" : "листи"} у ланцюжку` : "Немає жодного листа", "sequence"],
     [campaign.steps.length > 0 && campaign.steps.every((step) => templateOf(step.templateId)), "Кожен лист написаний і знайдений", "sequence"],
     [page.people.length > 0, page.people.length ? `${page.people.length} одержувачів` : "Немає одержувачів", "recipients"],
-    [campaign.senders.length > 0, campaign.senders.length ? `Скриньки: ${campaign.senders.join(", ")}` : "Не обрано скриньок", "sending"],
-    [!waitingSenders || campaign.senders.length > 0, waitingSenders ? `${waitingSenders} людей отримають скриньку при запуску` : "Кожна людина має скриньку", "sending"],
+    [campaign.senders.length > 0, campaign.senders.length ? `Пошти: ${campaign.senders.join(", ")}` : "Не обрано пошт", "sending"],
+    [!waitingSenders || campaign.senders.length > 0, waitingSenders ? `${waitingSenders} людей отримають пошту при запуску` : "Кожна людина має пошту", "sending"],
     [!page.halt?.on, page.halt?.on ? "Увімкнено «Стоп усе»" : "«Стоп усе» вимкнено", null],
     [page.sequenceOn, page.sequenceOn ? "Відправка на сервері увімкнена" : "Відправку на сервері вимкнено — кампанія стоятиме, доки її не ввімкнуть (ESP 11)", null]
   ];
@@ -624,7 +624,7 @@ function editorHtml() {
       ${libraryTemplates().length ? libraryTemplates().map((template) => `<button type="button" role="menuitem" data-mc-use-template="${escapeAttr(template.id)}"><i data-lucide="file-text"></i>${escapeHtml(template.name || template.subject)}</button>`).join("") : '<span class="mc-dropdown-note">У бібліотеці ще немає шаблонів.</span>'}
     </div>`
       : editor.menu === "unsubscribe" ? `<div class="mc-dropdown mc-dropdown-wide" role="note">
-      <span class="mc-dropdown-note">Посилання для відписки додається саме: заголовки List-Unsubscribe і List-Unsubscribe-Post (кнопка «Відписатися» в Gmail, одним кліком) і рядок під підписом з посиланням на домен скриньки. Вставляти його в текст не треба.</span>
+      <span class="mc-dropdown-note">Посилання для відписки додається саме: заголовки List-Unsubscribe і List-Unsubscribe-Post (кнопка «Відписатися» в Gmail, одним кліком) і рядок під підписом з посиланням на домен пошти. Вставляти його в текст не треба.</span>
     </div>` : "";
   const preview = editor.preview;
   return `<div class="mc-modal-backdrop" data-mc="editor-close"></div>
@@ -654,7 +654,7 @@ function editorHtml() {
         <button type="button" class="primary-button" data-mc="editor-save" ${editor.busy ? "disabled" : ""}><i data-lucide="save"></i><span>${editor.busy ? "Зберігаємо..." : "Зберегти"}</span></button>
         <div class="mc-toolbar-spacer"></div>
         <button type="button" data-mc="editor-preview" ${editor.busy ? "disabled" : ""}><i data-lucide="eye"></i><span>Переглянути й перевірити</span></button>
-        <button type="button" data-mc="editor-test" ${editor.busy || !page.liveSend ? "disabled" : ""} title="${escapeAttr(page.liveSend ? `Лист піде вам на ${myEmail()} з ${sampleMailbox()}, через ті самі перевірки, що й справжні` : "Справжню відправку ще не ввімкнено (ESP_LIVE_SEND, після приймання ESP 11) — тест на вашу скриньку з'явиться разом із нею")}"><i data-lucide="send"></i><span>Надіслати тест собі</span></button>
+        <button type="button" data-mc="editor-test" ${editor.busy || !page.liveSend ? "disabled" : ""} title="${escapeAttr(page.liveSend ? `Лист піде вам на ${myEmail()} з ${sampleMailbox()}, через ті самі перевірки, що й справжні` : "Справжню відправку ще не ввімкнено (ESP_LIVE_SEND, після приймання ESP 11) — тест на вашу пошту з'явиться разом із нею")}"><i data-lucide="send"></i><span>Надіслати тест собі</span></button>
         ${editor.library ? "" : `<button type="button" data-mc="editor-save-template" ${editor.busy ? "disabled" : ""}><i data-lucide="bookmark-plus"></i><span>Зберегти як шаблон</span></button>`}
       </footer>
     </section>`;
@@ -767,7 +767,7 @@ async function previewEditor() {
 }
 
 function myEmail() {
-  return authState?.user?.email || "вашу скриньку";
+  return authState?.user?.email || "вашу пошту";
 }
 
 async function sendTest() {
@@ -821,7 +821,7 @@ export function renderCampaignsPage() {
 function exportCsv() {
   const rows = page.campaigns.filter((campaign) => !page.selected.size || page.selected.has(campaign.id));
   const cell = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
-  const lines = [["Кампанія", "Стан", "Створено", "Одержувачів", "Листів у ланцюжку", "Надіслано", "Відповіді", "Bounce", "Відписки", "Скриньки"].map(cell).join(",")]
+  const lines = [["Кампанія", "Стан", "Створено", "Одержувачів", "Листів у ланцюжку", "Надіслано", "Відповіді", "Bounce", "Відписки", "Пошти"].map(cell).join(",")]
     .concat(rows.map((campaign) => [campaign.name, STATE_LABEL[campaign.state], campaign.createdAt, campaign.people, campaign.steps.length, campaign.sent, campaign.replied, campaign.bounced, campaign.unsubscribed, campaign.senders.join(" ")].map(cell).join(",")));
   const link = document.createElement("a");
   link.href = URL.createObjectURL(new Blob([`﻿${lines.join("\n")}`], { type: "text/csv;charset=utf-8" }));

@@ -369,10 +369,10 @@ test("реєстр як сховище пауз для SenderGate (ESP 1): ві�
   await readySender();
   const store = registrySenderStore();
   assert.equal(await store.pausedFor("mary@send.example.com"), null);
-  assert.equal((await store.pausedFor("ghost@send.example.com")).code, "not_registered", "незареєстрована скринька не надсилає");
+  assert.equal((await store.pausedFor("ghost@send.example.com")).code, "not_registered", "незареєстрована пошта не надсилає");
 
   const { MailboxError } = await import("../esp/gmail.mjs");
-  const refusal = new MailboxError("Делегування для скриньки не налаштовано", { code: "delegation_missing" });
+  const refusal = new MailboxError("Делегування для пошти не налаштовано", { code: "delegation_missing" });
   const gate = new SenderGate({ connector: { send: async () => { throw refusal; } }, store });
   await assert.rejects(() => gate.send("mary@send.example.com", LETTER), SenderPaused);
   const [sender] = (await registry()).senders;

@@ -21,7 +21,7 @@ const candidates = [
 
 test("an empty CRM email gets the confirmed address; the failed guess goes nowhere; holes are filled, not overwritten", () => {
   const contact = { id: "c1", email: "", website: "", linkedin: "https://www.linkedin.com/in/gal", phone: "", custom_fields: { source: "csv" } };
-  const { patch, added } = crmPatch(contact, { candidates, checks: [check("gal.shapira@apester.com", "valid"), check("gshapira@apester.com", "invalid", "такої скриньки немає")] });
+  const { patch, added } = crmPatch(contact, { candidates, checks: [check("gal.shapira@apester.com", "valid"), check("gshapira@apester.com", "invalid", "такої пошти немає")] });
   assert.equal(patch.email, "gal.shapira@apester.com");
   assert.equal(patch.website, "https://apester.com");
   assert.equal("linkedin" in patch, false, "the CRM already had one");
@@ -33,7 +33,7 @@ test("an empty CRM email gets the confirmed address; the failed guess goes nowhe
 
 test("a second confirmed address joins the list; the CRM's own failing address keeps its «!»", () => {
   const contact = { id: "c2", email: "old@apester.com", custom_fields: {} };
-  const { patch } = crmPatch(contact, { candidates, checks: [check("old@apester.com", "invalid", "такої скриньки немає"), check("gal.shapira@apester.com", "valid")] });
+  const { patch } = crmPatch(contact, { candidates, checks: [check("old@apester.com", "invalid", "такої пошти немає"), check("gal.shapira@apester.com", "valid")] });
   assert.equal("email" in patch, false, "the CRM's email is never replaced");
   assert.deepEqual(patch.custom_fields.emails.map((row) => row.email), ["gal.shapira@apester.com"]);
   const rows = contactEmails({ ...contact, ...patch });

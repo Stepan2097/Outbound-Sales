@@ -2,7 +2,7 @@
 //
 // Звідки йдуть холодні листи — які домени (коли зареєстровані, у якому стані:
 // старіє / рампа / активний / запас / виведений, що кажуть DNS і блоклисти), які
-// скриньки на них (хто з команди за кожною, етап рампи — це її ліміт на день) і чому
+// пошти на них (хто з команди за кожною, етап рампи — це її ліміт на день) і чому
 // кожна зміна сталася. Кожна зміна тут — рядок у журналі ESP, який лише дописується:
 // нічого не редагується і не видаляється, «вивести» означає назавжди, а пауза
 // просить причину. Міняє адміністратор; решта команди бачить.
@@ -89,7 +89,7 @@ function espSenderActionsHtml(sender, canEdit, stages) {
   return `<div class="esp-actions">
     ${at > 0 ? `<button class="text-button" type="button" data-esp-ramp="${stages[at - 1]}" ${data}><i data-lucide="chevron-down"></i><span>Етап нижче</span></button>` : ""}
     ${at >= 0 && at < stages.length - 1 ? `<button class="text-button" type="button" data-esp-ramp="${stages[at + 1]}" ${data}><i data-lucide="chevron-up"></i><span>Етап вище (${stages[at + 1]}/день)</span></button>` : ""}
-    <button class="text-button" type="button" data-esp-person ${data}><i data-lucide="user"></i><span>Хто за скринькою</span></button>
+    <button class="text-button" type="button" data-esp-person ${data}><i data-lucide="user"></i><span>Хто за поштою</span></button>
     ${sender.status === "active"
       ? `<button class="text-button" type="button" data-esp-status="paused" ${data}><i data-lucide="pause"></i><span>Пауза</span></button>`
       : `<button class="text-button" type="button" data-esp-status="active" ${data}><i data-lucide="play"></i><span>Відновити</span></button>`}
@@ -130,7 +130,7 @@ export function renderEspRegistry() {
           ${shown === "held" ? `<span class="esp-subtle">— домен ${escapeHtml(sender.domain)} у стані «${escapeHtml((ESP_STATE_LABEL[sender.heldBy] || [sender.heldBy])[0].toLowerCase())}»</span>` : ""}</div>
         <div class="esp-row-dns">
           <span>Етап рампи <b>${sender.rampStep || 1}/${rampStages.length}</b> · ліміт <b>${sender.limit ?? sender.rampStage}</b> на день</span>
-          <span class="esp-subtle">за скринькою: ${sender.person ? escapeHtml(sender.person) : "не вказано"}</span>
+          <span class="esp-subtle">за поштою: ${sender.person ? escapeHtml(sender.person) : "не вказано"}</span>
           <span class="esp-subtle">доступ: ${sender.mailboxRef ? `<code>${escapeHtml(sender.mailboxRef)}</code>` : "ще не прив'язано"}</span>
         </div>
         ${espSenderActionsHtml(sender, canEdit, rampStages)}
@@ -149,7 +149,7 @@ export function renderEspRegistry() {
       <button type="submit"><i data-lucide="plus"></i><span>Додати домен</span></button>
     </form>
     <form class="esp-form" id="espSenderForm">
-      <input name="email" type="email" placeholder="Скринька, напр. mary@mail.advantage-agency.co" required />
+      <input name="email" type="email" placeholder="Пошта, напр. mary@mail.advantage-agency.co" required />
       <input name="displayName" placeholder="Ім'я відправника" />
       <input name="person" placeholder="Хто з команди за нею" />
       <input name="mailboxRef" placeholder="Змінна з доступом, напр. GMAIL_MARY_TOKEN" pattern="[A-Z][A-Z0-9_]{2,80}" title="Лише назва змінної середовища — сам ключ сюди не пишеться" />
@@ -247,9 +247,9 @@ document.getElementById("espRegistryBody")?.addEventListener("click", async (eve
   }
   const person = event.target.closest("[data-esp-person]");
   if (person) {
-    const who = window.prompt(`Хто з команди за скринькою ${person.dataset.espKey}?`);
+    const who = window.prompt(`Хто з команди за поштою ${person.dataset.espKey}?`);
     if (who === null) return;
-    await espWrite("/api/esp/senders/update", { email: person.dataset.espKey, person: who }, () => `${person.dataset.espKey}: за скринькою — ${who || "ніхто"}.`);
+    await espWrite("/api/esp/senders/update", { email: person.dataset.espKey, person: who }, () => `${person.dataset.espKey}: за поштою — ${who || "ніхто"}.`);
     return;
   }
   const status = event.target.closest("[data-esp-status]");

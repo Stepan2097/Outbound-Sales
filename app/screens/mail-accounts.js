@@ -1,12 +1,12 @@
-// Пошта → «Скриньки» (власник 13.10: «там має бути тільки додавання пошт і
-// список доданих»). Як «Email accounts» в Instantly: угорі — скільки скриньок,
-// пошук і «Додати скриньку»; нижче — список. «Додати скриньку» відкриває вікно
+// Пошта → «Пошти» (власник 13.10: «там має бути тільки додавання пошт і
+// список доданих»). Як «Email accounts» в Instantly: угорі — скільки пошт,
+// пошук і «Додати пошту»; нижче — список. «Додати пошту» відкриває вікно
 // вибору способу; «Увійти через Google» веде у вікно Google, звідки людина
 // повертається сюди ж. Пароля платформа не бачить: Google віддає дозвіл на одну
-// скриньку, сервер тримає його зашифрованим (esp/google-oauth.mjs, маршрути —
+// пошту, сервер тримає його зашифрованим (esp/google-oauth.mjs, маршрути —
 // esp/mailbox-connect.mjs). Домени, доступи й ключ домену — у «Налаштуваннях».
 //
-// Повернення з Google — «#mail-settings/mailbox/ok/<скринька>» або
+// Повернення з Google — «#mail-settings/mailbox/ok/<пошта>» або
 // «…/error/<що не так>»: плашка вгорі, адреса прибирається з рядка.
 
 import { api, escapeAttr, escapeHtml, onScreen, refreshIcons, uaPlural } from "../core.js";
@@ -22,8 +22,8 @@ function readReturn() {
   const parts = window.location.hash.replace(/^#/, "").split("/");
   if (parts[0] !== "mail-settings" || parts[1] !== "mailbox") return;
   const value = decodeURIComponent(parts.slice(3).join("/") || "");
-  if (parts[2] === "ok") Object.assign(page, { notice: `Скриньку ${value} додано. Ліміт починається з 5 листів на день і росте сам.`, tone: "is-ok" });
-  if (parts[2] === "error") Object.assign(page, { notice: value || "Не вдалося додати скриньку.", tone: "is-bad" });
+  if (parts[2] === "ok") Object.assign(page, { notice: `Пошту ${value} додано. Ліміт починається з 5 листів на день і росте сам.`, tone: "is-ok" });
+  if (parts[2] === "error") Object.assign(page, { notice: value || "Не вдалося додати пошту.", tone: "is-bad" });
   window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#mail-settings`);
 }
 
@@ -39,7 +39,7 @@ async function load() {
     page.data = await api("/api/esp/oauth/google");
     page.error = "";
   } catch (error) {
-    page.error = error.message || "Не вдалося прочитати скриньки.";
+    page.error = error.message || "Не вдалося прочитати пошти.";
   }
   page.loading = false;
   render();
@@ -52,7 +52,7 @@ function stateOf(row) {
   if (row.status === "not_signed_in") {
     return page.data?.domainKey
       ? { tone: "is-ok", icon: "key-round", text: "через ключ домену", hint: "Працює через ключ адміністратора домену" }
-      : { tone: "is-warn", icon: "log-in", text: "не підключено", hint: "Скринька є у відправниках, але не увійшла через Google — листи з неї не підуть" };
+      : { tone: "is-warn", icon: "log-in", text: "не підключено", hint: "Пошта є у відправниках, але не увійшла через Google — листи з неї не підуть" };
   }
   const sender = row.sender;
   if (sender && sender.effectiveStatus === "retired") return { tone: "is-muted", icon: "archive", text: "виведено", hint: "" };
@@ -75,7 +75,7 @@ function rowHtml(row) {
   }
   const notes = [
     row.status === "broken" && row.error ? `<small class="is-bad">${escapeHtml(row.error)}</small>` : "",
-    check ? `<small class="${check.ok ? "is-ok" : "is-bad"}">${escapeHtml(check.ok ? `Доступ є${check.messagesTotal ? ` · листів у скриньці: ${check.messagesTotal}` : ""}` : check.error || "Google відмовив.")}</small>` : "",
+    check ? `<small class="${check.ok ? "is-ok" : "is-bad"}">${escapeHtml(check.ok ? `Доступ є${check.messagesTotal ? ` · листів у пошті: ${check.messagesTotal}` : ""}` : check.error || "Google відмовив.")}</small>` : "",
     row.via === "google" && row.status !== "broken" && !row.canModify ? '<small>без дозволу на мітки — прогрів не виймає листи зі спаму; «Увійти знову» й дозвольте все</small>' : ""
   ].join("");
   return `<li class="acc-row">
@@ -100,19 +100,19 @@ function listHtml() {
   if (!(page.data?.mailboxes || []).length) {
     return `<div class="acc-empty">
       <i data-lucide="mail-plus"></i>
-      <h3>Ще жодної скриньки</h3>
-      <p>Додайте скриньку, з якої підуть холодні листи: вхід через Google — і вона тут.</p>
-      <button type="button" class="primary-button" data-acc-add><i data-lucide="plus"></i><span>Додати скриньку</span></button>
+      <h3>Ще жодної пошти</h3>
+      <p>Додайте пошту, з якої підуть холодні листи: вхід через Google — і вона тут.</p>
+      <button type="button" class="primary-button" data-acc-add><i data-lucide="plus"></i><span>Додати пошту</span></button>
     </div>`;
   }
-  if (!rows.length) return '<p class="acc-muted">За цим пошуком скриньок немає.</p>';
+  if (!rows.length) return '<p class="acc-muted">За цим пошуком пошт немає.</p>';
   return `<div class="acc-list">
-    <div class="acc-head" aria-hidden="true"><span></span><span>Скринька</span><span>Стан</span><span>Ліміт</span><span>Додав</span><span></span></div>
+    <div class="acc-head" aria-hidden="true"><span></span><span>Пошта</span><span>Стан</span><span>Ліміт</span><span>Додав</span><span></span></div>
     <ul>${rows.map(rowHtml).join("")}</ul>
   </div>`;
 }
 
-// ── the «Додати скриньку» window ──────────────────────────────────────────
+// ── the «Додати пошту» window ──────────────────────────────────────────
 
 function setupHtml(data) {
   if (!data.canManage) return '<p class="acc-muted">Вхід через Google ще не налаштовано на сервері — це робить адміністратор один раз. Кнопка запрацює одразу після цього.</p>';
@@ -140,15 +140,15 @@ function dialogHtml() {
       <span>${page.busy === "start" ? "Відкриваю Google…" : "Увійти через Google"}</span>
     </button>
     <ul class="acc-google-steps">
-      <li><i data-lucide="mouse-pointer-click"></i>оберіть скриньку у вікні Google</li>
+      <li><i data-lucide="mouse-pointer-click"></i>оберіть пошту у вікні Google</li>
       <li><i data-lucide="check-check"></i>дозвольте всі пункти — надсилання, відповіді, мітки для прогріву</li>
       <li><i data-lucide="shield-check"></i>пароль платформа не бачить</li>
     </ul>`;
   return `<dialog class="acc-dialog" id="mailAccountsDialog">
     <form method="dialog" class="acc-dialog-head">
       <div>
-        <h2>Додати скриньку</h2>
-        <p class="acc-muted">Де живе скринька?</p>
+        <h2>Додати пошту</h2>
+        <p class="acc-muted">Де живе пошта?</p>
       </div>
       <button class="icon-button" value="close" aria-label="Закрити"><i data-lucide="x"></i></button>
     </form>
@@ -184,15 +184,15 @@ function render() {
   root.innerHTML = `
     <header class="acc-bar">
       <div>
-        <h2>${count ? `${count} ${uaPlural(count, "скринька", "скриньки", "скриньок")}` : "Скриньок ще немає"}</h2>
+        <h2>${count ? `${count} ${uaPlural(count, "пошта", "пошти", "пошт")}` : "Пошт ще немає"}</h2>
         <p>З них ідуть холодні листи й прогрів.</p>
       </div>
-      ${count ? `<label class="acc-search"><i data-lucide="search"></i><input id="mailAccountsSearch" type="search" placeholder="Пошук скриньки" value="${escapeAttr(page.query)}" autocomplete="off" /></label>` : ""}
-      <button type="button" class="primary-button" data-acc-add><i data-lucide="plus"></i><span>Додати скриньку</span></button>
+      ${count ? `<label class="acc-search"><i data-lucide="search"></i><input id="mailAccountsSearch" type="search" placeholder="Пошук пошти" value="${escapeAttr(page.query)}" autocomplete="off" /></label>` : ""}
+      <button type="button" class="primary-button" data-acc-add><i data-lucide="plus"></i><span>Додати пошту</span></button>
     </header>
     ${page.notice ? `<p class="esp-notice ${page.tone}">${escapeHtml(page.notice)}</p>` : ""}
-    ${page.data && !page.data.liveSend ? '<p class="acc-muted acc-lock"><i data-lucide="lock"></i> Справжня відправка на сервері поки вимкнена: скриньки можна додавати й перевіряти, листи підуть, щойно її ввімкнуть.</p>' : ""}
-    ${page.error ? `<p class="esp-notice is-bad">${escapeHtml(page.error)}</p>` : page.loading ? '<p class="acc-muted">Читаю скриньки…</p>' : page.data ? listHtml() : ""}
+    ${page.data && !page.data.liveSend ? '<p class="acc-muted acc-lock"><i data-lucide="lock"></i> Справжня відправка на сервері поки вимкнена: пошти можна додавати й перевіряти, листи підуть, щойно її ввімкнуть.</p>' : ""}
+    ${page.error ? `<p class="esp-notice is-bad">${escapeHtml(page.error)}</p>` : page.loading ? '<p class="acc-muted">Читаю пошти…</p>' : page.data ? listHtml() : ""}
     ${dialogHtml()}`;
   refreshIcons(root);
   if (wasOpen || page.dialog) document.getElementById("mailAccountsDialog")?.showModal?.();
@@ -237,7 +237,7 @@ async function drop(mailbox) {
   try {
     const answer = await api("/api/esp/oauth/google/disconnect", { method: "POST", body: JSON.stringify({ mailbox }) });
     page.data.mailboxes = answer.mailboxes || [];
-    Object.assign(page, { notice: `Скриньку ${mailbox} відключено.`, tone: "" });
+    Object.assign(page, { notice: `Пошту ${mailbox} відключено.`, tone: "" });
     // The list still holds it as a sender; read it again so its row says so.
     await load();
     return;

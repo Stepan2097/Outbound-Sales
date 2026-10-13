@@ -1,6 +1,6 @@
-// «Налаштування» → «Пошта: доступ через адміністратора домену» (ESP 1; 13.10 перенесено зі «Скриньок»): з чим цей сервер ходить у Gmail,
+// «Налаштування» → «Пошта: доступ через адміністратора домену» (ESP 1; 13.10 перенесено з «Пошт»): з чим цей сервер ходить у Gmail,
 // що вписати в консоль адміністратора Workspace, і чи можна діяти від імені
-// конкретної скриньки. Нічого звідси не надсилається — тут лише підключення.
+// конкретної пошти. Нічого звідси не надсилається — тут лише підключення.
 
 import { api, authState, escapeHtml, onScreen, refreshIcons, setHtml } from "../core.js";
 
@@ -10,7 +10,7 @@ let espConnection = null;
 let espError = "";
 let espCheck = null;
 let espChecking = false;
-// Скриньки, від імені яких Google перестав пускати (ESP 1): кожна на паузі,
+// Пошти, від імені яких Google перестав пускати (ESP 1): кожна на паузі,
 // доки людина не виправить причину й не зніме паузу сама.
 let espPaused = [];
 
@@ -39,8 +39,8 @@ function espConnectionHtml(connection) {
   const real = connection.mode === "gmail";
   const rows = [
     ["Підключення", real ? "Gmail API через сервісний акаунт"
-      : connection.mode === "gmail_oauth" ? "Скриньки входять через Google (панель вище); ключа сервісного акаунта немає — він і не потрібен"
-      : "Ключа сервісного акаунта немає — скриньки підключаються кнопкою «Увійти через Google» вище"],
+      : connection.mode === "gmail_oauth" ? "Пошти входять через Google (панель вище); ключа сервісного акаунта немає — він і не потрібен"
+      : "Ключа сервісного акаунта немає — пошти підключаються кнопкою «Увійти через Google» вище"],
     ...(real ? [["Сервісний акаунт", connection.serviceAccountEmail], ["Client ID для делегування", connection.clientId || "—"]] : []),
     ["Відправка", connection.liveSend ? "увімкнена" : "вимкнена до приймання ESP 11 — справжні листи не йдуть"],
     ["Посилання відписки", connection.unsubscribe?.configured
@@ -67,10 +67,10 @@ function espCheckHtml(check) {
   if (!check) return "";
   if (!check.ok) return `<p class="esp-check is-bad">${escapeHtml(check.mailbox)}: ${escapeHtml(check.error || "Google відмовив.")}</p>`;
   const alias = check.address && check.address !== check.mailbox ? ` Google називає її ${escapeHtml(check.address)} — це псевдонім, відповіді прийдуть туди.` : "";
-  return `<p class="esp-check is-ok">${escapeHtml(check.mailbox)}: ${check.stub ? "заглушка приймає цю скриньку (справжньої перевірки не було)." : "доступ є."}${alias}</p>`;
+  return `<p class="esp-check is-ok">${escapeHtml(check.mailbox)}: ${check.stub ? "заглушка приймає цю пошту (справжньої перевірки не було)." : "доступ є."}${alias}</p>`;
 }
 
-/** Як банер у Unibox Snov про відключену скриньку: що сталося, з якого часу, що робити. */
+/** Як банер у Unibox Snov про відключену пошту: що сталося, з якого часу, що робити. */
 function espPausedHtml(paused) {
   if (!paused.length) return "";
   return paused.map((row) => `

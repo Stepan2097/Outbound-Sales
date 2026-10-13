@@ -1,7 +1,7 @@
 // Головна (власник 12.10): папка CRM — і людина за людиною, кому ще ніхто не
 // писав. Спершу ті, хто вже в друзях наших LinkedIn-акаунтів. Про кожного:
 // усе з CRM, «Збагатити», у друзях якого акаунта, готовий текст для LinkedIn і
-// для листа — і кнопка надіслати через той акаунт або з тієї скриньки. Або
+// для листа — і кнопка надіслати через той акаунт або з тієї пошти. Або
 // «Не валідний», або «Пропустити».
 //
 // Надсилає не ця сторінка: повідомлення в LinkedIn стає в чергу акаунта й іде в
@@ -293,20 +293,20 @@ function emailHtml(item) {
   const mailboxes = triage.mailboxes || [];
   const chosen = list.filter((row) => triage.selected.has(row.address));
   const locked = !triage.liveSend;
-  const label = chosen.length > 1 ? `Надіслати ${chosen.length} листи з ${triage.mailbox || "скриньки"}` : `Надіслати з ${triage.mailbox || "скриньки"}`;
+  const label = chosen.length > 1 ? `Надіслати ${chosen.length} листи з ${triage.mailbox || "пошти"}` : `Надіслати з ${triage.mailbox || "пошти"}`;
   return `<section class="triage-channel">
     <header><i data-lucide="mail"></i><h3>Пошта</h3></header>
     ${list.length
       ? `<ul class="triage-addresses">${list.map(addressRowHtml).join("")}</ul>
-         ${list.length > 1 ? '<p class="triage-muted">Позначте, на які адреси писати. Усі листи підуть з однієї скриньки — вибраної нижче.</p>' : ""}`
+         ${list.length > 1 ? '<p class="triage-muted">Позначте, на які адреси писати. Усі листи підуть з однієї пошти — вибраної нижче.</p>' : ""}`
       : '<ul class="triage-status"><li><i data-lucide="mail-x"></i> Адреси в базі немає — «Збагатити» може знайти й перевірити</li></ul>'}
     <input data-triage-text="subject" placeholder="Тема" value="${escapeAttr(triage.texts.subject)}" />
     <textarea data-triage-text="body" rows="8" placeholder="${triage.drafting ? "Модель пише текст…" : "Текст листа. Лише простий текст; підпис і відписка додаються самі."}">${escapeHtml(triage.texts.body)}</textarea>
     <div class="triage-actions">
-      <select data-triage="mailbox" ${mailboxes.length ? "" : "disabled"}>${mailboxes.map((sender) => `<option value="${escapeAttr(sender.email)}" ${sender.email === triage.mailbox ? "selected" : ""}>${escapeHtml(sender.email)} · сьогодні ${sender.today}/${sender.limit}</option>`).join("") || '<option value="">Немає активної скриньки</option>'}</select>
+      <select data-triage="mailbox" ${mailboxes.length ? "" : "disabled"}>${mailboxes.map((sender) => `<option value="${escapeAttr(sender.email)}" ${sender.email === triage.mailbox ? "selected" : ""}>${escapeHtml(sender.email)} · сьогодні ${sender.today}/${sender.limit}</option>`).join("") || '<option value="">Немає активної пошти</option>'}</select>
       <button type="button" class="primary-button" data-triage="send-email" ${!chosen.length || !mailboxes.length || locked || triage.sending ? "disabled" : ""} title="${escapeAttr(locked ? "Справжню відправку ще не ввімкнено (ESP_LIVE_SEND, після приймання ESP 11)" : "")}"><i data-lucide="send"></i><span>${escapeHtml(label)}</span></button>
     </div>
-    ${locked ? '<p class="triage-muted"><i data-lucide="lock"></i> Справжню відправку листів ще не ввімкнено (ESP_LIVE_SEND, після приймання ESP 11) — кнопка запрацює разом із нею.</p>' : '<p class="triage-muted">Лист пройде ті самі перевірки, що й кампанія: виключення, верифікацію, ліміти скриньки й робочі години одержувача.</p>'}
+    ${locked ? '<p class="triage-muted"><i data-lucide="lock"></i> Справжню відправку листів ще не ввімкнено (ESP_LIVE_SEND, після приймання ESP 11) — кнопка запрацює разом із нею.</p>' : '<p class="triage-muted">Лист пройде ті самі перевірки, що й кампанія: виключення, верифікацію, ліміти пошти й робочі години одержувача.</p>'}
   </section>`;
 }
 

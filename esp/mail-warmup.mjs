@@ -178,7 +178,7 @@ export function warmupView(entries, { senders = [], domains = [], now = new Date
   return senders.filter((sender) => sender.effectiveStatus !== "retired").map((sender) => {
     const mine = rows.get(sender.email) || { running: false, day: 0, plannedToday: 0, sentToday: 0, firstsToday: 0, repliesToday: 0, sent: 0, repliesReceived: 0, repliesSent: 0, received: 0, rescued: 0, landedInSpam: 0, failedToday: 0, lastError: null, startedAt: null, pausedAt: null, by: "" };
     const domainStatus = domainState.get(sender.domain) || null;
-    const blocked = sender.status !== "active" ? (sender.status === "paused" ? "скринька на паузі" : "скриньку виведено")
+    const blocked = sender.status !== "active" ? (sender.status === "paused" ? "пошта на паузі" : "пошту виведено")
       : !["aging", "ramp", "active"].includes(domainStatus) ? `домен у стані «${DOMAIN_LABEL[domainStatus] || domainStatus || "немає"}»` : null;
     const limit = senderDailyLimit(sender);
     const coldToday = Math.max(0, (ledger.senders.get(sender.email)?.today || 0) - mine.sentToday);
@@ -200,7 +200,7 @@ export function warmupMode({ describe = {}, sequenceOn = false, env = process.en
   if (describe.mode === "stub") {
     return sequenceOn
       ? { runs: true, mode: "stub_cycle", text: "Заглушка замість Gmail, тестовий цикл (ESP_SEQUENCE=on): прогрів «шле» й «виймає зі спаму» в заглушці, у мережу нічого не йде." }
-      : { runs: false, mode: "stub", text: "Пошту ще не підключено — працює заглушка. Прогрів почнеться, коли скриньку підключать («Скриньки» → «Додати скриньку» → «Увійти через Google») і ввімкнуть справжню відправку (ESP_LIVE_SEND=1). «Старт» уже можна натиснути — скринька стане в чергу." };
+      : { runs: false, mode: "stub", text: "Пошту ще не підключено — працює заглушка. Прогрів почнеться, коли пошту підключать («Пошти» → «Додати пошту» → «Увійти через Google») і ввімкнуть справжню відправку (ESP_LIVE_SEND=1). «Старт» уже можна натиснути — пошта стане в чергу." };
   }
   if (!describe.liveSend) return { runs: false, mode: "locked", text: "Gmail підключено, але справжня відправка вимкнена (ESP_LIVE_SEND). Прогрів почнеться, щойно її ввімкнуть; «Старт» уже запам'ятовується." };
   return { runs: true, mode: "live", text: "" };

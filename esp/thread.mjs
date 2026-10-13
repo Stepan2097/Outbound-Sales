@@ -33,7 +33,7 @@ export function replySubject(subject) {
 export function followUpOf(previous, mailbox) {
   if (!previous?.messageId) throw new LetterError("Фолоуап без попереднього листа: немає Message-ID, на який відповідати.", { code: "no_previous" });
   if (String(previous.sender).toLowerCase() !== String(mailbox).toLowerCase()) {
-    throw new LetterError(`Фолоуап має йти з тієї самої скриньки (${previous.sender}), а не з ${mailbox}.`, { code: "other_sender" });
+    throw new LetterError(`Фолоуап має йти з тієї самої пошти (${previous.sender}), а не з ${mailbox}.`, { code: "other_sender" });
   }
   const chain = [...(Array.isArray(previous.references) ? previous.references : String(previous.references || "").split(/\s+/)), previous.messageId]
     .filter(Boolean);

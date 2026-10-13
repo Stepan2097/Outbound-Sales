@@ -1,5 +1,5 @@
 // Пошта (ESP 10): доступи, журнал дій адміністраторів і стан секретів — у
-// «Налаштування» → «Пошта: доступи й журнал дій» (13.10 перенесено зі «Скриньок»).
+// «Налаштування» → «Пошта: доступи й журнал дій» (13.10 перенесено з «Пошт»).
 //
 // Хто що може в холодній розсилці: запускати кампанії, міняти ліміти, бачити
 // відповіді й решту. Ролі ті самі, що в «Команді» (адміністратор і продавець); на
@@ -17,9 +17,9 @@ const ESP_ADMIN_ACTION_LABEL = {
   "domain.added": "додав домен",
   "domain.status": "змінив стан домену",
   "domain.checked": "перевірив DNS домену",
-  "sender.added": "додав скриньку",
-  "sender.status": "змінив стан скриньки",
-  "sender.updated": "змінив скриньку",
+  "sender.added": "додав пошту",
+  "sender.status": "змінив стан пошти",
+  "sender.updated": "змінив пошту",
   "access.granted": "видав право",
   "access.revoked": "забрав право",
   "admin.role_changed": "змінив роль",
@@ -27,7 +27,7 @@ const ESP_ADMIN_ACTION_LABEL = {
   "admin.user_removed": "прибрав людину",
   "admin.model_chosen_for": "вибрав модель за людину",
   "admin.model_provider_set": "задав ключ моделі",
-  "admin.mailbox_resumed": "зняв паузу зі скриньки",
+  "admin.mailbox_resumed": "зняв паузу з пошти",
   "admin.template_created": "створив шаблон",
   "admin.template_updated": "змінив шаблон",
   "admin.template_removed": "видалив шаблон",

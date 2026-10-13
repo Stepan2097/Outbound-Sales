@@ -1,7 +1,7 @@
 // Пошта → «Вхідні» = Unibox (ESP-UI 4, як екран Snov 02): усі розмови
-// скриньок-відправників з людьми — у папках, з пошуком і фільтрами, сторінками
+// пошт-відправників з людьми — у папках, з пошуком і фільтрами, сторінками
 // по 50; розмова відкривається на місці списку, з міткою відповіді й відповіддю
-// від тієї ж скриньки в тому ж треді. Ліва колонка тримає й журнал скриньок
+// від тієї ж пошти в тому ж треді. Ліва колонка тримає й журнал пошт
 // (ESP 7, app/screens/esp-inbox.js). Відповіді LinkedIn — окремий екран
 // LinkedIn → «Вхідні» (app/screens/inbox.js; власник 13.10: «розділити»).
 //
@@ -118,7 +118,7 @@ function toolbarHtml() {
     <label class="mail-search"><i data-lucide="search"></i><input type="search" id="uniboxSearch" placeholder="Пошук у листах: адреса, ім'я, компанія, тема, текст" value="${escapeAttr(unibox.filters.q)}" autocomplete="off" /></label>
     <select id="uniboxLabel" aria-label="Які листи">${option("", "Усі листи", unibox.filters.label)}${option("unread", "Непрочитані", unibox.filters.label)}${Object.entries(labels).map(([key, text]) => option(key, `Відповідь: ${text}`, unibox.filters.label)).join("")}</select>
     <select id="uniboxCampaign" aria-label="Кампанія">${option("", "Усі кампанії", unibox.filters.campaign)}${(list?.campaigns || []).map((row) => option(row.id, row.name, unibox.filters.campaign)).join("")}</select>
-    <select id="uniboxSender" aria-label="Скринька">${option("", "Усі скриньки", unibox.filters.sender)}${(list?.senders || []).map((email) => option(email, email, unibox.filters.sender)).join("")}</select>`;
+    <select id="uniboxSender" aria-label="Пошта">${option("", "Усі пошти", unibox.filters.sender)}${(list?.senders || []).map((email) => option(email, email, unibox.filters.sender)).join("")}</select>`;
 }
 
 function sideHtml() {
@@ -132,7 +132,7 @@ function sideHtml() {
   return `
     <div class="mail-side-title">Пошта</div>
     ${mail}
-    <button type="button" class="${unibox.channel === "events" ? "is-active" : ""}" data-unibox-events><i data-lucide="list-checks"></i><span>Журнал скриньок</span></button>`;
+    <button type="button" class="${unibox.channel === "events" ? "is-active" : ""}" data-unibox-events><i data-lucide="list-checks"></i><span>Журнал пошт</span></button>`;
 }
 
 function bannerHtml() {

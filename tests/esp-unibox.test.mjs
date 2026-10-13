@@ -58,7 +58,7 @@ test("папки як у Snov: Вхідні — щось повернулось;
   assert.deepEqual(uniboxList(world(), { folder: "bounced" }).rows.map((row) => row.contact), ["ivan@beta.com"]);
 });
 
-test("фільтри: мітка відповіді, непрочитані, кампанія, скринька, пошук по імені, темі й тексту листів", () => {
+test("фільтри: мітка відповіді, непрочитані, кампанія, пошта, пошук по імені, темі й тексту листів", () => {
   const entries = world();
   assert.deepEqual(uniboxList(entries, { label: "positive" }).rows.map((row) => row.contact), ["olga@acme.com"]);
   assert.deepEqual(uniboxList(entries, { campaign: "c2" }).rows.map((row) => row.contact), ["max@delta.com"]);
@@ -106,7 +106,7 @@ test("тред: усі листи розмови по черзі, з рядко�
   assert.equal(uniboxThread(world(), "nobody|x"), null);
 });
 
-test("жовтий банер: заглушка замість пошти, скриньки не читаються, відправники на паузі", () => {
+test("жовтий банер: заглушка замість пошти, пошти не читаються, відправники на паузі", () => {
   assert.equal(uniboxProblems({ mode: "stub" })[0].code, "stub");
   assert.equal(uniboxProblems({ mode: "gmail", polling: false })[0].code, "not_polling");
   assert.deepEqual(uniboxProblems({ mode: "gmail", polling: true }), []);

@@ -70,7 +70,7 @@ export function compareSenders({ entries, campaigns, minSent = COMPARE_MIN_SENT 
       actions.push({
         kind: "pause_sender", email: sender, code: "no_replies_vs_partner",
         key: `sender:${sender}:no_replies_vs_partner:${campaign.id}`,
-        reason: `0 відповідей на ${sent} листів у кампанії «${campaign.name}», а ${partner} там же отримує відповіді (${repliesBy.get(`${campaign.id}|${partner}`)}) — схоже, листи цієї скриньки не доходять`
+        reason: `0 відповідей на ${sent} листів у кампанії «${campaign.name}», а ${partner} там же отримує відповіді (${repliesBy.get(`${campaign.id}|${partner}`)}) — схоже, листи цієї пошти не доходять`
       });
     }
   }

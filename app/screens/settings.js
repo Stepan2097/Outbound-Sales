@@ -64,7 +64,7 @@ function teamRowHtml(person, selfEmail) {
   const name = personDisplayName(person.name, person.email);
   const facts = [
     person.blocked,
-    (person.aliases || []).length ? `та сама скринька, що ${person.aliases.join(", ")}` : "",
+    (person.aliases || []).length ? `та сама пошта, що ${person.aliases.join(", ")}` : "",
     person.crmRole ? `у CRM ${person.crmRole}` : "",
     person.signedInHere ? "" : "тут ще не заходив",
     person.lastSignInAt ? `вхід ${relativeTime(person.lastSignInAt)}` : "жодного входу"

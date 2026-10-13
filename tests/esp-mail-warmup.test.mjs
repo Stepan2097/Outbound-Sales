@@ -80,7 +80,7 @@ test("план росте з днями: 2, 4, 6 … до 20; день — ли�
   assert.deepEqual([paused.running, paused.day, paused.plannedToday], [false, 2, 0]);
 });
 
-test("скриньки пишуть одна одній — інший домен першим, по одному листу за прохід, з паузами між листами; у журналі warmup.*, без контакту", async (t) => {
+test("пошти пишуть одна одній — інший домен першим, по одному листу за прохід, з паузами між листами; у журналі warmup.*, без контакту", async (t) => {
   const { connector, tick, start } = await world(t);
   await start(ANNA, at(0, -60));
   await start(BORIS, at(0, -60));
@@ -180,7 +180,7 @@ test("прогріву не видно в кампаніях, звітах, Unib
   assert.equal(uniboxList(entries, { folder: "sent" }).total, 0);
 });
 
-test("шлюз: прогрів можна вести на домені, що ще старіє, холодні листи звідти — ні; скринька на паузі не гріється", async (t) => {
+test("шлюз: прогрів можна вести на домені, що ще старіє, холодні листи звідти — ні; пошта на паузі не гріється", async (t) => {
   const { gate, tick, start } = await world(t, { annaDomain: "aging" });
   const store = registrySenderStore("test");
   assert.equal((await store.pausedFor(ANNA)).code, "sender_held", "холодний лист з домену, що старіє, — ні");
@@ -196,7 +196,7 @@ test("шлюз: прогрів можна вести на домені, що щ�
   void gate;
 });
 
-test("після відмови скринька чекає пів години, а не пише по рядку відмови щопроходу; «Стоп усе» зупиняє і прогрів", async (t) => {
+test("після відмови пошта чекає пів години, а не пише по рядку відмови щопроходу; «Стоп усе» зупиняє і прогрів", async (t) => {
   const { tick, start, halt } = await world(t);
   await start(ANNA, at(0, -60));
   await start(BORIS, at(0, -60));
@@ -218,7 +218,7 @@ test("режим сторінки: заглушка, вимкнена відпр
   assert.equal(warmupMode({ describe: { mode: "gmail", liveSend: true }, env: { ESP_WARMUP: "off" } }).runs, false);
 });
 
-test("маршрути: таблицю бачить команда; «Старт» і «Пауза» — право лімітів, у журналі дій; заблоковану скриньку не запустити", async (t) => {
+test("маршрути: таблицю бачить команда; «Старт» і «Пауза» — право лімітів, у журналі дій; заблоковану пошту не запустити", async (t) => {
   await world(t);
   await setDomainStatus({ domain: "growadvantage.co", status: "reserve" }, "test");
   const esp = { connector: new StubGmailConnector(), sequenceOn: false, halted: () => false };
@@ -296,7 +296,7 @@ test("маршрут плану: лише з правом лімітів, з п�
   assert.ok((await allEntries()).some((entry) => entry.type === "admin.warmup_plan"));
 });
 
-test("партнера обирають за навантаженням: п'ять скриньок одного домену не валять усе на одну скриньку іншого", async (t) => {
+test("партнера обирають за навантаженням: п'ять пошт одного домену не валять усе на одну пошту іншого", async (t) => {
   const { tick, start } = await world(t);
   const extra = ["ira@advantage-mail.com", "max@advantage-mail.com", "lev@advantage-mail.com"];
   for (const email of extra) await addSender({ email, rampStage: 35 }, "test");
@@ -305,7 +305,7 @@ test("партнера обирають за навантаженням: п'ят
   await tick(at(0, 30));
   const sent = (await allEntries()).filter((entry) => entry.type === "warmup.sending").map((entry) => entry.data.to);
   assert.equal(sent.length, all.length, "кожна написала по листу");
-  assert.ok(sent.filter((to) => to === BORIS).length <= 2, `єдина скринька іншого домену не отримує всі листи (${sent.join(", ")})`);
+  assert.ok(sent.filter((to) => to === BORIS).length <= 2, `єдина пошта іншого домену не отримує всі листи (${sent.join(", ")})`);
   const most = Math.max(...all.map((mailbox) => sent.filter((to) => to === mailbox).length));
   assert.ok(most <= 2, "листи розходяться по всіх");
 });

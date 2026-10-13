@@ -194,7 +194,7 @@ test("зведення для сторінки «Звіти»: надіслан�
   assert.equal(Object.keys(report.totals).some((key) => /open|click/i.test(key)), false, "відкриттів і кліків немає");
 });
 
-test("зведення фільтрується за кампанією, скринькою й датами; графік — без дір по днях, тижнях і місяцях", () => {
+test("зведення фільтрується за кампанією, поштою й датами; графік — без дір по днях, тижнях і місяцях", () => {
   const entries = story();
   assert.equal(summaryReport(entries, { sender: "boris@other.com" }).totals.sent, 1);
   assert.equal(summaryReport(entries, { campaign: "nope" }).totals.sent, 0);

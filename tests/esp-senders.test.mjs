@@ -28,10 +28,10 @@ const refusing = (error) => {
 };
 
 test("Google refusing the mailbox pauses it, tells a person once, and the next send is refused without asking Google", async () => {
-  const connector = refusing(new MailboxError("Google не дає діяти від імені скриньки", { code: "delegation_missing", status: 401 }));
+  const connector = refusing(new MailboxError("Google не дає діяти від імені пошти", { code: "delegation_missing", status: 401 }));
   const { gate, notices, saved } = gateWith(connector);
   await assert.rejects(gate.send("Anna@Advantage-Mail.com", PLAIN), (error) => error instanceof SenderPaused && error.pause.code === "delegation_missing");
-  assert.equal(saved()["anna@advantage-mail.com"].reason, "Google не дає діяти від імені скриньки");
+  assert.equal(saved()["anna@advantage-mail.com"].reason, "Google не дає діяти від імені пошти");
   assert.equal(saved()["anna@advantage-mail.com"].at, "2026-10-10T08:00:00.000Z");
   assert.equal(notices.length, 1);
 

@@ -14,9 +14,9 @@ import { registry } from "../esp/registry.mjs";
 import { isAuthFailure } from "../esp/senders.mjs";
 
 /**
- * «Увійти через Google» (власник 13.10: «роби функціонал»): скринька
+ * «Увійти через Google» (власник 13.10: «роби функціонал»): пошта
  * підключається так, як в Instantly і Snov — кнопка, вікно Google, «Дозволити».
- * Пароля система не бачить; токен скриньки зберігається зашифрованим.
+ * Пароля система не бачить; токен пошти зберігається зашифрованим.
  */
 
 const KEY = randomBytes(32);
@@ -168,7 +168,7 @@ async function routes(t) {
   return { call, world };
 }
 
-test("a seller connects their own mailbox: back on «Скриньки», the domain in «рампа», the mailbox a sender", async (t) => {
+test("a seller connects their own mailbox: back on «Пошти», the domain in «рампа», the mailbox a sender", async (t) => {
   const { call } = await routes(t);
   const started = await call("POST", "/oauth/google/start", { body: { mailbox: "anna@advantage-send.com" } });
   assert.equal(started.status, 200);

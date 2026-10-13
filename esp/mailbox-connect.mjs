@@ -1,4 +1,4 @@
-// «Скриньки» → «Додати скриньку» → «Увійти через Google» (власник 13.10):
+// «Пошти» → «Додати пошту» → «Увійти через Google» (власник 13.10):
 // the routes around the sign-in, as Instantly and Snov have them — the list of
 // connected mailboxes with their state, the button that sends the browser to
 // Google, the way back, «Перевірити» and «Відключити».
@@ -43,7 +43,7 @@ async function registerSender({ email, name, person }, actor) {
   }
   if (!senders.some((row) => row.email === email)) {
     await addSender({ email, displayName: name, person }, actor);
-    notes.push("скриньку додано у відправники (5 листів на день на старті рампи)");
+    notes.push("пошту додано у відправники (5 листів на день на старті рампи)");
   }
   ({ senders } = await registry());
   const sender = senders.find((row) => row.email === email);
@@ -113,14 +113,14 @@ export async function handleMailboxConnect({ method, path, url, request, respons
     return true;
   }
 
-  // Google sends the person back here — a page, not an answer: back to «Скриньки» with what happened.
+  // Google sends the person back here — a page, not an answer: back to «Пошти» with what happened.
   if (method === "GET" && path === "/oauth/google/callback") {
     const back = (outcome, value) => redirect(response, `${RETURN_TO}/${outcome}/${encodeURIComponent(value)}`, sendJson);
     const pending = oauth.signIn.take(url.searchParams.get("state"));
     if (!pending) return back("error", "Вхід застарів або вже використаний — натисніть «Увійти через Google» ще раз."), true;
     if (pending.user && pending.user !== me) return back("error", "Вхід почав інший користувач платформи — почніть його зі свого акаунта."), true;
     const denied = url.searchParams.get("error");
-    if (denied) return back("error", denied === "access_denied" ? "Доступ у вікні Google не дали — скриньку не підключено." : `Google відповів: ${denied}.`), true;
+    if (denied) return back("error", denied === "access_denied" ? "Доступ у вікні Google не дали — пошту не підключено." : `Google відповів: ${denied}.`), true;
     try {
       const signed = await oauth.signIn.finish({ code: url.searchParams.get("code") || "", redirectUri: pending.redirectUri });
       await oauth.grants.put({ email: signed.email, name: signed.name, refreshToken: signed.refreshToken, scopes: signed.scopes, connectedBy: me });
@@ -141,7 +141,7 @@ export async function handleMailboxConnect({ method, path, url, request, respons
 
   // «Перевірити»: a token from the refresh token and a read of the mailbox's profile — nothing is sent.
   if (method === "POST" && path === "/oauth/google/check") {
-    if (!grant) return sendJson(response, 404, { success: false, error: "Такої підключеної скриньки немає." }), true;
+    if (!grant) return sendJson(response, 404, { success: false, error: "Такої підключеної пошти немає." }), true;
     try {
       const result = await oauth.connector.checkMailbox(mailbox);
       sendJson(response, 200, { success: true, ok: true, ...result, mailboxes: await mailboxRows(esp) });
@@ -154,9 +154,9 @@ export async function handleMailboxConnect({ method, path, url, request, respons
 
   // «Відключити»: the token is revoked at Google and forgotten here; the sender is paused, not removed — its history stays.
   if (method === "POST" && path === "/oauth/google/disconnect") {
-    if (!grant) return sendJson(response, 404, { success: false, error: "Такої підключеної скриньки немає." }), true;
+    if (!grant) return sendJson(response, 404, { success: false, error: "Такої підключеної пошти немає." }), true;
     if (grant.connectedBy !== me && !await can(profile, "registry.change")) {
-      sendJson(response, 403, { success: false, error: "Відключити чужу скриньку може лише адміністратор." });
+      sendJson(response, 403, { success: false, error: "Відключити чужу пошту може лише адміністратор." });
       return true;
     }
     const token = oauth.grants.refreshToken(mailbox);
@@ -164,16 +164,16 @@ export async function handleMailboxConnect({ method, path, url, request, respons
     oauth.connector.forget(mailbox);
     await oauth.signIn.revoke(token);
     try {
-      await setSenderStatus({ email: mailbox, status: "paused", reason: "Скриньку відключено від платформи — листи з неї не йдуть, доки її не підключать знову.", code: "not_connected" }, actor || me);
+      await setSenderStatus({ email: mailbox, status: "paused", reason: "Пошту відключено від платформи — листи з неї не йдуть, доки її не підключать знову.", code: "not_connected" }, actor || me);
     } catch { /* not a sender, or already so */ }
     // Its warm-up stops too: a reconnected mailbox starts warming again only on «Старт».
     const lastWarmup = [...await allEntries()].reverse().find((entry) => /^warmup\.(started|paused)$/.test(entry.type) && entry.data?.mailbox === mailbox);
-    if (lastWarmup?.type === "warmup.started") await append({ type: "warmup.paused", actor: actor || me, data: { mailbox, reason: "скриньку відключено" } });
+    if (lastWarmup?.type === "warmup.started") await append({ type: "warmup.paused", actor: actor || me, data: { mailbox, reason: "пошту відключено" } });
     await logged("mailbox_disconnected", { mailbox });
     sendJson(response, 200, { success: true, mailboxes: await mailboxRows(esp) });
     return true;
   }
 
-  sendJson(response, 404, { success: false, error: "Невідомий маршрут підключення скриньки." });
+  sendJson(response, 404, { success: false, error: "Невідомий маршрут підключення пошти." });
   return true;
 }

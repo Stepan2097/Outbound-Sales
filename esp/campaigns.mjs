@@ -49,7 +49,7 @@ function cleanSteps(steps, templates, { allowEmpty = false } = {}) {
 
 function cleanSenders(senders, { allowEmpty = false } = {}) {
   const list = [...new Set((Array.isArray(senders) ? senders : []).map((email) => contactKey(email)).filter(Boolean))];
-  if (!list.length && !allowEmpty) throw new CampaignError("Оберіть хоча б одну скриньку-відправника.", { code: "no_senders" });
+  if (!list.length && !allowEmpty) throw new CampaignError("Оберіть хоча б одну пошту-відправника.", { code: "no_senders" });
   return list;
 }
 
@@ -183,7 +183,7 @@ export function campaignStore({ read, write, readEnrollments, writeEnrollments, 
         const senders = cleanSenders(input.senders, { allowEmpty: campaign.state === "draft" });
         const assigned = new Set(enrollments().filter((row) => row.campaignId === id && LIVE_ENROLMENT.has(row.status) && row.sender).map((row) => row.sender));
         const dropped = [...assigned].filter((email) => !senders.includes(email));
-        if (dropped.length) throw new CampaignError(`Скринька ${dropped.join(", ")} уже веде людей цієї кампанії — її не прибрати, доки вони в ланцюжку.`, { code: "sender_in_use", status: 409 });
+        if (dropped.length) throw new CampaignError(`Пошта ${dropped.join(", ")} уже веде людей цієї кампанії — її не прибрати, доки вони в ланцюжку.`, { code: "sender_in_use", status: 409 });
         next.senders = senders;
       }
       await write(list().map((row) => (row.id === id ? next : row)));
@@ -199,7 +199,7 @@ export function campaignStore({ read, write, readEnrollments, writeEnrollments, 
       if (state === "running") {
         if (!campaign.steps.length) throw new CampaignError("У кампанії ще немає жодного листа — додайте його в «Послідовності».", { code: "no_steps", status: 409 });
         cleanSteps(campaign.steps, templates());
-        if (!campaign.senders.length) throw new CampaignError("Не обрано жодної скриньки — оберіть їх у «Параметрах відправки».", { code: "no_senders", status: 409 });
+        if (!campaign.senders.length) throw new CampaignError("Не обрано жодної пошти — оберіть їх у «Параметрах відправки».", { code: "no_senders", status: 409 });
         await assignSenders(campaign);
       }
       const next = { ...campaign, state, updatedAt: now().toISOString() };

@@ -40,7 +40,7 @@ export class SendingHalted extends Error {
 
 export class SenderPaused extends Error {
   constructor(mailbox, pause) {
-    super(`Скринька ${mailbox} на паузі: ${pause.reason}`);
+    super(`Пошта ${mailbox} на паузі: ${pause.reason}`);
     this.code = "sender_paused";
     this.mailbox = mailbox;
     this.pause = pause;

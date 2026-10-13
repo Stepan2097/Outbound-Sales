@@ -82,7 +82,7 @@ function tokenFailure(status, body, { refreshing = false } = {}) {
   const error = body?.error || "";
   if (error === "invalid_grant") {
     return new MailboxError(refreshing
-      ? "Google відкликав доступ до скриньки (змінили пароль або прибрали дозвіл) — увійдіть через Google ще раз."
+      ? "Google відкликав доступ до пошти (змінили пароль або прибрали дозвіл) — увійдіть через Google ще раз."
       : "Google не прийняв код входу: він уже використаний або застарів — спробуйте ще раз.", { code: "oauth_revoked", status, detail: body?.error_description || null });
   }
   if (error === "invalid_client" || error === "unauthorized_client") {
@@ -198,7 +198,7 @@ export function googleSignIn({ config, fetch = globalThis.fetch, now = () => Dat
       const profileResponse = await fetch(`${GMAIL}/profile`, { headers: { authorization: `Bearer ${body.access_token}` } });
       const profile = await profileResponse.json().catch(() => ({}));
       if (!profileResponse.ok || !profile.emailAddress) {
-        throw new MailboxError(`Gmail не відкрив скриньку (${profileResponse.status}): ${profile?.error?.message || "без пояснення"}.`, { code: "gmail_error", status: profileResponse.status });
+        throw new MailboxError(`Gmail не відкрив пошту (${profileResponse.status}): ${profile?.error?.message || "без пояснення"}.`, { code: "gmail_error", status: profileResponse.status });
       }
       let name = "";
       try {
@@ -258,7 +258,7 @@ export class GmailOAuthConnector extends GmailApiConnector {
     const cached = this.tokens.get(key);
     if (cached && cached.expiresAt - 60_000 > this.now()) return cached.token;
     const refreshToken = this.grants.refreshToken(key);
-    if (!refreshToken) throw new MailboxError(`Скриньку ${key} не підключено — «Скриньки» → «Додати скриньку» → «Увійти через Google».`, { code: "not_connected" });
+    if (!refreshToken) throw new MailboxError(`Пошту ${key} не підключено — «Пошти» → «Додати пошту» → «Увійти через Google».`, { code: "not_connected" });
     try {
       const { token, expiresIn } = await this.signIn.refresh(refreshToken);
       this.tokens.set(key, { token, expiresAt: this.now() + expiresIn * 1000 });
@@ -294,7 +294,7 @@ export class NotConnectedConnector {
   constructor() { this.kind = "not_connected"; this.liveSend = false; }
   describe() { return { mode: "not_connected", liveSend: false, serviceAccountEmail: null, clientId: null, scopes: OAUTH_SCOPES }; }
   #no(mailbox) {
-    return new MailboxError(`Скриньку ${mailbox} не підключено — «Скриньки» → «Додати скриньку» → «Увійти через Google».`, { code: "not_connected" });
+    return new MailboxError(`Пошту ${mailbox} не підключено — «Пошти» → «Додати пошту» → «Увійти через Google».`, { code: "not_connected" });
   }
   async checkMailbox(mailbox) { throw this.#no(mailbox); }
   async send(mailbox) { throw this.#no(mailbox); }

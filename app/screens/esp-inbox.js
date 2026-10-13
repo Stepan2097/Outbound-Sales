@@ -1,7 +1,7 @@
-// Вхідні → «Журнал скриньок» (ESP 7): відповіді, автовідповіді, bounce з
+// Вхідні → «Журнал пошт» (ESP 7): відповіді, автовідповіді, bounce з
 // кодами, відписки й тривоги по сендерах — з журналу, найновіше вгорі.
 // Папка Unibox поруч із листами (app/screens/mail-inbox.js), що показує, що
-// саме зробив читач скриньок із кожною подією.
+// саме зробив читач пошт із кожною подією.
 
 import { api, escapeHtml, onScreen, refreshIcons, setHtml } from "../core.js";
 
@@ -44,8 +44,8 @@ export async function loadEspInbox() {
               <p>${detail(event)}</p></div>
           </li>`;
         }).join("")}</ul>`
-      : '<div class="empty-state">У скриньки ще нічого не приходило.</div>';
-    const note = answer.polling ? "Скриньки читаються кожні 5 хвилин." : "Автоматичне читання вимкнено (ESP_SEQUENCE) — лише кнопкою.";
+      : '<div class="empty-state">У пошти ще нічого не приходило.</div>';
+    const note = answer.polling ? "Пошти читаються кожні 5 хвилин." : "Автоматичне читання вимкнено (ESP_SEQUENCE) — лише кнопкою.";
     setHtml("espInboxBody", `<p class="esp-limits-rules">${escapeHtml(note)}</p>${rows}`);
   } catch (error) {
     setHtml("espInboxBody", `<div class="empty-state">${escapeHtml(error.status === 403 ? "Вхідні холодної пошти бачить команда з правом replies.read." : error.message)}</div>`);

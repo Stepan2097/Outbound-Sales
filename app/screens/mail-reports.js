@@ -1,4 +1,4 @@
-// Звіти (ESP-UI 6, як екран Snov 06): зверху фільтри — кампанія, скринька,
+// Звіти (ESP-UI 6, як екран Snov 06): зверху фільтри — кампанія, пошта,
 // період; картки «Надіслано» (перші листи й фолоуапи) і «Доставлено» (і bounce),
 // воронка «Написали → Відповіли → Позитивні», відписки й автовідповіді; під ними
 // графік по днях, тижнях чи місяцях. Усе — з журналу відправок.
@@ -82,7 +82,7 @@ function filtersHtml(data) {
   return `
     <div class="mail-toolbar reports-filters">
       <select id="reportsCampaign" aria-label="Кампанія">${option("", "Усі кампанії", campaign)}${(data?.campaigns || []).map((row) => option(row.id, row.name, campaign)).join("")}</select>
-      <select id="reportsSender" aria-label="Скринька">${option("", "Усі скриньки", sender)}${(data?.senders || []).map((email) => option(email, email, sender)).join("")}</select>
+      <select id="reportsSender" aria-label="Пошта">${option("", "Усі пошти", sender)}${(data?.senders || []).map((email) => option(email, email, sender)).join("")}</select>
       <select id="reportsDays" aria-label="Період">${Object.entries(PERIODS).map(([value, text]) => option(value, text, days)).join("")}</select>
     </div>`;
 }

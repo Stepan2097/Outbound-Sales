@@ -34,7 +34,7 @@ export class MailboxError extends Error {
 export function normalizeMailbox(value) {
   const mailbox = String(value ?? "").trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mailbox)) {
-    throw new MailboxError("Це не адреса скриньки.", { code: "bad_mailbox" });
+    throw new MailboxError("Це не адреса пошти.", { code: "bad_mailbox" });
   }
   return mailbox;
 }
@@ -56,7 +56,7 @@ export class MicrosoftGraphConnector {
   }
 
   #notYet() {
-    return new MailboxError("Скриньки Microsoft 365 ще не підключено: конектор Graph API — наступний крок (ESP 17).", { code: "provider_not_ready" });
+    return new MailboxError("Пошти Microsoft 365 ще не підключено: конектор Graph API — наступний крок (ESP 17).", { code: "provider_not_ready" });
   }
 
   async checkMailbox() { throw this.#notYet(); }
@@ -74,7 +74,7 @@ export function providerRouter({ connectors, providerOf = () => "gmail", fallbac
   const pick = (mailbox) => {
     const name = providerOf(normalizeMailbox(mailbox)) || fallback;
     const connector = connectors[name];
-    if (!connector) throw new MailboxError(`Для скриньки ${mailbox} немає провайдера «${name}».`, { code: "no_provider" });
+    if (!connector) throw new MailboxError(`Для пошти ${mailbox} немає провайдера «${name}».`, { code: "no_provider" });
     return connector;
   };
   const main = connectors[fallback];

@@ -109,13 +109,13 @@ function tokenRefusal(status, body) {
   const error = body?.error || "";
   if (error === "unauthorized_client") {
     return new MailboxError(
-      "Google не дає сервісному акаунту діяти від імені цієї скриньки: у консолі адміністратора Workspace делегування на рівні домену не налаштоване для його Client ID або не має потрібних scopes.",
+      "Google не дає сервісному акаунту діяти від імені цієї пошти: у консолі адміністратора Workspace делегування на рівні домену не налаштоване для його Client ID або не має потрібних scopes.",
       { code: "delegation_missing", status, detail: body?.error_description || null }
     );
   }
   if (error === "invalid_grant") {
     return new MailboxError(
-      "Google не прийняв цю скриньку: її немає серед користувачів домену, вона вимкнена, або годинник сервера розійшовся з Google.",
+      "Google не прийняв цю пошту: її немає серед користувачів домену, вона вимкнена, або годинник сервера розійшовся з Google.",
       { code: "mailbox_rejected", status, detail: body?.error_description || null }
     );
   }
@@ -343,7 +343,7 @@ export class StubGmailConnector {
 
   async setLabels(value, id, { add = [], remove = [] } = {}) {
     const message = (this.inboxes.get(normalizeMailbox(value)) || []).find((row) => row.id === id);
-    if (!message) throw new MailboxError("Заглушка: такого листа в скриньці немає.", { code: "gmail_error", status: 404 });
+    if (!message) throw new MailboxError("Заглушка: такого листа в пошті немає.", { code: "gmail_error", status: 404 });
     message.labels = [...new Set([...(message.labels || []).filter((label) => !remove.includes(label)), ...add])];
     return { id, labels: message.labels };
   }

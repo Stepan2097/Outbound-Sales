@@ -1,7 +1,7 @@
-// Прогрів пошт — наші скриньки Workspace пишуть одна одній (esp/mail-warmup.mjs):
+// Прогрів пошт — наші пошти Workspace пишуть одна одній (esp/mail-warmup.mjs):
 // живі листи за розкладом, частина — з відповіддю в тому ж треді, лист зі спаму
 // виймається у вхідні й позначається важливим, обсяг росте з днями. Тут —
-// таблиця скриньок зі «Старт» і «Пауза», що зараз заважає (банер), і журнал.
+// таблиця пошт зі «Старт» і «Пауза», що зараз заважає (банер), і журнал.
 // Листи прогріву не потрапляють у кампанії, звіти й «Вхідні».
 
 import { api, escapeAttr, escapeHtml, onScreen, refreshIcons, uaPlural } from "../core.js";
@@ -41,7 +41,7 @@ function summaryHtml(rows) {
   const running = rows.filter((row) => row.status === "running");
   const sum = (key) => rows.reduce((total, row) => total + (row[key] || 0), 0);
   const cards = [
-    ["mail-plus", "Гріються", `${running.length} з ${rows.length}`, "скриньок"],
+    ["mail-plus", "Гріються", `${running.length} з ${rows.length}`, "пошт"],
     ["send", "Сьогодні листів", `${number(sum("firstsToday"))} / ${number(running.reduce((total, row) => total + row.plannedToday, 0))}`, `і ${number(sum("repliesToday"))} ${uaPlural(sum("repliesToday"), "відповідь", "відповіді", "відповідей")}`],
     ["reply", "Відповідей отримано", number(sum("repliesReceived")), "за весь прогрів"],
     ["shield-check", "Вийнято зі спаму", number(sum("rescued")), `${number(sum("landedInSpam"))} ${uaPlural(sum("landedInSpam"), "лист потрапив", "листи потрапили", "листів потрапило")} у спам`]
@@ -52,7 +52,7 @@ function summaryHtml(rows) {
 
 function tableHtml(data) {
   const { rows, canChange } = data;
-  if (!rows.length) return `<div class="empty-state">У прогріві немає скриньок — додайте їх у «Пошта» → «Скриньки» → «Додати скриньку».</div>${removedHtml(data)}`;
+  if (!rows.length) return `<div class="empty-state">У прогріві немає пошт — додайте їх у «Пошта» → «Пошти» → «Додати пошту».</div>${removedHtml(data)}`;
   const action = (row) => {
     if (!canChange) return "";
     if (row.status === "running") return `<button type="button" class="text-button" data-warmup-pause="${escapeAttr(row.email)}"${mailWarmupState.busy ? " disabled" : ""}><i data-lucide="pause"></i><span>Пауза</span></button>`;
@@ -61,7 +61,7 @@ function tableHtml(data) {
   };
   return `
     <div class="table-wrap"><table class="warmup-mail-table">
-      <thead><tr><th>Скринька</th><th>Статус</th><th>День</th><th>Листів сьогодні / план</th><th>Відповідей</th><th>Вийнято зі спаму</th><th>Ліміт дня</th><th></th></tr></thead>
+      <thead><tr><th>Пошта</th><th>Статус</th><th>День</th><th>Листів сьогодні / план</th><th>Відповідей</th><th>Вийнято зі спаму</th><th>Ліміт дня</th><th></th></tr></thead>
       <tbody>${rows.map((row) => {
         const [word, tone] = STATUS[row.status];
         const share = row.plannedToday ? Math.min(100, Math.round((row.firstsToday / row.plannedToday) * 100)) : 0;
@@ -96,7 +96,7 @@ function planHtml(data) {
     ${field("step", "Щодня більше на", "")}
     ${field("max", "До", "на день")}
     ${canChange ? `<button type="submit" class="text-button"${mailWarmupState.busy ? " disabled" : ""}><i data-lucide="save"></i><span>Зберегти</span></button>` : ""}
-    <small>${plan.savedAt ? `змінено ${escapeHtml(when(plan.savedAt))}${plan.by ? ` · ${escapeHtml(plan.by)}` : ""}` : "за замовчуванням"} · для свіжого домену — менший старт і приріст. Діє на всі скриньки з наступного проходу; ліміт дня скриньки (ESP 4) однаково головніший.</small>
+    <small>${plan.savedAt ? `змінено ${escapeHtml(when(plan.savedAt))}${plan.by ? ` · ${escapeHtml(plan.by)}` : ""}` : "за замовчуванням"} · для свіжого домену — менший старт і приріст. Діє на всі пошти з наступного проходу; ліміт дня пошти (ESP 4) однаково головніший.</small>
   </form>`;
 }
 
@@ -115,14 +115,14 @@ export function renderMailWarmup() {
   const plan = data.plan;
   root.innerHTML = `
     <div class="warmup-mail-head">
-      <p>Наші скриньки пишуть одна одній живі листи за розкладом: перший робочий день — ${plan.start}, далі +${plan.step} щодня до ${plan.max}. Приблизно третина отримує відповідь у тому ж треді. Лист, що впав у спам, виймається у «Вхідні» й позначається важливим. Прогрів і холодні листи разом не виходять за ліміт дня скриньки й домену. У кампанії, звіти й «Вхідні» прогрів не потрапляє.</p>
+      <p>Наші пошти пишуть одна одній живі листи за розкладом: перший робочий день — ${plan.start}, далі +${plan.step} щодня до ${plan.max}. Приблизно третина отримує відповідь у тому ж треді. Лист, що впав у спам, виймається у «Вхідні» й позначається важливим. Прогрів і холодні листи разом не виходять за ліміт дня пошти й домену. У кампанії, звіти й «Вхідні» прогрів не потрапляє.</p>
       ${data.canChange && startable ? `<button type="button" class="primary-button" data-warmup-start-all${mailWarmupState.busy ? " disabled" : ""}><i data-lucide="play"></i><span>Запустити всі (${startable})</span></button>` : ""}
     </div>
     ${bannerHtml(data)}
     ${planHtml(data)}
     ${notice ? `<p class="esp-notice ${error ? "is-bad" : ""}">${escapeHtml(notice)}</p>` : ""}
     ${summaryHtml(data.rows)}
-    <section class="panel"><div class="panel-heading"><div><h2>Скриньки</h2><p>Статус, день прогріву, листи сьогодні проти плану, відповіді й листи, вийняті зі спаму.</p></div>
+    <section class="panel"><div class="panel-heading"><div><h2>Пошти</h2><p>Статус, день прогріву, листи сьогодні проти плану, відповіді й листи, вийняті зі спаму.</p></div>
       <button type="button" class="text-button" data-warmup-refresh><i data-lucide="refresh-cw"></i><span>Оновити</span></button></div>
       ${tableHtml(data)}
     </section>

@@ -143,7 +143,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
   if (method === "POST" && path === "/senders/resume") {
     const body = await readJson(request);
     if (!body?.mailbox) {
-      sendJson(response, 400, { success: false, error: "Яку скриньку знімати з паузи?" });
+      sendJson(response, 400, { success: false, error: "Яку пошту знімати з паузи?" });
       return true;
     }
     try {
@@ -560,7 +560,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
     const email = String(body.mailbox || "").trim().toLowerCase();
     const { senders } = await registry();
     if (!senders.some((sender) => sender.email === email)) {
-      sendJson(response, 404, { success: false, error: "Такої скриньки немає в реєстрі відправників." });
+      sendJson(response, 404, { success: false, error: "Такої пошти немає в реєстрі відправників." });
       return true;
     }
     const entries = await allEntries();
@@ -592,7 +592,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
     const refused = [];
     for (const email of wanted) {
       const row = rows.find((item) => item.email === email);
-      if (!row) { refused.push({ mailbox: email, reason: "Такої скриньки немає в реєстрі відправників." }); continue; }
+      if (!row) { refused.push({ mailbox: email, reason: "Такої пошти немає в реєстрі відправників." }); continue; }
       if (starting && row.blocked) { refused.push({ mailbox: email, reason: `Прогрів не почати: ${row.blocked}.` }); continue; }
       if ((starting && row.status === "running") || (!starting && row.status !== "running")) continue;
       await append({ type: starting ? "warmup.started" : "warmup.paused", actor, data: { mailbox: email } });
@@ -697,7 +697,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
       return true;
     }
     if (stubFor(conversation.sender) && !esp.sequenceOn) {
-      sendJson(response, 409, { success: false, code: "not_connected", error: `Скриньку ${conversation.sender} не підключено (працює заглушка) — відповідь нікуди б не пішла, тож її не надіслано й не записано.` });
+      sendJson(response, 409, { success: false, code: "not_connected", error: `Пошту ${conversation.sender} не підключено (працює заглушка) — відповідь нікуди б не пішла, тож її не надіслано й не записано.` });
       return true;
     }
     const lead = (esp.campaigns?.enrollments() || []).find((row) => row.email === conversation.contact)?.lead || {};
@@ -924,11 +924,11 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
     const to = contactKey(profile?.email);
     if (!to) return badRequest(sendJson, response, "У вашого акаунта немає адреси пошти — тест нікуди надіслати.");
     if (!esp.connector?.liveSend) {
-      sendJson(response, 409, { success: false, code: "sending_locked", error: "Справжню відправку ще не ввімкнено (ESP_LIVE_SEND, після приймання ESP 11) — тест на вашу скриньку піде, щойно її ввімкнуть." });
+      sendJson(response, 409, { success: false, code: "sending_locked", error: "Справжню відправку ще не ввімкнено (ESP_LIVE_SEND, після приймання ESP 11) — тест на вашу пошту піде, щойно її ввімкнуть." });
       return true;
     }
     const mailbox = contactKey(body.mailbox);
-    const allowed = mailbox ? await canSend(mailbox) : { ok: false, reason: "Оберіть скриньку, з якої піде тест." };
+    const allowed = mailbox ? await canSend(mailbox) : { ok: false, reason: "Оберіть пошту, з якої піде тест." };
     if (!allowed.ok) {
       sendJson(response, 409, { success: false, code: "sender_unavailable", error: allowed.reason });
       return true;
@@ -969,7 +969,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
     const lead = { ...(body.lead || {}), email: contactKey(body.lead?.email) };
     if (!lead.email) return badRequest(sendJson, response, "У людини немає адреси пошти.");
     const mailbox = contactKey(body.mailbox);
-    const allowed = mailbox ? await canSend(mailbox) : { ok: false, reason: "Оберіть скриньку, з якої піде лист." };
+    const allowed = mailbox ? await canSend(mailbox) : { ok: false, reason: "Оберіть пошту, з якої піде лист." };
     if (!allowed.ok) {
       sendJson(response, 409, { success: false, code: "sender_unavailable", error: allowed.reason });
       return true;
