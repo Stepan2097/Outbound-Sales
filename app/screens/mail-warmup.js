@@ -97,7 +97,7 @@ function tableHtml(data) {
         const [word, tone] = STATUS[row.status];
         const share = row.plannedToday ? Math.min(100, Math.round((row.firstsToday / row.plannedToday) * 100)) : 0;
         return `<tr>
-          <td><strong>${escapeHtml(row.email)}</strong>${ownTags(row).length ? `<span class="warmup-mail-tags">${tagPills(ownTags(row))}</span>` : ""}<small>${escapeHtml(row.person || "")}${row.person ? " · " : ""}домен: ${escapeHtml(DOMAIN_WORD[row.domainStatus] || row.domainStatus || "—")}</small></td>
+          <td><strong>${escapeHtml(row.email)}</strong>${ownTags(row).length ? `<span class="warmup-mail-tags">${tagPills(ownTags(row))}</span>` : ""}<small>домен: ${escapeHtml(DOMAIN_WORD[row.domainStatus] || row.domainStatus || "—")}</small></td>
           <td>${roleHtml(row, canChange)}</td>
           <td><span class="pill ${tone}">${word}</span>${row.status === "paused" && row.pausedAt ? `<small>з ${escapeHtml(when(row.pausedAt))}</small>` : row.status === "running" && row.startedAt ? `<small>старт ${escapeHtml(when(row.startedAt))}</small>` : ""}</td>
           <td class="is-number">${row.day || "—"}</td>

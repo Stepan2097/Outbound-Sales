@@ -101,7 +101,6 @@ function rowHtml(row) {
     <span class="acc-state ${state.tone}" title="${escapeAttr(state.hint)}"><i data-lucide="${state.icon}"></i>${escapeHtml(state.text)}</span>
     ${tagCell}
     <span class="acc-limit">${row.sender ? `<b>${row.sender.rampStage}</b> / день` : "—"}</span>
-    <span class="acc-by">${escapeHtml(row.connectedBy ? (row.connectedBy === data.me ? "ви" : row.connectedBy) : "—")}<small>${escapeHtml(when(row.connectedAt))}</small></span>
     <span class="acc-actions">
       ${action}
       ${canDrop ? `<button type="button" class="icon-button" data-acc-drop="${escapeAttr(row.email)}" title="Відключити" aria-label="Відключити ${escapeAttr(row.email)}"><i data-lucide="trash-2"></i></button>` : ""}
@@ -123,7 +122,7 @@ function listHtml() {
   }
   if (!rows.length) return '<p class="acc-muted">За цим пошуком чи тегом пошт немає.</p>';
   return `<div class="acc-list">
-    <div class="acc-head" aria-hidden="true"><span></span><span>Пошта</span><span>Стан</span><span>Теги</span><span>Ліміт</span><span>Додав</span><span></span></div>
+    <div class="acc-head" aria-hidden="true"><span></span><span>Пошта</span><span>Стан</span><span>Теги</span><span>Ліміт</span><span></span></div>
     <ul>${rows.map(rowHtml).join("")}</ul>
   </div>`;
 }

@@ -191,7 +191,6 @@ function campaignRowHtml(campaign) {
       </div>
     </td>
     <td><span class="pill ${STATE_TONE[campaign.state]}">${STATE_LABEL[campaign.state]}</span></td>
-    <td class="mc-owner" title="${escapeAttr(campaign.owner || "")}">${campaign.owner ? `<i data-lucide="user"></i>${escapeHtml(campaign.owner.split("@")[0])}` : '<span class="mc-subtle">—</span>'}</td>
     <td class="mc-num">${stat(campaign.sent)}</td>
     <td class="mc-num">${stat(campaign.replied, campaign.sent)}</td>
     <td class="mc-num">${stat(campaign.bounced, campaign.sent)}</td>
@@ -244,7 +243,7 @@ function campaignsTableHtml() {
   return `${bulkBarHtml()}<div class="table-wrap mc-table-wrap"><table class="mc-table">
     <thead><tr>
       <th class="mc-check"><input type="checkbox" data-mc="select-all" ${all ? "checked" : ""} aria-label="Вибрати всі" /></th>
-      <th>Кампанія</th><th>Стан</th><th>Власник</th><th>Надіслано</th><th>Відповіді</th><th>Bounce</th><th>Відписки</th><th></th>
+      <th>Кампанія</th><th>Стан</th><th>Надіслано</th><th>Відповіді</th><th>Bounce</th><th>Відписки</th><th></th>
     </tr></thead>
     <tbody>${rows.map(campaignRowHtml).join("")}</tbody>
   </table></div>

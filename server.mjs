@@ -2908,10 +2908,6 @@ async function workFromRoute(profile, path, body, payload) {
     const email = String(payload.to || body.lead?.email || "").toLowerCase();
     const contactId = body.lead?.crmContactId || (await baseContactByEmail(email))?.id || null;
     await logWork(profile, { action: "wrote", channel: "email", contactId, email, name: body.lead?.name, mailbox: payload.mailbox || body.mailbox, detail: String(body.subject || "").slice(0, 300) });
-  } else if (path === "/api/esp/conversations/reply" && payload.sent) {
-    const [mailbox, email] = String(body.key || "").split("|");
-    const base = await baseContactByEmail(email);
-    await logWork(profile, { action: "replied", channel: "email", contactId: base?.id || null, email, name: base?.name, mailbox, detail: String(body.text || "").slice(0, 500) });
   }
 }
 
