@@ -133,15 +133,12 @@ function screen({ threads = threeThreads(), accounts = [], sync = null, api, ext
     clearInterval: () => {},
     refreshIcons: () => {},
     rememberWarmupInbox: () => {},
-    // «Вхідні» тепер Unibox: перехід сюди з «Прогріву» відкриває його LinkedIn-папку (app/screens/mail-inbox.js).
-    showInboxChannel: (channel) => { globals.channels.push(channel); },
-    channels: [],
     ...extra
   };
   const main = loadMain(NAMES, globals, LISTENERS);
   // Змінна модуля, яку людина змінила б на екрані (пошук, звуження), — без самого екрана.
   const set = (name, value) => { main.context.__v = value; vm.runInContext(`${name} = __v`, main.context); };
-  return { els, warmupState, clicks, calls, listeners, main, get: main.get, set, channels: globals.channels };
+  return { els, warmupState, clicks, calls, listeners, main, get: main.get, set };
 }
 
 const orderOf = (html) => [...html.matchAll(/data-warmup-thread="([^"]+)"/g)].map((match) => match[1]);
@@ -291,13 +288,12 @@ test("з одним акаунтом кнопка теж є — видно, чи
 });
 
 test("перехід із бейджа акаунта у «Прогріві» відкриває «Вхідні» з цим акаунтом і закриває відкриту розмову", () => {
-  const { els, clicks, get, warmupState, main, channels } = screen({ accounts: [{ accountId: "acc-a", identity: "Anna Kovalenko", unread: 1 }, { accountId: "acc-b", label: "Profile 7", unread: 1 }] });
+  const { els, clicks, get, warmupState, main } = screen({ accounts: [{ accountId: "acc-a", identity: "Anna Kovalenko", unread: 1 }, { accountId: "acc-b", label: "Profile 7", unread: 1 }] });
   warmupState.inbox.openAccountId = "acc-a";
   warmupState.inbox.openThreadKey = "t-read";
   get("showWarmupInboxAccount")("acc-b");
   assert.deepEqual(clicks, ['.nav-item[data-view="inbox"]'], "екран «Вхідні» не відкрито через меню");
   assert.equal(main.get("inboxAccountFilter"), "acc-b");
-  assert.deepEqual(channels, ["linkedin"], "«Вхідні» відкрито на пошті, а не на відповідях LinkedIn");
   assert.equal(warmupState.inbox.openThreadKey, null, "розмова іншого акаунта лишилась відкритою");
   assert.deepEqual(orderOf(els.warmupInboxBody.innerHTML), ["t-old-unread"]);
   assert.match(els.warmupInboxAccounts.innerHTML, /is-active[^>]*data-warmup-account="acc-b"/);

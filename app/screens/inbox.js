@@ -10,7 +10,6 @@ import {
   authState, escapeAttr, escapeHtml, onScreen, onWorkspaceEnter, refreshIcons, uaPlural
 } from "../core.js";
 import { onCacheReset } from "../cache.js";
-import { showInboxChannel } from "../screens/mail-inbox.js";
 import {
   showContactCard
 } from "../screens/contacts.js";
@@ -1206,7 +1205,6 @@ function closeWarmupThread() {
  */
 export function showWarmupInboxAccount(accountId) {
   if (!accountId) return;
-  showInboxChannel("linkedin");
   openWarmupInboxAccount(accountId);
   document.querySelector('.nav-item[data-view="inbox"]')?.click();
   renderWarmupInbox();
@@ -1218,7 +1216,6 @@ export function showWarmupInboxAccount(accountId) {
  */
 export function showWarmupInboxThread(accountId, threadKey) {
   if (!accountId || !threadKey) return;
-  showInboxChannel("linkedin");
   openWarmupInboxAccount(accountId);
   document.querySelector('.nav-item[data-view="inbox"]')?.click();
   openWarmupThread(accountId, threadKey);

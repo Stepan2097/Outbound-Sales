@@ -76,6 +76,7 @@
             <div class="nav-group-items">
               <button class="nav-item" data-view="mail-warmup" aria-label="Прогрів пошт" title="Прогрів пошт"><i data-lucide="mail-plus"></i><span>Прогрів пошт</span></button>
               <button class="nav-item" data-view="campaigns" aria-label="Кампанії" title="Кампанії"><i data-lucide="send"></i><span>Кампанії</span></button>
+              <button class="nav-item" data-view="mail-inbox" aria-label="Вхідні пошти" title="Вхідні пошти: відповіді на холодні листи"><i data-lucide="mail-open"></i><span>Вхідні</span></button>
               <button class="nav-item" data-view="leads" aria-label="Ліди" title="Ліди"><i data-lucide="users"></i><span>Ліди</span></button>
               <button class="nav-item" data-view="reports" aria-label="Звіти" title="Звіти"><i data-lucide="chart-column"></i><span>Звіти</span></button>
               <button class="nav-item" data-view="mail-settings" aria-label="Скриньки, домени й доступи" title="Скриньки, домени й доступи"><i data-lucide="sliders-horizontal"></i><span>Скриньки</span></button>
@@ -266,27 +267,9 @@
         </section>
 
         <section class="view" id="view-inbox">
-          <!-- Вхідні = Unibox (ESP-UI 4, як екран Snov 02): ліва колонка — папки
-               холодної пошти й LinkedIn. Пошту малює app/screens/mail-inbox.js;
-               LinkedIn — app/screens/inbox.js у своїй панелі нижче. -->
-          <div class="mail-page unibox" id="unibox">
-            <div class="mail-toolbar" id="uniboxToolbar"></div>
-            <div class="mail-body">
-              <nav class="mail-side" id="uniboxSide" aria-label="Папки"></nav>
-              <div class="unibox-main">
-                <div id="uniboxMail"></div>
-                <!-- ESP 7: усе, що прийшло в скриньки, рядками журналу — і «Перевірити зараз»; малює app/screens/esp-inbox.js. -->
-                <section class="panel esp-inbox-panel" id="uniboxEvents" hidden>
-                  <div class="panel-heading">
-                    <div>
-                      <h2>Журнал скриньок</h2>
-                      <p>Відповідь зупиняє ланцюжок людини, автовідповідь переносить крок, bounce — за кодом, відписка — того ж дня.</p>
-                    </div>
-                    <button class="text-button" id="espInboxPoll" type="button"><i data-lucide="refresh-cw"></i><span>Перевірити зараз</span></button>
-                  </div>
-                  <div id="espInboxBody"></div>
-                </section>
-                <div class="warmup-layout" id="uniboxLinkedin" hidden>
+          <!-- LinkedIn → «Вхідні»: відповіді на прогрів, по акаунтах, як у месенджері (app/screens/inbox.js).
+               Пошта має свої «Вхідні» в папці «Пошта» (view-mail-inbox). -->
+          <div class="warmup-layout">
             <section class="panel warmup-inbox-panel span-2">
               <div class="panel-heading">
                 <div>
@@ -321,7 +304,29 @@
                 </div>
               </div>
             </section>
-                </div>
+          </div>
+        </section>
+
+        <section class="view" id="view-mail-inbox">
+          <!-- Пошта → «Вхідні» = Unibox (ESP-UI 4, як екран Snov 02): ліва колонка — папки
+               холодної пошти й журнал скриньок. Малює app/screens/mail-inbox.js. -->
+          <div class="mail-page unibox" id="unibox">
+            <div class="mail-toolbar" id="uniboxToolbar"></div>
+            <div class="mail-body">
+              <nav class="mail-side" id="uniboxSide" aria-label="Папки"></nav>
+              <div class="unibox-main">
+                <div id="uniboxMail"></div>
+                <!-- ESP 7: усе, що прийшло в скриньки, рядками журналу — і «Перевірити зараз»; малює app/screens/esp-inbox.js. -->
+                <section class="panel esp-inbox-panel" id="uniboxEvents" hidden>
+                  <div class="panel-heading">
+                    <div>
+                      <h2>Журнал скриньок</h2>
+                      <p>Відповідь зупиняє ланцюжок людини, автовідповідь переносить крок, bounce — за кодом, відписка — того ж дня.</p>
+                    </div>
+                    <button class="text-button" id="espInboxPoll" type="button"><i data-lucide="refresh-cw"></i><span>Перевірити зараз</span></button>
+                  </div>
+                  <div id="espInboxBody"></div>
+                </section>
               </div>
             </div>
           </div>

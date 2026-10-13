@@ -329,6 +329,7 @@ function setView(viewName) {
       "mail-warmup": "Прогрів пошт",
       "mail-settings": "Налаштування пошти",
       campaigns: "Кампанії",
+      "mail-inbox": "Вхідні пошти",
       leads: "Ліди",
       reports: "Звіти",
       inbox: "Вхідні LinkedIn",

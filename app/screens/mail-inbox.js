@@ -1,9 +1,9 @@
-// Вхідні = Unibox (ESP-UI 4, як екран Snov 02): усі розмови скриньок-відправників
-// з людьми — у папках, з пошуком і фільтрами, сторінками по 50; розмова
-// відкривається на місці списку, з міткою відповіді й відповіддю від тієї ж
-// скриньки в тому ж треді. Ліва колонка тримає й журнал скриньок (ESP 7,
-// app/screens/esp-inbox.js) і LinkedIn — відповіді на прогрів малює
-// app/screens/inbox.js у своїй панелі; тут вони лише показуються.
+// Пошта → «Вхідні» = Unibox (ESP-UI 4, як екран Snov 02): усі розмови
+// скриньок-відправників з людьми — у папках, з пошуком і фільтрами, сторінками
+// по 50; розмова відкривається на місці списку, з міткою відповіді й відповіддю
+// від тієї ж скриньки в тому ж треді. Ліва колонка тримає й журнал скриньок
+// (ESP 7, app/screens/esp-inbox.js). Відповіді LinkedIn — окремий екран
+// LinkedIn → «Вхідні» (app/screens/inbox.js; власник 13.10: «розділити»).
 //
 // Відкриттів і кліків немає: листи без пікселів і переписаних посилань.
 
@@ -29,7 +29,7 @@ export const unibox = {
   dismissed: new Set()
 };
 
-const CHANNELS = ["mail", "events", "linkedin"];
+const CHANNELS = ["mail", "events"];
 
 function readChannel() {
   try { const saved = window.localStorage.getItem(CHANNEL_KEY); return CHANNELS.includes(saved) ? saved : "mail"; } catch { return "mail"; }
@@ -39,7 +39,7 @@ function saveChannel(channel) {
   try { window.localStorage.setItem(CHANNEL_KEY, channel); } catch { /* лише зручність */ }
 }
 
-onScreen("inbox", { open: () => void openUnibox() });
+onScreen("mail-inbox", { open: () => void openUnibox() });
 
 async function openUnibox() {
   if (!document.getElementById("unibox")) return;
@@ -47,10 +47,7 @@ async function openUnibox() {
   if (unibox.channel === "mail") await loadUniboxList();
 }
 
-/**
- * LinkedIn instead of the mail: from «Головна» and «Прогрів», which open one
- * account's replies or one conversation.
- */
+/** The letters or the mailboxes' journal — the two halves of this screen. */
 export function showInboxChannel(channel) {
   unibox.channel = CHANNELS.includes(channel) ? channel : "mail";
   saveChannel(unibox.channel);
@@ -127,8 +124,6 @@ function toolbarHtml() {
 function sideHtml() {
   const counts = unibox.list?.counts || {};
   const folders = unibox.list?.folders || { inbox: "Вхідні", sent: "Надіслані", starred: "Із зірочкою", bounced: "Bounce" };
-  const badge = document.getElementById("warmupNavBadge");
-  const linkedinNew = badge && !badge.hidden ? badge.textContent.trim() : "";
   const mail = Object.entries(folders).map(([key, text]) => {
     const count = key === "inbox" ? counts.unread : key === "starred" || key === "bounced" ? counts[key] : null;
     const active = unibox.channel === "mail" && unibox.folder === key;
@@ -137,9 +132,7 @@ function sideHtml() {
   return `
     <div class="mail-side-title">Пошта</div>
     ${mail}
-    <button type="button" class="${unibox.channel === "events" ? "is-active" : ""}" data-unibox-events><i data-lucide="list-checks"></i><span>Журнал скриньок</span></button>
-    <div class="mail-side-title">LinkedIn</div>
-    <button type="button" class="${unibox.channel === "linkedin" ? "is-active" : ""}" data-unibox-linkedin><i data-lucide="message-circle"></i><span>Відповіді на прогрів</span>${linkedinNew ? `<b>${escapeHtml(linkedinNew)}</b>` : ""}</button>`;
+    <button type="button" class="${unibox.channel === "events" ? "is-active" : ""}" data-unibox-events><i data-lucide="list-checks"></i><span>Журнал скриньок</span></button>`;
 }
 
 function bannerHtml() {
@@ -247,16 +240,14 @@ export function renderUnibox() {
   const toolbar = document.getElementById("uniboxToolbar");
   const side = document.getElementById("uniboxSide");
   const mail = document.getElementById("uniboxMail");
-  const linkedin = document.getElementById("uniboxLinkedin");
   const events = document.getElementById("uniboxEvents");
-  if (!toolbar || !side || !mail || !linkedin) return;
+  if (!toolbar || !side || !mail) return;
   const onMail = unibox.channel === "mail";
   // The search keeps its caret while the list behind it is redrawn.
   const typing = document.activeElement?.id === "uniboxSearch";
   toolbar.hidden = !onMail;
   if (!typing) toolbar.innerHTML = toolbarHtml();
   side.innerHTML = sideHtml();
-  linkedin.hidden = unibox.channel !== "linkedin";
   if (events) events.hidden = unibox.channel !== "events";
   mail.hidden = !onMail;
   if (onMail) mail.innerHTML = `${bannerHtml()}<div class="mail-main">${unibox.openKey ? threadHtml() : listHtml()}</div>`;
@@ -286,7 +277,6 @@ root()?.addEventListener("click", async (event) => {
     renderUnibox();
     return loadUniboxList();
   }
-  if (target.closest("[data-unibox-linkedin]")) return showInboxChannel("linkedin");
   if (target.closest("[data-unibox-events]")) return showInboxChannel("events");
   const dismiss = target.closest("[data-unibox-dismiss]")?.dataset.uniboxDismiss;
   if (dismiss) { unibox.dismissed.add(dismiss); return renderUnibox(); }

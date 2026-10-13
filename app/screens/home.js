@@ -9,7 +9,6 @@
 
 import { escapeAttr, escapeHtml, onScreen, refreshIcons } from "../core.js";
 import { getCacheEpoch, onCacheReset, recallScreen, rememberScreen } from "../cache.js";
-import { showInboxChannel } from "../screens/mail-inbox.js";
 import { showContactCard } from "../screens/contacts.js";
 import { showWarmupInboxThread } from "../screens/inbox.js";
 import { warmupApi, warmupCount } from "../screens/warmup-accounts.js";
@@ -372,7 +371,7 @@ function homeRepliesHtml(data) {
         <h2>Нові відповіді</h2>
         <p>${replies.unread ? `${warmupCount(replies.unread)} непрочитаних` : "Усе прочитано"}</p>
       </div>
-      <button class="text-button" type="button" data-home-go="inbox" data-home-channel="linkedin"><span>Усі у «Вхідних»</span><i data-lucide="arrow-right"></i></button>
+      <button class="text-button" type="button" data-home-go="inbox"><span>Усі у «Вхідних»</span><i data-lucide="arrow-right"></i></button>
     </div>`;
   if (!latest.length) return `${head}<div class="home-empty is-small"><span>Нових відповідей немає.</span></div>`;
   return `${head}<div class="home-replies">${latest.map((thread) => {
@@ -516,8 +515,6 @@ document.getElementById("linkedinHomeRoot")?.addEventListener("click", (event) =
   if ((hit = pick("data-home-contact"))) { showContactCard(hit.dataset.homeContact); return; }
   if ((hit = pick("data-home-thread"))) { showWarmupInboxThread(hit.dataset.homeThreadAccount, hit.dataset.homeThread); return; }
   if ((hit = pick("data-home-go"))) {
-    // LinkedIn replies open «Вхідні» on their own folder, not on the mail.
-    if (hit.dataset.homeChannel) showInboxChannel(hit.dataset.homeChannel);
     document.querySelector(`.nav-item[data-view="${hit.dataset.homeGo}"]`)?.click();
     return;
   }
