@@ -114,10 +114,10 @@ export function localTime(instant, zone) {
  * Is it a working moment — Monday to Friday, 08:00–17:00, not a public
  * holiday of the recipient's country (ESP 17) — in every one of these zones?
  */
-export function inWindow(instant, zones, country = "") {
+export function inWindow(instant, zones, country = "", window = WINDOW) {
   return zones.length > 0 && zones.every((zone) => {
     const time = localTime(instant, zone);
-    return time.weekday <= 5 && time.hour >= WINDOW.startHour && time.hour < WINDOW.endHour && !isHoliday(country, time.date);
+    return time.weekday <= 5 && time.hour >= window.startHour && time.hour < window.endHour && !isHoliday(country, time.date);
   });
 }
 
@@ -126,11 +126,11 @@ export function inWindow(instant, zones, country = "") {
  * steps (two weeks at most — Christmas, a holiday and a weekend fit): when to
  * come back, not a promise of a send.
  */
-export function nextWindowOpen(instant, zones, country = "") {
+export function nextWindowOpen(instant, zones, country = "", window = WINDOW) {
   if (!zones.length) return null;
   const start = Math.ceil(instant.getTime() / (15 * 60_000)) * 15 * 60_000;
   for (let at = start; at < start + 15 * 24 * 3600_000; at += 15 * 60_000) {
-    if (inWindow(new Date(at), zones, country)) return new Date(at);
+    if (inWindow(new Date(at), zones, country, window)) return new Date(at);
   }
   return null;
 }
@@ -184,7 +184,7 @@ export function sendLedger(entries, { now = new Date(), zone = COUNTING_ZONE } =
  * answer). Limits are checked before the clock: a sender that is done for the
  * day is told so, not told to wait twelve minutes.
  */
-export function sendDecision({ sender, recipient = {}, ledger, now = new Date(), domainLimit = DOMAIN_DAILY_LIMIT }) {
+export function sendDecision({ sender, recipient = {}, ledger, now = new Date(), domainLimit = DOMAIN_DAILY_LIMIT, window = WINDOW }) {
   const email = String(sender?.email || "").toLowerCase();
   const domain = email.split("@")[1] || "";
   const mine = ledger.senders.get(email) || { today: 0, lastAt: null };
@@ -204,19 +204,19 @@ export function sendDecision({ sender, recipient = {}, ledger, now = new Date(),
     return refuse("unknown_timezone", "Невідомо, котра в одержувача година: у ліда немає ні часового поясу, ні знайомої країни.", null);
   }
   const country = recipient.country || "";
-  if (!inWindow(now, zones, country)) {
+  if (!inWindow(now, zones, country, window)) {
     const local = localTime(now, zones[0]);
     const holiday = local.weekday <= 5 && zones.some((zone) => isHoliday(country, localTime(now, zone).date));
     const reason = local.weekday > 5 ? "weekend" : holiday ? "holiday" : "outside_window";
-    const message = { weekend: "У одержувача вихідний.", holiday: `У одержувача державне свято (${country}, ${local.date}).`, outside_window: "У одержувача зараз не 08:00–17:00." }[reason];
-    return refuse(reason, message, nextWindowOpen(now, zones, country));
+    const message = { weekend: "У одержувача вихідний.", holiday: `У одержувача державне свято (${country}, ${local.date}).`, outside_window: `У одержувача зараз не ${String(window.startHour).padStart(2, "0")}:00–${window.endHour}:00.` }[reason];
+    return refuse(reason, message, nextWindowOpen(now, zones, country, window));
   }
 
   // Not straight at the window's opening, and never on the hour: the first
   // letter of a sender's day waits a few minutes picked for that sender and
   // day; every letter after it waits 12–40 minutes picked for that gap.
   if (!mine.lastAt || localTime(mine.lastAt, COUNTING_ZONE).date !== ledger.today) {
-    const opened = windowOpenedAt(now, zones);
+    const opened = windowOpenedAt(now, zones, window);
     const offset = seeded(`${email}|${ledger.today}|first`, 3, GAP_MINUTES.max);
     const from = new Date(opened.getTime() + offset * 60_000);
     if (now < from) return refuse("too_soon", "Перший лист дня — не одразу на відкритті вікна.", from);
@@ -236,10 +236,10 @@ function refuse(reason, message, retryAt) {
  * When today's window opened for these zones: the latest of their 08:00s.
  * Called only inside the window, so each zone's local hour is 08 or later.
  */
-function windowOpenedAt(now, zones) {
+function windowOpenedAt(now, zones, window = WINDOW) {
   return new Date(Math.max(...zones.map((zone) => {
     const local = localTime(now, zone);
-    return now.getTime() - ((local.hour - WINDOW.startHour) * 60 + local.minute) * 60_000 - now.getUTCSeconds() * 1000 - now.getUTCMilliseconds();
+    return now.getTime() - ((local.hour - window.startHour) * 60 + local.minute) * 60_000 - now.getUTCSeconds() * 1000 - now.getUTCMilliseconds();
   })));
 }
 

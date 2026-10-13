@@ -40,6 +40,13 @@ export const REPLY_DELAY_MINUTES = { min: 25, max: 140 };
 export const BACKOFF_MINUTES = 30;
 // Warm-up runs on our days: Kyiv working hours, Ukrainian holidays off.
 const OUR_SIDE = { timezone: COUNTING_ZONE, country: "Ukraine" };
+/**
+ * When warm-up letters go: 08:00–22:00 Kyiv on working days (owner 13.10:
+ * «почати прогрів сьогодні», at six in the evening). These are our own
+ * mailboxes writing to each other — people answer mail in the evening too —
+ * so the cold-mail window (08–17 in the recipient's zone) is not theirs.
+ */
+export const WARMUP_WINDOW = { startHour: 8, endHour: 22 };
 
 export const DEFAULT_PLAN = { start: WARMUP_START, step: WARMUP_STEP, max: WARMUP_MAX };
 // What a plan may be: at least one letter, never past a sender's daily cap.
@@ -359,7 +366,7 @@ export async function runWarmupTick({ journal, senders, connector, gate, now = n
     const error = plan?.lastError;
     if (error && now.getTime() - new Date(error.at).getTime() < BACKOFF_MINUTES * 60_000) return { ok: false, reason: "backoff" };
     if (kind === "first" && today >= (plan?.plannedToday || 0)) return { ok: false, reason: "plan_done" };
-    return sendDecision({ sender, recipient: OUR_SIDE, ledger, now });
+    return sendDecision({ sender, recipient: OUR_SIDE, ledger, now, window: WARMUP_WINDOW });
   };
 
   // (2) Replies that are due: a third of the first letters, an hour or two after they arrived.

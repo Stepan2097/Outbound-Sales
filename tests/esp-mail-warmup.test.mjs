@@ -309,3 +309,17 @@ test("партнера обирають за навантаженням: п'ят
   const most = Math.max(...all.map((mailbox) => sent.filter((to) => to === mailbox).length));
   assert.ok(most <= 2, "листи розходяться по всіх");
 });
+
+test("прогрів пише й увечері — 08:00–22:00 за Києвом; холодні листи лишаються у вікні одержувача 08–17", async (t) => {
+  const { tick, start } = await world(t);
+  for (const mailbox of [ANNA, BORIS]) await start(mailbox, at(0));
+  // 19:00 у Києві, понеділок.
+  const evening = at(0, 7 * 60);
+  const summary = await tick(evening);
+  assert.equal(summary.sent, 2, `увечері прогрів іде (${JSON.stringify(summary.skipped)})`);
+  const cold = sendLedger(await allEntries(), { now: evening });
+  const { sendDecision } = await import("../esp/limits.mjs");
+  assert.equal(sendDecision({ sender: { email: "x@advantage-mail.com", rampStage: 35 }, recipient: { country: "Ukraine", timezone: "Europe/Kyiv" }, ledger: cold, now: evening }).reason, "outside_window");
+  const late = await tick(at(0, 13 * 60 + 30));
+  assert.equal(late.sent, 0, "після 22:00 — ні");
+});
