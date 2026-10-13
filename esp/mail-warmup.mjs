@@ -261,19 +261,19 @@ const firstName = (sender) => {
 };
 
 /** A first letter from one of our mailboxes to another: picked, not generated, and different every time. */
-export function warmupLetter({ from, to, seed, date = new Date() }) {
+export function warmupLetter({ from, to, seed, date = new Date(), written = null }) {
   const pick = (list, salt) => list[seeded(`${seed}|${salt}`, 0, list.length - 1)];
-  const subject = pick(SUBJECTS, "subject");
+  const subject = written?.subject || pick(SUBJECTS, "subject");
   const closer = pick(CLOSERS, "closer");
-  const body = `${pick(OPENERS, "open").replace("{to}", firstName(to))}\n\n${pick(BODIES, "body")}${closer ? `\n\n${closer}` : ""}`;
+  const body = written?.body || `${pick(OPENERS, "open").replace("{to}", firstName(to))}\n\n${pick(BODIES, "body")}${closer ? `\n\n${closer}` : ""}`;
   const messageId = messageIdFor(from.email);
   const raw = buildLetter({ from: { email: from.email, name: ownName(from) }, to: { email: to.email, name: ownName(to) }, subject, body, signature: firstName(from), date, messageId });
   return { raw, subject, text: `${body}\n\n${firstName(from)}`, messageId };
 }
 
 /** The answer to a warm-up letter, in its thread. */
-export function warmupReply({ from, to, original, seed, date = new Date() }) {
-  const body = `${seeded(`${seed}|hi`, 0, 1) ? `Hi ${firstName(to)},\n\n` : ""}${REPLIES[seeded(`${seed}|reply`, 0, REPLIES.length - 1)]}`;
+export function warmupReply({ from, to, original, seed, date = new Date(), written = null }) {
+  const body = written?.body || `${seeded(`${seed}|hi`, 0, 1) ? `Hi ${firstName(to)},\n\n` : ""}${REPLIES[seeded(`${seed}|reply`, 0, REPLIES.length - 1)]}`;
   const messageId = messageIdFor(from.email);
   const subject = replySubject(original.subject || "");
   const raw = buildLetter({
@@ -297,7 +297,28 @@ export function warmupReply({ from, to, original, seed, date = new Date() }) {
  * sender gate (its `purpose: "warmup"` rule); `connector` — lettersFrom and
  * setLabels.
  */
-export async function runWarmupTick({ journal, senders, connector, gate, now = new Date(), replyPercent = REPLY_PERCENT }) {
+/**
+ * Each letter written by the connected model (owner 13.10: «генеруй кожен лист
+ * моделлю»), when the server has one: `writer({ kind, from, to, original,
+ * recent })` → `{ subject, body }`. A writer that fails or takes too long
+ * costs nothing — the letter is made from the built-in pieces, as before.
+ */
+async function written(writer, request) {
+  if (!writer) return null;
+  try {
+    const answer = await Promise.race([writer(request), new Promise((resolve) => setTimeout(() => resolve(null), 30_000).unref?.())]);
+    const subject = String(answer?.subject || "").replace(/[\r\n]+/g, " ").trim().slice(0, 120);
+    const body = String(answer?.body || "").replace(/\r/g, "").trim().slice(0, 1500);
+    if (!body || (request.kind === "first" && !subject)) return null;
+    // Plain text only, nothing that reads like marketing.
+    if (/https?:\/\/|<\/?[a-z][^>]*>/i.test(body)) return null;
+    return { subject, body };
+  } catch {
+    return null;
+  }
+}
+
+export async function runWarmupTick({ journal, senders, connector, gate, now = new Date(), replyPercent = REPLY_PERCENT, writer = null }) {
   const summary = { received: 0, rescued: 0, replied: 0, sent: 0, skipped: [], errors: [] };
   const entries = await journal.allEntries();
   const { rows } = warmupLedger(entries, { now });
@@ -396,8 +417,9 @@ export async function runWarmupTick({ journal, senders, connector, gate, now = n
     if (!from || !to || failedSeqs.has(original.seq)) continue;
     const decision = mayWrite(from, "reply");
     if (!decision.ok) { summary.skipped.push({ mailbox: from.email, kind: "reply", reason: decision.reason }); continue; }
-    const letter = warmupReply({ from, to, original: original.data, seed: messageId, date: now });
-    if (await send(from, to, letter, { kind: "reply", inReplyTo: messageId, threadId: received.data.threadId })) {
+    const text = await written(writer, { kind: "reply", from: { email: from.email, name: firstName(from) }, to: { email: to.email, name: firstName(to) }, original: { subject: original.data.subject, text: original.data.text } });
+    const letter = warmupReply({ from, to, original: original.data, seed: messageId, date: now, written: text });
+    if (await send(from, to, letter, { kind: "reply", inReplyTo: messageId, threadId: received.data.threadId, writtenBy: text ? "model" : "template" })) {
       answered.add(messageId);
       summary.replied += 1;
     }
@@ -424,8 +446,12 @@ export async function runWarmupTick({ journal, senders, connector, gate, now = n
     const count = warmupLedger(await journal.allEntries(), { now }).rows.get(from.email)?.sent || 0;
     const to = pool[seeded(`${from.email}|${count}|partner`, 0, pool.length - 1)];
     inbound.set(to.email, (inbound.get(to.email) || 0) + 1);
-    const letter = warmupLetter({ from, to, seed: `${from.email}|${count}|${now.toISOString().slice(0, 10)}`, date: now });
-    if (await send(from, to, letter, { kind: "first" })) summary.sent += 1;
+    // The model sees the last subjects between these two, so a thread of
+    // letters between colleagues does not repeat itself.
+    const recent = fresh.filter((entry) => entry.type === "warmup.sending" && entry.data?.kind === "first" && [entry.data.from, entry.data.to].includes(from.email) && [entry.data.from, entry.data.to].includes(to.email)).slice(-6).map((entry) => entry.data.subject);
+    const text = await written(writer, { kind: "first", from: { email: from.email, name: firstName(from) }, to: { email: to.email, name: firstName(to) }, recent });
+    const letter = warmupLetter({ from, to, seed: `${from.email}|${count}|${now.toISOString().slice(0, 10)}`, date: now, written: text });
+    if (await send(from, to, letter, { kind: "first", writtenBy: text ? "model" : "template" })) summary.sent += 1;
   }
   return summary;
 }

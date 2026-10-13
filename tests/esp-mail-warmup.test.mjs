@@ -334,3 +334,23 @@ test("лист прогріву звертається на ім'я одержу
   assert.match(letter.text, /\n\nMaryna$/, "підпис — ім'я відправника");
   assert.match(letter.raw, /^From: .*Maryna Koval/m);
 });
+
+test("кожен лист прогріву пише модель; якщо вона мовчить чи помиляється — лист однаково йде з готових шматків", async (t) => {
+  const { tick, start } = await world(t);
+  for (const mailbox of [ANNA, BORIS]) await start(mailbox, at(0));
+  const asked = [];
+  const writer = async (request) => {
+    asked.push(request);
+    if (request.from.email === BORIS) throw new Error("model down");
+    return { subject: "Budget review slot", body: `Hi ${request.to.name},\n\nCan we move the budget review to Thursday at 11?` };
+  };
+  await tick(at(0, 30), { writer });
+  const sending = (await allEntries()).filter((entry) => entry.type === "warmup.sending");
+  const anna = sending.find((entry) => entry.data.from === ANNA);
+  const boris = sending.find((entry) => entry.data.from === BORIS);
+  assert.equal(anna.data.writtenBy, "model");
+  assert.equal(anna.data.subject, "Budget review slot");
+  assert.match(anna.data.text, /^Hi Boris,/);
+  assert.equal(boris.data.writtenBy, "template", "модель упала — лист з шматків");
+  assert.equal(asked[0].to.name, asked[0].to.email === BORIS ? "Boris" : "Anna");
+});

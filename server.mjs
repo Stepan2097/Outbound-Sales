@@ -586,7 +586,7 @@ const esp = (() => {
   // Прогрів пошт: our mailboxes writing to each other (esp/mail-warmup.mjs).
   const warmupTick = async () => {
     const { senders } = await espRegistry();
-    return runWarmupTick({ journal: { allEntries, append: espAppend }, senders, connector, gate, now: new Date() });
+    return runWarmupTick({ journal: { allEntries, append: espAppend }, senders, connector, gate, now: new Date(), writer: state.vault ? writeWarmupLetter : null });
   };
   // «Ліди»: the CRM's folders, read through the same cached folder list «Контакти» uses.
   const crmLeads = crmLeadSource({ crm: warmupCrm, listFolders: () => listContactFolders() });
@@ -2943,6 +2943,27 @@ async function inBatches(items, size, task) {
   const results = [];
   for (let at = 0; at < items.length; at += size) results.push(...await Promise.all(items.slice(at, at + size).map(task)));
   return results;
+}
+
+/**
+ * One warm-up letter by the connected writing model (owner 13.10: «генеруй
+ * кожен лист моделлю … тою що підключена»): colleagues at a small agency
+ * writing to each other about ordinary work. The warm-up falls back to its
+ * built-in pieces when this throws (esp/mail-warmup.mjs).
+ */
+async function writeWarmupLetter({ kind, from, to, original = null, recent = [] }) {
+  const system = "You write short, ordinary work emails between two colleagues at a small digital marketing agency. Plain text, English, natural and varied: different topics each time (planning, a client question, a document, numbers, scheduling, a small favour, feedback on a draft, an internal process). No links, no attachments mentioned, no sales language, no emojis, no signature. Return strict JSON.";
+  const user = kind === "reply"
+    ? { task: "Write the reply to this email, in the same thread.", from: from.name, to: to.name, original, rules: "1–3 sentences, may start with the recipient's first name or with nothing. Answer what was asked. JSON: {\"body\": \"...\"}" }
+    : { task: "Write a new email.", from: from.name, to: to.name, avoidSubjects: recent, rules: "Subject 2–6 words, not clickbait. Body 35–110 words, starts with a greeting to the recipient's first name, one concrete point or question. JSON: {\"subject\": \"...\", \"body\": \"...\"}" };
+  const { data } = await callOpenRouterJson({
+    model: resolveModelForProfile(null, "writing"),
+    taskType: "WARMUP_LETTER",
+    profile: "economy",
+    maxTokens: 400,
+    messages: [{ role: "system", content: system }, { role: "user", content: JSON.stringify(user) }]
+  });
+  return { subject: data?.subject || "", body: data?.body || "" };
 }
 
 function takeCrmContactIntoQueue(contact) {
