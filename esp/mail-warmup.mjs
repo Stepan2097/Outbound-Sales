@@ -383,16 +383,27 @@ export async function runWarmupTick({ journal, senders, connector, gate, now = n
     }
   }
 
-  // (3) First letters, one per mailbox, to a partner picked for the day — another domain first.
+  // (3) First letters, one per mailbox. The partner: whoever of ours has had
+  // the fewest warm-up letters today (so 25 @gmail.com mailboxes do not all pile
+  // onto the one on our own domain), among those another domain first, and
+  // among equals a seeded pick — spread like chance, the same on a re-run.
+  const today = dayOf(now.toISOString());
+  const inbound = new Map();
+  for (const entry of await journal.allEntries()) {
+    if (entry.type === "warmup.sending" && dayOf(entry.at) === today) inbound.set(entry.data?.to, (inbound.get(entry.data?.to) || 0) + 1);
+  }
   for (const from of live) {
     const partners = live.filter((sender) => sender.email !== from.email);
     if (!partners.length) { summary.skipped.push({ mailbox: from.email, kind: "first", reason: "no_partner" }); continue; }
     const decision = mayWrite(from);
     if (!decision.ok) { summary.skipped.push({ mailbox: from.email, kind: "first", reason: decision.reason }); continue; }
-    const others = partners.filter((sender) => sender.domain !== from.domain);
-    const pool = others.length ? others : partners;
+    const fewest = Math.min(...partners.map((sender) => inbound.get(sender.email) || 0));
+    const least = partners.filter((sender) => (inbound.get(sender.email) || 0) === fewest);
+    const others = least.filter((sender) => sender.domain !== from.domain);
+    const pool = others.length ? others : least;
     const count = warmupLedger(await journal.allEntries(), { now }).rows.get(from.email)?.sent || 0;
     const to = pool[seeded(`${from.email}|${count}|partner`, 0, pool.length - 1)];
+    inbound.set(to.email, (inbound.get(to.email) || 0) + 1);
     const letter = warmupLetter({ from, to, seed: `${from.email}|${count}|${now.toISOString().slice(0, 10)}`, date: now });
     if (await send(from, to, letter, { kind: "first" })) summary.sent += 1;
   }

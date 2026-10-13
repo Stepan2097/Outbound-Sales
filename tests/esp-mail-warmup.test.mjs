@@ -295,3 +295,17 @@ test("маршрут плану: лише з правом лімітів, з п�
   assert.deepEqual(view.payload.planBounds.max, [1, 35]);
   assert.ok((await allEntries()).some((entry) => entry.type === "admin.warmup_plan"));
 });
+
+test("партнера обирають за навантаженням: п'ять скриньок одного домену не валять усе на одну скриньку іншого", async (t) => {
+  const { tick, start } = await world(t);
+  const extra = ["ira@advantage-mail.com", "max@advantage-mail.com", "lev@advantage-mail.com"];
+  for (const email of extra) await addSender({ email, rampStage: 35 }, "test");
+  const all = [ANNA, BORIS, OLGA, ...extra];
+  for (const mailbox of all) await start(mailbox, at(0));
+  await tick(at(0, 30));
+  const sent = (await allEntries()).filter((entry) => entry.type === "warmup.sending").map((entry) => entry.data.to);
+  assert.equal(sent.length, all.length, "кожна написала по листу");
+  assert.ok(sent.filter((to) => to === BORIS).length <= 2, `єдина скринька іншого домену не отримує всі листи (${sent.join(", ")})`);
+  const most = Math.max(...all.map((mailbox) => sent.filter((to) => to === mailbox).length));
+  assert.ok(most <= 2, "листи розходяться по всіх");
+});
