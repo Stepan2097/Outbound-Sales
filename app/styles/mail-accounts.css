@@ -93,7 +93,7 @@
 .acc-head,
 .acc-row {
   display: grid;
-  grid-template-columns: 36px minmax(0, 2.4fr) minmax(130px, 1fr) 90px minmax(120px, 1fr) minmax(170px, auto);
+  grid-template-columns: 36px minmax(0, 2.2fr) minmax(130px, 1fr) minmax(120px, 1fr) 90px minmax(120px, 1fr) minmax(170px, auto);
   align-items: center;
   gap: 12px;
   padding: 12px 16px;
@@ -473,4 +473,80 @@
   .acc-actions {
     justify-content: flex-start;
   }
+}
+
+/* Теги пошти: «Розсилка», «Прогрів», свої; редактор розгортається під рядком. */
+
+.acc-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.acc-tag {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--surface-strong);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.acc-tag.is-send {
+  background: color-mix(in srgb, var(--blue) 18%, transparent);
+  color: var(--blue);
+}
+
+.acc-tag.is-warm {
+  background: color-mix(in srgb, var(--amber) 20%, transparent);
+  color: var(--amber);
+}
+
+.acc-tag-edit {
+  min-height: 26px;
+  width: 26px;
+  padding: 0;
+}
+
+.acc-tag-filter {
+  min-height: 40px;
+  max-width: 180px;
+}
+
+.acc-tag-form {
+  grid-column: 2 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-strong);
+  font-size: 14px;
+}
+
+.acc-tag-form label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.acc-tag-form input[type="checkbox"] {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--teal);
+}
+
+.acc-tag-form input[name="custom"] {
+  flex: 1 1 200px;
+  min-height: 34px;
 }

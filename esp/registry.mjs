@@ -66,7 +66,7 @@ export async function registry() {
       senders.set(data.email, {
         email: data.email, domain: data.domain, displayName: data.displayName || "", mailboxRef: data.mailboxRef || "",
         person: data.person || "", rampStage: RAMP_STAGES.includes(data.rampStage) ? data.rampStage : RAMP_STAGES[0],
-        status: "active", addedAt: entry.at, addedBy: entry.actor, history: [{ ...stamp, status: "active" }]
+        status: "active", addedAt: entry.at, addedBy: entry.actor, history: [{ ...stamp, status: "active" }], tags: []
       });
     } else if (entry.type === "sender.updated" && senders.has(data.email)) {
       const sender = senders.get(data.email);
@@ -76,9 +76,16 @@ export async function registry() {
       sender.history.push({ ...stamp, changed: Object.keys(data).filter((key) => key !== "email") });
     } else if (entry.type === "sender.role" && senders.has(data.email)) {
       // «Розсилка» or «Прогрів» (13.10): a warm-up-only mailbox never sends cold mail.
+      // The same fact as the built-in tags, which follow it.
       const sender = senders.get(data.email);
       sender.role = SENDER_ROLES.includes(data.role) ? data.role : null;
+      sender.tags = tagsForRole(sender.tags, sender.role);
       sender.history.push({ ...stamp, changed: ["role"], role: sender.role });
+    } else if (entry.type === "sender.tags" && senders.has(data.email)) {
+      // Tags (13.10): the built-in ones are the role, the rest are the team's own labels.
+      const sender = senders.get(data.email);
+      sender.tags = cleanTags(data.tags);
+      sender.role = roleOfTags(sender.tags);
     } else if (entry.type === "sender.status" && senders.has(data.email)) {
       const sender = senders.get(data.email);
       sender.status = data.status;
@@ -182,6 +189,64 @@ export async function updateSender({ email, person, rampStage, mailboxRef, displ
   }
   if (!Object.keys(change).length) return null;
   return append({ type: "sender.updated", actor, data: { email: key, ...change } });
+}
+
+/**
+ * Tags on a mailbox: «Розсилка» (it writes campaigns), «Прогрів» (it warms up —
+ * the warm-up page picks these by default), and any of a team's own, created by
+ * typing a name. A mailbox may carry several, or none — none is how every
+ * mailbox started, and nothing that worked before needs one.
+ */
+export const MAILBOX_TAGS = ["Розсилка", "Прогрів"];
+const TAG_MAX = 8;
+
+/** A tag list made clean: trimmed, 1–30 characters, no doubles (case aside), the built-ins spelled as built. */
+export function cleanTags(tags) {
+  const out = [];
+  const seen = new Set();
+  for (const raw of Array.isArray(tags) ? tags : []) {
+    let tag = String(raw ?? "").replace(/\s+/g, " ").trim().slice(0, 30);
+    if (!tag) continue;
+    tag = MAILBOX_TAGS.find((builtIn) => builtIn.toLowerCase() === tag.toLowerCase()) || tag;
+    if (seen.has(tag.toLowerCase())) continue;
+    seen.add(tag.toLowerCase());
+    out.push(tag);
+    if (out.length === TAG_MAX) break;
+  }
+  return out;
+}
+
+/** The role the built-in tags say: «Розсилка» — cold mail (and warm-up), «Прогрів» alone — warm-up only. */
+export function roleOfTags(tags = []) {
+  if (tags.includes("Розсилка")) return "cold";
+  if (tags.includes("Прогрів")) return "warmup";
+  return null;
+}
+
+/** A mailbox's tags after its role was set by hand: the built-ins follow, the team's own stay. */
+export function tagsForRole(tags = [], role = null) {
+  const own = (tags || []).filter((tag) => !MAILBOX_TAGS.includes(tag));
+  if (role === "cold") return cleanTags(["Розсилка", ...(tags || []).filter((tag) => tag === "Прогрів"), ...own]);
+  if (role === "warmup") return cleanTags(["Прогрів", ...own]);
+  return own;
+}
+
+/** Every tag a team can pick: the built-ins first, then the ones it made, A–Z. */
+export function tagCatalog(senders = []) {
+  const custom = new Set();
+  for (const sender of senders) for (const tag of sender.tags || []) if (!MAILBOX_TAGS.includes(tag)) custom.add(tag);
+  return [...MAILBOX_TAGS, ...[...custom].sort((left, right) => left.localeCompare(right, "uk"))];
+}
+
+/** A mailbox's tags, replaced whole; a line in the journal with its author. */
+export async function setSenderTags({ email, tags }, actor) {
+  const key = contactKey(email);
+  const { senders } = await registry();
+  const found = senders.find((row) => row.email === key);
+  if (!found) throw fail("Такої пошти серед відправників немає.", 404);
+  const next = cleanTags(tags);
+  if (JSON.stringify(next) === JSON.stringify(found.tags || [])) return null;
+  return append({ type: "sender.tags", actor, data: { email: key, tags: next } });
 }
 
 export async function setSenderStatus({ email, status, reason = "", code = null }, actor) {

@@ -21,7 +21,7 @@ import { recordAboutContact, recordFailed, recordSending, recordSent } from "./m
 import { allEntries, append, contactKey } from "./journal.mjs";
 import { applyRampReviews, reviewRamp } from "./ramp.mjs";
 import { DOMAIN_DAILY_LIMIT, GAP_MINUTES, WINDOW, sendDecision, sendLedger, senderDailyLimit } from "./limits.mjs";
-import { canSend, isDisconnected, registry, setSenderRole, updateSender } from "./registry.mjs";
+import { canSend, isDisconnected, registry, setSenderRole, tagCatalog, updateSender } from "./registry.mjs";
 import { LetterError, assertPlainLetter } from "./letter.mjs";
 import { TEMPLATE_VARIABLES, TemplateError, prepareTemplate } from "./template.mjs";
 import { DEFAULT_SIGNATURE, prepareSignature } from "./templates.mjs";
@@ -537,6 +537,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
       removed: [...removedFromWarmup(entries)].filter((email) => senders.some((sender) => sender.email === email && !isDisconnected(sender) && sender.status !== "retired")).sort(),
       log: warmupLog(entries),
       plan: warmupPlan(entries), planBounds: PLAN_BOUNDS,
+      tagCatalog: tagCatalog(senders),
       // Google refused the labels token: the owner has gmail.modify to add.
       rescueRefused: [...entries].reverse().find((entry) => entry.type === "warmup.rescue_refused")?.at || null,
       canChange: await can(profile, "limits.change")
@@ -601,7 +602,9 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
     // «Запустити всі» never wakes a mailbox taken off the warm-up or disconnected.
     const hidden = removedFromWarmup(entries);
     const rows = warmupView(entries, { senders: senders.filter((sender) => !isDisconnected(sender) && !hidden.has(sender.email)), domains });
-    const wanted = body.all ? rows.map((row) => row.email) : [String(body.mailbox || "").trim().toLowerCase()];
+    // `mailboxes` — the ones the page shows under its tag filter («Запустити всі» starts those).
+    const wanted = Array.isArray(body.mailboxes) ? body.mailboxes.map((email) => String(email).trim().toLowerCase())
+      : body.all ? rows.map((row) => row.email) : [String(body.mailbox || "").trim().toLowerCase()];
     const starting = path === "/warmup/start";
     const changed = [];
     const refused = [];
@@ -614,7 +617,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
       changed.push(email);
     }
     if (changed.length) await logged(starting ? "warmup_started" : "warmup_paused", { mailboxes: changed });
-    if (!body.all && refused.length) { sendJson(response, 400, { success: false, error: refused[0].reason, refused }); return true; }
+    if (!body.all && !Array.isArray(body.mailboxes) && refused.length) { sendJson(response, 400, { success: false, error: refused[0].reason, refused }); return true; }
     sendJson(response, 200, { success: true, changed, refused });
     return true;
   }
@@ -823,9 +826,11 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
         const row = ledger.senders.get(sender.email) || { today: 0, lastAt: null };
         return {
           email: sender.email, domain: sender.domain, status: sender.effectiveStatus, rampStage: sender.rampStage,
-          limit: senderDailyLimit(sender), today: row.today, lastAt: row.lastAt ? row.lastAt.toISOString() : null
+          limit: senderDailyLimit(sender), today: row.today, lastAt: row.lastAt ? row.lastAt.toISOString() : null,
+          tags: sender.tags || []
         };
       }),
+      tagCatalog: tagCatalog(senders),
       domains: domains.map((domain) => ({ domain: domain.domain, status: domain.status, today: ledger.domains.get(domain.domain) || 0, limit: DOMAIN_DAILY_LIMIT }))
     });
     return true;

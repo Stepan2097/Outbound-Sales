@@ -16,7 +16,7 @@
 import { can } from "./access.mjs";
 import { MailboxError } from "./provider.mjs";
 import { allEntries, append } from "./journal.mjs";
-import { addDomain, addSender, domainKey, isDisconnected, registry, setSenderStatus } from "./registry.mjs";
+import { addDomain, addSender, domainKey, isDisconnected, registry, setSenderStatus, tagCatalog } from "./registry.mjs";
 
 /** Pauses that signing in again repairs: the connection itself was the problem. */
 const CONNECTION_CODES = new Set(["oauth_revoked", "oauth_client", "not_connected", "token_failed", "delegation_missing", "mailbox_rejected"]);
@@ -63,7 +63,7 @@ async function registerSender({ email, name, person }, actor) {
  */
 async function mailboxRows(esp) {
   const { senders } = await registry();
-  const senderView = (sender) => (sender ? { status: sender.status, effectiveStatus: sender.effectiveStatus || sender.status, rampStage: sender.rampStage, person: sender.person, domain: sender.domain } : null);
+  const senderView = (sender) => (sender ? { status: sender.status, effectiveStatus: sender.effectiveStatus || sender.status, rampStage: sender.rampStage, person: sender.person, domain: sender.domain, tags: sender.tags || [] } : null);
   const grants = esp.oauth.grants.list();
   const signed = new Set(grants.map((grant) => grant.email));
   return [
@@ -95,7 +95,10 @@ export async function handleMailboxConnect({ method, path, url, request, respons
       domainKey: esp.connector?.describe?.().providers?.gmail === "gmail",
       canManage: await can(profile, "registry.change"),
       me,
-      mailboxes: await mailboxRows(esp)
+      mailboxes: await mailboxRows(esp),
+      // Mailbox tags: the ones to pick from, and whether this viewer may change them.
+      tagCatalog: tagCatalog((await registry()).senders),
+      canTag: await can(profile, "registry.change")
     });
     return true;
   }

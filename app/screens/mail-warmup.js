@@ -11,7 +11,24 @@ const STATUS = {
 };
 const DOMAIN_WORD = { aging: "старіє", ramp: "рампа", active: "активний", reserve: "запас", paused: "на паузі", retired: "виведено" };
 
-export const mailWarmupState = { data: null, error: "", notice: "", busy: "" };
+export const mailWarmupState = { data: null, error: "", notice: "", busy: "", tag: null };
+
+// Mailbox tags: the page shows the mailboxes tagged «Прогрів» by default (all of
+// them while nobody has tagged any); the filter changes it, «Запустити всі»
+// starts what it shows.
+function tagFilter(data) {
+  if (mailWarmupState.tag !== null) return mailWarmupState.tag;
+  return data.rows.some((row) => (row.tags || []).includes("Прогрів")) ? "Прогрів" : "";
+}
+
+function shownRows(data) {
+  const tag = tagFilter(data);
+  return data.rows.filter((row) => !tag || (tag === "-" ? !(row.tags || []).length : (row.tags || []).includes(tag)));
+}
+
+// «Розсилка» і «Прогрів» показує стовпчик «Призначення» — біля адреси лише свої теги команди.
+const ownTags = (row) => (row.tags || []).filter((tag) => tag !== "Розсилка" && tag !== "Прогрів");
+const tagPills = (tags = []) => tags.map((tag) => `<span class="warmup-mail-tag${tag === "Прогрів" ? " is-warm" : tag === "Розсилка" ? " is-send" : ""}">${escapeHtml(tag)}</span>`).join("");
 
 onScreen("mail-warmup", { open: () => void loadMailWarmup() });
 
@@ -63,7 +80,9 @@ function roleHtml(row, canChange) {
 }
 
 function tableHtml(data) {
-  const { rows, canChange } = data;
+  const { canChange } = data;
+  const rows = shownRows(data);
+  if (data.rows.length && !rows.length) return `<div class="empty-state">З тегом «${escapeHtml(tagFilter(data))}» пошт немає — виберіть інший тег у фільтрі або позначте пошти в «Пошта» → «Пошти».</div>${removedHtml(data)}`;
   if (!rows.length) return `<div class="empty-state">У прогріві немає пошт — додайте їх у «Пошта» → «Пошти» → «Додати пошту».</div>${removedHtml(data)}`;
   const action = (row) => {
     if (!canChange) return "";
@@ -78,7 +97,7 @@ function tableHtml(data) {
         const [word, tone] = STATUS[row.status];
         const share = row.plannedToday ? Math.min(100, Math.round((row.firstsToday / row.plannedToday) * 100)) : 0;
         return `<tr>
-          <td><strong>${escapeHtml(row.email)}</strong><small>${escapeHtml(row.person || "")}${row.person ? " · " : ""}домен: ${escapeHtml(DOMAIN_WORD[row.domainStatus] || row.domainStatus || "—")}</small></td>
+          <td><strong>${escapeHtml(row.email)}</strong>${ownTags(row).length ? `<span class="warmup-mail-tags">${tagPills(ownTags(row))}</span>` : ""}<small>${escapeHtml(row.person || "")}${row.person ? " · " : ""}домен: ${escapeHtml(DOMAIN_WORD[row.domainStatus] || row.domainStatus || "—")}</small></td>
           <td>${roleHtml(row, canChange)}</td>
           <td><span class="pill ${tone}">${word}</span>${row.status === "paused" && row.pausedAt ? `<small>з ${escapeHtml(when(row.pausedAt))}</small>` : row.status === "running" && row.startedAt ? `<small>старт ${escapeHtml(when(row.startedAt))}</small>` : ""}</td>
           <td class="is-number">${row.day || "—"}</td>
@@ -124,7 +143,9 @@ export function renderMailWarmup() {
   const { data, error, notice } = mailWarmupState;
   if (error && !data) { root.innerHTML = `<div class="empty-state">${escapeHtml(error)}</div>`; return; }
   if (!data) { root.innerHTML = '<div class="empty-state">Читаємо прогрів...</div>'; return; }
-  const startable = data.rows.filter((row) => row.status === "never" || row.status === "paused").length;
+  const startable = shownRows(data).filter((row) => row.status === "never" || row.status === "paused").length;
+  const current = tagFilter(data);
+  const filter = `<label class="warmup-mail-filter">Тег <select id="mailWarmupTag">${[["", "Усі пошти"], ...(data.tagCatalog || ["Розсилка", "Прогрів"]).map((tag) => [tag, tag]), ["-", "Без тегу"]].map(([value, label]) => `<option value="${escapeAttr(value)}"${current === value ? " selected" : ""}>${escapeHtml(label)}</option>`).join("")}</select></label>`;
   const plan = data.plan;
   root.innerHTML = `
     <div class="warmup-mail-head">
@@ -136,7 +157,7 @@ export function renderMailWarmup() {
     ${notice ? `<p class="esp-notice ${error ? "is-bad" : ""}">${escapeHtml(notice)}</p>` : ""}
     ${summaryHtml(data.rows)}
     <section class="panel"><div class="panel-heading"><div><h2>Пошти</h2><p>Статус, день прогріву, листи сьогодні проти плану, відповіді й листи, вийняті зі спаму.</p></div>
-      <button type="button" class="text-button" data-warmup-refresh><i data-lucide="refresh-cw"></i><span>Оновити</span></button></div>
+      <div class="warmup-mail-tools">${filter}<button type="button" class="text-button" data-warmup-refresh><i data-lucide="refresh-cw"></i><span>Оновити</span></button></div></div>
       ${tableHtml(data)}
     </section>
     <section class="panel"><div class="panel-heading"><div><h2>Що робив прогрів</h2><p>Останні 30 подій.</p></div></div>${logHtml(data.log)}</section>`;
@@ -159,6 +180,12 @@ async function change(path, body, done) {
   await loadMailWarmup();
 }
 
+document.getElementById("mailWarmupRoot")?.addEventListener("change", (event) => {
+  if (event.target.id !== "mailWarmupTag") return;
+  mailWarmupState.tag = event.target.value;
+  renderMailWarmup();
+});
+
 document.getElementById("mailWarmupRoot")?.addEventListener("submit", (event) => {
   if (event.target.id !== "mailWarmupPlan") return;
   event.preventDefault();
@@ -179,7 +206,7 @@ document.getElementById("mailWarmupRoot")?.addEventListener("click", (event) => 
   const pause = event.target.closest("[data-warmup-pause]")?.dataset.warmupPause;
   if (pause) return void change("pause", { mailbox: pause }, () => `${pause}: прогрів на паузі.`);
   if (event.target.closest("[data-warmup-start-all]")) {
-    return void change("start", { all: true }, (result) => `Запущено: ${result.changed.length}${result.refused.length ? `; не можна: ${result.refused.map((row) => row.mailbox).join(", ")}` : ""}.`);
+    return void change("start", { mailboxes: shownRows(mailWarmupState.data).filter((row) => row.status === "never" || row.status === "paused").map((row) => row.email) }, (result) => `Запущено: ${result.changed.length}${result.refused.length ? `; не можна: ${result.refused.map((row) => row.mailbox).join(", ")}` : ""}.`);
   }
   if (event.target.closest("[data-warmup-refresh]")) void loadMailWarmup();
 });
@@ -190,5 +217,12 @@ document.getElementById("mailWarmupRoot")?.addEventListener("change", (event) =>
   if (!select) return;
   const mailbox = select.dataset.warmupRole;
   const role = select.value || null;
+  // Призначення — це й вбудовані теги: щоб рядок не зник з-під руки, коли
+  // фільтр за тегом його більше не бере, фільтр стає «Усі пошти».
+  const row = mailWarmupState.data?.rows.find((item) => item.email === mailbox);
+  const tag = mailWarmupState.data ? tagFilter(mailWarmupState.data) : "";
+  const builtIns = role === "cold" ? ["Розсилка", ...((row?.tags || []).includes("Прогрів") ? ["Прогрів"] : [])] : role === "warmup" ? ["Прогрів"] : [];
+  const after = [...builtIns, ...(row ? ownTags(row) : [])];
+  if (tag && !(tag === "-" ? !after.length : after.includes(tag))) mailWarmupState.tag = "";
   void change("role", { mailbox, role }, () => `${mailbox}: ${role === "cold" ? "для розсилки" : role === "warmup" ? "лише для прогріву — холодні листи з неї не підуть" : "призначення знято"}.`);
 });

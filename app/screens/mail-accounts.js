@@ -13,7 +13,12 @@ import { api, escapeAttr, escapeHtml, onScreen, refreshIcons, uaPlural } from ".
 
 onScreen("mail-settings", { open: () => void openMailAccounts() });
 
-const page = { data: null, error: "", loading: false, busy: "", notice: "", tone: "", checks: {}, query: "", dialog: false, dialogError: "", picked: "" };
+const page = { data: null, error: "", loading: false, busy: "", notice: "", tone: "", checks: {}, query: "", dialog: false, dialogError: "", picked: "", tag: "", tagging: "" };
+
+// Mailbox tags: «Розсилка», «Прогрів» or a team's own. Pills in the row, a
+// filter beside the search, and — for whoever may change the registry — an
+// editor under the row: the known tags as checkboxes, a field for a new one.
+const tagPills = (tags = []) => tags.map((tag) => `<span class="acc-tag${tag === "Прогрів" ? " is-warm" : tag === "Розсилка" ? " is-send" : ""}">${escapeHtml(tag)}</span>`).join("");
 
 const rootEl = () => document.getElementById("mailAccountsRoot");
 const when = (iso) => (iso ? new Date(iso).toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit", year: "2-digit" }) : "");
@@ -78,6 +83,14 @@ function rowHtml(row) {
     check ? `<small class="${check.ok ? "is-ok" : "is-bad"}">${escapeHtml(check.ok ? `Доступ є${check.messagesTotal ? ` · листів у пошті: ${check.messagesTotal}` : ""}` : check.error || "Google відмовив.")}</small>` : "",
     row.via === "google" && row.status !== "broken" && !row.canModify ? '<small>без дозволу на мітки — прогрів не виймає листи зі спаму; «Увійти знову» й дозвольте все</small>' : ""
   ].join("");
+  const tags = row.sender?.tags || [];
+  const tagCell = `<span class="acc-tags">${tagPills(tags) || '<small class="acc-muted">—</small>'}${row.sender && data.canTag ? `<button type="button" class="icon-button acc-tag-edit" data-acc-tags="${escapeAttr(row.email)}" title="Теги" aria-label="Теги ${escapeAttr(row.email)}"><i data-lucide="tag"></i></button>` : ""}</span>`;
+  const editor = page.tagging === row.email ? `<form class="acc-tag-form" data-acc-tag-form="${escapeAttr(row.email)}">
+      ${(data.tagCatalog || []).map((tag) => `<label><input type="checkbox" name="tag" value="${escapeAttr(tag)}"${tags.includes(tag) ? " checked" : ""} /> ${escapeHtml(tag)}</label>`).join("")}
+      <input name="custom" placeholder="Свій тег, напр. UK або Anna" maxlength="30" />
+      <button type="submit" class="primary-button">Зберегти</button>
+      <button type="button" class="text-button" data-acc-tags-cancel>Скасувати</button>
+    </form>` : "";
   return `<li class="acc-row">
     <span class="acc-avatar" aria-hidden="true">${escapeHtml(initial)}</span>
     <div class="acc-who">
@@ -86,17 +99,20 @@ function rowHtml(row) {
       ${notes}
     </div>
     <span class="acc-state ${state.tone}" title="${escapeAttr(state.hint)}"><i data-lucide="${state.icon}"></i>${escapeHtml(state.text)}</span>
+    ${tagCell}
     <span class="acc-limit">${row.sender ? `<b>${row.sender.rampStage}</b> / день` : "—"}</span>
     <span class="acc-by">${escapeHtml(row.connectedBy ? (row.connectedBy === data.me ? "ви" : row.connectedBy) : "—")}<small>${escapeHtml(when(row.connectedAt))}</small></span>
     <span class="acc-actions">
       ${action}
       ${canDrop ? `<button type="button" class="icon-button" data-acc-drop="${escapeAttr(row.email)}" title="Відключити" aria-label="Відключити ${escapeAttr(row.email)}"><i data-lucide="trash-2"></i></button>` : ""}
     </span>
+    ${editor}
   </li>`;
 }
 
 function listHtml() {
-  const rows = (page.data?.mailboxes || []).filter((row) => !page.query || `${row.email} ${row.name}`.toLowerCase().includes(page.query.toLowerCase()));
+  const rows = (page.data?.mailboxes || []).filter((row) => (!page.query || `${row.email} ${row.name}`.toLowerCase().includes(page.query.toLowerCase()))
+    && (!page.tag || (page.tag === "-" ? !(row.sender?.tags || []).length : (row.sender?.tags || []).includes(page.tag))));
   if (!(page.data?.mailboxes || []).length) {
     return `<div class="acc-empty">
       <i data-lucide="mail-plus"></i>
@@ -105,9 +121,9 @@ function listHtml() {
       <button type="button" class="primary-button" data-acc-add><i data-lucide="plus"></i><span>Додати пошту</span></button>
     </div>`;
   }
-  if (!rows.length) return '<p class="acc-muted">За цим пошуком пошт немає.</p>';
+  if (!rows.length) return '<p class="acc-muted">За цим пошуком чи тегом пошт немає.</p>';
   return `<div class="acc-list">
-    <div class="acc-head" aria-hidden="true"><span></span><span>Пошта</span><span>Стан</span><span>Ліміт</span><span>Додав</span><span></span></div>
+    <div class="acc-head" aria-hidden="true"><span></span><span>Пошта</span><span>Стан</span><span>Теги</span><span>Ліміт</span><span>Додав</span><span></span></div>
     <ul>${rows.map(rowHtml).join("")}</ul>
   </div>`;
 }
@@ -187,6 +203,7 @@ function render() {
         <h2>${count ? `${count} ${uaPlural(count, "пошта", "пошти", "пошт")}` : "Пошт ще немає"}</h2>
         <p>З них ідуть холодні листи й прогрів.</p>
       </div>
+      ${count ? `<select id="mailAccountsTag" class="acc-tag-filter" aria-label="Фільтр за тегом">${[["", "Усі теги"], ...(page.data?.tagCatalog || []).map((tag) => [tag, tag]), ["-", "Без тегу"]].map(([value, label]) => `<option value="${escapeAttr(value)}"${page.tag === value ? " selected" : ""}>${escapeHtml(label)}</option>`).join("")}</select>` : ""}
       ${count ? `<label class="acc-search"><i data-lucide="search"></i><input id="mailAccountsSearch" type="search" placeholder="Пошук пошти" value="${escapeAttr(page.query)}" autocomplete="off" /></label>` : ""}
       <button type="button" class="primary-button" data-acc-add><i data-lucide="plus"></i><span>Додати пошту</span></button>
     </header>
@@ -250,6 +267,11 @@ async function drop(mailbox) {
 document.addEventListener("click", (event) => {
   const root = rootEl();
   if (!root || !root.contains(event.target)) return;
+  const tagging = event.target.closest("[data-acc-tags], [data-acc-tags-cancel]");
+  if (tagging) {
+    page.tagging = tagging.dataset.accTags && page.tagging !== tagging.dataset.accTags ? tagging.dataset.accTags : "";
+    return render();
+  }
   const target = event.target.closest("[data-acc-add], [data-acc-check], [data-acc-drop], [data-acc-signin], [data-acc-pick], [data-acc-google]");
   if (!target) return;
   if (target.dataset.accPick) {
@@ -267,6 +289,34 @@ document.addEventListener("click", (event) => {
   if (target.dataset.accCheck) return void check(target.dataset.accCheck);
   if (target.dataset.accDrop) return void drop(target.dataset.accDrop);
   if (target.dataset.accSignin) return void startGoogle(target.dataset.accSignin);
+});
+
+async function saveTags(form) {
+  const email = form.dataset.accTagForm;
+  const values = new FormData(form);
+  const tags = [...values.getAll("tag"), ...String(values.get("custom") || "").split(",")].map((tag) => tag.trim()).filter(Boolean);
+  try {
+    await api("/api/esp/senders/tags", { method: "POST", body: JSON.stringify({ email, tags }) });
+    Object.assign(page, { tagging: "", notice: `${email}: теги збережено.`, tone: "is-ok" });
+    await load();
+    return;
+  } catch (error) {
+    Object.assign(page, { notice: error.message || "Теги не збереглися.", tone: "is-bad" });
+  }
+  render();
+}
+
+document.addEventListener("submit", (event) => {
+  const form = event.target.closest?.("[data-acc-tag-form]");
+  if (!form || !rootEl()?.contains(form)) return;
+  event.preventDefault();
+  void saveTags(form);
+});
+
+document.addEventListener("change", (event) => {
+  if (event.target?.id !== "mailAccountsTag") return;
+  page.tag = event.target.value;
+  render();
 });
 
 document.addEventListener("close", (event) => {

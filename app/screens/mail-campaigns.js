@@ -38,7 +38,9 @@ const page = {
   folder: "all", search: "", selected: new Set(), menuFor: null,
   // Конструктор: відкрита кампанія і крок.
   openId: null, step: "sequence", people: [], peopleLoaded: false, peopleResult: null, peopleText: "", plan: null, previews: {}, sampleEmail: "",
-  chooser: null, editor: null, busy: false
+  chooser: null, editor: null, busy: false,
+  // Фільтр пошт за тегом у «Параметрах відправки»; null — ще не обрано (тоді «Розсилка», якщо така є).
+  senderTag: null
 };
 
 const byId = (id) => page.campaigns.find((campaign) => campaign.id === id) || null;
@@ -459,6 +461,33 @@ function recipientsHtml(campaign) {
   </section>`;
 }
 
+/** Тег, за яким зараз відфільтровані пошти: обраний, інакше «Розсилка», коли хоч одна пошта її має. */
+function senderTagOf(senders) {
+  if (page.senderTag !== null) return page.senderTag;
+  return senders.some((sender) => (sender.tags || []).includes("Розсилка")) ? "Розсилка" : "";
+}
+
+/** Позначену пошту видно завжди — інакше фільтр мовчки ховав би, з чого вже йде кампанія. */
+function senderHidden(sender, campaign, tag) {
+  if (!tag || campaign.senders.includes(sender.email)) return false;
+  const tags = sender.tags || [];
+  return tag === "-" ? tags.length > 0 : !tags.includes(tag);
+}
+
+function senderTagPills(sender) {
+  const tags = sender.tags || [];
+  if (!tags.length) return "";
+  return `<span class="mc-sender-tags">${tags.map((tag) => `<span class="mc-sender-tag${tag === "Розсилка" ? " is-send" : tag === "Прогрів" ? " is-warm" : ""}">${escapeHtml(tag)}</span>`).join("")}</span>`;
+}
+
+function senderTagFilterHtml(senders) {
+  const catalog = page.limits?.tagCatalog || [];
+  if (!catalog.length) return "";
+  const tag = senderTagOf(senders);
+  const option = (value, label) => `<option value="${escapeAttr(value)}" ${tag === value ? "selected" : ""}>${escapeHtml(label)}</option>`;
+  return `<label class="mc-sender-filter"><span>Тег</span><select data-mc-sender-tag>${option("", "Усі пошти")}${catalog.map((name) => option(name, name)).join("")}${option("-", "Без тегу")}</select></label>`;
+}
+
 function sendingHtml(campaign) {
   const limits = page.limits;
   const usable = (limits?.senders || []).filter((sender) => sender.status === "active" || campaign.senders.includes(sender.email));
@@ -468,9 +497,10 @@ function sendingHtml(campaign) {
     <div class="mc-step-intro"><h2>Параметри відправки</h2><p>З яких пошт іде кампанія і як. Людина отримує весь ланцюжок з однієї пошти; нові люди розподіляються на найменш завантажену.</p></div>
     <form class="mc-sending" data-mc-form="sending">
       <fieldset class="mc-fieldset"><legend>Пошти</legend>
-        ${usable.length ? usable.map((sender) => `<label class="mc-sender">
+        ${senderTagFilterHtml(usable)}
+        ${usable.length ? usable.map((sender) => `<label class="mc-sender" data-mc-sender-tags="${escapeAttr((sender.tags || []).join("|"))}" ${senderHidden(sender, campaign, senderTagOf(usable)) ? "hidden" : ""}>
             <input type="checkbox" name="sender" value="${escapeAttr(sender.email)}" ${campaign.senders.includes(sender.email) ? "checked" : ""} ${campaign.state === "done" ? "disabled" : ""} />
-            <span><strong>${escapeHtml(sender.email)}</strong><small>${sender.status === "active" ? "надсилає" : "на паузі"} · сьогодні ${sender.today} з ${sender.limit} · етап рампи ${sender.rampStage ?? "—"}</small></span>
+            <span><strong>${escapeHtml(sender.email)}</strong><small>${sender.status === "active" ? "надсилає" : "на паузі"} · сьогодні ${sender.today} з ${sender.limit} · етап рампи ${sender.rampStage ?? "—"}</small>${senderTagPills(sender)}</span>
             <span class="mc-meter"><span style="width:${percent(sender.today, sender.limit)}%"></span></span>
           </label>`).join("") : '<p class="esp-notice is-bad">У реєстрі немає жодної активної пошти. Додайте пошту: «Пошта» → «Пошти» → «Додати пошту».</p>'}
         <button type="button" class="text-button" data-mc="add-mailbox"><i data-lucide="mail-plus"></i><span>Додати пошту</span></button>
@@ -1009,6 +1039,18 @@ async function onChange(event) {
     const name = input.value.trim();
     if (!name || name === current()?.name) return undefined;
     return act(() => saveCampaign({ name }), { success: "Назву збережено." });
+  }
+  if (input.dataset.mcSenderTag !== undefined) {
+    // Без перемальовування: позначки, ще не збережені, лишаються як є.
+    page.senderTag = input.value;
+    const campaign = current();
+    const form = input.closest("[data-mc-form=sending]");
+    for (const label of form?.querySelectorAll(".mc-sender") || []) {
+      const box = label.querySelector("input[name=sender]");
+      const sender = { email: box.value, tags: label.dataset.mcSenderTags ? label.dataset.mcSenderTags.split("|") : [] };
+      label.hidden = senderHidden(sender, { senders: [...(campaign?.senders || []), ...(box.checked ? [box.value] : [])] }, page.senderTag);
+    }
+    return undefined;
   }
   if (input.dataset.mcDelay !== undefined) return setDelay(Number(input.dataset.mcDelay), input.value);
   if (input.dataset.mcInput === "sample") { page.sampleEmail = input.value; return previewAll(); }

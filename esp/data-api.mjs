@@ -10,7 +10,7 @@ import {
 } from "./filters.mjs";
 import { TIMELINE_TYPES } from "./messages.mjs";
 import {
-  DOMAIN_LABEL, DOMAIN_STATES, RAMP_STAGES, addDomain, addSender, checkDomain, registry, setDomainStatus, setSenderStatus, updateSender
+  DOMAIN_LABEL, DOMAIN_STATES, RAMP_STAGES, addDomain, addSender, checkDomain, registry, setDomainStatus, setSenderStatus, setSenderTags, tagCatalog, updateSender
 } from "./registry.mjs";
 
 /**
@@ -43,7 +43,8 @@ export async function handleEspDataApi({ request, response, url, sendJson, readJ
         canEdit: await allowed("registry.change") || await allowed("limits.change"),
         canAdd: await allowed("registry.change"),
         canLimit: await allowed("limits.change"),
-        domainStates: DOMAIN_STATES, domainLabels: DOMAIN_LABEL, rampStages: RAMP_STAGES });
+        domainStates: DOMAIN_STATES, domainLabels: DOMAIN_LABEL, rampStages: RAMP_STAGES,
+        tagCatalog: tagCatalog((await registry()).senders) });
       return true;
     }
 
@@ -189,7 +190,9 @@ export async function handleEspDataApi({ request, response, url, sendJson, readJ
       "/api/esp/domains/check": ["registry.change", (body) => checkDomain(body, actor, dns)],
       "/api/esp/senders": ["registry.change", (body) => addSender(body, actor)],
       "/api/esp/senders/status": [(body) => (body?.status === "retired" ? "registry.change" : "limits.change"), (body) => setSenderStatus(body, actor)],
-      "/api/esp/senders/update": [(body) => (body?.rampStage !== undefined ? "limits.change" : "registry.change"), (body) => updateSender(body, actor)]
+      "/api/esp/senders/update": [(body) => (body?.rampStage !== undefined ? "limits.change" : "registry.change"), (body) => updateSender(body, actor)],
+      // Mailbox tags (Розсилка / Прогрів / a team's own): the registry's.
+      "/api/esp/senders/tags": ["registry.change", (body) => setSenderTags(body, actor)]
     };
     if (method === "POST" && writes[path]) {
       const body = await readJson(request);

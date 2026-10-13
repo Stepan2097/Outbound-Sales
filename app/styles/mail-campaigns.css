@@ -1385,3 +1385,53 @@ div.mc-subject {
 .mc-bulk > span {
   margin-right: 6px;
 }
+
+/* Теги пошт у «Параметрах відправки»: фільтр над списком і мітки біля адреси. */
+.mc-sender[hidden] {
+  display: none;
+}
+
+.mc-sender-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.mc-sender-filter select {
+  min-height: 32px;
+  max-width: 220px;
+}
+
+.mc-sender-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.mc-sender-tag {
+  display: inline-block;
+  max-width: 160px;
+  padding: 1px 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-strong);
+  color: var(--ink);
+  font-size: 11px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mc-sender-tag.is-send {
+  background: color-mix(in srgb, var(--blue) 18%, transparent);
+  color: var(--blue);
+}
+
+.mc-sender-tag.is-warm {
+  background: color-mix(in srgb, var(--amber) 20%, transparent);
+  color: var(--amber);
+}

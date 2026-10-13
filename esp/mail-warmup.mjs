@@ -193,7 +193,7 @@ export function warmupView(entries, { senders = [], domains = [], now = new Date
     const limit = senderDailyLimit(sender);
     const coldToday = Math.max(0, (ledger.senders.get(sender.email)?.today || 0) - mine.sentToday);
     return {
-      email: sender.email, domain: sender.domain, domainStatus, person: sender.person || sender.displayName || "", role: sender.role || null,
+      email: sender.email, domain: sender.domain, domainStatus, person: sender.person || sender.displayName || "", role: sender.role || null, tags: sender.tags || [],
       status: blocked ? "blocked" : mine.running ? "running" : mine.startedAt ? "paused" : "never",
       blocked, day: mine.day, plannedToday: Math.min(mine.plannedToday, Math.max(0, limit - coldToday)), planOfDay: mine.plannedToday,
       sentToday: mine.sentToday, firstsToday: mine.firstsToday, repliesToday: mine.repliesToday, coldToday, limit,

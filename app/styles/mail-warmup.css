@@ -226,3 +226,48 @@
   border-color: var(--amber);
   color: var(--amber);
 }
+
+.warmup-mail-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.warmup-mail-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.warmup-mail-filter select {
+  min-height: 34px;
+}
+
+.warmup-mail-tags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.warmup-mail-tag {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--surface-strong);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.warmup-mail-tag.is-send {
+  background: color-mix(in srgb, var(--blue) 18%, transparent);
+  color: var(--blue);
+}
+
+.warmup-mail-tag.is-warm {
+  background: color-mix(in srgb, var(--amber) 20%, transparent);
+  color: var(--amber);
+}
