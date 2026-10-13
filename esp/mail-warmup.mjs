@@ -245,7 +245,20 @@ const REPLIES = [
 ];
 const CLOSERS = ["Thanks,", "Best,", "Cheers,", "Talk soon,", ""];
 
-const firstName = (sender) => String(sender.person || sender.displayName || sender.email.split("@")[0]).split(/[\s.]+/)[0].replace(/^./, (char) => char.toUpperCase());
+/**
+ * The name a mailbox greets and signs with: its own — the name on the Google
+ * account (`displayName`), else its address before the @. Never `person`:
+ * that is who on the team looks after the mailbox, and with one person
+ * connecting all of them every letter said «Hi Pavlo» and signed «Pavlo» (13.10).
+ */
+const ownName = (sender) => {
+  const name = String(sender.displayName || "").trim();
+  return name && !name.includes("@") ? name : "";
+};
+const firstName = (sender) => {
+  const word = (ownName(sender) || sender.email.split("@")[0].replace(/\d+/g, "")).split(/[\s._-]+/).find(Boolean) || sender.email.split("@")[0];
+  return word.replace(/^./, (char) => char.toUpperCase());
+};
 
 /** A first letter from one of our mailboxes to another: picked, not generated, and different every time. */
 export function warmupLetter({ from, to, seed, date = new Date() }) {
@@ -254,7 +267,7 @@ export function warmupLetter({ from, to, seed, date = new Date() }) {
   const closer = pick(CLOSERS, "closer");
   const body = `${pick(OPENERS, "open").replace("{to}", firstName(to))}\n\n${pick(BODIES, "body")}${closer ? `\n\n${closer}` : ""}`;
   const messageId = messageIdFor(from.email);
-  const raw = buildLetter({ from: { email: from.email, name: from.displayName || from.person || "" }, to: { email: to.email, name: to.displayName || to.person || "" }, subject, body, signature: firstName(from), date, messageId });
+  const raw = buildLetter({ from: { email: from.email, name: ownName(from) }, to: { email: to.email, name: ownName(to) }, subject, body, signature: firstName(from), date, messageId });
   return { raw, subject, text: `${body}\n\n${firstName(from)}`, messageId };
 }
 
@@ -264,7 +277,7 @@ export function warmupReply({ from, to, original, seed, date = new Date() }) {
   const messageId = messageIdFor(from.email);
   const subject = replySubject(original.subject || "");
   const raw = buildLetter({
-    from: { email: from.email, name: from.displayName || from.person || "" }, to: { email: to.email, name: to.displayName || to.person || "" },
+    from: { email: from.email, name: ownName(from) }, to: { email: to.email, name: ownName(to) },
     subject, body, signature: firstName(from), date, messageId,
     headers: { "In-Reply-To": original.messageId, References: original.messageId }
   });

@@ -323,3 +323,14 @@ test("прогрів пише й увечері — 08:00–22:00 за Києв�
   const late = await tick(at(0, 13 * 60 + 30));
   assert.equal(late.sent, 0, "після 22:00 — ні");
 });
+
+test("лист прогріву звертається на ім'я одержувача й підписаний іменем відправника — не того, хто підключав пошти", async () => {
+  const { warmupLetter } = await import("../esp/mail-warmup.mjs");
+  const from = { email: "maryna.advantage@gmail.com", displayName: "Maryna Koval", person: "pavlo.work.101@gmail.com" };
+  const to = { email: "advantage.inbox1@gmail.com", displayName: "", person: "pavlo.work.101@gmail.com" };
+  const letter = warmupLetter({ from, to, seed: "s", date: new Date("2026-10-13T10:00:00Z") });
+  assert.doesNotMatch(letter.raw, /Pavlo/i);
+  assert.match(letter.text, /Advantage/, "без імені в Google — з адреси до @");
+  assert.match(letter.text, /\n\nMaryna$/, "підпис — ім'я відправника");
+  assert.match(letter.raw, /^From: .*Maryna Koval/m);
+});
