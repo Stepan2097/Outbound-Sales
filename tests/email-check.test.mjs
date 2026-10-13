@@ -12,6 +12,8 @@ import { checkEmail, checkEmails } from "../contacts/email-check.mjs";
 
 function mailServer({ mailboxes = [], catchAll = false, greylist = false, refuseMail = false }) {
   const server = net.createServer((socket) => {
+    // The client may hang up right after QUIT; a reset here is not a failure of the test.
+    socket.on("error", () => {});
     socket.write("220 mx.test ESMTP ready\r\n");
     let buffer = "";
     socket.on("data", (chunk) => {
