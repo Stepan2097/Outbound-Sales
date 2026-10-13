@@ -182,7 +182,10 @@ export function warmupView(entries, { senders = [], domains = [], now = new Date
   const { rows } = warmupLedger(entries, { now });
   const ledger = sendLedger(entries, { now });
   const domainState = new Map(domains.map((domain) => [domain.domain, domain.status]));
-  return senders.filter((sender) => sender.effectiveStatus !== "retired").map((sender) => {
+  // Mailboxes for campaigns first, then unmarked, then warm-up-only (13.10).
+  const order = (sender) => (sender.role === "cold" ? 0 : sender.role === "warmup" ? 2 : 1);
+  return senders.filter((sender) => sender.effectiveStatus !== "retired")
+    .sort((left, right) => order(left) - order(right) || left.email.localeCompare(right.email)).map((sender) => {
     const mine = rows.get(sender.email) || { running: false, day: 0, plannedToday: 0, sentToday: 0, firstsToday: 0, repliesToday: 0, sent: 0, repliesReceived: 0, repliesSent: 0, received: 0, rescued: 0, landedInSpam: 0, failedToday: 0, lastError: null, startedAt: null, pausedAt: null, by: "" };
     const domainStatus = domainState.get(sender.domain) || null;
     const blocked = sender.status !== "active" ? (sender.status === "paused" ? "пошта на паузі" : "пошту виведено")
@@ -190,7 +193,7 @@ export function warmupView(entries, { senders = [], domains = [], now = new Date
     const limit = senderDailyLimit(sender);
     const coldToday = Math.max(0, (ledger.senders.get(sender.email)?.today || 0) - mine.sentToday);
     return {
-      email: sender.email, domain: sender.domain, domainStatus, person: sender.person || sender.displayName || "",
+      email: sender.email, domain: sender.domain, domainStatus, person: sender.person || sender.displayName || "", role: sender.role || null,
       status: blocked ? "blocked" : mine.running ? "running" : mine.startedAt ? "paused" : "never",
       blocked, day: mine.day, plannedToday: Math.min(mine.plannedToday, Math.max(0, limit - coldToday)), planOfDay: mine.plannedToday,
       sentToday: mine.sentToday, firstsToday: mine.firstsToday, repliesToday: mine.repliesToday, coldToday, limit,
@@ -326,7 +329,11 @@ export async function runWarmupTick({ journal, senders, connector, gate, now = n
   // ramping or active (the gate's warm-up rule, `canWarm`). One on a paused or
   // reserve domain, or paused itself, waits without writing a failure a minute.
   const allowed = (sender) => sender.status === "active" && (sender.effectiveStatus === "active" || (sender.effectiveStatus === "held" && sender.heldBy === "aging"));
-  const live = senders.filter((sender) => rows.get(sender.email)?.running && allowed(sender));
+  // Mailboxes for campaigns go first in every pass (owner 13.10: «вони в першу
+  // чергу прогріваються») — when limits bite, theirs are the letters that go.
+  const priority = (sender) => (sender.role === "cold" ? 0 : sender.role === "warmup" ? 2 : 1);
+  const live = senders.filter((sender) => rows.get(sender.email)?.running && allowed(sender))
+    .sort((left, right) => priority(left) - priority(right));
   if (!live.length) return summary;
   const ours = senders.map((sender) => sender.email);
   const sentById = new Map(entries.filter((entry) => entry.type === "warmup.sending" && entry.data?.messageId).map((entry) => [entry.data.messageId, entry]));
@@ -439,8 +446,13 @@ export async function runWarmupTick({ journal, senders, connector, gate, now = n
     if (!partners.length) { summary.skipped.push({ mailbox: from.email, kind: "first", reason: "no_partner" }); continue; }
     const decision = mayWrite(from);
     if (!decision.ok) { summary.skipped.push({ mailbox: from.email, kind: "first", reason: decision.reason }); continue; }
-    const fewest = Math.min(...partners.map((sender) => inbound.get(sender.email) || 0));
-    const least = partners.filter((sender) => (inbound.get(sender.email) || 0) === fewest);
+    // A mailbox for campaigns is written to first, up to twice its own plan a
+    // day (at least 4) — the helpers warm it; past that, everyone shares.
+    const cap = (sender) => Math.max(4, 2 * (rows.get(sender.email)?.plannedToday || WARMUP_START));
+    const coldRoom = partners.filter((sender) => sender.role === "cold" && (inbound.get(sender.email) || 0) < cap(sender));
+    const base = coldRoom.length ? coldRoom : partners;
+    const fewest = Math.min(...base.map((sender) => inbound.get(sender.email) || 0));
+    const least = base.filter((sender) => (inbound.get(sender.email) || 0) === fewest);
     const others = least.filter((sender) => sender.domain !== from.domain);
     const pool = others.length ? others : least;
     const count = warmupLedger(await journal.allEntries(), { now }).rows.get(from.email)?.sent || 0;

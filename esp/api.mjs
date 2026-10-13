@@ -21,7 +21,7 @@ import { recordAboutContact, recordFailed, recordSending, recordSent } from "./m
 import { allEntries, append, contactKey } from "./journal.mjs";
 import { applyRampReviews, reviewRamp } from "./ramp.mjs";
 import { DOMAIN_DAILY_LIMIT, GAP_MINUTES, WINDOW, sendDecision, sendLedger, senderDailyLimit } from "./limits.mjs";
-import { canSend, isDisconnected, registry, updateSender } from "./registry.mjs";
+import { canSend, isDisconnected, registry, setSenderRole, updateSender } from "./registry.mjs";
 import { LetterError, assertPlainLetter } from "./letter.mjs";
 import { TEMPLATE_VARIABLES, TemplateError, prepareTemplate } from "./template.mjs";
 import { DEFAULT_SIGNATURE, prepareSignature } from "./templates.mjs";
@@ -550,6 +550,21 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
     await append({ type: "warmup.plan", actor, data: plan });
     await logged("warmup_plan", plan);
     sendJson(response, 200, { success: true, plan });
+    return true;
+  }
+
+  // «Розсилка» / «Прогрів» (13.10): what a mailbox is for; warm-up-only ones never send cold mail.
+  if (method === "POST" && path === "/warmup/role") {
+    const body = (await readJson(request)) || {};
+    try {
+      await setSenderRole({ email: body.mailbox, role: body.role || null }, actor);
+    } catch (error) {
+      if (!error?.statusCode) throw error;
+      sendJson(response, error.statusCode, { success: false, error: error.message });
+      return true;
+    }
+    await logged("mailbox_role", { mailbox: String(body.mailbox || ""), role: body.role || null });
+    sendJson(response, 200, { success: true });
     return true;
   }
 

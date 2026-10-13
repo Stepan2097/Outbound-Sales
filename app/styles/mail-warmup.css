@@ -204,3 +204,25 @@
   color: inherit;
   font-size: inherit;
 }
+
+/* «Призначення» (13.10) */
+.warmup-mail-role-select {
+  width: auto;
+  min-width: 120px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.warmup-mail-role-select.is-cold,
+.warmup-mail-role.is-cold {
+  border-color: var(--teal);
+  color: var(--teal);
+}
+
+.warmup-mail-role-select.is-warmup,
+.warmup-mail-role.is-warmup {
+  border-color: var(--amber);
+  color: var(--amber);
+}

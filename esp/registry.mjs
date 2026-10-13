@@ -29,6 +29,9 @@ export const SENDING_DOMAIN_STATES = ["ramp", "active"];
 export const RAMP_STAGES = [5, 10, 15, 20, 25, 30, 35];
 export const DOMAIN_LABEL = { aging: "старіє", ramp: "рампа", active: "активний", reserve: "запас", paused: "пауза", retired: "виведений" };
 export const SENDER_STATES = ["active", "paused", "retired"];
+/** What a mailbox is for: `cold` — campaigns and letters to leads (and warm-up); `warmup` — warm-up only. */
+export const SENDER_ROLES = ["cold", "warmup"];
+export const SENDER_ROLE_LABEL = { cold: "розсилка", warmup: "прогрів" };
 
 function fail(message, statusCode = 400) {
   return Object.assign(new Error(message), { statusCode });
@@ -71,6 +74,11 @@ export async function registry() {
         if (data[field] !== undefined) sender[field] = data[field];
       }
       sender.history.push({ ...stamp, changed: Object.keys(data).filter((key) => key !== "email") });
+    } else if (entry.type === "sender.role" && senders.has(data.email)) {
+      // «Розсилка» or «Прогрів» (13.10): a warm-up-only mailbox never sends cold mail.
+      const sender = senders.get(data.email);
+      sender.role = SENDER_ROLES.includes(data.role) ? data.role : null;
+      sender.history.push({ ...stamp, changed: ["role"], role: sender.role });
     } else if (entry.type === "sender.status" && senders.has(data.email)) {
       const sender = senders.get(data.email);
       sender.status = data.status;
@@ -224,6 +232,17 @@ export async function canWarm(email) {
   return { ok: true };
 }
 
+/** Mark a mailbox «розсилка» or «прогрів»; `null` clears the mark. */
+export async function setSenderRole({ email, role }, actor) {
+  const key = contactKey(email);
+  const { senders } = await registry();
+  const found = senders.find((row) => row.email === key);
+  if (!found) throw fail("Такої пошти в реєстрі немає.", 404);
+  const next = SENDER_ROLES.includes(role) ? role : null;
+  if ((found.role || null) === next) return null;
+  return append({ type: "sender.role", actor, data: { email: key, role: next } });
+}
+
 export async function canSend(email) {
   const key = contactKey(email);
   const { senders } = await registry();
@@ -235,6 +254,7 @@ export async function canSend(email) {
   if (sender.effectiveStatus !== "active") {
     return { ok: false, reason: `${sender.email}: ${sender.effectiveStatus === "paused" ? "на паузі" : "виведено"}${sender.status === "active" ? " разом із доменом" : ""}.` };
   }
+  if (sender.role === "warmup") return { ok: false, reason: `${sender.email} — пошта лише для прогріву: холодні листи з неї не йдуть.` };
   return { ok: true, sender };
 }
 

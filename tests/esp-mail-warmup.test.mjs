@@ -354,3 +354,32 @@ test("кожен лист прогріву пише модель; якщо во�
   assert.equal(boris.data.writtenBy, "template", "модель упала — лист з шматків");
   assert.equal(asked[0].to.name, asked[0].to.email === BORIS ? "Boris" : "Anna");
 });
+
+test("призначення: пошти для розсилки вгорі таблиці; пошта «лише прогрів» не шле холодних листів, але гріється", async (t) => {
+  await world(t);
+  const { setSenderRole, canSend, registry: read } = await import("../esp/registry.mjs");
+  await setSenderRole({ email: OLGA, role: "cold" }, "test");
+  await setSenderRole({ email: ANNA, role: "warmup" }, "test");
+  const { senders, domains } = await read();
+  const rows = warmupView(await allEntries(), { senders, domains });
+  assert.deepEqual(rows.map((row) => [row.email, row.role]), [[OLGA, "cold"], [BORIS, null], [ANNA, "warmup"]]);
+  assert.equal((await canSend(OLGA)).ok, true);
+  const refused = await canSend(ANNA);
+  assert.equal(refused.ok, false);
+  assert.match(refused.reason, /лише для прогріву/);
+});
+
+test("пошти для розсилки гріються першими: помічники пишуть насамперед їм — у межах подвійного плану", async (t) => {
+  const { tick, start } = await world(t);
+  const extra = ["ira@advantage-mail.com", "max@advantage-mail.com", "lev@advantage-mail.com"];
+  for (const email of extra) await addSender({ email, rampStage: 35 }, "test");
+  const { setSenderRole } = await import("../esp/registry.mjs");
+  await setSenderRole({ email: BORIS, role: "cold" }, "test");
+  for (const email of [ANNA, OLGA, ...extra]) await setSenderRole({ email, role: "warmup" }, "test");
+  for (const mailbox of [ANNA, BORIS, OLGA, ...extra]) await start(mailbox, at(0));
+  await tick(at(0, 30));
+  const sent = (await allEntries()).filter((entry) => entry.type === "warmup.sending");
+  assert.equal(sent[0].data.from, BORIS, "пошта для розсилки шле першою");
+  const toBoris = sent.filter((entry) => entry.data.to === BORIS).length;
+  assert.equal(toBoris, 4, `Борис отримує до подвійного плану (мін. 4): ${sent.map((entry) => entry.data.to).join(", ")}`);
+});

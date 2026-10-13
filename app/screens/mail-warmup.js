@@ -50,6 +50,18 @@ function summaryHtml(rows) {
     <article class="warmup-mail-card"><span class="warmup-mail-icon"><i data-lucide="${icon}"></i></span><div><span>${label}</span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(note)}</small></div></article>`).join("")}</div>`;
 }
 
+const ROLE_WORD = { cold: "Розсилка", warmup: "Прогрів" };
+
+/** «Розсилка» or «Прогрів»: a select for whoever may change it, a label for the rest. */
+function roleHtml(row, canChange) {
+  if (!canChange) return row.role ? `<span class="warmup-mail-role is-${row.role}">${ROLE_WORD[row.role]}</span>` : '<span class="esp-subtle">—</span>';
+  return `<select class="warmup-mail-role-select is-${row.role || "none"}" data-warmup-role="${escapeAttr(row.email)}" aria-label="Призначення ${escapeAttr(row.email)}"${mailWarmupState.busy ? " disabled" : ""}>
+    <option value=""${row.role ? "" : " selected"}>не вказано</option>
+    <option value="cold"${row.role === "cold" ? " selected" : ""}>Розсилка</option>
+    <option value="warmup"${row.role === "warmup" ? " selected" : ""}>Прогрів</option>
+  </select>`;
+}
+
 function tableHtml(data) {
   const { rows, canChange } = data;
   if (!rows.length) return `<div class="empty-state">У прогріві немає пошт — додайте їх у «Пошта» → «Пошти» → «Додати пошту».</div>${removedHtml(data)}`;
@@ -61,12 +73,13 @@ function tableHtml(data) {
   };
   return `
     <div class="table-wrap"><table class="warmup-mail-table">
-      <thead><tr><th>Пошта</th><th>Статус</th><th>День</th><th>Листів сьогодні / план</th><th>Відповідей</th><th>Вийнято зі спаму</th><th>Ліміт дня</th><th></th></tr></thead>
+      <thead><tr><th>Пошта</th><th>Призначення</th><th>Статус</th><th>День</th><th>Листів сьогодні</th><th>Відповідей</th><th>Вийнято зі спаму</th><th>Ліміт дня</th><th></th></tr></thead>
       <tbody>${rows.map((row) => {
         const [word, tone] = STATUS[row.status];
         const share = row.plannedToday ? Math.min(100, Math.round((row.firstsToday / row.plannedToday) * 100)) : 0;
         return `<tr>
           <td><strong>${escapeHtml(row.email)}</strong><small>${escapeHtml(row.person || "")}${row.person ? " · " : ""}домен: ${escapeHtml(DOMAIN_WORD[row.domainStatus] || row.domainStatus || "—")}</small></td>
+          <td>${roleHtml(row, canChange)}</td>
           <td><span class="pill ${tone}">${word}</span>${row.status === "paused" && row.pausedAt ? `<small>з ${escapeHtml(when(row.pausedAt))}</small>` : row.status === "running" && row.startedAt ? `<small>старт ${escapeHtml(when(row.startedAt))}</small>` : ""}</td>
           <td class="is-number">${row.day || "—"}</td>
           <td class="is-number">${row.status === "running" ? `<div class="warmup-mail-progress"><span style="width:${share}%"></span></div>` : ""}${row.firstsToday} / ${row.plannedToday}${row.repliesToday ? `<small>+ ${row.repliesToday} ${uaPlural(row.repliesToday, "відповідь", "відповіді", "відповідей")}</small>` : ""}${row.planOfDay > row.plannedToday && row.status === "running" ? `<small title="Холодні листи сьогодні: ${row.coldToday}">план ${row.planOfDay}, ліміт урізав</small>` : ""}</td>
@@ -169,4 +182,13 @@ document.getElementById("mailWarmupRoot")?.addEventListener("click", (event) => 
     return void change("start", { all: true }, (result) => `Запущено: ${result.changed.length}${result.refused.length ? `; не можна: ${result.refused.map((row) => row.mailbox).join(", ")}` : ""}.`);
   }
   if (event.target.closest("[data-warmup-refresh]")) void loadMailWarmup();
+});
+
+// «Призначення»: розсилка або прогрів — і пошти для розсилки піднімаються нагору.
+document.getElementById("mailWarmupRoot")?.addEventListener("change", (event) => {
+  const select = event.target.closest?.("[data-warmup-role]");
+  if (!select) return;
+  const mailbox = select.dataset.warmupRole;
+  const role = select.value || null;
+  void change("role", { mailbox, role }, () => `${mailbox}: ${role === "cold" ? "для розсилки" : role === "warmup" ? "лише для прогріву — холодні листи з неї не підуть" : "призначення знято"}.`);
 });
