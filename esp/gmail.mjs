@@ -285,6 +285,17 @@ export class GmailApiConnector {
   }
 
   /**
+   * The Message-ID Gmail actually gave a sent message. Gmail replaces the one
+   * in the raw letter with its own (13.10: a warm-up letter left as
+   * <…@trafpush.com> and arrived as <CA…@mail.gmail.com>), so whoever matches
+   * letters by Message-ID has to ask for the real one.
+   */
+  async messageIdOf(value, id) {
+    const message = await this.call(normalizeMailbox(value), `/messages/${encodeURIComponent(id)}?format=metadata&metadataHeaders=Message-ID`);
+    return metaHeader(message, "message-id") || null;
+  }
+
+  /**
    * One finished RFC 5322 message (built by ESP 2/3), sent as `mailbox`. With
    * `threadId` Gmail keeps a follow-up in the conversation it continues.
    */
@@ -359,6 +370,11 @@ export class StubGmailConnector {
       throw new MailboxError("Заглушка: цей домен не серед підключених.", { code: "mailbox_rejected" });
     }
     return { ok: true, mailbox, address: mailbox, messagesTotal: 0, stub: true };
+  }
+
+  async messageIdOf(value, id) {
+    const sent = this.sent.find((row) => row.id === id);
+    return sent ? (String(sent.raw).match(/^Message-ID:\s*(.*)$/im) || [])[1]?.trim() || null : null;
   }
 
   async send(value, raw, { threadId = null } = {}) {

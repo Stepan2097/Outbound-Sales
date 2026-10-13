@@ -192,7 +192,8 @@ export async function processInbound({ mailbox, message, entries, index, record,
 
 /** The Message-IDs of the mailbox warm-up's letters, first ones and replies. */
 export function warmupMessageIds(entries) {
-  return new Set(entries.filter((entry) => entry.type === "warmup.sending" && entry.data?.messageId).map((entry) => entry.data.messageId));
+  // Ours as we wrote it, and as Gmail really sent it (it replaces the Message-ID).
+  return new Set(entries.filter((entry) => ["warmup.sending", "warmup.sent", "warmup.sent_id"].includes(entry.type) && entry.data?.messageId).map((entry) => entry.data.messageId));
 }
 
 /**

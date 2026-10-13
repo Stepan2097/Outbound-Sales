@@ -383,3 +383,29 @@ test("пошти для розсилки гріються першими: пом
   const toBoris = sent.filter((entry) => entry.data.to === BORIS).length;
   assert.equal(toBoris, 4, `Борис отримує до подвійного плану (мін. 4): ${sent.map((entry) => entry.data.to).join(", ")}`);
 });
+
+test("Gmail підміняє Message-ID: лист однаково впізнається у вхідних і на нього відповідають (13.10: жодної відповіді)", async (t) => {
+  const { connector, tick, start } = await world(t);
+  // Gmail's behaviour: what arrives carries Gmail's own Message-ID, not ours.
+  const realIds = new Map();
+  connector.messageIdOf = async (_mailbox, id) => realIds.get(id) || null;
+  const route = () => {
+    for (const letter of connector.sent.splice(0)) {
+      const real = `<CA${letter.id.slice(5, 15)}@mail.gmail.com>`;
+      realIds.set(letter.id, real);
+      const to = (letter.raw.match(/^To:.*<([^>]+)>|^To:\s*(\S+@\S+)/m) || []).slice(1).find(Boolean);
+      connector.deliver(to, letter.raw.replace(/^Message-ID:.*$/im, `Message-ID: ${real}`));
+    }
+  };
+  // the stub must remember what it sent to answer messageIdOf
+  const send = connector.send.bind(connector);
+  connector.send = async (mailbox, raw, options) => { const result = await send(mailbox, raw, options); connector.sent.at(-1).id = result.id; return result; };
+  for (const mailbox of [ANNA, BORIS]) await start(mailbox, at(0));
+  await tick(at(0, 30));
+  route();
+  await tick(at(0, 32));
+  const received = (await allEntries()).filter((entry) => entry.type === "warmup.received");
+  assert.equal(received.length, 2, "обидва листи впізнано за справжнім Message-ID");
+  const replies = await tick(at(0, 32 + 141), { replyPercent: 100 });
+  assert.ok(replies.replied >= 1, `на них відповідають (${JSON.stringify(replies.skipped)})`);
+});

@@ -336,7 +336,33 @@ export async function runWarmupTick({ journal, senders, connector, gate, now = n
     .sort((left, right) => priority(left) - priority(right));
   if (!live.length) return summary;
   const ours = senders.map((sender) => sender.email);
-  const sentById = new Map(entries.filter((entry) => entry.type === "warmup.sending" && entry.data?.messageId).map((entry) => [entry.data.messageId, entry]));
+  // Our letters by Message-ID — the one we wrote and the one Gmail really gave
+  // them (it replaces ours); letters sent before that was recorded are looked
+  // up once, a few dozen a pass.
+  const sendingBySeq = new Map(entries.filter((entry) => entry.type === "warmup.sending").map((entry) => [entry.seq, entry]));
+  const realIds = new Map();
+  for (const entry of entries) {
+    if ((entry.type === "warmup.sent" || entry.type === "warmup.sent_id") && entry.data?.messageId) realIds.set(entry.data.sendingSeq, entry.data.messageId);
+  }
+  const unknown = entries.filter((entry) => entry.type === "warmup.sent" && entry.data?.gmailId && !realIds.has(entry.data.sendingSeq)
+    && now.getTime() - new Date(entry.at).getTime() < 4 * 86_400_000).slice(-40);
+  for (const entry of unknown) {
+    const sending = sendingBySeq.get(entry.data.sendingSeq);
+    if (!sending || !connector.messageIdOf) continue;
+    try {
+      const messageId = await connector.messageIdOf(sending.data.from, entry.data.gmailId);
+      if (!messageId) continue;
+      await journal.append({ type: "warmup.sent_id", actor: "esp-warmup", data: { sendingSeq: entry.data.sendingSeq, messageId } });
+      realIds.set(entry.data.sendingSeq, messageId);
+    } catch (error) {
+      summary.errors.push({ mailbox: sending.data.from, stage: "message_id", error: error.message });
+    }
+  }
+  const sentById = new Map();
+  for (const entry of sendingBySeq.values()) {
+    if (entry.data?.messageId) sentById.set(entry.data.messageId, entry);
+    if (realIds.has(entry.seq)) sentById.set(realIds.get(entry.seq), entry);
+  }
   const seen = new Set(entries.filter((entry) => entry.type === "warmup.received").map((entry) => `${entry.data.mailbox}|${entry.data.gmailId}`));
   const rescued = new Set(entries.filter((entry) => entry.type === "warmup.rescued").map((entry) => `${entry.data.mailbox}|${entry.data.gmailId}`));
 
@@ -387,7 +413,8 @@ export async function runWarmupTick({ journal, senders, connector, gate, now = n
     const sending = await journal.append({ type: "warmup.sending", actor: "esp-warmup", data: { from: from.email, to: to.email, subject: letter.subject, text: letter.text, messageId: letter.messageId, ...data } });
     try {
       const result = await gate.send(from.email, letter.raw, { purpose: "warmup", ...(data.threadId ? { threadId: data.threadId } : {}) });
-      await journal.append({ type: "warmup.sent", actor: "esp-warmup", data: { sendingSeq: sending.seq, gmailId: result.id, threadId: result.threadId, stub: Boolean(result.stub) } });
+      const realId = connector.messageIdOf ? await connector.messageIdOf(from.email, result.id).catch(() => null) : null;
+      await journal.append({ type: "warmup.sent", actor: "esp-warmup", data: { sendingSeq: sending.seq, gmailId: result.id, threadId: result.threadId, stub: Boolean(result.stub), ...(realId ? { messageId: realId } : {}) } });
       usedThisPass.add(from.email);
       ledger = sendLedger(await journal.allEntries(), { now });
       return true;
@@ -425,7 +452,7 @@ export async function runWarmupTick({ journal, senders, connector, gate, now = n
     const decision = mayWrite(from, "reply");
     if (!decision.ok) { summary.skipped.push({ mailbox: from.email, kind: "reply", reason: decision.reason }); continue; }
     const text = await written(writer, { kind: "reply", from: { email: from.email, name: firstName(from) }, to: { email: to.email, name: firstName(to) }, original: { subject: original.data.subject, text: original.data.text } });
-    const letter = warmupReply({ from, to, original: original.data, seed: messageId, date: now, written: text });
+    const letter = warmupReply({ from, to, original: { ...original.data, messageId }, seed: messageId, date: now, written: text });
     if (await send(from, to, letter, { kind: "reply", inReplyTo: messageId, threadId: received.data.threadId, writtenBy: text ? "model" : "template" })) {
       answered.add(messageId);
       summary.replied += 1;
