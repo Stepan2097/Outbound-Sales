@@ -161,7 +161,10 @@ test("ESP 11 · 2 — the original of every letter: one text/plain part, List-Un
   assert.ok(opener.includes(LINK), "the link was not left as the template has it");
 });
 
-test("ESP 11 · 3 — load: 300 people on 3 senders over a working week — no sender over its ramp or under its gap, and a retry after a failure sends nothing twice", async (t) => {
+// The week-long load run takes ~8 minutes on the deploy server — most of the
+// whole suite — and held every deploy behind it (owner 13.10: «скороти, щоб за
+// 2 хв білдилося»). It runs with `npm run test:slow`, not in the deploy gate.
+test("ESP 11 · 3 — load: 300 people on 3 senders over a working week — no sender over its ramp or under its gap, and a retry after a failure sends nothing twice", { skip: process.env.SLOW_TESTS === "1" ? false : "повільне навантажувальне приймання — npm run test:slow" }, async (t) => {
   const stub = new StubGmailConnector();
   let failNext = 3;
   // Every so often Gmail takes the letter and the answer is lost: the worst case for duplicates.
