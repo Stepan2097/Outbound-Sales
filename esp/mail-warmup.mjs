@@ -185,7 +185,7 @@ export function warmupView(entries, { senders = [], domains = [], now = new Date
   // Mailboxes for campaigns first, then unmarked, then warm-up-only (13.10).
   const order = (sender) => (sender.role === "cold" ? 0 : sender.role === "warmup" ? 2 : 1);
   return senders.filter((sender) => sender.effectiveStatus !== "retired")
-    .sort((left, right) => order(left) - order(right) || left.email.localeCompare(right.email)).map((sender) => {
+    .sort((left, right) => order(left) - order(right) || String(left.domain).localeCompare(String(right.domain)) || left.email.localeCompare(right.email)).map((sender) => {
     const mine = rows.get(sender.email) || { running: false, day: 0, plannedToday: 0, sentToday: 0, firstsToday: 0, repliesToday: 0, sent: 0, repliesReceived: 0, repliesSent: 0, received: 0, rescued: 0, landedInSpam: 0, failedToday: 0, lastError: null, startedAt: null, pausedAt: null, by: "" };
     const domainStatus = domainState.get(sender.domain) || null;
     const blocked = sender.status !== "active" ? (sender.status === "paused" ? "пошта на паузі" : "пошту виведено")

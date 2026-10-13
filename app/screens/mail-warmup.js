@@ -93,10 +93,12 @@ function tableHtml(data) {
   return `
     <div class="table-wrap"><table class="warmup-mail-table">
       <thead><tr><th>Пошта</th><th>Призначення</th><th>Статус</th><th>День</th><th>Листів сьогодні</th><th>Відповідей</th><th>Вийнято зі спаму</th><th>Ліміт дня</th><th></th></tr></thead>
-      <tbody>${rows.map((row) => {
+      <tbody>${rows.map((row, index, list) => {
         const [word, tone] = STATUS[row.status];
         const share = row.plannedToday ? Math.min(100, Math.round((row.firstsToday / row.plannedToday) * 100)) : 0;
-        return `<tr>
+        // A new domain starts a group: a small gap above it (13.10).
+        const groupStart = index > 0 && list[index - 1].domain !== row.domain;
+        return `<tr${groupStart ? ' class="warmup-mail-group-start"' : ""}>
           <td><strong>${escapeHtml(row.email)}</strong>${ownTags(row).length ? `<span class="warmup-mail-tags">${tagPills(ownTags(row))}</span>` : ""}<small>домен: ${escapeHtml(DOMAIN_WORD[row.domainStatus] || row.domainStatus || "—")}</small></td>
           <td>${roleHtml(row, canChange)}</td>
           <td><span class="pill ${tone}">${word}</span>${row.status === "paused" && row.pausedAt ? `<small>з ${escapeHtml(when(row.pausedAt))}</small>` : row.status === "running" && row.startedAt ? `<small>старт ${escapeHtml(when(row.startedAt))}</small>` : ""}</td>

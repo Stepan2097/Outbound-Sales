@@ -109,6 +109,18 @@ function rowHtml(row) {
   </li>`;
 }
 
+/** Mailboxes grouped by domain — domains A→Z, and inside each the addresses A→Z (13.10). */
+function groupsByDomain(rows) {
+  const groups = new Map();
+  for (const row of rows) {
+    const domain = row.email.split("@")[1] || "";
+    if (!groups.has(domain)) groups.set(domain, []);
+    groups.get(domain).push(row);
+  }
+  return [...groups.entries()].sort(([left], [right]) => left.localeCompare(right))
+    .map(([domain, group]) => [domain, group.sort((left, right) => left.email.localeCompare(right.email))]);
+}
+
 function listHtml() {
   const rows = (page.data?.mailboxes || []).filter((row) => (!page.query || `${row.email} ${row.name}`.toLowerCase().includes(page.query.toLowerCase()))
     && (!page.tag || (page.tag === "-" ? !(row.sender?.tags || []).length : (row.sender?.tags || []).includes(page.tag))));
@@ -123,7 +135,7 @@ function listHtml() {
   if (!rows.length) return '<p class="acc-muted">За цим пошуком чи тегом пошт немає.</p>';
   return `<div class="acc-list">
     <div class="acc-head" aria-hidden="true"><span></span><span>Пошта</span><span>Стан</span><span>Теги</span><span>Ліміт</span><span></span></div>
-    <ul>${rows.map(rowHtml).join("")}</ul>
+    ${groupsByDomain(rows).map(([domain, group]) => `<ul class="acc-group" aria-label="${escapeAttr(domain)}"><li class="acc-group-name">${escapeHtml(domain)}</li>${group.map(rowHtml).join("")}</ul>`).join("")}
   </div>`;
 }
 

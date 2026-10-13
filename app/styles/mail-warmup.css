@@ -271,3 +271,8 @@
   background: color-mix(in srgb, var(--amber) 20%, transparent);
   color: var(--amber);
 }
+
+/* Пошти одного домену — групою; між доменами невеликий проміжок (13.10). */
+.warmup-mail-table tr.warmup-mail-group-start td {
+  border-top: 10px solid var(--surface-sunk);
+}
