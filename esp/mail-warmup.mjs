@@ -400,6 +400,20 @@ export async function runWarmupTick({ journal, senders, connector, gate, now = n
 }
 
 /** The last things the warm-up did, for the page's log. */
+/**
+ * Mailboxes somebody took off the warm-up page («Прибрати з прогріву», 13.10):
+ * the last of `warmup.removed` / `warmup.restored` per mailbox. They are not
+ * listed and do not run; «Повернути» brings one back, paused.
+ */
+export function removedFromWarmup(entries) {
+  const removed = new Set();
+  for (const entry of entries) {
+    if (entry.type === "warmup.removed") removed.add(entry.data?.mailbox);
+    if (entry.type === "warmup.restored") removed.delete(entry.data?.mailbox);
+  }
+  return removed;
+}
+
 export function warmupLog(entries, { limit = 30 } = {}) {
   const words = {
     "warmup.started": (data) => `${data.mailbox}: прогрів запущено`,
@@ -409,7 +423,9 @@ export function warmupLog(entries, { limit = 30 } = {}) {
     "warmup.received": (data) => `${data.mailbox} отримала від ${data.from}${data.inSpam ? " — у спамі" : ""}`,
     "warmup.rescued": (data) => `${data.mailbox}: лист від ${data.from} вийнято зі спаму, позначено важливим`,
     "warmup.rescue_refused": (data) => `${data.mailbox}: Google не дав змінити мітки — немає scope gmail.modify`,
-    "warmup.plan": (data) => `план прогріву: старт ${data.start}, +${data.step} щодня, до ${data.max}`
+    "warmup.plan": (data) => `план прогріву: старт ${data.start}, +${data.step} щодня, до ${data.max}`,
+    "warmup.removed": (data) => `${data.mailbox}: прибрано з прогріву`,
+    "warmup.restored": (data) => `${data.mailbox}: повернуто в прогрів`
   };
   return entries.filter((entry) => words[entry.type]).slice(-limit).reverse().map((entry) => ({
     at: entry.at, type: entry.type, actor: entry.actor || "", text: words[entry.type](entry.data || {})

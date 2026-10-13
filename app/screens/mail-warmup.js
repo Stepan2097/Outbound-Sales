@@ -52,7 +52,7 @@ function summaryHtml(rows) {
 
 function tableHtml(data) {
   const { rows, canChange } = data;
-  if (!rows.length) return '<div class="empty-state">Скриньок-відправників ще немає — додайте їх у «Пошта» → «Налаштування пошти» → «Домени й відправники».</div>';
+  if (!rows.length) return `<div class="empty-state">У прогріві немає скриньок — додайте їх у «Пошта» → «Скриньки» → «Додати скриньку».</div>${removedHtml(data)}`;
   const action = (row) => {
     if (!canChange) return "";
     if (row.status === "running") return `<button type="button" class="text-button" data-warmup-pause="${escapeAttr(row.email)}"${mailWarmupState.busy ? " disabled" : ""}><i data-lucide="pause"></i><span>Пауза</span></button>`;
@@ -73,10 +73,18 @@ function tableHtml(data) {
           <td class="is-number">${row.repliesReceived}<small>сама відповіла: ${row.repliesSent}</small></td>
           <td class="is-number">${row.rescued}<small>її листів у спамі: ${row.landedInSpam}</small></td>
           <td class="is-number">${row.limit}<small>холодних сьогодні: ${row.coldToday}</small></td>
-          <td class="warmup-mail-action">${action(row)}${row.lastError && row.status === "running" ? `<small class="is-bad" title="${escapeAttr(row.lastError.error)}">остання відмова ${escapeHtml(when(row.lastError.at))}</small>` : ""}</td>
+          <td class="warmup-mail-action">${action(row)}${canChange ? `<button type="button" class="icon-button warmup-mail-remove" data-warmup-remove="${escapeAttr(row.email)}" title="Прибрати з прогріву" aria-label="Прибрати ${escapeAttr(row.email)} з прогріву"${mailWarmupState.busy ? " disabled" : ""}><i data-lucide="trash-2"></i></button>` : ""}${row.lastError && row.status === "running" ? `<small class="is-bad" title="${escapeAttr(row.lastError.error)}">остання відмова ${escapeHtml(when(row.lastError.at))}</small>` : ""}</td>
         </tr>`;
       }).join("")}</tbody>
-    </table></div>`;
+    </table></div>
+    ${removedHtml(data)}`;
+}
+
+/** Mailboxes taken off the warm-up: listed small under the table, each with «Повернути». */
+function removedHtml(data) {
+  const removed = data.removed || [];
+  if (!removed.length) return "";
+  return `<div class="warmup-mail-removed"><span>Прибрані з прогріву:</span>${removed.map((email) => `<span class="warmup-mail-removed-item">${escapeHtml(email)}${data.canChange ? `<button type="button" class="text-button" data-warmup-restore="${escapeAttr(email)}"${mailWarmupState.busy ? " disabled" : ""}><i data-lucide="undo-2"></i><span>Повернути</span></button>` : ""}</span>`).join("")}</div>`;
 }
 
 function planHtml(data) {
@@ -148,6 +156,13 @@ document.getElementById("mailWarmupRoot")?.addEventListener("submit", (event) =>
 document.getElementById("mailWarmupRoot")?.addEventListener("click", (event) => {
   const start = event.target.closest("[data-warmup-start]")?.dataset.warmupStart;
   if (start) return void change("start", { mailbox: start }, () => `${start}: прогрів запущено.`);
+  const remove = event.target.closest("[data-warmup-remove]")?.dataset.warmupRemove;
+  if (remove) {
+    if (!window.confirm(`Прибрати ${remove} з прогріву? Вона перестане писати й отримувати листи прогріву. Повернути можна під таблицею.`)) return;
+    return void change("remove", { mailbox: remove }, () => `${remove}: прибрано з прогріву.`);
+  }
+  const restore = event.target.closest("[data-warmup-restore]")?.dataset.warmupRestore;
+  if (restore) return void change("restore", { mailbox: restore }, () => `${restore}: повернуто — натисніть «Старт», щоб прогрів пішов.`);
   const pause = event.target.closest("[data-warmup-pause]")?.dataset.warmupPause;
   if (pause) return void change("pause", { mailbox: pause }, () => `${pause}: прогрів на паузі.`);
   if (event.target.closest("[data-warmup-start-all]")) {

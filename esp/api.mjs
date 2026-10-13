@@ -15,7 +15,7 @@ import { composeLetter } from "./compose.mjs";
 import { ReplyError, conversations, quickReply } from "./conversations.mjs";
 import { REPLY_LABELS } from "./replies.mjs";
 import { LeadError, decorateLeads, leadPage } from "./leads.mjs";
-import { PLAN_BOUNDS, cleanPlan, warmupLog, warmupMode, warmupPlan, warmupView } from "./mail-warmup.mjs";
+import { PLAN_BOUNDS, cleanPlan, removedFromWarmup, warmupLog, warmupMode, warmupPlan, warmupView } from "./mail-warmup.mjs";
 import { UNIBOX_FOLDERS, uniboxList, uniboxProblems, uniboxThread } from "./unibox.mjs";
 import { recordAboutContact, recordFailed, recordSending, recordSent } from "./messages.mjs";
 import { allEntries, append, contactKey } from "./journal.mjs";
@@ -531,8 +531,10 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
     sendJson(response, 200, {
       success: true, mode, halted: Boolean(esp.halted?.()),
       scopes: esp.connector?.describe().scopes || [],
-      // A mailbox disconnected from the platform is not ours to warm any more.
-      rows: warmupView(entries, { senders: senders.filter((sender) => !isDisconnected(sender)), domains }),
+      // A mailbox disconnected from the platform is not ours to warm any more,
+      // and one taken off this page («Прибрати з прогріву») is listed apart.
+      rows: warmupView(entries, { senders: senders.filter((sender) => !isDisconnected(sender) && !removedFromWarmup(entries).has(sender.email)), domains }),
+      removed: [...removedFromWarmup(entries)].filter((email) => senders.some((sender) => sender.email === email && !isDisconnected(sender) && sender.status !== "retired")).sort(),
       log: warmupLog(entries),
       plan: warmupPlan(entries), planBounds: PLAN_BOUNDS,
       // Google refused the labels token: the owner has gmail.modify to add.
@@ -551,11 +553,39 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
     return true;
   }
 
+  // «Прибрати з прогріву» / «Повернути» (13.10): the mailbox stops warming and
+  // leaves the table; coming back, it is paused until somebody presses «Старт».
+  if (method === "POST" && (path === "/warmup/remove" || path === "/warmup/restore")) {
+    const body = (await readJson(request)) || {};
+    const email = String(body.mailbox || "").trim().toLowerCase();
+    const { senders } = await registry();
+    if (!senders.some((sender) => sender.email === email)) {
+      sendJson(response, 404, { success: false, error: "Такої скриньки немає в реєстрі відправників." });
+      return true;
+    }
+    const entries = await allEntries();
+    const removed = removedFromWarmup(entries).has(email);
+    if (path === "/warmup/remove" && !removed) {
+      const last = [...entries].reverse().find((entry) => /^warmup\.(started|paused)$/.test(entry.type) && entry.data?.mailbox === email);
+      if (last?.type === "warmup.started") await append({ type: "warmup.paused", actor, data: { mailbox: email } });
+      await append({ type: "warmup.removed", actor, data: { mailbox: email } });
+      await logged("warmup_removed", { mailbox: email });
+    }
+    if (path === "/warmup/restore" && removed) {
+      await append({ type: "warmup.restored", actor, data: { mailbox: email } });
+      await logged("warmup_restored", { mailbox: email });
+    }
+    sendJson(response, 200, { success: true, mailbox: email });
+    return true;
+  }
+
   if (method === "POST" && (path === "/warmup/start" || path === "/warmup/pause")) {
     const body = (await readJson(request)) || {};
     const { senders, domains } = await registry();
     const entries = await allEntries();
-    const rows = warmupView(entries, { senders, domains });
+    // «Запустити всі» never wakes a mailbox taken off the warm-up or disconnected.
+    const hidden = removedFromWarmup(entries);
+    const rows = warmupView(entries, { senders: senders.filter((sender) => !isDisconnected(sender) && !hidden.has(sender.email)), domains });
     const wanted = body.all ? rows.map((row) => row.email) : [String(body.mailbox || "").trim().toLowerCase()];
     const starting = path === "/warmup/start";
     const changed = [];
