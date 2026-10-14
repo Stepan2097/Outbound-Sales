@@ -36,6 +36,8 @@ const page = {
   ready: false, error: "", notice: "", noticeTone: "",
   campaigns: [], templates: [], variables: [], signature: null, limits: null, halt: null, sequenceOn: false, alerts: [], alertIndex: 0,
   folder: "all", search: "", selected: new Set(), menuFor: null,
+  // Кампанії, розгорнуті до своїх пошт-відправників (таск 5283abdd).
+  expanded: new Set(),
   // Конструктор: відкрита кампанія і крок.
   openId: null, step: "sequence", people: [], peopleLoaded: false, peopleResult: null, peopleText: "", plan: null, previews: {}, sampleEmail: "",
   chooser: null, editor: null, busy: false,
@@ -182,7 +184,10 @@ function campaignRowHtml(campaign) {
   return `<tr>
     <td class="mc-check"><input type="checkbox" data-mc-select="${escapeAttr(campaign.id)}" ${page.selected.has(campaign.id) ? "checked" : ""} aria-label="Вибрати ${escapeAttr(campaign.name)}" /></td>
     <td class="mc-campaign-cell">
-      <button type="button" class="mc-link" data-mc-open="${escapeAttr(campaign.id)}">${escapeHtml(campaign.name)}</button>
+      <div class="mc-campaign-title">
+        <button type="button" class="mc-link" data-mc-open="${escapeAttr(campaign.id)}">${escapeHtml(campaign.name)}</button>
+        <button type="button" class="mc-expand ${page.expanded.has(campaign.id) ? "is-open" : ""}" data-mc-expand="${escapeAttr(campaign.id)}" aria-expanded="${page.expanded.has(campaign.id)}" title="${page.expanded.has(campaign.id) ? "Згорнути пошти" : "Показати пошти кампанії"}" aria-label="Пошти кампанії ${escapeAttr(campaign.name)}"><i data-lucide="chevron-down"></i><span>${(campaign.bySender || []).length}</span></button>
+      </div>
       <div class="mc-meta">
         <span><i data-lucide="users"></i>Одержувачів: ${campaign.people}</span>${campaign.people ? `<span class="mc-progress" title="Пройшли ланцюжок: ${done} з ${campaign.people}"><span style="width:${progress}%"></span></span>` : ""}
         <span><i data-lucide="mail"></i>${campaign.steps.length} ${campaign.steps.length === 1 ? "лист" : campaign.steps.length < 5 ? "листи" : "листів"}${campaign.spinMode === "half" ? " · A/B" : ""}</span>
@@ -211,7 +216,24 @@ function campaignRowHtml(campaign) {
         ${deletable(campaign) ? `<button type="button" role="menuitem" class="mc-danger-text" data-mc-delete="${escapeAttr(campaign.id)}"><i data-lucide="trash-2"></i>Видалити</button>` : ""}
       </div>` : ""}
     </td>
-  </tr>`;
+  </tr>${page.expanded.has(campaign.id) ? senderRowsHtml(campaign) : ""}`;
+}
+
+/** Under a campaign: each of its sending mailboxes, its numbers under the campaign's columns. */
+function senderRowsHtml(campaign) {
+  const senders = (campaign.bySender || []).slice().sort((left, right) => left.email.localeCompare(right.email));
+  const stat = (value, base) => `<b>${value}</b>${base ? `<small>${percent(value, base)}%</small>` : ""}`;
+  if (!senders.length) return `<tr class="mc-sender-row is-empty"><td></td><td colspan="7"><span class="mc-subtle">Пошт ще не обрано — їх додають у кампанії, крок «Параметри відправки».</span></td></tr>`;
+  return senders.map((sender, index) => `<tr class="mc-sender-row${index === senders.length - 1 ? " is-last" : ""}">
+    <td></td>
+    <td><div class="mc-sender-cell"><span class="mc-sender-avatar">${escapeHtml(sender.email.charAt(0).toUpperCase())}</span><span>${escapeHtml(sender.email.split("@")[0])}<small>@${escapeHtml(sender.email.split("@")[1] || "")}</small></span></div></td>
+    <td></td>
+    <td class="mc-num">${stat(sender.sent)}</td>
+    <td class="mc-num">${stat(sender.replied, sender.sent)}</td>
+    <td class="mc-num">${stat(sender.bounced, sender.sent)}</td>
+    <td class="mc-num">${stat(sender.unsubscribed, sender.sent)}</td>
+    <td></td>
+  </tr>`).join("");
 }
 
 /** Nothing has gone out of it: it can go entirely. Otherwise only the archive (the server says the same). */
@@ -921,6 +943,11 @@ function onClick(event) {
   const editor = page.editor;
 
   if (button.dataset.mcFolder) { page.folder = button.dataset.mcFolder; page.menuFor = null; return renderCampaignsPage(); }
+  if (button.dataset.mcExpand) {
+    const id = button.dataset.mcExpand;
+    if (page.expanded.has(id)) page.expanded.delete(id); else page.expanded.add(id);
+    return renderCampaignsPage();
+  }
   if (button.dataset.mcMenu) { page.menuFor = page.menuFor === button.dataset.mcMenu ? null : button.dataset.mcMenu; return renderCampaignsPage(); }
   if (button.dataset.mcOpen) {
     page.openId = button.dataset.mcOpen;

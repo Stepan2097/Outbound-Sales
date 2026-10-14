@@ -111,3 +111,15 @@ test("Головна: an unverified lead does not get the letter, and is told wh
   assert.match(refused.payload.error, /Не піде/);
   assert.equal(live.sent.length, 0);
 });
+
+test("«Кампанії»: рядок кампанії несе статистику по кожній її пошті — і пошта без листів теж є, з нулями (таск 5283abdd)", async (t) => {
+  const { call } = await setup(t);
+  const created = await call("POST", "/campaigns", { name: "Pilot" });
+  const id = created.payload.campaign.id;
+  await call("PATCH", "/campaigns", { id, senders: ["anna@advantage-mail.com", "boris@advantage-mail.com"] });
+  const { append } = await import("../esp/journal.mjs");
+  for (const to of ["a@x.com", "b@x.com"]) await append({ type: "message.sent", contact: to, data: { from: "anna@advantage-mail.com", campaignId: id, step: 0 } });
+  const row = (await call("GET", "/campaigns")).payload.campaigns.find((campaign) => campaign.id === id);
+  assert.equal(row.sent, 2);
+  assert.deepEqual(row.bySender.map((sender) => [sender.email, sender.sent]).sort(), [["anna@advantage-mail.com", 2], ["boris@advantage-mail.com", 0]]);
+});

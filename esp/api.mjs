@@ -1066,17 +1066,36 @@ function badRequest(sendJson, response, error) {
 function campaignSummary(campaign, enrollments, entries) {
   const people = new Map(enrollments.map((row) => [row.email, row]));
   const counts = { sent: 0, replied: 0, bounced: 0, unsubscribed: 0 };
+  // Per sender too (task 5283abdd: a campaign row opens into its senders). A
+  // reply, bounce or unsubscribe belongs to the mailbox it came back to — or,
+  // when the event does not say, the one that last wrote to that person here.
+  const bySender = new Map((campaign.senders || []).map((email) => [String(email).toLowerCase(), { sent: 0, replied: 0, bounced: 0, unsubscribed: 0 }]));
+  const writer = new Map();
+  const sender = (email) => {
+    const key = String(email || "").toLowerCase();
+    if (!key) return null;
+    if (!bySender.has(key)) bySender.set(key, { sent: 0, replied: 0, bounced: 0, unsubscribed: 0 });
+    return bySender.get(key);
+  };
   for (const entry of entries) {
-    if (entry.type === "message.sent" && entry.data?.campaignId === campaign.id) counts.sent += 1;
+    if (entry.type === "message.sent" && entry.data?.campaignId === campaign.id) {
+      counts.sent += 1;
+      const from = entry.data?.from;
+      const row = sender(from);
+      if (row) row.sent += 1;
+      if (entry.contact && from) writer.set(entry.contact, from);
+    }
     const row = entry.contact ? people.get(entry.contact) : null;
     if (!row || new Date(entry.at) < new Date(row.enrolledAt)) continue;
-    if (entry.type === "message.replied") counts.replied += 1;
-    else if (entry.type === "message.bounced") counts.bounced += 1;
-    else if (entry.type === "contact.unsubscribed") counts.unsubscribed += 1;
+    const key = entry.type === "message.replied" ? "replied" : entry.type === "message.bounced" ? "bounced" : entry.type === "contact.unsubscribed" ? "unsubscribed" : null;
+    if (!key) continue;
+    counts[key] += 1;
+    const owner = sender(entry.data?.sender || writer.get(entry.contact) || row.sender);
+    if (owner) owner[key] += 1;
   }
   const byStatus = {};
   for (const row of enrollments) byStatus[row.status] = (byStatus[row.status] || 0) + 1;
-  return { ...campaign, people: enrollments.length, byStatus, ...counts };
+  return { ...campaign, people: enrollments.length, byStatus, ...counts, bySender: [...bySender.entries()].map(([email, stats]) => ({ email, ...stats })) };
 }
 
 /** A report as a file to save. */

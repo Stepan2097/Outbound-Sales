@@ -1435,3 +1435,81 @@ div.mc-subject {
   background: color-mix(in srgb, var(--amber) 20%, transparent);
   color: var(--amber);
 }
+
+/* Кампанія розгортається до своїх пошт (таск 5283abdd). */
+.mc-campaign-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mc-expand {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 26px;
+  padding: 0 8px 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.mc-expand svg {
+  width: 16px;
+  height: 16px;
+  transition: transform 0.15s ease;
+}
+
+.mc-expand.is-open {
+  border-color: var(--teal);
+  color: var(--teal);
+}
+
+.mc-expand.is-open svg {
+  transform: rotate(180deg);
+}
+
+.mc-sender-row td {
+  padding-top: 6px;
+  padding-bottom: 6px;
+  border-bottom: 0;
+  background: var(--surface-sunk);
+}
+
+.mc-sender-row.is-last td {
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.mc-sender-row .mc-num b {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.mc-sender-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-left: 18px;
+}
+
+.mc-sender-cell span:last-child small {
+  display: inline;
+  color: var(--muted);
+}
+
+.mc-sender-avatar {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  background: var(--teal-weak);
+  color: var(--teal);
+  font-size: 12px;
+  font-weight: 700;
+}
