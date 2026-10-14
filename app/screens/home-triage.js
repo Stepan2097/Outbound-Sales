@@ -50,7 +50,11 @@ async function openTriage() {
   }
   // What sends: our mailboxes and whether real sending is on; accounts that can still send requests.
   void Promise.all([
-    api("/api/esp/limits").then((payload) => { triage.mailboxes = (payload.senders || []).filter((sender) => sender.status === "active"); }).catch(() => { triage.mailboxes = []; }),
+    // Active mailboxes that may send cold mail — a warm-up-only one never does — by domain A→Z, then address A→Z.
+    api("/api/esp/limits").then((payload) => {
+      triage.mailboxes = (payload.senders || []).filter((sender) => sender.status === "active" && sender.role !== "warmup")
+        .sort((left, right) => String(left.domain || left.email.split("@")[1]).localeCompare(String(right.domain || right.email.split("@")[1])) || left.email.localeCompare(right.email));
+    }).catch(() => { triage.mailboxes = []; }),
     api("/api/esp/halt").then((payload) => { triage.liveSend = Boolean(payload.liveSend) && !payload.halt?.on; }).catch(() => {}),
     api("/api/warmup/invites/accounts").then((payload) => { triage.inviteAccounts = payload.accounts || []; }).catch(() => { triage.inviteAccounts = []; })
   ]).then(() => {
@@ -332,6 +336,42 @@ function addressRowHtml(row) {
   </li>`;
 }
 
+/**
+ * The mailbox to send from — a picker of our own, not the browser's select
+ * (owner 13.10): grouped by domain, a small gap between domains, each with
+ * today's count against its limit; a full one says so and cannot be picked.
+ */
+function mailboxPickerHtml(mailboxes) {
+  if (!mailboxes.length) return '<div class="triage-picker is-empty"><i data-lucide="mail-x"></i><span>Немає пошти для розсилки</span></div>';
+  const chosen = mailboxes.find((sender) => sender.email === triage.mailbox) || mailboxes[0];
+  const room = (sender) => `${sender.today}/${sender.limit}`;
+  const groups = new Map();
+  for (const sender of mailboxes) {
+    const domain = sender.domain || sender.email.split("@")[1];
+    if (!groups.has(domain)) groups.set(domain, []);
+    groups.get(domain).push(sender);
+  }
+  return `<div class="triage-picker ${triage.pickerOpen ? "is-open" : ""}">
+    <button type="button" class="triage-picker-button" data-triage="picker" aria-haspopup="listbox" aria-expanded="${triage.pickerOpen ? "true" : "false"}">
+      <span class="triage-picker-avatar">${escapeHtml(chosen.email.charAt(0).toUpperCase())}</span>
+      <span class="triage-picker-text"><b>${escapeHtml(chosen.email)}</b><small>сьогодні ${room(chosen)}</small></span>
+      <i data-lucide="chevron-down"></i>
+    </button>
+    ${triage.pickerOpen ? `<div class="triage-picker-menu" role="listbox">${[...groups.entries()].map(([domain, group]) => `
+      <div class="triage-picker-group">
+        <div class="triage-picker-domain">${escapeHtml(domain)}</div>
+        ${group.map((sender) => {
+          const full = sender.today >= sender.limit;
+          return `<button type="button" role="option" class="triage-picker-option ${sender.email === chosen.email ? "is-chosen" : ""}" data-triage-pick="${escapeAttr(sender.email)}" aria-selected="${sender.email === chosen.email}" ${full ? "disabled" : ""}>
+            <span>${escapeHtml(sender.email.split("@")[0])}<small>@${escapeHtml(domain)}</small></span>
+            <span class="triage-picker-room ${full ? "is-full" : ""}">${full ? "ліміт на сьогодні" : room(sender)}</span>
+            ${sender.email === chosen.email ? '<i data-lucide="check"></i>' : ""}
+          </button>`;
+        }).join("")}
+      </div>`).join("")}</div>` : ""}
+  </div>`;
+}
+
 function emailHtml(item) {
   const list = addresses();
   const mailboxes = triage.mailboxes || [];
@@ -347,7 +387,7 @@ function emailHtml(item) {
     <input data-triage-text="subject" placeholder="Тема" value="${escapeAttr(triage.texts.subject)}" />
     <textarea data-triage-text="body" rows="8" placeholder="${triage.drafting ? "Модель пише текст…" : "Текст листа. Лише простий текст; підпис і відписка додаються самі."}">${escapeHtml(triage.texts.body)}</textarea>
     <div class="triage-actions">
-      <select data-triage="mailbox" ${mailboxes.length ? "" : "disabled"}>${mailboxes.map((sender) => `<option value="${escapeAttr(sender.email)}" ${sender.email === triage.mailbox ? "selected" : ""}>${escapeHtml(sender.email)} · сьогодні ${sender.today}/${sender.limit}</option>`).join("") || '<option value="">Немає активної пошти</option>'}</select>
+      ${mailboxPickerHtml(mailboxes)}
       <button type="button" class="primary-button" data-triage="send-email" ${!chosen.length || !mailboxes.length || locked || triage.sending ? "disabled" : ""} title="${escapeAttr(locked ? "Справжню відправку ще не ввімкнено (ESP_LIVE_SEND, після приймання ESP 11)" : "")}"><i data-lucide="send"></i><span>${escapeHtml(label)}</span></button>
     </div>
     ${locked ? '<p class="triage-muted"><i data-lucide="lock"></i> Справжню відправку листів ще не ввімкнено (ESP_LIVE_SEND, після приймання ESP 11) — кнопка запрацює разом із нею.</p>' : '<p class="triage-muted">Лист пройде ті самі перевірки, що й кампанія: виключення, верифікацію, ліміти пошти й робочі години одержувача.</p>'}
@@ -572,7 +612,13 @@ root?.addEventListener("click", (event) => {
   const button = event.target.closest("button");
   if (!button) return;
   if (button.dataset.triageSendLinkedin) return void sendLinkedin(button.dataset.triageSendLinkedin);
+  if (button.dataset.triagePick) {
+    readTexts();
+    Object.assign(triage, { mailbox: button.dataset.triagePick, pickerOpen: false });
+    return renderTriage();
+  }
   switch (button.dataset.triage) {
+    case "picker": readTexts(); triage.pickerOpen = !triage.pickerOpen; return renderTriage();
     case "invalid": return void decideInvalid();
     case "skip": return void skip();
     case "draft": return void draftTexts();
@@ -584,4 +630,18 @@ root?.addEventListener("click", (event) => {
     case "restart": Object.assign(triage, { cursor: 0, skip: [], notice: "" }); return void loadNext();
     default: return undefined;
   }
+});
+
+// The mailbox picker closes on a click elsewhere and on Escape.
+document.addEventListener("click", (event) => {
+  if (!triage.pickerOpen || event.target.closest?.(".triage-picker")) return;
+  readTexts();
+  triage.pickerOpen = false;
+  renderTriage();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || !triage.pickerOpen) return;
+  readTexts();
+  triage.pickerOpen = false;
+  renderTriage();
 });

@@ -827,7 +827,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
         return {
           email: sender.email, domain: sender.domain, status: sender.effectiveStatus, rampStage: sender.rampStage,
           limit: senderDailyLimit(sender), today: row.today, lastAt: row.lastAt ? row.lastAt.toISOString() : null,
-          tags: sender.tags || []
+          tags: sender.tags || [], role: sender.role || null
         };
       }),
       tagCatalog: tagCatalog(senders),
