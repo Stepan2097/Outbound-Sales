@@ -66,6 +66,15 @@ test("сховище: частини збираються до «done»; пов�
   await store.request("acc");
   assert.equal((await store.view("acc")).due, true, "«Оновити» робить читання потрібним");
 
+  // Two copies of the server on one file (a deploy): each writes on top of what the other wrote.
+  const other = networkStore(path, { now: () => clock });
+  await other.batch("bbb", [{ slug: "z", name: "Zed" }], { first: true });
+  await other.done("bbb", { total: 1, complete: true });
+  await store.batch("acc", [{ slug: "a", name: "Anna" }], { first: true });
+  await store.done("acc", { total: 1, complete: true });
+  assert.deepEqual((await other.view("bbb")).people.map((p) => p.slug), ["z"], "запис одного не затер іншого");
+  assert.deepEqual((await store.view("bbb")).people.map((p) => p.slug), ["z"]);
+
   const again = networkStore(path, { now: () => clock });
   assert.deepEqual((await again.view("acc")).people.map((p) => p.slug), ["a"]);
   assert.ok(JSON.parse(await readFile(path, "utf8")).accounts.acc);

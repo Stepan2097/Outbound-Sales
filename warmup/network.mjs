@@ -49,8 +49,11 @@ export function networkStore(path, { now = () => new Date() } = {}) {
   let data = null;
   let chain = Promise.resolve();
 
+  // Read from the file every time, never kept between calls: during a deploy
+  // two copies of the server share the file, and one that wrote from what it
+  // remembered put back a list the other had already replaced (14.10: Chloe's
+  // full 423 was overwritten with an earlier 40 that way).
   async function load() {
-    if (data) return data;
     data = { accounts: {} };
     if (path && existsSync(path)) {
       try {
