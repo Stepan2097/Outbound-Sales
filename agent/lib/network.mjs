@@ -4,8 +4,12 @@
  *
  * What the page looked like on a read-only look at Chloe's (423 contacts) and
  * Profile 48's on 14.10.2026, Ukrainian UI:
- * - the list scrolls inside `main#workspace`, not the window, and loads ten
- *   more cards each time it is scrolled to the bottom — no «Show more» button;
+ * - the list scrolls inside `main#workspace`, not the window, and loads more
+ *   cards as it is scrolled — no «Show more» button. Setting `scrollTop` to
+ *   the bottom stops loading after 30–40 cards (the list waits at its end for
+ *   an event that never comes); a real mouse wheel over the list loads 20–30 a
+ *   round, and stepping up a screen and back down loads 10 when the wheel
+ *   stalls — measured on Chloe's list the same day;
  * - each card is a `div[componentkey="ConnectionCard_<n>-<slug>"]` whose text is
  *   «Name | Headline | Встановлено контакт October 14, 2026 | Повідомлення»;
  * - the total is in the page text: «423 контакти».
@@ -62,12 +66,27 @@ async function readTotal(page) {
   });
 }
 
-async function scrollDown(page) {
-  await page.evaluate(() => {
-    const box = document.querySelector('main#workspace') || document.querySelector('main');
-    if (box) box.scrollTop = box.scrollHeight;
-    window.scrollTo(0, document.scrollingElement.scrollHeight);
-  });
+/** The wheel, over the list, as a person scrolls; when that stalled, up a screen and back down. */
+async function scrollDown(page, { stalled = false, sleep = wait } = {}) {
+  if (stalled) {
+    await page.evaluate(() => {
+      const box = document.querySelector('main#workspace') || document.querySelector('main');
+      if (box) box.scrollTop = Math.max(0, box.scrollHeight - box.clientHeight - 900);
+    });
+    await sleep(600);
+    await page.evaluate(() => {
+      const box = document.querySelector('main#workspace') || document.querySelector('main');
+      if (box) box.scrollTop = box.scrollHeight;
+    });
+    return;
+  }
+  const box = await page.locator('main#workspace').boundingBox().catch(() => null)
+    || await page.locator('main').first().boundingBox().catch(() => null);
+  if (box) await page.mouse.move(box.x + box.width / 2, box.y + Math.min(box.height / 2, 400));
+  for (let step = 0; step < 6; step += 1) {
+    await page.mouse.wheel(0, 900);
+    await sleep(250);
+  }
 }
 
 /**
@@ -93,7 +112,7 @@ export async function readConnections(page, { guard = async () => {}, log = () =
     stalled = people.size > before ? 0 : stalled + 1;
     rounds += 1;
     if (rounds % 10 === 0) { log(`  контакти: ${people.size}${total ? ` з ${total}` : ''}`); await guard(); }
-    await scrollDown(page);
+    await scrollDown(page, { stalled: stalled > 0, sleep });
     await sleep(pauseMs);
   }
   const list = [...people.values()].slice(0, max);
