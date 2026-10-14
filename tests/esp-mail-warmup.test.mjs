@@ -145,19 +145,21 @@ test("відповідь — у тому ж треді (In-Reply-To, тема «
   assert.equal(twice.replied, 0, "на лист відповідають один раз");
 });
 
-test("прогрів і холодні листи разом — у межах ліміту ESP 4: прогрів не перевищує, а холодні бачать листи прогріву", async (t) => {
+test("холодні листи й прогрів рахуються окремо (14.10): вичерпаний холодний ліміт не зупиняє прогрів, а листи прогріву не з'їдають холодний", async (t) => {
   const { tick, start } = await world(t, { rampStage: 5 });
   await start(ANNA, at(0, -60));
   await start(BORIS, at(0, -60));
   t.mock.timers.setTime(at(0, -30).getTime());
   for (let n = 0; n < 5; n += 1) await append({ type: "message.sending", contact: `lead${n}@x.com`, data: { from: ANNA, campaignId: "c1", step: 0, subject: "s", text: "t" } });
   const pass = await tick(at(0));
-  assert.deepEqual(pass.skipped.filter((row) => row.mailbox === ANNA).map((row) => row.reason), ["sender_daily_limit"]);
-  assert.equal(pass.sent, 1, "лише Борис");
+  assert.equal(pass.sent, 2, "гріються обидві, і Анна теж");
   const ledger = sendLedger(await allEntries(), { now: at(0, 1) });
-  assert.equal(ledger.senders.get(BORIS).today, 1, "лист прогріву Бориса рахується в його ліміт і для холодних листів");
+  assert.deepEqual([ledger.senders.get(BORIS).cold, ledger.senders.get(BORIS).warmup], [0, 1], "лист прогріву Бориса — не холодний");
+  const { sendDecision } = await import("../esp/limits.mjs");
+  const anna = (await registry()).senders.find((row) => row.email === ANNA);
+  assert.equal(sendDecision({ sender: anna, recipient: { country: "Ukraine", timezone: "Europe/Kyiv" }, ledger, now: at(0, 60) }).reason, "sender_daily_limit", "холодний ліміт Анни — 5 із 5");
   const view = warmupView(await allEntries(), { ...(await registry()), now: at(0, 1) });
-  assert.equal(view.find((row) => row.email === ANNA).plannedToday, 0, "план на сьогодні — не більше, ніж лишилось від ліміту");
+  assert.deepEqual([view.find((row) => row.email === ANNA).coldToday, view.find((row) => row.email === BORIS).coldToday], [5, 0]);
 });
 
 test("прогріву не видно в кампаніях, звітах, Unibox і хронології; читач вхідних не бере його листи за відповіді", async (t) => {

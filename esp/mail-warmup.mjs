@@ -191,11 +191,11 @@ export function warmupView(entries, { senders = [], domains = [], now = new Date
     const blocked = sender.status !== "active" ? (sender.status === "paused" ? "пошта на паузі" : "пошту виведено")
       : !["aging", "ramp", "active"].includes(domainStatus) ? `домен у стані «${DOMAIN_LABEL[domainStatus] || domainStatus || "немає"}»` : null;
     const limit = senderDailyLimit(sender);
-    const coldToday = Math.max(0, (ledger.senders.get(sender.email)?.today || 0) - mine.sentToday);
+    const coldToday = ledger.senders.get(sender.email)?.cold || 0;
     return {
       email: sender.email, domain: sender.domain, domainStatus, person: sender.person || sender.displayName || "", role: sender.role || null, tags: sender.tags || [],
       status: blocked ? "blocked" : mine.running ? "running" : mine.startedAt ? "paused" : "never",
-      blocked, day: mine.day, plannedToday: Math.min(mine.plannedToday, Math.max(0, limit - coldToday)), planOfDay: mine.plannedToday,
+      blocked, day: mine.day, plannedToday: mine.plannedToday, planOfDay: mine.plannedToday,
       sentToday: mine.sentToday, firstsToday: mine.firstsToday, repliesToday: mine.repliesToday, coldToday, limit,
       sent: mine.sent, repliesReceived: mine.repliesReceived, repliesSent: mine.repliesSent, received: mine.received,
       rescued: mine.rescued, landedInSpam: mine.landedInSpam, failedToday: mine.failedToday, lastError: mine.lastError,
@@ -434,7 +434,7 @@ export async function runWarmupTick({ journal, senders, connector, gate, now = n
     const error = plan?.lastError;
     if (error && now.getTime() - new Date(error.at).getTime() < BACKOFF_MINUTES * 60_000) return { ok: false, reason: "backoff" };
     if (kind === "first" && today >= (plan?.plannedToday || 0)) return { ok: false, reason: "plan_done" };
-    return sendDecision({ sender, recipient: OUR_SIDE, ledger, now, window: WARMUP_WINDOW });
+    return sendDecision({ sender, recipient: OUR_SIDE, ledger, now, window: WARMUP_WINDOW, purpose: "warmup" });
   };
 
   // (2) Replies that are due: a third of the first letters, an hour or two after they arrived.

@@ -823,10 +823,11 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
       gapMinutes: GAP_MINUTES,
       domainLimit: DOMAIN_DAILY_LIMIT,
       senders: senders.map((sender) => {
-        const row = ledger.senders.get(sender.email) || { today: 0, lastAt: null };
+        const row = ledger.senders.get(sender.email) || { today: 0, cold: 0, warmup: 0, lastAt: null };
         return {
           email: sender.email, domain: sender.domain, status: sender.effectiveStatus, rampStage: sender.rampStage,
-          limit: senderDailyLimit(sender), today: row.today, lastAt: row.lastAt ? row.lastAt.toISOString() : null,
+          // Today's count is cold letters against the cold limit; the warm-up's are apart (14.10).
+          limit: senderDailyLimit(sender), today: row.cold ?? row.today, warmupToday: row.warmup || 0, lastAt: row.lastAt ? row.lastAt.toISOString() : null,
           tags: sender.tags || [], role: sender.role || null
         };
       }),

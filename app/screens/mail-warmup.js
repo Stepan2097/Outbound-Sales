@@ -96,7 +96,7 @@ function tableHtml(data) {
   };
   return `
     <div class="table-wrap"><table class="warmup-mail-table">
-      <thead><tr><th>Пошта</th><th>Призначення</th><th>Статус</th><th>День</th><th>Листів сьогодні</th><th>Відповідей</th><th>Вийнято зі спаму</th><th>Ліміт дня</th><th></th></tr></thead>
+      <thead><tr><th>Пошта</th><th>Призначення</th><th>Статус</th><th>День</th><th>Листів сьогодні</th><th>Відповідей</th><th>Вийнято зі спаму</th><th>Холодних листів</th><th></th></tr></thead>
       <tbody>${rows.map((row, index, list) => {
         const [word, tone] = STATUS[row.status];
         const share = row.plannedToday ? Math.min(100, Math.round((row.firstsToday / row.plannedToday) * 100)) : 0;
@@ -111,10 +111,10 @@ function tableHtml(data) {
           <td>${roleHtml(row, canChange)}</td>
           <td><span class="pill ${tone}">${word}</span>${row.status === "paused" && row.pausedAt ? `<small>з ${escapeHtml(when(row.pausedAt))}</small>` : row.status === "running" && row.startedAt ? `<small>старт ${escapeHtml(when(row.startedAt))}</small>` : ""}</td>
           <td class="is-number">${row.day || "—"}</td>
-          <td class="is-number">${row.status === "running" ? `<div class="warmup-mail-progress"><span style="width:${share}%"></span></div>` : ""}${row.firstsToday} / ${row.plannedToday}${row.repliesToday ? `<small>+ ${row.repliesToday} ${uaPlural(row.repliesToday, "відповідь", "відповіді", "відповідей")}</small>` : ""}${row.planOfDay > row.plannedToday && row.status === "running" ? `<small title="Холодні листи сьогодні: ${row.coldToday}">план ${row.planOfDay}, ліміт урізав</small>` : ""}</td>
+          <td class="is-number">${row.status === "running" ? `<div class="warmup-mail-progress"><span style="width:${share}%"></span></div>` : ""}${row.firstsToday} / ${row.plannedToday}${row.repliesToday ? `<small>+ ${row.repliesToday} ${uaPlural(row.repliesToday, "відповідь", "відповіді", "відповідей")}</small>` : ""}</td>
           <td class="is-number">${row.repliesReceived}<small>сама відповіла: ${row.repliesSent}</small></td>
           <td class="is-number">${row.rescued}<small>її листів у спамі: ${row.landedInSpam}</small></td>
-          <td class="is-number">${row.limit}<small>холодних сьогодні: ${row.coldToday}</small></td>
+          <td class="is-number">${row.coldToday} / ${row.limit}<small>ліміт росте рампою</small></td>
           <td class="warmup-mail-action">${action(row)}${canChange ? `<button type="button" class="icon-button warmup-mail-remove" data-warmup-remove="${escapeAttr(row.email)}" title="Прибрати з прогріву" aria-label="Прибрати ${escapeAttr(row.email)} з прогріву"${mailWarmupState.busy ? " disabled" : ""}><i data-lucide="trash-2"></i></button>` : ""}${row.lastError && row.status === "running" ? `<small class="is-bad" title="${escapeAttr(row.lastError.error)}">остання відмова ${escapeHtml(when(row.lastError.at))}</small>` : ""}</td>
         </tr>`;
       }).join("")}</tbody>
@@ -159,7 +159,7 @@ export function renderMailWarmup() {
   const plan = data.plan;
   root.innerHTML = `
     <div class="warmup-mail-head">
-      <p>Наші пошти пишуть одна одній живі листи за розкладом: перший робочий день — ${plan.start}, далі +${plan.step} щодня до ${plan.max}. Приблизно третина отримує відповідь у тому ж треді. Лист, що впав у спам, виймається у «Вхідні» й позначається важливим. Прогрів і холодні листи разом не виходять за ліміт дня пошти й домену. У кампанії, звіти й «Вхідні» прогрів не потрапляє.</p>
+      <p>Наші пошти пишуть одна одній живі листи за розкладом: перший робочий день — ${plan.start}, далі +${plan.step} щодня до ${plan.max}. Приблизно третина отримує відповідь у тому ж треді. Лист, що впав у спам, виймається у «Вхідні» й позначається важливим. Ліміт дня пошти — лише для холодних листів; прогрів іде за своїм планом. У кампанії, звіти й «Вхідні» прогрів не потрапляє.</p>
       ${data.canChange && startable ? `<button type="button" class="primary-button" data-warmup-start-all${mailWarmupState.busy ? " disabled" : ""}><i data-lucide="play"></i><span>Запустити всі (${startable})</span></button>` : ""}
     </div>
     ${bannerHtml(data)}

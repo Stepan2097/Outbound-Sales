@@ -154,8 +154,9 @@ export function senderDailyLimit(sender) {
  */
 export function sendLedger(entries, { now = new Date(), zone = COUNTING_ZONE } = {}) {
   const today = localTime(now, zone).date;
-  // The mailbox warm-up's letters count too: warm-up and cold mail together stay
-  // within one sender's and one domain's daily limit.
+  // Cold letters and warm-up letters are counted apart (owner 14.10: a mailbox
+  // that only warmed today has not used its cold limit). `today` is both, for
+  // the gaps between letters; `cold` is what the ramp's limit is about.
   const failed = new Set(entries.filter((entry) => entry.type === "message.failed" || entry.type === "warmup.failed").map((entry) => entry.data?.sendingSeq));
   const senders = new Map();
   const domains = new Map();
@@ -164,12 +165,17 @@ export function sendLedger(entries, { now = new Date(), zone = COUNTING_ZONE } =
     const from = String(entry.data?.from || "").toLowerCase();
     if (!from) continue;
     const at = new Date(entry.at);
-    const row = senders.get(from) || { today: 0, lastAt: null };
+    const row = senders.get(from) || { today: 0, cold: 0, warmup: 0, lastAt: null };
     if (!row.lastAt || at > row.lastAt) row.lastAt = at;
     if (localTime(at, zone).date === today) {
       row.today += 1;
-      const domain = from.split("@")[1];
-      domains.set(domain, (domains.get(domain) || 0) + 1);
+      const cold = entry.type === "message.sending";
+      if (cold) row.cold += 1; else row.warmup += 1;
+      // The domain's day is cold mail too.
+      if (cold) {
+        const domain = from.split("@")[1];
+        domains.set(domain, (domains.get(domain) || 0) + 1);
+      }
     }
     senders.set(from, row);
   }
@@ -184,17 +190,23 @@ export function sendLedger(entries, { now = new Date(), zone = COUNTING_ZONE } =
  * answer). Limits are checked before the clock: a sender that is done for the
  * day is told so, not told to wait twelve minutes.
  */
-export function sendDecision({ sender, recipient = {}, ledger, now = new Date(), domainLimit = DOMAIN_DAILY_LIMIT, window = WINDOW }) {
+export function sendDecision({ sender, recipient = {}, ledger, now = new Date(), domainLimit = DOMAIN_DAILY_LIMIT, window = WINDOW, purpose = "cold" }) {
   const email = String(sender?.email || "").toLowerCase();
   const domain = email.split("@")[1] || "";
-  const mine = ledger.senders.get(email) || { today: 0, lastAt: null };
-  const limit = senderDailyLimit(sender);
+  const mine = ledger.senders.get(email) || { today: 0, cold: 0, warmup: 0, lastAt: null };
+  const warmup = purpose === "warmup";
+  // Cold mail answers to the ramp's limit; the warm-up to its own plan (checked
+  // by the warm-up), with the sender's cap as a ceiling.
+  const limit = warmup ? SENDER_DAILY_CAP : senderDailyLimit(sender);
+  const used = warmup ? (mine.warmup ?? mine.today) : (mine.cold ?? mine.today);
   const tomorrow = () => nextCountingDay(now);
 
-  if (mine.today >= limit) {
-    return refuse("sender_daily_limit", `${email} сьогодні вже надіслав ${mine.today} з ${limit} (етап рампи).`, tomorrow());
+  if (used >= limit) {
+    return refuse("sender_daily_limit", warmup
+      ? `${email} сьогодні вже надіслав ${used} листів прогріву — більше не можна.`
+      : `${email} сьогодні вже надіслав ${used} з ${limit} холодних листів (етап рампи).`, tomorrow());
   }
-  const domainToday = ledger.domains.get(domain) || 0;
+  const domainToday = warmup ? 0 : ledger.domains.get(domain) || 0;
   if (domainToday >= domainLimit && !PUBLIC_MAIL_DOMAINS.has(domain)) {
     return refuse("domain_daily_limit", `Домен ${domain} сьогодні вже надіслав ${domainToday} з ${domainLimit}.`, tomorrow());
   }
@@ -225,7 +237,7 @@ export function sendDecision({ sender, recipient = {}, ledger, now = new Date(),
     const from = new Date(mine.lastAt.getTime() + gap * 60_000);
     if (now < from) return refuse("too_soon", `Між листами одного сендера — ${gap} хв.`, from);
   }
-  return { ok: true, limit, sentToday: mine.today, domainToday };
+  return { ok: true, limit, sentToday: used, domainToday };
 }
 
 function refuse(reason, message, retryAt) {
