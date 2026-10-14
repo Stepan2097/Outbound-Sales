@@ -145,7 +145,8 @@ test("хронологія анонімізованої людини: що й к
   const [event] = captured.payload.events;
   assert.equal(event.type, "message.replied");
   assert.equal(event.data.redacted, true);
-  assert.equal(JSON.stringify(captured.payload).includes("7700"), false);
+  // The phone itself — "7700" alone also turns up in a random hash or timestamp now and then (gate red on 1ecaca7).
+  assert.equal(JSON.stringify(captured.payload).includes("7700 900123"), false);
   assert.equal(redactFor({ type: "x", contact: "other@x.com", data: { text: "hi" } }, new Set()).data.text, "hi");
 });
 
