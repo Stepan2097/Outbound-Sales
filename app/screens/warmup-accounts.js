@@ -664,11 +664,11 @@ const WARMUP_PEOPLE_FILTERS = [
 ];
 let warmupPeople = { accountId: null, rows: null, error: "", search: "", filter: "friends" };
 // Усі друзі LinkedIn (14.10): те, що агент прочитав зі сторінки «Контакти».
-let warmupNetwork = { accountId: null, data: null, error: "", busy: false };
+let warmupNetwork = { accountId: null, data: null, error: "", busy: false, shown: 50 };
 const WARMUP_NETWORK_FILTER = "linkedin";
 
 async function loadWarmupNetwork(accountId) {
-  if (warmupNetwork.accountId !== accountId) warmupNetwork = { accountId, data: null, error: "", busy: false };
+  if (warmupNetwork.accountId !== accountId) warmupNetwork = { accountId, data: null, error: "", busy: false, shown: 50 };
   try {
     const payload = await warmupApi(`/network?accountId=${encodeURIComponent(accountId)}`);
     if (warmupNetwork.accountId !== accountId) return;
@@ -729,7 +729,7 @@ function warmupNetworkListHtml() {
   if (!shown.length) return `${head}${people.length ? '<p class="wa-muted">Нікого не знайдено — змініть пошук.</p>' : ""}`;
   return `${head}<div class="table-wrap"><table class="wa-people">
     <thead><tr><th>Людина</th><th>У друзях з</th><th>Звідки</th><th></th></tr></thead>
-    <tbody>${shown.slice(0, 300).map((person) => {
+    <tbody>${shown.slice(0, warmupNetwork.shown).map((person) => {
       const row = ours.get(person.slug);
       return `<tr>
       <td>${row?.crmContactId
@@ -739,7 +739,7 @@ function warmupNetworkListHtml() {
       <td>${row ? '<span class="pill tone-good">через систему</span>' : '<span class="wa-muted">поза системою</span>'}</td>
       <td><a class="icon-button" href="https://www.linkedin.com/in/${escapeAttr(encodeURIComponent(person.slug))}/" target="_blank" rel="noopener" aria-label="Відкрити LinkedIn" title="Відкрити LinkedIn"><i data-lucide="external-link"></i></a></td>
     </tr>`;
-    }).join("")}</tbody></table></div>${shown.length > 300 ? `<p class="wa-muted">Показано 300 з ${shown.length} — уточніть пошук.</p>` : ""}`;
+    }).join("")}</tbody></table></div>${shown.length > warmupNetwork.shown ? `<p class="wa-network-more"><span class="wa-muted">Показано ${warmupNetwork.shown} з ${shown.length}</span><button type="button" class="text-button" data-warmup-network-more>Показати ще 50</button></p>` : ""}`;
 }
 
 function warmupPeopleListHtml() {
@@ -1021,6 +1021,12 @@ document.getElementById("warmupDetailBody")?.addEventListener("click", (event) =
     refreshIcons();
     return;
   }
+  if (event.target.closest("[data-warmup-network-more]")) {
+    warmupNetwork.shown += 50;
+    const list = document.getElementById("warmupPeopleList");
+    if (list) { list.innerHTML = warmupPeopleListHtml(); refreshIcons(list); }
+    return;
+  }
   const networkRefresh = event.target.closest("[data-warmup-network-refresh]");
   if (networkRefresh && warmupNetwork.accountId) {
     const accountId = warmupNetwork.accountId;
@@ -1107,6 +1113,7 @@ export const WARMUP_OUTREACH_TONE = {
 document.getElementById("warmupDetailBody")?.addEventListener("input", (event) => {
   if (event.target.id !== "warmupPeopleSearch") return;
   warmupPeople.search = event.target.value;
+  warmupNetwork.shown = 50;
   const list = document.getElementById("warmupPeopleList");
   if (list) { list.innerHTML = warmupPeopleListHtml(); refreshIcons(list); }
 });

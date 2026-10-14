@@ -639,3 +639,10 @@
   gap: 8px 16px;
   margin-bottom: 10px;
 }
+
+.wa-network-more {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 8px 0 0;
+}
