@@ -17,6 +17,7 @@ import { contactEmails, crmPatch } from "./contacts/enrich-crm.mjs";
 import { logAdminAction } from "./esp/access.mjs";
 import { knowledgeExcerptsForPrompt, knowledgeFilesForProduct, loadKnowledgeLibrary } from "./knowledge/library.mjs";
 import { handleWarmupApi } from "./warmup/api.mjs";
+import { networkStore } from "./warmup/network.mjs";
 import { handleEspApi } from "./esp/api.mjs";
 import { connectorFromEnv } from "./esp/gmail.mjs";
 import { GmailOAuthConnector, NotConnectedConnector, googleSignIn, grantStore, oauthConfigFromEnv, redirectUriFor } from "./esp/google-oauth.mjs";
@@ -54,6 +55,8 @@ const stateFilePath = process.env.STATE_FILE_PATH || join(root, ".data", "outbou
 useJournal(process.env.ESP_JOURNAL_PATH || join(dirname(stateFilePath), "esp-journal.jsonl"));
 // Who did what, by day (triage/work-log.mjs) — beside the state too.
 useWorkLog(process.env.WORK_LOG_PATH || join(dirname(stateFilePath), "work-log.jsonl"));
+// Усі друзі LinkedIn по акаунтах (14.10) — знімок, який агент читає раз на кілька днів.
+const linkedinNetwork = networkStore(process.env.LINKEDIN_NETWORK_PATH || join(dirname(stateFilePath), "linkedin-network.json"));
 // The administrators' log (ESP 10) is the ESP journal: what an admin changes in
 // the workspace — roles, people, models, keys — is a line there, with who did it.
 // Never the key itself. A log that cannot be written costs the change nothing.
@@ -983,6 +986,7 @@ async function handleApi(request, response, url) {
           return null;
         }
       },
+      network: linkedinNetwork,
       // Campaigns are workspace configuration, so the warm-up reads and writes
       // them through the state this app already persists rather than keeping a
       // store of its own.

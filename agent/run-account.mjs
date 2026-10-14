@@ -23,6 +23,7 @@ import os from 'node:os';
 import { Portal } from './lib/portal.mjs';
 import { readProfile, normalizeCookie } from './lib/anty.mjs';
 import { syncInbox } from './lib/inbox.mjs';
+import { syncNetwork } from './lib/network.mjs';
 import { sendReplies } from './lib/outbox.mjs';
 import { AntyApi } from './lib/anty-api.mjs';
 import { settle } from './lib/login-probe.mjs';
@@ -40,7 +41,7 @@ const ACCOUNT = arg('account');
 const PORTAL = arg('portal', DEFAULT_PORTAL);
 const ANYTIME = argv.includes('--anytime');
 if (!ACCOUNT) {
-  console.error('usage: node agent/run-account.mjs --account "<profile name or id>" [--portal URL] [--shots DIR] [--no-inbox|--inbox] [--anytime] [--no-replies]');
+  console.error('usage: node agent/run-account.mjs --account "<profile name or id>" [--portal URL] [--shots DIR] [--no-inbox|--inbox] [--anytime] [--no-replies] [--no-network]');
   process.exit(2);
 }
 
@@ -474,6 +475,21 @@ log(`сесію відкрито (${session.sessionId}${session.resumed ? ', п�
       report.errors.push(`відповіді: ${e.message}`);
       log(`  ⚠️ відповіді впали: ${e.message}`);
       await portal.log('agent.outbox', `Sending replies failed — ${e.message}`, null, 'warn').catch(() => {});
+    }
+  }
+
+  // ── all of the account's connections, every few days ─────────────────────
+  // Last, after the replies: a long read-only scroll that must not cost the
+  // day's work if LinkedIn is slow. Its own catch, like the inbox.
+  if (plan.network?.due === true && !argv.includes('--no-network')) {
+    await recycle('контакти');
+    try {
+      report.network = await syncNetwork(page, { portal, guard, log });
+    } catch (e) {
+      if (e instanceof VisitStopped) throw e;
+      report.errors.push(`контакти: ${e.message}`);
+      log(`  ⚠️ контакти не прочитано: ${e.message}`);
+      await portal.log('agent.network', `Reading connections failed — ${e.message}`, null, 'warn').catch(() => {});
     }
   }
 

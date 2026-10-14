@@ -78,6 +78,9 @@ export class Portal {
   invitesChecked(results) { return this.#post({ action: 'invites.checked', results }); }
   inboxThread(thread) { return this.#post({ action: 'inbox.thread', ...thread }); }
   inboxDone(threadsSeen) { return this.#post({ action: 'inbox.done', threadsSeen }); }
+  /** All of the account's LinkedIn connections, in parts; `first` starts a new read. */
+  networkBatch(people, first = false) { return this.#post({ action: 'network.batch', people, first }); }
+  networkDone({ total = null, complete = false } = {}) { return this.#post({ action: 'network.done', total, complete }); }
   /** Right before typing: is this reply still wanted, and is the account still allowed to send it? */
   outboxPrepare(replyId) { return this.#post({ action: 'outbox.prepare', replyId }); }
   /** After LinkedIn showed the message in the conversation — never before. */

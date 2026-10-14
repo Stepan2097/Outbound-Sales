@@ -1136,7 +1136,7 @@ const RECHECK_REFUSALS = {
   expired: "Посилання застаріло — дочекайся наступного повідомлення в групі."
 };
 
-export async function handleWarmupApi({ request, response, url, sendJson, readJson, campaigns: campaignStore, writer = null }) {
+export async function handleWarmupApi({ request, response, url, sendJson, readJson, campaigns: campaignStore, writer = null, network = null }) {
   const path = url.pathname.replace(/^\/api\/warmup/, "") || "/";
   const method = request.method;
 
@@ -2079,6 +2079,25 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         .select("id,account_id,profile_remote_id,started_at,ended_at,source,running_on,actions,note")
         .eq("account_id", accountId).order("started_at", { ascending: false }).limit(100).rows();
       sendJson(response, 200, { success: true, sessions: rows.map(describeSession) });
+      return true;
+    }
+
+    // Усі друзі LinkedIn акаунта — те, що агент прочитав зі сторінки «Контакти».
+    if (method === "GET" && path === "/network") {
+      const accountId = url.searchParams.get("accountId");
+      if (!accountId) return fail(response, sendJson, 400, "Який акаунт?");
+      if (!network) return fail(response, sendJson, 404, "Список контактів тут не зберігається");
+      sendJson(response, 200, { success: true, network: await network.view(accountId) });
+      return true;
+    }
+
+    // «Оновити»: агент перечитає список у найближчій сесії акаунта.
+    if (method === "POST" && path === "/network/refresh") {
+      const body = await readJson(request);
+      if (!body?.accountId) return fail(response, sendJson, 400, "Який акаунт?");
+      if (!network) return fail(response, sendJson, 404, "Список контактів тут не зберігається");
+      const requestedAt = await network.request(String(body.accountId));
+      sendJson(response, 200, { success: true, requestedAt });
       return true;
     }
 
@@ -3330,6 +3349,10 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           maxThreads: paused ? 0 : MAX_THREADS_PER_RUN,
           due: upkeep.inbox
         },
+        // Усі друзі LinkedIn (14.10): прочитати сторінку «Контакти» в цій
+        // сесії — раз на кілька днів або коли на сторінці акаунта натиснули
+        // «Оновити». Ніколи під час паузи; сесію заради цього не відкриваємо.
+        network: { due: Boolean(network) && !paused && account.status !== "excluded" && await network.due(account.id) },
         // Replies written on the Inbox screen that this account is to send in
         // this session — the oldest few, never past the day's limit, and none at
         // all where the account would not be opened anyway. The agent still asks
@@ -3680,6 +3703,20 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         // the conversations stored before they were added on arrival.
         const crmAdded = await adoptWaitingThreads(account, { folderIds: runningFolderIds() });
         sendJson(response, 200, { success: true, threadsSeen, syncedAt, crmRetried, crmAdded });
+        return true;
+      }
+
+      // ── усі друзі LinkedIn ───────────────────────────────────────────
+      //
+      // Частинами, бо в акаунта бувають тисячі контактів; `done` закриває
+      // читання. Без сховища (тести, старий сервер) — 501, агент це пише в лог
+      // і йде далі.
+      if (action === "network.batch" || action === "network.done") {
+        if (!network) return fail(response, sendJson, 501, "Список контактів тут не зберігається");
+        const result = action === "network.batch"
+          ? await network.batch(account.id, body.people, { first: body.first === true })
+          : await network.done(account.id, { total: body.total, complete: body.complete === true });
+        sendJson(response, 200, { success: true, ...result });
         return true;
       }
 
