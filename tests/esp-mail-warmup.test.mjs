@@ -355,14 +355,15 @@ test("кожен лист прогріву пише модель; якщо во�
   assert.equal(asked[0].to.name, asked[0].to.email === BORIS ? "Boris" : "Anna");
 });
 
-test("призначення: пошти для розсилки вгорі таблиці; пошта «лише прогрів» не шле холодних листів, але гріється", async (t) => {
+test("призначення: таблиця за доменами; пошта «лише прогрів» не шле холодних листів, але гріється", async (t) => {
   await world(t);
   const { setSenderRole, canSend, registry: read } = await import("../esp/registry.mjs");
   await setSenderRole({ email: OLGA, role: "cold" }, "test");
   await setSenderRole({ email: ANNA, role: "warmup" }, "test");
   const { senders, domains } = await read();
   const rows = warmupView(await allEntries(), { senders, domains });
-  assert.deepEqual(rows.map((row) => [row.email, row.role]), [[OLGA, "cold"], [BORIS, null], [ANNA, "warmup"]]);
+  // The table goes by domain, then address (14.10); the role is shown, not sorted by.
+  assert.deepEqual(rows.map((row) => [row.email, row.role]), [[ANNA, "warmup"], [OLGA, "cold"], [BORIS, null]]);
   assert.equal((await canSend(OLGA)).ok, true);
   const refused = await canSend(ANNA);
   assert.equal(refused.ok, false);

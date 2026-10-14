@@ -81,7 +81,10 @@ function roleHtml(row, canChange) {
 
 function tableHtml(data) {
   const { canChange } = data;
-  const rows = shownRows(data);
+  // Domains A→Z, inside each the addresses A→Z, a heading row per domain (owner 13–14.10).
+  const rows = shownRows(data).slice().sort((left, right) => String(left.domain).localeCompare(String(right.domain)) || left.email.localeCompare(right.email));
+  const perDomain = new Map();
+  for (const row of rows) perDomain.set(row.domain, (perDomain.get(row.domain) || 0) + 1);
   if (data.rows.length && !rows.length) return `<div class="empty-state">З тегом «${escapeHtml(tagFilter(data))}» пошт немає — виберіть інший тег у фільтрі або позначте пошти в «Пошта» → «Пошти».</div>${removedHtml(data)}`;
   if (!rows.length) return `<div class="empty-state">У прогріві немає пошт — додайте їх у «Пошта» → «Пошти» → «Додати пошту».</div>${removedHtml(data)}`;
   const action = (row) => {
@@ -96,9 +99,10 @@ function tableHtml(data) {
       <tbody>${rows.map((row, index, list) => {
         const [word, tone] = STATUS[row.status];
         const share = row.plannedToday ? Math.min(100, Math.round((row.firstsToday / row.plannedToday) * 100)) : 0;
-        // A new domain starts a group: a small gap above it (13.10).
-        const groupStart = index > 0 && list[index - 1].domain !== row.domain;
-        return `<tr${groupStart ? ' class="warmup-mail-group-start"' : ""}>
+        // A new domain starts a group: its name on a row of its own, with a gap above.
+        const groupStart = index === 0 || list[index - 1].domain !== row.domain;
+        const heading = groupStart ? `<tr class="warmup-mail-domain-row${index ? " is-gap" : ""}"><td colspan="9">${escapeHtml(row.domain)}<span>${perDomain.get(row.domain)}</span></td></tr>` : "";
+        return `${heading}<tr>
           <td><strong>${escapeHtml(row.email)}</strong>${ownTags(row).length ? `<span class="warmup-mail-tags">${tagPills(ownTags(row))}</span>` : ""}<small>домен: ${escapeHtml(DOMAIN_WORD[row.domainStatus] || row.domainStatus || "—")}</small></td>
           <td>${roleHtml(row, canChange)}</td>
           <td><span class="pill ${tone}">${word}</span>${row.status === "paused" && row.pausedAt ? `<small>з ${escapeHtml(when(row.pausedAt))}</small>` : row.status === "running" && row.startedAt ? `<small>старт ${escapeHtml(when(row.startedAt))}</small>` : ""}</td>

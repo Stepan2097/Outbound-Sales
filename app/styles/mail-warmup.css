@@ -273,6 +273,29 @@
 }
 
 /* Пошти одного домену — групою; між доменами невеликий проміжок (13.10). */
-.warmup-mail-table tr.warmup-mail-group-start td {
-  border-top: 10px solid var(--surface-sunk);
+.warmup-mail-table tr.warmup-mail-domain-row td {
+  padding: 10px 12px 4px;
+  border-bottom: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.warmup-mail-table tr.warmup-mail-domain-row.is-gap td {
+  padding-top: 26px;
+}
+
+.warmup-mail-table tr.warmup-mail-domain-row span {
+  display: inline;
+  margin-left: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--surface-sunk);
+  font-weight: 600;
+  letter-spacing: 0;
 }
