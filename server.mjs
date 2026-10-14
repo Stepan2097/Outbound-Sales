@@ -11,7 +11,7 @@ import { invalidateContactCaches, contactAsProspect, contactsConfigured, contact
 import { handleKnowledgeLibraryApi } from "./knowledge/api.mjs";
 import { allEntries, append as espAppend, useJournal } from "./esp/journal.mjs";
 import { nextContact as nextTriageContact } from "./triage/queue.mjs";
-import { FOLLOW_UP_LIMIT, contactKeyOf, contactWork, dayActivity, dayOf, followUpsDue, logWork, recentDays, useWorkLog, workEntries, workUsers } from "./triage/work-log.mjs";
+import { FOLLOW_UP_LIMIT, contactKeyOf, contactWork, dayActivity, dayOf, daysAround, followUpsDue, logWork, useWorkLog, workEntries, workUsers } from "./triage/work-log.mjs";
 import { checkEmail } from "./contacts/email-check.mjs";
 import { contactEmails, crmPatch } from "./contacts/enrich-crm.mjs";
 import { logAdminAction } from "./esp/access.mjs";
@@ -1425,7 +1425,7 @@ async function handleApi(request, response, url) {
           date, user, admin, viewer,
           today: dayOf(new Date()),
           users: admin ? workUsers(entries) : [],
-          days: recentDays(entries, { user, until: date }),
+          days: daysAround(entries, { user, date, today: dayOf(new Date()) }),
           total: { ...activity.total, answered: contacts.filter((item) => item.answer).length, fresh: contacts.filter((item) => item.fresh).length },
           byUser: activity.users.map((person) => ({ ...person, counts: { ...person.counts, answered: answeredBy.get(person.user) || 0 } })),
           contacts,

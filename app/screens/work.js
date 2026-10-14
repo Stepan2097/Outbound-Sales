@@ -88,8 +88,9 @@ function daysHtml(data) {
   const days = (data?.days || []).slice().reverse();
   if (!days.length) return "";
   const most = Math.max(1, ...days.map((day) => day.contacts));
-  return `<div class="work-days" aria-label="Скільком людям писали по днях">${days.map((day) => `
-    <button type="button" class="work-day ${day.date === work.date ? "is-on" : ""}" data-work-day="${escapeAttr(day.date)}" title="${escapeAttr(`${dayWord(day.date)}: ${day.contacts}`)}">
+  const middle = days.findIndex((day) => day.date === work.date);
+  return `<div class="work-days" aria-label="Скільком людям писали по днях">${days.map((day, index) => `
+    <button type="button" class="work-day ${day.date === work.date ? "is-on" : ""} ${day.future ? "is-future" : ""} ${middle >= 0 && Math.abs(index - middle) > 3 ? "is-far" : ""}" data-work-day="${escapeAttr(day.date)}" title="${escapeAttr(day.future ? `${dayWord(day.date)}: ще попереду` : `${dayWord(day.date)}: ${day.contacts}`)}" ${day.future ? "disabled" : ""}>
       <span class="work-day-bar"><span style="height:${Math.round((day.contacts / most) * 100)}%"></span></span>
       <b>${day.contacts || ""}</b>
       <small>${escapeHtml(new Date(`${day.date}T12:00:00Z`).toLocaleDateString("uk-UA", { day: "numeric", month: "numeric" }))}</small>

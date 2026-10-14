@@ -140,7 +140,18 @@ export function dayActivity(entries, { date, user = "all" }) {
   return { date, users, total, contacts: [...contacts.values()].sort((left, right) => right.lastAt.localeCompare(left.lastAt)) };
 }
 
-/** How many people were written to on each of the last `days` days — the day strip above the list. */
+/**
+ * The day strip above the list: the chosen day in the middle (власник 14.10:
+ * «день має бути по центру»), `around` days either side. Days after `today`
+ * come back marked `future` — nothing was done on them yet.
+ */
+export function daysAround(entries, { user = "all", date, today, around = 7 }) {
+  const shift = (days) => new Date(Date.parse(`${date}T12:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
+  return recentDays(entries, { user, until: shift(around), days: around * 2 + 1 })
+    .map((day) => ({ ...day, future: day.date > today }));
+}
+
+/** How many people were written to on each of the last `days` days. */
 export function recentDays(entries, { user = "all", until, days = 14 }) {
   const counts = new Map();
   for (const row of entries) {

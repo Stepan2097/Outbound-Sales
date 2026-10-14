@@ -67,3 +67,13 @@ test("a Kyiv day: who was written to, through what, by whom — and every login'
   assert.equal(contactWork(entries, { contactId: "c1" }).length, 4, "the dialog shows everything anybody did to the person");
   assert.equal(contactWork(entries, { emails: ["X@Y.com"] }).length, 1, "a letter-only person is found by address");
 });
+
+test("смуга днів: обраний день посередині, по 7 з боків; дні після сьогодні позначені", async () => {
+  const { daysAround } = await import("../triage/work-log.mjs");
+  const strip = daysAround([], { date: "2026-10-10", today: "2026-10-14" });
+  assert.equal(strip.length, 15);
+  assert.equal(strip[7].date, "2026-10-10", "посередині — обраний");
+  const list = strip.slice().reverse();
+  assert.equal(list[7].date, "2026-10-10", "і в порядку, як їх малює сторінка");
+  assert.deepEqual(list.filter((day) => day.future).map((day) => day.date), ["2026-10-15", "2026-10-16", "2026-10-17"]);
+});

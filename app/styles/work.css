@@ -50,8 +50,15 @@
 
 .work-days {
   display: grid;
-  grid-template-columns: repeat(14, minmax(0, 1fr));
+  grid-template-columns: repeat(15, minmax(0, 1fr));
   gap: 6px;
+}
+
+/* Дні після сьогодні: ще нічого не зроблено — видно, але не натискаються. */
+.work-day.is-future {
+  border-style: dashed;
+  opacity: 0.45;
+  cursor: default;
 }
 
 .work-day {
@@ -490,6 +497,11 @@
 
   .work-days {
     grid-template-columns: repeat(7, minmax(0, 1fr));
+  }
+
+  /* На телефоні — обраний день і по три з кожного боку, він і тут посередині. */
+  .work-day.is-far {
+    display: none;
   }
 }
 
