@@ -141,7 +141,7 @@ function listHtml() {
   if (!rows.length) return '<p class="acc-muted">За цим пошуком чи тегом пошт немає.</p>';
   return `<div class="acc-list">
     <div class="acc-head" aria-hidden="true"><span></span><span>Пошта</span><span>Стан</span><span>Теги</span><span>Ліміт</span><span></span></div>
-    ${sectionsOf(rows).map(([title, part]) => `<div class="acc-section"><div class="acc-section-name">${escapeHtml(title)}<span>${part.length}</span></div>${groupsByDomain(part).map(([domain, group]) => `<ul class="acc-group" aria-label="${escapeAttr(domain)}"><li class="acc-group-name">${escapeHtml(domain)}</li>${group.map(rowHtml).join("")}</ul>`).join("")}</div>`).join("")}
+    ${sectionsOf(rows).map(([title, part]) => `<div class="acc-section"><div class="acc-section-name">${escapeHtml(title)}<span>${part.length}</span></div>${groupsByDomain(part).map(([domain, group]) => `<ul class="acc-group" aria-label="${escapeAttr(domain)}">${group.map(rowHtml).join("")}</ul>`).join("")}</div>`).join("")}
   </div>`;
 }
 

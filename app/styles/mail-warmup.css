@@ -339,3 +339,11 @@
   outline: none;
   text-decoration: underline dotted;
 }
+
+/* Між доменами — лише проміжок, без назви (14.10). */
+.warmup-mail-table tr.warmup-mail-domain-gap td {
+  height: 16px;
+  padding: 0;
+  border-bottom: 0;
+  background: var(--surface-sunk);
+}

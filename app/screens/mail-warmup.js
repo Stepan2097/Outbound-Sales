@@ -83,8 +83,6 @@ function tableHtml(data) {
   // inside each, domains A→Z and addresses A→Z.
   const rank = (row) => (row.role === "cold" ? 0 : row.role === "warmup" ? 2 : 1);
   const rows = shownRows(data).slice().sort((left, right) => rank(left) - rank(right) || String(left.domain).localeCompare(String(right.domain)) || left.email.localeCompare(right.email));
-  const perDomain = new Map();
-  for (const row of rows) perDomain.set(`${rank(row)}|${row.domain}`, (perDomain.get(`${rank(row)}|${row.domain}`) || 0) + 1);
   const perRank = new Map();
   for (const row of rows) perRank.set(rank(row), (perRank.get(rank(row)) || 0) + 1);
   const SECTION = ["Для розсилки", "Призначення не вказано", "Лише прогрів"];
@@ -106,7 +104,8 @@ function tableHtml(data) {
         const sectionStart = index === 0 || rank(list[index - 1]) !== rank(row);
         const groupStart = sectionStart || list[index - 1].domain !== row.domain;
         const section = sectionStart ? `<tr class="warmup-mail-section-row${index ? " is-gap" : ""}"><td colspan="9">${SECTION[rank(row)]}<span>${perRank.get(rank(row))}</span></td></tr>` : "";
-        const heading = groupStart ? `${section}<tr class="warmup-mail-domain-row${index && !sectionStart ? " is-gap" : ""}"><td colspan="9">${escapeHtml(row.domain)}<span>${perDomain.get(`${rank(row)}|${row.domain}`)}</span></td></tr>` : "";
+        // A new domain: just a gap above it, no label (owner 14.10).
+        const heading = sectionStart ? section : groupStart ? '<tr class="warmup-mail-domain-gap" aria-hidden="true"><td colspan="9"></td></tr>' : "";
         return `${heading}<tr>
           <td><strong>${escapeHtml(row.email)}</strong>${ownTags(row).length ? `<span class="warmup-mail-tags">${tagPills(ownTags(row))}</span>` : ""}</td>
           <td>${roleHtml(row, canChange)}</td>
