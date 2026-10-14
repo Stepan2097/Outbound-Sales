@@ -299,3 +299,43 @@
   font-weight: 600;
   letter-spacing: 0;
 }
+
+/* Розділи: спершу пошти для розсилки, потім без призначення, потім лише прогрів (14.10). */
+.warmup-mail-table tr.warmup-mail-section-row td {
+  padding: 14px 12px 2px;
+  border-bottom: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.warmup-mail-table tr.warmup-mail-section-row.is-gap td {
+  padding-top: 34px;
+}
+
+.warmup-mail-table tr.warmup-mail-section-row span {
+  display: inline;
+  margin-left: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* «Призначення» без рамки — лише кольорове слово й стрілка (14.10). */
+.warmup-mail-role-select,
+.warmup-mail-role-select.is-cold,
+.warmup-mail-role-select.is-warmup {
+  min-width: 0;
+  padding-left: 0;
+  border-color: transparent;
+  background-color: transparent;
+  box-shadow: none;
+}
+
+.warmup-mail-role-select:hover,
+.warmup-mail-role-select:focus {
+  border-color: transparent;
+  outline: none;
+  text-decoration: underline dotted;
+}

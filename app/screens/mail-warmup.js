@@ -79,9 +79,15 @@ function roleHtml(row, canChange) {
 function tableHtml(data) {
   const { canChange } = data;
   // Domains A→Z, inside each the addresses A→Z, a heading row per domain (owner 13–14.10).
-  const rows = shownRows(data).slice().sort((left, right) => String(left.domain).localeCompare(String(right.domain)) || left.email.localeCompare(right.email));
+  // Mailboxes for campaigns first, then the unmarked, then warm-up-only (owner 14.10);
+  // inside each, domains A→Z and addresses A→Z.
+  const rank = (row) => (row.role === "cold" ? 0 : row.role === "warmup" ? 2 : 1);
+  const rows = shownRows(data).slice().sort((left, right) => rank(left) - rank(right) || String(left.domain).localeCompare(String(right.domain)) || left.email.localeCompare(right.email));
   const perDomain = new Map();
-  for (const row of rows) perDomain.set(row.domain, (perDomain.get(row.domain) || 0) + 1);
+  for (const row of rows) perDomain.set(`${rank(row)}|${row.domain}`, (perDomain.get(`${rank(row)}|${row.domain}`) || 0) + 1);
+  const perRank = new Map();
+  for (const row of rows) perRank.set(rank(row), (perRank.get(rank(row)) || 0) + 1);
+  const SECTION = ["Для розсилки", "Призначення не вказано", "Лише прогрів"];
   if (data.rows.length && !rows.length) return `<div class="empty-state">З тегом «${escapeHtml(tagFilter(data))}» пошт немає — виберіть інший тег у фільтрі або позначте пошти в «Пошта» → «Пошти».</div>${removedHtml(data)}`;
   if (!rows.length) return `<div class="empty-state">У прогріві немає пошт — додайте їх у «Пошта» → «Пошти» → «Додати пошту».</div>${removedHtml(data)}`;
   const action = (row) => {
@@ -97,8 +103,10 @@ function tableHtml(data) {
         const [word, tone] = STATUS[row.status];
         const share = row.plannedToday ? Math.min(100, Math.round((row.firstsToday / row.plannedToday) * 100)) : 0;
         // A new domain starts a group: its name on a row of its own, with a gap above.
-        const groupStart = index === 0 || list[index - 1].domain !== row.domain;
-        const heading = groupStart ? `<tr class="warmup-mail-domain-row${index ? " is-gap" : ""}"><td colspan="9">${escapeHtml(row.domain)}<span>${perDomain.get(row.domain)}</span></td></tr>` : "";
+        const sectionStart = index === 0 || rank(list[index - 1]) !== rank(row);
+        const groupStart = sectionStart || list[index - 1].domain !== row.domain;
+        const section = sectionStart ? `<tr class="warmup-mail-section-row${index ? " is-gap" : ""}"><td colspan="9">${SECTION[rank(row)]}<span>${perRank.get(rank(row))}</span></td></tr>` : "";
+        const heading = groupStart ? `${section}<tr class="warmup-mail-domain-row${index && !sectionStart ? " is-gap" : ""}"><td colspan="9">${escapeHtml(row.domain)}<span>${perDomain.get(`${rank(row)}|${row.domain}`)}</span></td></tr>` : "";
         return `${heading}<tr>
           <td><strong>${escapeHtml(row.email)}</strong>${ownTags(row).length ? `<span class="warmup-mail-tags">${tagPills(ownTags(row))}</span>` : ""}</td>
           <td>${roleHtml(row, canChange)}</td>

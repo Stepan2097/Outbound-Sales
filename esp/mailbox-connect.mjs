@@ -63,7 +63,7 @@ async function registerSender({ email, name, person }, actor) {
  */
 async function mailboxRows(esp) {
   const { senders } = await registry();
-  const senderView = (sender) => (sender ? { status: sender.status, effectiveStatus: sender.effectiveStatus || sender.status, rampStage: sender.rampStage, person: sender.person, domain: sender.domain, tags: sender.tags || [] } : null);
+  const senderView = (sender) => (sender ? { status: sender.status, effectiveStatus: sender.effectiveStatus || sender.status, rampStage: sender.rampStage, person: sender.person, domain: sender.domain, tags: sender.tags || [], role: sender.role || null } : null);
   const grants = esp.oauth.grants.list();
   const signed = new Set(grants.map((grant) => grant.email));
   return [

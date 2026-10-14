@@ -121,6 +121,12 @@ function groupsByDomain(rows) {
     .map(([domain, group]) => [domain, group.sort((left, right) => left.email.localeCompare(right.email))]);
 }
 
+/** Mailboxes for campaigns first, then the unmarked, then warm-up-only (owner 14.10). */
+function sectionsOf(rows) {
+  const parts = [["Для розсилки", rows.filter((row) => row.sender?.role === "cold")], ["Призначення не вказано", rows.filter((row) => !row.sender?.role)], ["Лише прогрів", rows.filter((row) => row.sender?.role === "warmup")]];
+  return parts.filter(([, part]) => part.length);
+}
+
 function listHtml() {
   const rows = (page.data?.mailboxes || []).filter((row) => (!page.query || `${row.email} ${row.name}`.toLowerCase().includes(page.query.toLowerCase()))
     && (!page.tag || (page.tag === "-" ? !(row.sender?.tags || []).length : (row.sender?.tags || []).includes(page.tag))));
@@ -135,7 +141,7 @@ function listHtml() {
   if (!rows.length) return '<p class="acc-muted">За цим пошуком чи тегом пошт немає.</p>';
   return `<div class="acc-list">
     <div class="acc-head" aria-hidden="true"><span></span><span>Пошта</span><span>Стан</span><span>Теги</span><span>Ліміт</span><span></span></div>
-    ${groupsByDomain(rows).map(([domain, group]) => `<ul class="acc-group" aria-label="${escapeAttr(domain)}"><li class="acc-group-name">${escapeHtml(domain)}</li>${group.map(rowHtml).join("")}</ul>`).join("")}
+    ${sectionsOf(rows).map(([title, part]) => `<div class="acc-section"><div class="acc-section-name">${escapeHtml(title)}<span>${part.length}</span></div>${groupsByDomain(part).map(([domain, group]) => `<ul class="acc-group" aria-label="${escapeAttr(domain)}"><li class="acc-group-name">${escapeHtml(domain)}</li>${group.map(rowHtml).join("")}</ul>`).join("")}</div>`).join("")}
   </div>`;
 }
 

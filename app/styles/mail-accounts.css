@@ -569,3 +569,27 @@
 .acc-group-name + .acc-row {
   border-top: 0;
 }
+
+/* Розділи «Для розсилки» / без призначення / «Лише прогрів» (14.10). */
+.acc-section + .acc-section {
+  margin-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.acc-section-name {
+  padding: 14px 16px 2px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.acc-section-name span {
+  margin-left: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.acc-section .acc-group:first-of-type {
+  margin-top: 0;
+  border-top: 0;
+}
