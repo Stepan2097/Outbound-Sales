@@ -184,9 +184,11 @@ export function contactWork(entries, { contactId, emails = [] }) {
  * than `maxDays` — a plan that grows forever is a plan nobody reads.
  */
 export const FOLLOW_UP_LIMIT = 3;
-export const FOLLOW_UP_MAX_DAYS = 30;
+export const FOLLOW_UP_MAX_DAYS = 14;
+// LinkedIn's link label sometimes comes through as the name: «Переглянути профіль Luke».
+const PROFILE_LABEL = /^(переглянути профіль|view profile( of)?|view|открыть профиль|посмотреть профиль)\s+/i;
 
-export function followUpsDue(threads, { today, accounts = new Map(), limit = FOLLOW_UP_LIMIT, maxDays = FOLLOW_UP_MAX_DAYS } = {}) {
+export function followUpsDue(threads, { today, accounts = new Map(), skipAccounts = new Set(), limit = FOLLOW_UP_LIMIT, maxDays = FOLLOW_UP_MAX_DAYS } = {}) {
   const dayNumber = (date) => Math.round(Date.parse(`${date}T12:00:00Z`) / 86400000);
   const now = dayNumber(today);
   const due = [];
@@ -194,6 +196,8 @@ export function followUpsDue(threads, { today, accounts = new Map(), limit = FOL
     const last = thread.lastMessage;
     if (!last || last.direction !== "out" || !last.at || !Number.isFinite(Date.parse(last.at))) continue;
     if (!thread.trailingOut || thread.trailingOut >= limit) continue;
+    // A blocked account cannot write anyone; its people are not today's work.
+    if (skipAccounts.has(thread.accountId)) continue;
     const sentDay = dayOf(last.at);
     const waited = now - dayNumber(sentDay);
     if (waited < 1 || waited > maxDays) continue;
@@ -203,7 +207,7 @@ export function followUpsDue(threads, { today, accounts = new Map(), limit = FOL
       accountId: thread.accountId,
       accountName: accounts.get(thread.accountId) || null,
       threadKey: thread.threadKey,
-      name: thread.participant?.name || "без імені",
+      name: String(thread.participant?.name || "").replace(PROFILE_LABEL, "").trim() || "без імені",
       headline: thread.participant?.headline || null,
       lastAt: last.at,
       lastText: String(last.body || "").slice(0, 240),
@@ -212,5 +216,12 @@ export function followUpsDue(threads, { today, accounts = new Map(), limit = FOL
       carriedDays: waited - 1
     });
   }
-  return due.sort((left, right) => right.carriedDays - left.carriedDays || left.lastAt.localeCompare(right.lastAt));
+  // One row a person: the same contact in two threads (a re-sent first message,
+  // a second account) is one follow-up — the newest thread's.
+  const newest = new Map();
+  for (const item of due) {
+    const person = item.contactId ? `id:${item.contactId}` : `${item.accountId}:${item.name.toLowerCase()}`;
+    if (!newest.has(person) || item.lastAt > newest.get(person).lastAt) newest.set(person, item);
+  }
+  return [...newest.values()].sort((left, right) => right.carriedDays - left.carriedDays || left.lastAt.localeCompare(right.lastAt));
 }

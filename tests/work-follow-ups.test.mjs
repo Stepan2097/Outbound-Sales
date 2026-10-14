@@ -28,7 +28,7 @@ test("написали вчора, мовчить — сьогодні в пла
 test("не встигли — переноситься: чекає днів, старіші вгорі", () => {
   const due = followUpsDue([
     thread({ threadKey: "new" }),
-    thread({ threadKey: "old", lastMessage: { direction: "out", at: "2026-10-10T09:00:00Z" } })
+    thread({ threadKey: "old", participant: { name: "Boris" }, lastMessage: { direction: "out", at: "2026-10-10T09:00:00Z" } })
   ], { today: "2026-10-14" });
   assert.deepEqual(due.map((item) => [item.threadKey, item.carriedDays]), [["old", 3], ["new", 0]]);
 });
@@ -52,6 +52,19 @@ test("розмова знає, скільки наших повідомлень 
   ]);
   assert.equal(one.trailingOut, 2);
   assert.equal(one.lastMessage.at, "2026-10-13T08:00:00Z");
+});
+
+test("заблокований акаунт пропускається, одна людина — один рядок, «Переглянути профіль» з імені прибрано", () => {
+  const today = "2026-10-14";
+  assert.deepEqual(followUpsDue([thread()], { today, skipAccounts: new Set(["acc"]) }), []);
+  const due = followUpsDue([
+    thread({ threadKey: "a", crmContactId: "c1", participant: { name: "Переглянути профіль Luke" } }),
+    thread({ threadKey: "b", crmContactId: "c1", lastMessage: { direction: "out", at: "2026-10-12T09:00:00Z" } }),
+    thread({ threadKey: "c", participant: { name: "Anna" } }),
+    thread({ threadKey: "d", participant: { name: "anna" }, lastMessage: { direction: "out", at: "2026-10-13T10:00:00Z" } })
+  ], { today });
+  assert.deepEqual(due.map((item) => [item.threadKey, item.name]), [["a", "Luke"], ["d", "anna"]]);
+  assert.deepEqual(followUpsDue([thread({ lastMessage: { direction: "out", at: "2026-09-16T09:00:00Z" } })], { today }), [], "понад 14 днів тиші");
 });
 
 test("сторінка: блок «Заплановані», кнопка «Написати» веде в розмову; сервер дає план лише на сьогодні", async () => {

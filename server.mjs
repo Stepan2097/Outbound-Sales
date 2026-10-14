@@ -2969,9 +2969,10 @@ async function plannedFollowUps(today) {
   try {
     const [threads, accounts] = await Promise.all([
       listThreads(),
-      warmupAnty.from("wl_accounts").select("id,label").rows()
+      warmupAnty.from("wl_accounts").select("id,label,status,health").rows()
     ]);
-    const due = followUpsDue(threads, { today, accounts: new Map(accounts.map((row) => [row.id, row.label])) });
+    const skipAccounts = new Set(accounts.filter((row) => row.health === "blocked" || row.status === "excluded").map((row) => row.id));
+    const due = followUpsDue(threads, { today, accounts: new Map(accounts.map((row) => [row.id, row.label])), skipAccounts });
     value = { items: due.slice(0, 200), total: due.length, limit: FOLLOW_UP_LIMIT, error: null };
   } catch (error) {
     value = { items: [], total: 0, limit: FOLLOW_UP_LIMIT, error: "Не вдалося прочитати розмови LinkedIn." };
