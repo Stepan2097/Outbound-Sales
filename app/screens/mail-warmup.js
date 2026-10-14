@@ -9,16 +9,13 @@ import { api, escapeAttr, escapeHtml, onScreen, refreshIcons, uaPlural } from ".
 const STATUS = {
   running: ["іде", "tone-live"], paused: ["на паузі", "tone-warn"], never: ["не запущено", "tone-muted"], blocked: ["не можна", "tone-bad"]
 };
-const DOMAIN_WORD = { aging: "старіє", ramp: "рампа", active: "активний", reserve: "запас", paused: "на паузі", retired: "виведено" };
 
 export const mailWarmupState = { data: null, error: "", notice: "", busy: "", tag: null };
 
-// Mailbox tags: the page shows the mailboxes tagged «Прогрів» by default (all of
-// them while nobody has tagged any); the filter changes it, «Запустити всі»
-// starts what it shows.
-function tagFilter(data) {
-  if (mailWarmupState.tag !== null) return mailWarmupState.tag;
-  return data.rows.some((row) => (row.tags || []).includes("Прогрів")) ? "Прогрів" : "";
+// Mailbox tags: the page shows every mailbox by default — grouped by domain
+// (owner 14.10); the filter narrows it, «Запустити всі» starts what it shows.
+function tagFilter() {
+  return mailWarmupState.tag !== null ? mailWarmupState.tag : "";
 }
 
 function shownRows(data) {
@@ -103,7 +100,7 @@ function tableHtml(data) {
         const groupStart = index === 0 || list[index - 1].domain !== row.domain;
         const heading = groupStart ? `<tr class="warmup-mail-domain-row${index ? " is-gap" : ""}"><td colspan="9">${escapeHtml(row.domain)}<span>${perDomain.get(row.domain)}</span></td></tr>` : "";
         return `${heading}<tr>
-          <td><strong>${escapeHtml(row.email)}</strong>${ownTags(row).length ? `<span class="warmup-mail-tags">${tagPills(ownTags(row))}</span>` : ""}<small>домен: ${escapeHtml(DOMAIN_WORD[row.domainStatus] || row.domainStatus || "—")}</small></td>
+          <td><strong>${escapeHtml(row.email)}</strong>${ownTags(row).length ? `<span class="warmup-mail-tags">${tagPills(ownTags(row))}</span>` : ""}</td>
           <td>${roleHtml(row, canChange)}</td>
           <td><span class="pill ${tone}">${word}</span>${row.status === "paused" && row.pausedAt ? `<small>з ${escapeHtml(when(row.pausedAt))}</small>` : row.status === "running" && row.startedAt ? `<small>старт ${escapeHtml(when(row.startedAt))}</small>` : ""}</td>
           <td class="is-number">${row.day || "—"}</td>
