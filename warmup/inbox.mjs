@@ -1327,7 +1327,12 @@ export function deriveThreads(events, { readMarks = new Map(), syncedAt = new Ma
     const readAt = readMarks.get(threadId(thread.accountId, thread.threadKey)) || null;
     // The last in the order the thread screen shows (`threadOrder`), so the
     // list's preview is the message the thread ends on there.
-    const lastMessage = threadOrder(thread.messages).at(-1) ?? null;
+    const ordered = threadOrder(thread.messages);
+    const lastMessage = ordered.at(-1) ?? null;
+    // Our messages at the end with nothing from them after — «По днях» plans
+    // the next follow-up from this (14.10).
+    let trailingOut = 0;
+    for (let at = ordered.length - 1; at >= 0 && ordered[at].direction === "out"; at -= 1) trailingOut += 1;
     // Who the thread is with: the newest of what a message was stored knowing
     // and a later tie (`CONTACT_TYPE`). An approach of this account's, which
     // the caller knows about and this does not, comes before both.
@@ -1341,8 +1346,12 @@ export function deriveThreads(events, { readMarks = new Map(), syncedAt = new Ma
       lastMessage: lastMessage && {
         direction: lastMessage.direction,
         body: lastMessage.body,
-        sentAt: lastMessage.sentAt
+        sentAt: lastMessage.sentAt,
+        // A real moment: LinkedIn's own time when it was readable as one,
+        // otherwise when the agent stored it.
+        at: lastMessage.sentAtIso ? lastMessage.sentAt : lastMessage.storedAt
       },
+      trailingOut,
       messageCount: thread.messages.length,
       unread: Boolean(thread.newestInboundStoredAt) && (!readAt || thread.newestInboundStoredAt > readAt),
       readAt,

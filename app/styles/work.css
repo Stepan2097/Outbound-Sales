@@ -492,3 +492,93 @@
     grid-template-columns: repeat(7, minmax(0, 1fr));
   }
 }
+
+/* Заплановані: кому писати повторно сьогодні; перенесені — з червоною позначкою. */
+.work-plan {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.work-plan header {
+  display: grid;
+  gap: 4px;
+}
+
+.work-plan h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.work-plan h3 b {
+  margin-left: 4px;
+  color: var(--teal);
+}
+
+.work-plan header p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.work-plan-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.work-plan-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.work-plan-row.is-carried {
+  border-color: color-mix(in srgb, var(--red) 45%, var(--line));
+}
+
+.work-plan-who {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.work-plan-who small,
+.work-plan-last {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.work-plan-tags {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+}
+
+.work-plan-count {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+@media (max-width: 720px) {
+  .work-plan-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .work-plan-tags {
+    justify-items: start;
+  }
+}

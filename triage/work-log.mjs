@@ -171,3 +171,46 @@ export function contactWork(entries, { contactId, emails = [] }) {
   return entries.filter((row) => (contactId && row.contactId === contactId) || (row.email && addresses.has(row.email)))
     .sort((left, right) => left.at.localeCompare(right.at));
 }
+
+/**
+ * Заплановані (власник 14.10): «коли я написав людині і вона не відповіла — через
+ * день їй знову написати; що не встигли — перенести на наступний день».
+ *
+ * From the LinkedIn conversations the agent reads (`deriveThreads`): a thread
+ * whose last message is ours, sent before `today`, is due the day after it was
+ * sent; one not written to by then stays on the list, older first, with how
+ * many days it has waited. After `limit` messages of ours in a row with no
+ * answer the person leaves the list, and so does a thread silent for longer
+ * than `maxDays` — a plan that grows forever is a plan nobody reads.
+ */
+export const FOLLOW_UP_LIMIT = 3;
+export const FOLLOW_UP_MAX_DAYS = 30;
+
+export function followUpsDue(threads, { today, accounts = new Map(), limit = FOLLOW_UP_LIMIT, maxDays = FOLLOW_UP_MAX_DAYS } = {}) {
+  const dayNumber = (date) => Math.round(Date.parse(`${date}T12:00:00Z`) / 86400000);
+  const now = dayNumber(today);
+  const due = [];
+  for (const thread of threads) {
+    const last = thread.lastMessage;
+    if (!last || last.direction !== "out" || !last.at || !Number.isFinite(Date.parse(last.at))) continue;
+    if (!thread.trailingOut || thread.trailingOut >= limit) continue;
+    const sentDay = dayOf(last.at);
+    const waited = now - dayNumber(sentDay);
+    if (waited < 1 || waited > maxDays) continue;
+    due.push({
+      key: thread.crmContactId ? `id:${thread.crmContactId}` : `thread:${thread.accountId}:${thread.threadKey}`,
+      contactId: thread.crmContactId || null,
+      accountId: thread.accountId,
+      accountName: accounts.get(thread.accountId) || null,
+      threadKey: thread.threadKey,
+      name: thread.participant?.name || "без імені",
+      headline: thread.participant?.headline || null,
+      lastAt: last.at,
+      lastText: String(last.body || "").slice(0, 240),
+      sentInRow: thread.trailingOut,
+      // Due the day after it was sent; every day past that it was carried over.
+      carriedDays: waited - 1
+    });
+  }
+  return due.sort((left, right) => right.carriedDays - left.carriedDays || left.lastAt.localeCompare(right.lastAt));
+}

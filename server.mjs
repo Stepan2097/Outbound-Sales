@@ -11,7 +11,7 @@ import { invalidateContactCaches, contactAsProspect, contactsConfigured, contact
 import { handleKnowledgeLibraryApi } from "./knowledge/api.mjs";
 import { allEntries, append as espAppend, useJournal } from "./esp/journal.mjs";
 import { nextContact as nextTriageContact } from "./triage/queue.mjs";
-import { contactKeyOf, contactWork, dayActivity, dayOf, logWork, recentDays, useWorkLog, workEntries, workUsers } from "./triage/work-log.mjs";
+import { FOLLOW_UP_LIMIT, contactKeyOf, contactWork, dayActivity, dayOf, followUpsDue, logWork, recentDays, useWorkLog, workEntries, workUsers } from "./triage/work-log.mjs";
 import { checkEmail } from "./contacts/email-check.mjs";
 import { contactEmails, crmPatch } from "./contacts/enrich-crm.mjs";
 import { logAdminAction } from "./esp/access.mjs";
@@ -38,7 +38,7 @@ import { leadStore } from "./esp/leads.mjs";
 import { crmLeadSource } from "./esp/crm-leads.mjs";
 import { anty as warmupAnty, crm as warmupCrm } from "./warmup/db.mjs";
 import { likeLiteral } from "./warmup/rest.mjs";
-import { messagesForContact } from "./warmup/inbox.mjs";
+import { listThreads, messagesForContact } from "./warmup/inbox.mjs";
 import { postponedDue, runTick, startSequence } from "./esp/sequence.mjs";
 import { pollInboxes } from "./esp/inbound.mjs";
 import { runWarmupTick, warmupMode } from "./esp/mail-warmup.mjs";
@@ -1418,6 +1418,9 @@ async function handleApi(request, response, url) {
         });
         const answeredBy = new Map();
         for (const item of contacts) if (item.answer) for (const person of item.users) answeredBy.set(person, (answeredBy.get(person) || 0) + 1);
+        // Заплановані: лише на сьогодні — на минулий день план уже нічого не скаже.
+        const today = dayOf(new Date());
+        const planned = date === today ? await plannedFollowUps(today) : null;
         sendJson(response, 200, {
           date, user, admin, viewer,
           today: dayOf(new Date()),
@@ -1425,7 +1428,8 @@ async function handleApi(request, response, url) {
           days: recentDays(entries, { user, until: date }),
           total: { ...activity.total, answered: contacts.filter((item) => item.answer).length, fresh: contacts.filter((item) => item.fresh).length },
           byUser: activity.users.map((person) => ({ ...person, counts: { ...person.counts, answered: answeredBy.get(person.user) || 0 } })),
-          contacts
+          contacts,
+          planned
         });
         return;
       }
@@ -2950,6 +2954,29 @@ async function answerFor(item, base, journal) {
   const value = { answer: answers.find((row) => !row.bounced) || null, answers: answers.length, bounced: answers.some((row) => row.bounced), accepted };
   answerCache.set(cacheKey, { at: Date.now(), value });
   if (answerCache.size > 5000) answerCache.clear();
+  return value;
+}
+
+/**
+ * «Заплановані» на сьогодні з розмов LinkedIn, які читає агент: кому ми
+ * написали останніми і хто мовчить (triage/work-log.mjs followUpsDue). Хвилину
+ * в кеші — сторінка перечитує день щохвилини.
+ */
+let plannedCache = null;
+async function plannedFollowUps(today) {
+  if (plannedCache && plannedCache.today === today && Date.now() - plannedCache.at < 60000) return plannedCache.value;
+  let value;
+  try {
+    const [threads, accounts] = await Promise.all([
+      listThreads(),
+      warmupAnty.from("wl_accounts").select("id,label").rows()
+    ]);
+    const due = followUpsDue(threads, { today, accounts: new Map(accounts.map((row) => [row.id, row.label])) });
+    value = { items: due.slice(0, 200), total: due.length, limit: FOLLOW_UP_LIMIT, error: null };
+  } catch (error) {
+    value = { items: [], total: 0, limit: FOLLOW_UP_LIMIT, error: "Не вдалося прочитати розмови LinkedIn." };
+  }
+  plannedCache = { today, at: Date.now(), value };
   return value;
 }
 
