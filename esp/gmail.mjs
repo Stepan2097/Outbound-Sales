@@ -246,11 +246,12 @@ export class GmailApiConnector {
    * and Trash unless asked. Headers only: the warm-up needs who, which letter
    * and where it landed, not the text.
    */
-  async lettersFrom(value, senders, { newerThanDays = 3 } = {}) {
+  async lettersFrom(value, senders, { newerThanDays = 3, inSpam = false } = {}) {
     const mailbox = normalizeMailbox(value);
     const from = [...new Set(senders.map((email) => normalizeMailbox(email)).filter((email) => email !== mailbox))];
     if (!from.length) return [];
-    const query = `from:(${from.join(" OR ")}) newer_than:${Math.max(1, Number(newerThanDays) || 3)}d`;
+    // `inSpam`: only what sits in Spam — the warm-up takes out every letter of ours there (15.10).
+    const query = `${inSpam ? "in:spam " : ""}from:(${from.join(" OR ")}) newer_than:${Math.max(1, Number(newerThanDays) || 3)}d`;
     const list = await this.call(mailbox, `/messages?q=${encodeURIComponent(query)}&includeSpamTrash=true&maxResults=100`);
     const letters = [];
     for (const row of list.messages || []) {
@@ -342,14 +343,14 @@ export class StubGmailConnector {
     return { messages: list.slice(from).filter((message) => !message.labels?.includes("SPAM")), cursor: String(list.length) };
   }
 
-  async lettersFrom(value, senders) {
+  async lettersFrom(value, senders, { inSpam = false } = {}) {
     const from = new Set(senders.map((email) => normalizeMailbox(email)));
     const read = (raw, name) => (String(raw).match(new RegExp(`^${name}:\\s*(.*)$`, "im")) || [])[1]?.trim() || "";
     return (this.inboxes.get(normalizeMailbox(value)) || []).map((message) => ({
       id: message.id, threadId: message.threadId, labels: [...(message.labels || [])],
       from: (read(message.raw, "From").match(/<([^>]+)>/)?.[1] || read(message.raw, "From")).toLowerCase(),
       messageId: read(message.raw, "Message-ID"), inReplyTo: read(message.raw, "In-Reply-To"), subject: read(message.raw, "Subject")
-    })).filter((letter) => from.has(letter.from));
+    })).filter((letter) => from.has(letter.from) && (!inSpam || letter.labels.includes("SPAM")));
   }
 
   async setLabels(value, id, { add = [], remove = [] } = {}) {

@@ -122,6 +122,7 @@ export function warmupLedger(entries, { now = new Date(), plan = warmupPlan(entr
   const failed = new Set(entries.filter((entry) => entry.type === "warmup.failed").map((entry) => entry.data?.sendingSeq));
   const sendingBySeq = new Map();
   const byMessageId = new Map();
+  const pendingReplies = [];
   for (const entry of entries) {
     const data = entry.data || {};
     if (entry.type === "warmup.started" || entry.type === "warmup.paused") {
@@ -145,8 +146,9 @@ export function warmupLedger(entries, { now = new Date(), plan = warmupPlan(entr
       target.sent += 1;
       if (data.kind === "reply") {
         target.repliesSent += 1;
-        const original = byMessageId.get(data.inReplyTo);
-        if (original) row(original.data.from).repliesReceived += 1;
+        // Attributed after the loop: the reply names the letter by the
+        // Message-ID Gmail gave it, which is known only from warmup.sent(_id).
+        pendingReplies.push(data.inReplyTo);
       }
       if (dayOf(entry.at) === today) {
         target.sentToday += 1;
@@ -159,12 +161,19 @@ export function warmupLedger(entries, { now = new Date(), plan = warmupPlan(entr
         if (dayOf(entry.at) === today) target.failedToday += 1;
         target.lastError = { at: entry.at, error: data.error || "", code: data.code || null };
       }
+    } else if ((entry.type === "warmup.sent" || entry.type === "warmup.sent_id") && data.messageId) {
+      const sending = sendingBySeq.get(data.sendingSeq);
+      if (sending) byMessageId.set(data.messageId, sending);
     } else if (entry.type === "warmup.received") {
       row(data.mailbox).received += 1;
       if (data.inSpam) row(data.from).landedInSpam += 1;
     } else if (entry.type === "warmup.rescued") {
       row(data.mailbox).rescued += 1;
     }
+  }
+  for (const id of pendingReplies) {
+    const original = byMessageId.get(id);
+    if (original) row(original.data.from).repliesReceived += 1;
   }
   for (const target of rows.values()) {
     if (target.running) for (let date = dayOf(target.since); date <= today; date = addDays(date, 1)) target.activeDays.add(date);
@@ -402,6 +411,33 @@ export async function runWarmupTick({ journal, senders, connector, gate, now = n
             await journal.append({ type: "warmup.rescue_refused", actor: "esp-warmup", data: { mailbox: mailbox.email, code: error.code, error: error.message } });
           }
         }
+      }
+    }
+  }
+
+  // (1b) Every letter from our mailboxes still in Spam, of the last month —
+  // the warm-up's, a cold one between colleagues, one sent before its id was
+  // known — goes to the Inbox, marked Important (owner 15.10: «витягуй
+  // абсолютно всі листи зі спаму»).
+  for (const mailbox of live) {
+    let spam = [];
+    try {
+      spam = await connector.lettersFrom(mailbox.email, ours, { inSpam: true, newerThanDays: 30 });
+    } catch (error) {
+      summary.errors.push({ mailbox: mailbox.email, stage: "spam", error: error.message });
+      continue;
+    }
+    for (const letter of spam) {
+      const key = `${mailbox.email}|${letter.id}`;
+      if (rescued.has(key) || !letter.labels.includes("SPAM")) continue;
+      try {
+        await connector.setLabels(mailbox.email, letter.id, { add: ["INBOX", "IMPORTANT"], remove: ["SPAM"] });
+        await journal.append({ type: "warmup.rescued", actor: "esp-warmup", data: { mailbox: mailbox.email, from: letter.from, gmailId: letter.id, ...(sentById.has(letter.messageId) ? {} : { other: true }) } });
+        rescued.add(key);
+        summary.rescued += 1;
+      } catch (error) {
+        summary.errors.push({ mailbox: mailbox.email, stage: "rescue", error: error.message, code: error.code || null });
+        break;
       }
     }
   }

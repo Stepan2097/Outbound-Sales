@@ -412,3 +412,22 @@ test("Gmail підміняє Message-ID: лист однаково впізна�
   const replies = await tick(at(0, 32 + 141), { replyPercent: 100 });
   assert.ok(replies.replied >= 1, `на них відповідають (${JSON.stringify(replies.skipped)})`);
 });
+
+test("зі спаму виймається кожен лист від наших пошт — і не з прогріву теж; «Відповідей» рахує відповіді за справжнім Message-ID Gmail (15.10)", async (t) => {
+  const { connector, tick, start } = await world(t);
+  for (const mailbox of [ANNA, BORIS]) await start(mailbox, at(0));
+  // A letter from Boris to Anna that the warm-up never sent, sitting in Spam.
+  connector.deliver(ANNA, `From: Boris <${BORIS}>\r\nTo: ${ANNA}\r\nSubject: hello\r\nMessage-ID: <other@x>\r\n\r\nhi`, { labels: ["SPAM"] });
+  const summary = await tick(at(0, 30));
+  assert.equal(summary.rescued, 1, "вийнято й чужий для прогріву лист від нашої пошти");
+  const rescued = (await allEntries()).filter((entry) => entry.type === "warmup.rescued");
+  assert.equal(rescued[0].data.other, true);
+  assert.deepEqual(connector.inboxes.get(ANNA)[0].labels.sort(), ["IMPORTANT", "INBOX"]);
+  // A reply that names the letter by Gmail's id is a reply to Anna.
+  const { append: write } = await import("../esp/journal.mjs");
+  const first = await write({ type: "warmup.sending", actor: "t", data: { from: ANNA, to: BORIS, kind: "first", messageId: "<ours@x>", subject: "s", text: "t" } });
+  await write({ type: "warmup.sent", actor: "t", data: { sendingSeq: first.seq, gmailId: "g1", messageId: "<CAreal@mail.gmail.com>" } });
+  await write({ type: "warmup.sending", actor: "t", data: { from: BORIS, to: ANNA, kind: "reply", inReplyTo: "<CAreal@mail.gmail.com>", messageId: "<r@x>", subject: "Re: s", text: "ok" } });
+  const view = warmupView(await allEntries(), { ...(await registry()), now: at(0, 31) });
+  assert.equal(view.find((row) => row.email === ANNA).repliesReceived, 1);
+});
