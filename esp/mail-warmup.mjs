@@ -221,7 +221,7 @@ export function warmupMode({ describe = {}, sequenceOn = false, env = process.en
   if (describe.mode === "stub") {
     return sequenceOn
       ? { runs: true, mode: "stub_cycle", text: "Заглушка замість Gmail, тестовий цикл (ESP_SEQUENCE=on): прогрів «шле» й «виймає зі спаму» в заглушці, у мережу нічого не йде." }
-      : { runs: false, mode: "stub", text: "Пошту ще не підключено — працює заглушка. Прогрів почнеться, коли пошту підключать («Пошти» → «Додати пошту» → «Увійти через Google») і ввімкнуть справжню відправку (ESP_LIVE_SEND=1). «Старт» уже можна натиснути — пошта стане в чергу." };
+      : { runs: false, mode: "stub", text: "Пошту ще не підключено — працює заглушка. Прогрів почнеться, коли пошту підключать («Прогрів пошт» → «Додати пошту» → «Увійти через Google») і ввімкнуть справжню відправку (ESP_LIVE_SEND=1). «Старт» уже можна натиснути — пошта стане в чергу." };
   }
   if (!describe.liveSend) return { runs: false, mode: "locked", text: "Gmail підключено, але справжня відправка вимкнена (ESP_LIVE_SEND). Прогрів почнеться, щойно її ввімкнуть; «Старт» уже запам'ятовується." };
   return { runs: true, mode: "live", text: "" };

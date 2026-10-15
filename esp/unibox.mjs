@@ -122,7 +122,7 @@ export function uniboxThread(entries, key, { leads = new Map(), campaigns = new 
  */
 export function uniboxProblems({ mode = "stub", polling = false, senders = [] } = {}) {
   const problems = [];
-  if (mode === "stub") problems.push({ code: "stub", text: "Пошту ще не підключено — працює заглушка: листи з Gmail не читаються, і відповісти звідси не можна. Підключення — «Пошта» → «Пошти» → «Додати пошту» → «Увійти через Google»." });
+  if (mode === "stub") problems.push({ code: "stub", text: "Пошту ще не підключено — працює заглушка: листи з Gmail не читаються, і відповісти звідси не можна. Підключення — «Пошта» → «Прогрів пошт» → «Додати пошту» → «Увійти через Google»." });
   else if (!polling) problems.push({ code: "not_polling", text: "Пошти зараз не читаються (ланцюжок вимкнено, ESP_SEQUENCE) — нові відповіді не з'являться, доки його не ввімкнуть." });
   const paused = senders.filter((row) => row.status === "paused").map((row) => row.email);
   if (paused.length) problems.push({ code: "paused", text: `На паузі: ${paused.join(", ")} — їхні листи не йдуть. Причина й зняття паузи — у реєстрі відправників.`, senders: paused });

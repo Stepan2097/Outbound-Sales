@@ -176,7 +176,7 @@ test("a seller connects their own mailbox: back on «Пошти», the domain in
 
   const back = await call("GET", `/oauth/google/callback?state=${state}&code=code-1`);
   assert.equal(back.status, 302);
-  assert.equal(back.location, "/#mail-settings/mailbox/ok/anna%40advantage-send.com");
+  assert.equal(back.location, "/#mail-warmup/mailbox/ok/anna%40advantage-send.com");
   const { domains, senders } = await registry();
   assert.equal(domains.find((row) => row.domain === "advantage-send.com").status, "ramp");
   const sender = senders.find((row) => row.email === "anna@advantage-send.com");

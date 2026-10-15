@@ -108,10 +108,11 @@ test("теги видно в лімітах (конструктор) і в пр�
   assert.equal((await api("POST", "/warmup/start", {})).status, 400, "без пошти й без списку — помилка, як раніше");
 });
 
-test("сторінки: фільтр за тегом у «Поштах», «Прогріві» і конструкторі; позначену пошту фільтр не ховає", () => {
+test("сторінки: фільтр за тегом у «Прогріві» і конструкторі, теги редагуються в рядку прогріву; позначену пошту фільтр не ховає", () => {
   const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
+  // «Пошти» joined «Прогрів пошт» (owner 15.10): the tag editor lives in its rows.
   const accounts = read("app/screens/mail-accounts.js");
-  assert.match(accounts, /id="mailAccountsTag"/);
+  assert.match(accounts, /data-acc-tag-form/);
   assert.match(accounts, /\/api\/esp\/senders\/tags/);
   const warmup = read("app/screens/mail-warmup.js");
   assert.match(warmup, /id="mailWarmupTag"/);

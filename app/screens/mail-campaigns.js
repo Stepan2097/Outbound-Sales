@@ -10,6 +10,7 @@
 // ланцюжок на сервері, і лише після приймання ESP 11.
 
 import { api, authState, escapeAttr, escapeHtml, onScreen, refreshIcons } from "../core.js";
+import { openAddMailbox } from "./mail-accounts.js";
 
 onScreen("campaigns", { open: () => void openCampaignsPage() });
 
@@ -526,7 +527,7 @@ function sendingHtml(campaign) {
             <input type="checkbox" name="sender" value="${escapeAttr(sender.email)}" ${campaign.senders.includes(sender.email) ? "checked" : ""} ${campaign.state === "done" ? "disabled" : ""} />
             <span><strong>${escapeHtml(sender.email)}</strong><small>${sender.status === "active" ? "надсилає" : "на паузі"} · сьогодні ${sender.today} з ${sender.limit} · етап рампи ${sender.rampStage ?? "—"}</small>${senderTagPills(sender)}</span>
             <span class="mc-meter"><span style="width:${percent(sender.today, sender.limit)}%"></span></span>
-          </label>`).join("") : '<p class="esp-notice is-bad">У реєстрі немає жодної активної пошти. Додайте пошту: «Пошта» → «Пошти» → «Додати пошту».</p>'}
+          </label>`).join("") : '<p class="esp-notice is-bad">У реєстрі немає жодної активної пошти. Додайте пошту: «Пошта» → «Прогрів пошт» → «Додати пошту».</p>'}
         <button type="button" class="text-button" data-mc="add-mailbox"><i data-lucide="mail-plus"></i><span>Додати пошту</span></button>
       </fieldset>
       <fieldset class="mc-fieldset"><legend>Варіанти тексту (A/B)</legend>
@@ -884,10 +885,6 @@ function exportCsv() {
   window.setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 }
 
-function goToSettings() {
-  document.querySelector('.nav-item[data-view="account"]')?.click();
-}
-
 // ── дії ──────────────────────────────────────────────────────────────────────
 
 async function changeState(id, state) {
@@ -1000,7 +997,7 @@ function onClick(event) {
     case "bulk-delete": return deleteCampaigns(page.campaigns.filter((campaign) => page.selected.has(campaign.id) && deletable(campaign)).map((campaign) => campaign.id));
     case "bulk-archive": return archiveCampaigns(page.campaigns.filter((campaign) => page.selected.has(campaign.id) && !campaign.archived && campaign.state !== "running").map((campaign) => campaign.id), true);
     case "bulk-clear": page.selected.clear(); return renderCampaignsPage();
-    case "add-mailbox": return goToSettings();
+    case "add-mailbox": return openAddMailbox();
     case "halt-on": {
       const reason = window.prompt("«Стоп усе»: чому зупиняємо всю відправку?");
       if (!reason?.trim()) return;

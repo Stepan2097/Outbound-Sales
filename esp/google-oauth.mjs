@@ -258,7 +258,7 @@ export class GmailOAuthConnector extends GmailApiConnector {
     const cached = this.tokens.get(key);
     if (cached && cached.expiresAt - 60_000 > this.now()) return cached.token;
     const refreshToken = this.grants.refreshToken(key);
-    if (!refreshToken) throw new MailboxError(`Пошту ${key} не підключено — «Пошти» → «Додати пошту» → «Увійти через Google».`, { code: "not_connected" });
+    if (!refreshToken) throw new MailboxError(`Пошту ${key} не підключено — «Прогрів пошт» → «Додати пошту» → «Увійти через Google».`, { code: "not_connected" });
     try {
       const { token, expiresIn } = await this.signIn.refresh(refreshToken);
       this.tokens.set(key, { token, expiresAt: this.now() + expiresIn * 1000 });
@@ -294,7 +294,7 @@ export class NotConnectedConnector {
   constructor() { this.kind = "not_connected"; this.liveSend = false; }
   describe() { return { mode: "not_connected", liveSend: false, serviceAccountEmail: null, clientId: null, scopes: OAUTH_SCOPES }; }
   #no(mailbox) {
-    return new MailboxError(`Пошту ${mailbox} не підключено — «Пошти» → «Додати пошту» → «Увійти через Google».`, { code: "not_connected" });
+    return new MailboxError(`Пошту ${mailbox} не підключено — «Прогрів пошт» → «Додати пошту» → «Увійти через Google».`, { code: "not_connected" });
   }
   async checkMailbox(mailbox) { throw this.#no(mailbox); }
   async send(mailbox) { throw this.#no(mailbox); }

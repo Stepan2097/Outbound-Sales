@@ -368,3 +368,69 @@
 .warmup-mail-pair span.is-bad b {
   color: var(--amber);
 }
+
+/* Підключення пошт на цій сторінці (15.10, колишні «Пошти»). */
+.warmup-mail-head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.warmup-mail-table td .acc-state {
+  display: inline-flex;
+  margin-top: 4px;
+}
+
+.warmup-mail-table td small.acc-note {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+}
+
+.warmup-mail-table td small.acc-note.is-bad {
+  color: var(--red);
+}
+
+.warmup-mail-table td small.acc-note.is-ok {
+  color: var(--green);
+}
+
+.warmup-mail-action .acc-icon {
+  margin-left: 6px;
+  color: var(--muted);
+}
+
+.warmup-mail-action .acc-icon:hover {
+  color: var(--ink);
+}
+
+.warmup-mail-action .acc-icon.is-signin {
+  color: var(--teal);
+}
+
+.warmup-mail-action .acc-icon.is-danger:hover {
+  color: var(--red);
+}
+
+.warmup-mail-tag-row td {
+  padding-top: 0;
+  background: var(--surface-sunk);
+}
+
+.warmup-mail-action {
+  white-space: nowrap;
+}
+
+.warmup-mail-action .icon-button {
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  min-height: 30px;
+  margin-left: 4px;
+}
+
+.warmup-mail-action .icon-button svg {
+  width: 15px;
+  height: 15px;
+}

@@ -38,7 +38,7 @@ function sources(dir = APP.pathname) {
   });
 }
 
-const SCREENS = [["home", "Головна"], ["work", "По днях"], ["linkedin-home", "Огляд"], ["warmup", "Прогрів"], ["inbox", "Вхідні"], ["mail-warmup", "Прогрів пошт"], ["campaigns", "Кампанії"], ["mail-inbox", "Вхідні"], ["leads", "Ліди"], ["reports", "Звіти"], ["mail-settings", "Пошти"], ["contacts", "Контакти"], ["account", "Налаштування"]];
+const SCREENS = [["home", "Головна"], ["work", "По днях"], ["linkedin-home", "Огляд"], ["warmup", "Прогрів"], ["inbox", "Вхідні"], ["mail-warmup", "Прогрів пошт"], ["campaigns", "Кампанії"], ["mail-inbox", "Вхідні"], ["leads", "Ліди"], ["reports", "Звіти"], ["contacts", "Контакти"], ["account", "Налаштування"]];
 
 const REMOVED_VIEWS = ["email", "prospects", "ai", "products", "overview", "models", "routing", "budgets", "privacy", "evaluation"];
 

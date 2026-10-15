@@ -1,4 +1,4 @@
-// «Пошти» → «Додати пошту» → «Увійти через Google» (власник 13.10):
+// «Прогрів пошт» → «Додати пошту» → «Увійти через Google» (власник 13.10):
 // the routes around the sign-in, as Instantly and Snov have them — the list of
 // connected mailboxes with their state, the button that sends the browser to
 // Google, the way back, «Перевірити» and «Відключити».
@@ -21,7 +21,7 @@ import { addDomain, addSender, domainKey, isDisconnected, registry, setSenderSta
 /** Pauses that signing in again repairs: the connection itself was the problem. */
 const CONNECTION_CODES = new Set(["oauth_revoked", "oauth_client", "not_connected", "token_failed", "delegation_missing", "mailbox_rejected"]);
 
-const RETURN_TO = "/#mail-settings/mailbox";
+const RETURN_TO = "/#mail-warmup/mailbox";
 
 function redirect(response, location, sendJson) {
   if (typeof response.writeHead === "function") {
@@ -116,7 +116,7 @@ export async function handleMailboxConnect({ method, path, url, request, respons
     return true;
   }
 
-  // Google sends the person back here — a page, not an answer: back to «Пошти» with what happened.
+  // Google sends the person back here — a page, not an answer: back to «Прогрів пошт» with what happened.
   if (method === "GET" && path === "/oauth/google/callback") {
     const back = (outcome, value) => redirect(response, `${RETURN_TO}/${outcome}/${encodeURIComponent(value)}`, sendJson);
     const pending = oauth.signIn.take(url.searchParams.get("state"));

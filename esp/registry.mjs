@@ -266,7 +266,7 @@ export async function setSenderStatus({ email, status, reason = "", code = null 
 
 /**
  * A mailbox somebody pressed «Відключити» on (esp/mailbox-connect.mjs): paused
- * with the code `not_connected`. It is gone from «Пошти» and «Прогрів пошт»
+ * with the code `not_connected`. It is gone from «Прогрів пошт»
  * — its history stays here — and signing in through Google again brings it back.
  */
 export function isDisconnected(sender) {

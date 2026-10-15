@@ -5,6 +5,7 @@
 // Листи прогріву не потрапляють у кампанії, звіти й «Вхідні».
 
 import { api, escapeAttr, escapeHtml, onScreen, refreshIcons, uaPlural } from "../core.js";
+import { accountActionsHtml, accountNotesHtml, accountsNoticeHtml, addButtonHtml, addDialogHtml, afterAccountsRender, bindAccounts, loadAccounts, onAccountsChange, readAccountsReturn, tagEditorHtml } from "./mail-accounts.js";
 
 const STATUS = {
   running: ["іде", "tone-live"], paused: ["на паузі", "tone-warn"], never: ["не запущено", "tone-muted"], blocked: ["не можна", "tone-bad"]
@@ -31,8 +32,10 @@ onScreen("mail-warmup", { open: () => void loadMailWarmup() });
 
 export async function loadMailWarmup() {
   if (!document.getElementById("mailWarmupRoot")) return;
+  // The mailboxes' connections (what was the «Пошти» page) come with the table.
+  readAccountsReturn();
   try {
-    mailWarmupState.data = await api("/api/esp/warmup");
+    [mailWarmupState.data] = await Promise.all([api("/api/esp/warmup"), loadAccounts()]);
     mailWarmupState.error = "";
   } catch (error) {
     mailWarmupState.error = error?.status === 403 ? "Прогрів бачить команда з правом читати відповіді — його дає адміністратор." : error?.message || "Прогрів не прочитався.";
@@ -89,8 +92,8 @@ function tableHtml(data) {
   const perRank = new Map();
   for (const row of rows) perRank.set(rank(row), (perRank.get(rank(row)) || 0) + 1);
   const SECTION = ["Для розсилки", "Призначення не вказано", "Лише прогрів"];
-  if (data.rows.length && !rows.length) return `<div class="empty-state">З тегом «${escapeHtml(tagFilter(data))}» пошт немає — виберіть інший тег у фільтрі або позначте пошти в «Пошта» → «Пошти».</div>${removedHtml(data)}`;
-  if (!rows.length) return `<div class="empty-state">У прогріві немає пошт — додайте їх у «Пошта» → «Пошти» → «Додати пошту».</div>${removedHtml(data)}`;
+  if (data.rows.length && !rows.length) return `<div class="empty-state">З тегом «${escapeHtml(tagFilter(data))}» пошт немає — виберіть інший тег у фільтрі або позначте пошти кнопкою з міткою в рядку.</div>${removedHtml(data)}`;
+  if (!rows.length) return `<div class="empty-state">Пошт ще немає — «Додати пошту» вгорі сторінки.</div>${removedHtml(data)}`;
   const action = (row) => {
     if (!canChange) return "";
     if (row.status === "running") return `<button type="button" class="text-button" data-warmup-pause="${escapeAttr(row.email)}"${mailWarmupState.busy ? " disabled" : ""}><i data-lucide="pause"></i><span>Пауза</span></button>`;
@@ -110,16 +113,16 @@ function tableHtml(data) {
         // A new domain: just a gap above it, no label (owner 14.10).
         const heading = sectionStart ? section : groupStart ? '<tr class="warmup-mail-domain-gap" aria-hidden="true"><td colspan="9"></td></tr>' : "";
         return `${heading}<tr>
-          <td><strong>${escapeHtml(row.email)}</strong>${ownTags(row).length ? `<span class="warmup-mail-tags">${tagPills(ownTags(row))}</span>` : ""}</td>
+          <td><strong>${escapeHtml(row.email)}</strong>${ownTags(row).length ? `<span class="warmup-mail-tags">${tagPills(ownTags(row))}</span>` : ""}${accountNotesHtml(row.email)}</td>
           <td>${roleHtml(row, canChange)}</td>
           <td><span class="pill ${tone}">${word}</span>${row.status === "paused" && row.pausedAt ? `<small>з ${escapeHtml(when(row.pausedAt))}</small>` : row.status === "running" && row.startedAt ? `<small>старт ${escapeHtml(when(row.startedAt))}</small>` : ""}</td>
           <td class="is-number">${row.day || "—"}</td>
           <td class="is-number">${row.status === "running" ? `<div class="warmup-mail-progress"><span style="width:${share}%"></span></div>` : ""}${row.firstsToday} / ${row.plannedToday}${row.repliesToday ? `<small>+ ${row.repliesToday} ${uaPlural(row.repliesToday, "відповідь", "відповіді", "відповідей")}</small>` : ""}</td>
           <td class="is-number warmup-mail-pair"><span title="Скільки відповідей прийшло на листи цієї пошти"><b>${row.repliesReceived}</b> отримала</span><small title="На скільки чужих листів прогріву відповіла вона сама">відповіла сама: ${row.repliesSent}</small></td>
           <td class="is-number warmup-mail-pair" title="Листи цієї пошти, що в інших наших пошт потрапили у «Спам». Прогрів виймає їх усі й позначає важливими."><span class="${spamShare(row) >= 10 ? "is-bad" : ""}"><b>${row.landedInSpam}</b> з ${row.sent}</span><small>${row.sent ? `${spamShare(row)}%` : "—"}</small></td>
-          <td class="is-number">${row.coldToday} / ${row.limit}<small>холодних сьогодні з ліміту</small></td>
-          <td class="warmup-mail-action">${action(row)}${canChange ? `<button type="button" class="icon-button warmup-mail-remove" data-warmup-remove="${escapeAttr(row.email)}" title="Прибрати з прогріву" aria-label="Прибрати ${escapeAttr(row.email)} з прогріву"${mailWarmupState.busy ? " disabled" : ""}><i data-lucide="trash-2"></i></button>` : ""}${row.lastError && row.status === "running" ? `<small class="is-bad" title="${escapeAttr(row.lastError.error)}">остання відмова ${escapeHtml(when(row.lastError.at))}</small>` : ""}</td>
-        </tr>`;
+          <td class="is-number">${row.coldToday} / ${row.limit}<small>сьогодні з ліміту</small></td>
+          <td class="warmup-mail-action">${action(row)}${accountActionsHtml(row.email)}${canChange ? `<button type="button" class="icon-button warmup-mail-remove" data-warmup-remove="${escapeAttr(row.email)}" title="Прибрати з прогріву" aria-label="Прибрати ${escapeAttr(row.email)} з прогріву"${mailWarmupState.busy ? " disabled" : ""}><i data-lucide="trash-2"></i></button>` : ""}${row.lastError && row.status === "running" ? `<small class="is-bad" title="${escapeAttr(row.lastError.error)}">остання відмова ${escapeHtml(when(row.lastError.at))}</small>` : ""}</td>
+        </tr>${tagEditorHtml(row.email) ? `<tr class="warmup-mail-tag-row"><td colspan="9">${tagEditorHtml(row.email)}</td></tr>` : ""}`;
       }).join("")}</tbody>
     </table></div>
     ${removedHtml(data)}`;
@@ -153,6 +156,7 @@ function logHtml(log) {
 export function renderMailWarmup() {
   const root = document.getElementById("mailWarmupRoot");
   if (!root) return;
+  const wasOpen = document.getElementById("mailAccountsDialog")?.open;
   const { data, error, notice } = mailWarmupState;
   if (error && !data) { root.innerHTML = `<div class="empty-state">${escapeHtml(error)}</div>`; return; }
   if (!data) { root.innerHTML = '<div class="empty-state">Читаємо прогрів...</div>'; return; }
@@ -163,8 +167,10 @@ export function renderMailWarmup() {
   root.innerHTML = `
     <div class="warmup-mail-head">
       <p>Наші пошти пишуть одна одній живі листи за розкладом: перший робочий день — ${plan.start}, далі +${plan.step} щодня до ${plan.max}. Приблизно третина отримує відповідь у тому ж треді. Лист, що впав у спам, виймається у «Вхідні» й позначається важливим. Ліміт дня пошти — лише для холодних листів; прогрів іде за своїм планом. У кампанії, звіти й «Вхідні» прогрів не потрапляє.</p>
-      ${data.canChange && startable ? `<button type="button" class="primary-button" data-warmup-start-all${mailWarmupState.busy ? " disabled" : ""}><i data-lucide="play"></i><span>Запустити всі (${startable})</span></button>` : ""}
+      <div class="warmup-mail-head-actions">${addButtonHtml()}
+      ${data.canChange && startable ? `<button type="button" class="primary-button" data-warmup-start-all${mailWarmupState.busy ? " disabled" : ""}><i data-lucide="play"></i><span>Запустити всі (${startable})</span></button>` : ""}</div>
     </div>
+    ${accountsNoticeHtml()}
     ${bannerHtml(data)}
     ${planHtml(data)}
     ${notice ? `<p class="esp-notice ${error ? "is-bad" : ""}">${escapeHtml(notice)}</p>` : ""}
@@ -173,8 +179,10 @@ export function renderMailWarmup() {
       <div class="warmup-mail-tools">${filter}<button type="button" class="text-button" data-warmup-refresh><i data-lucide="refresh-cw"></i><span>Оновити</span></button></div></div>
       ${tableHtml(data)}
     </section>
-    <section class="panel"><div class="panel-heading"><div><h2>Що робив прогрів</h2><p>Останні 30 подій.</p></div></div>${logHtml(data.log)}</section>`;
+    <section class="panel"><div class="panel-heading"><div><h2>Що робив прогрів</h2><p>Останні 30 подій.</p></div></div>${logHtml(data.log)}</section>
+    ${addDialogHtml()}`;
   refreshIcons(root);
+  afterAccountsRender(wasOpen);
 }
 
 async function change(path, body, done) {
@@ -239,3 +247,7 @@ document.getElementById("mailWarmupRoot")?.addEventListener("change", (event) =>
   if (tag && !(tag === "-" ? !after.length : after.includes(tag))) mailWarmupState.tag = "";
   void change("role", { mailbox, role }, () => `${mailbox}: ${role === "cold" ? "для розсилки" : role === "warmup" ? "лише для прогріву — холодні листи з неї не підуть" : "призначення знято"}.`);
 });
+
+// Connections: «Додати пошту», check, sign in again, tags, disconnect (what was the «Пошти» page).
+onAccountsChange(() => renderMailWarmup());
+bindAccounts(document.getElementById("mailWarmupRoot"), () => loadMailWarmup());

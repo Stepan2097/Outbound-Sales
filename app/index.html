@@ -80,7 +80,6 @@
               <button class="nav-item" data-view="mail-inbox" aria-label="Вхідні пошти" title="Вхідні пошти: відповіді на холодні листи"><i data-lucide="mail-open"></i><span>Вхідні</span></button>
               <button class="nav-item" data-view="leads" aria-label="Ліди" title="Ліди"><i data-lucide="users"></i><span>Ліди</span></button>
               <button class="nav-item" data-view="reports" aria-label="Звіти" title="Звіти"><i data-lucide="chart-column"></i><span>Звіти</span></button>
-              <button class="nav-item" data-view="mail-settings" aria-label="Пошти, домени й доступи" title="Пошти, домени й доступи"><i data-lucide="sliders-horizontal"></i><span>Пошти</span></button>
             </div>
           </div>
           <button class="nav-item" data-view="contacts" aria-label="Контакти" title="Контакти"><i data-lucide="contact"></i><span>Контакти</span></button>
@@ -264,13 +263,6 @@
 
         <!-- Налаштування пошти: підключення Gmail, домени й відправники, доступи й журнал дій
              (esp-mailboxes.js, esp-registry.js, esp-access.js). У «Налаштуваннях» — лише профіль і команда. -->
-        <section class="view" id="view-mail-settings">
-          <!-- Пошта → «Пошти» (власник 13.10: «там має бути тільки додавання пошт і список доданих»):
-               «Додати пошту» і список — малює app/screens/mail-accounts.js. Домени, доступи й ключ
-               адміністратора домену — у «Налаштуваннях». -->
-          <div class="mail-accounts-page" id="mailAccountsRoot"></div>
-        </section>
-
         <section class="view" id="view-inbox">
           <!-- LinkedIn → «Вхідні»: відповіді на прогрів, по акаунтах, як у месенджері (app/screens/inbox.js).
                Пошта має свої «Вхідні» в папці «Пошта» (view-mail-inbox). -->
