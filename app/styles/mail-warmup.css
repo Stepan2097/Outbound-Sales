@@ -363,3 +363,8 @@
 .warmup-mail-pair small.is-bad {
   color: var(--amber);
 }
+
+.warmup-mail-pair span.is-bad,
+.warmup-mail-pair span.is-bad b {
+  color: var(--amber);
+}

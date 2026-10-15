@@ -525,7 +525,12 @@ export async function runWarmupTick({ journal, senders, connector, gate, now = n
     inbound.set(to.email, (inbound.get(to.email) || 0) + 1);
     // The model sees the last subjects between these two, so a thread of
     // letters between colleagues does not repeat itself.
-    const recent = fresh.filter((entry) => entry.type === "warmup.sending" && entry.data?.kind === "first" && [entry.data.from, entry.data.to].includes(from.email) && [entry.data.from, entry.data.to].includes(to.email)).slice(-6).map((entry) => entry.data.subject);
+    // The last subjects between these two, and the latest across all our mailboxes.
+    const firsts = fresh.filter((entry) => entry.type === "warmup.sending" && entry.data?.kind === "first");
+    const recent = [...new Set([
+      ...firsts.filter((entry) => [entry.data.from, entry.data.to].includes(from.email) && [entry.data.from, entry.data.to].includes(to.email)).slice(-6),
+      ...firsts.slice(-20)
+    ].map((entry) => entry.data.subject))];
     const text = await written(writer, { kind: "first", from: { email: from.email, name: firstName(from) }, to: { email: to.email, name: firstName(to) }, recent });
     const letter = warmupLetter({ from, to, seed: `${from.email}|${count}|${now.toISOString().slice(0, 10)}`, date: now, written: text });
     if (await send(from, to, letter, { kind: "first", writtenBy: text ? "model" : "template" })) summary.sent += 1;

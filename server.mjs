@@ -3005,19 +3005,45 @@ async function inBatches(items, size, task) {
  * writing to each other about ordinary work. The warm-up falls back to its
  * built-in pieces when this throws (esp/mail-warmup.mjs).
  */
+// What a warm-up letter is about — one picked at random each time, so the
+// model does not drift to the same thing (owner 15.10: «Q3 дуже часто
+// попадається в листах»).
+const WARMUP_TOPICS = [
+  "moving a meeting to another day", "a question about a client's brief", "feedback on a draft landing page", "the new onboarding checklist",
+  "a missing file in the shared folder", "lunch plans with the team", "a typo spotted in a proposal", "ordering new laptops for two new hires",
+  "the office Wi-Fi being slow", "a podcast episode worth listening to", "renewing a software subscription", "who covers support next week",
+  "a client asked for a call on Friday", "ideas for the team offsite", "the invoice from a contractor", "a change to the design of the logo",
+  "notes from yesterday's call", "a hiring candidate's portfolio", "training session next Tuesday", "updating the FAQ page",
+  "a broken link reported by a user", "booking a meeting room", "the holiday schedule", "a new font for the presentation",
+  "photos from the event", "a webinar invite", "access to an analytics dashboard", "a supplier's late delivery",
+  "testing a new email signature", "a short survey for clients", "the order of slides in a deck", "a question about expense reports",
+  "copy for a social post", "a translation that needs checking", "the agenda for Monday's sync", "a client thank-you note",
+  "cleaning up old project folders", "a new tool someone wants to try", "a birthday card for a colleague", "parking at the new office"
+];
+const BANNED_IN_WARMUP = /\bQ[1-4]\b|\bquarter(ly)?\b|\bperformance report\b/i;
+
 async function writeWarmupLetter({ kind, from, to, original = null, recent = [] }) {
-  const system = "You write short, ordinary work emails between two colleagues at a small digital marketing agency. Plain text, English, natural and varied: different topics each time (planning, a client question, a document, numbers, scheduling, a small favour, feedback on a draft, an internal process). No links, no attachments mentioned, no sales language, no emojis, no signature. Return strict JSON.";
-  const user = kind === "reply"
-    ? { task: "Write the reply to this email, in the same thread.", from: from.name, to: to.name, original, rules: "1–3 sentences, may start with the recipient's first name or with nothing. Answer what was asked. JSON: {\"body\": \"...\"}" }
-    : { task: "Write a new email.", from: from.name, to: to.name, avoidSubjects: recent, rules: "Subject 2–6 words, not clickbait. Body 35–110 words, starts with a greeting to the recipient's first name, one concrete point or question. JSON: {\"subject\": \"...\", \"body\": \"...\"}" };
-  const { data } = await callOpenRouterJson({
-    model: resolveModelForProfile(null, "writing"),
-    taskType: "WARMUP_LETTER",
-    profile: "economy",
-    maxTokens: 400,
-    messages: [{ role: "system", content: system }, { role: "user", content: JSON.stringify(user) }]
-  });
-  return { subject: data?.subject || "", body: data?.body || "" };
+  const system = "You write short, ordinary work emails between two colleagues at a small digital marketing agency. Plain text, English, casual and varied. No links, no attachments mentioned, no sales language, no emojis, no signature. Never mention quarters (Q1–Q4), quarterly numbers or performance reports. Return strict JSON.";
+  const ask = async () => {
+    const topic = WARMUP_TOPICS[randomBytes(2).readUInt16BE(0) % WARMUP_TOPICS.length];
+    const user = kind === "reply"
+      ? { task: "Write the reply to this email, in the same thread.", from: from.name, to: to.name, original, rules: "1–3 sentences, may start with the recipient's first name or with nothing. Answer what was asked. JSON: {\"body\": \"...\"}" }
+      : { task: "Write a new email.", topic, from: from.name, to: to.name, avoidSubjects: recent, rules: "About the topic given. Subject 2–6 words, not clickbait. Body 35–110 words, starts with a greeting to the recipient's first name, one concrete point or question. JSON: {\"subject\": \"...\", \"body\": \"...\"}" };
+    const { data } = await callOpenRouterJson({
+      model: resolveModelForProfile(null, "writing"),
+      taskType: "WARMUP_LETTER",
+      profile: "economy",
+      maxTokens: 400,
+      messages: [{ role: "system", content: system }, { role: "user", content: JSON.stringify(user) }]
+    });
+    return { subject: data?.subject || "", body: data?.body || "" };
+  };
+  // A letter that still talks about quarters is asked for once more, then left to the built-in pieces.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const letter = await ask();
+    if (!BANNED_IN_WARMUP.test(`${letter.subject} ${letter.body}`)) return letter;
+  }
+  return { subject: "", body: "" };
 }
 
 // ── Головна: «Про компанію» (13.10) ─────────────────────────────────────────
