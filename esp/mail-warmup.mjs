@@ -114,7 +114,7 @@ export function warmupLedger(entries, { now = new Date(), plan = warmupPlan(entr
       rows.set(key, {
         email: key, running: false, startedAt: null, pausedAt: null, by: "", activeDays: new Set(),
         sentToday: 0, firstsToday: 0, repliesToday: 0, sent: 0, repliesReceived: 0, repliesSent: 0,
-        received: 0, rescued: 0, landedInSpam: 0, failedToday: 0, lastError: null
+        received: 0, rescued: 0, rescuedOwn: 0, landedInSpam: 0, failedToday: 0, lastError: null
       });
     }
     return rows.get(key);
@@ -169,6 +169,8 @@ export function warmupLedger(entries, { now = new Date(), plan = warmupPlan(entr
       if (data.inSpam) row(data.from).landedInSpam += 1;
     } else if (entry.type === "warmup.rescued") {
       row(data.mailbox).rescued += 1;
+      // …and to the mailbox the letter came from: of ITS letters that landed in Spam, how many are out.
+      if (data.from && !data.other) row(data.from).rescuedOwn += 1;
     }
   }
   for (const id of pendingReplies) {
@@ -195,7 +197,7 @@ export function warmupView(entries, { senders = [], domains = [], now = new Date
   // warm first is the pass's own order (`runWarmupTick`), not the table's.
   return senders.filter((sender) => sender.effectiveStatus !== "retired")
     .sort((left, right) => String(left.domain).localeCompare(String(right.domain)) || left.email.localeCompare(right.email)).map((sender) => {
-    const mine = rows.get(sender.email) || { running: false, day: 0, plannedToday: 0, sentToday: 0, firstsToday: 0, repliesToday: 0, sent: 0, repliesReceived: 0, repliesSent: 0, received: 0, rescued: 0, landedInSpam: 0, failedToday: 0, lastError: null, startedAt: null, pausedAt: null, by: "" };
+    const mine = rows.get(sender.email) || { running: false, day: 0, plannedToday: 0, sentToday: 0, firstsToday: 0, repliesToday: 0, sent: 0, repliesReceived: 0, repliesSent: 0, received: 0, rescued: 0, rescuedOwn: 0, landedInSpam: 0, failedToday: 0, lastError: null, startedAt: null, pausedAt: null, by: "" };
     const domainStatus = domainState.get(sender.domain) || null;
     const blocked = sender.status !== "active" ? (sender.status === "paused" ? "пошта на паузі" : "пошту виведено")
       : !["aging", "ramp", "active"].includes(domainStatus) ? `домен у стані «${DOMAIN_LABEL[domainStatus] || domainStatus || "немає"}»` : null;
@@ -207,7 +209,7 @@ export function warmupView(entries, { senders = [], domains = [], now = new Date
       blocked, day: mine.day, plannedToday: mine.plannedToday, planOfDay: mine.plannedToday,
       sentToday: mine.sentToday, firstsToday: mine.firstsToday, repliesToday: mine.repliesToday, coldToday, limit,
       sent: mine.sent, repliesReceived: mine.repliesReceived, repliesSent: mine.repliesSent, received: mine.received,
-      rescued: mine.rescued, landedInSpam: mine.landedInSpam, failedToday: mine.failedToday, lastError: mine.lastError,
+      rescued: mine.rescued, rescuedOwn: mine.rescuedOwn, landedInSpam: mine.landedInSpam, failedToday: mine.failedToday, lastError: mine.lastError,
       startedAt: mine.startedAt, pausedAt: mine.pausedAt, by: mine.by
     };
   });

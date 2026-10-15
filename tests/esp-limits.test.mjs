@@ -200,3 +200,10 @@ test("a mail provider's own domain is not one sender: many @gmail.com mailboxes 
   const answer = sendDecision({ sender: { email: "olena.advantage@gmail.com", rampStage: 5 }, recipient: { country: "UA" }, ledger, now: new Date("2026-10-14T09:00:00Z") });
   assert.notEqual(answer.reason, "domain_daily_limit");
 });
+
+test("нижня межа ліміту холодних листів — ESP_COLD_LIMIT_FLOOR: усі пошти щонайменше 20 на день, рампа над нею росте далі (15.10)", async () => {
+  const { senderDailyLimit } = await import("../esp/limits.mjs");
+  assert.equal(senderDailyLimit({ rampStage: 5 }, { ESP_COLD_LIMIT_FLOOR: "20" }), 20);
+  assert.equal(senderDailyLimit({ rampStage: 30 }, { ESP_COLD_LIMIT_FLOOR: "20" }), 30);
+  assert.equal(senderDailyLimit({ rampStage: 5 }, {}), 5);
+});

@@ -141,9 +141,16 @@ export function seeded(seed, min, max) {
   return min + (value % (max - min + 1));
 }
 
-export function senderDailyLimit(sender) {
+/**
+ * The cold letters a sender may send today: its ramp stage, but never below the
+ * workspace's floor — `ESP_COLD_LIMIT_FLOOR` (owner 15.10: «постав у всіх 0 / 20»).
+ * The ramp still climbs above the floor (25, 30, 35) on clean weeks.
+ */
+export function senderDailyLimit(sender, env = process.env) {
   const stage = Number(sender?.rampStage);
-  return Math.min(RAMP_LIMITS.includes(stage) ? stage : RAMP_LIMITS[0], SENDER_DAILY_CAP);
+  const ramp = RAMP_LIMITS.includes(stage) ? stage : RAMP_LIMITS[0];
+  const floor = Math.min(Math.max(0, Number(env.ESP_COLD_LIMIT_FLOOR) || 0), SENDER_DAILY_CAP);
+  return Math.min(Math.max(ramp, floor), SENDER_DAILY_CAP);
 }
 
 /**
