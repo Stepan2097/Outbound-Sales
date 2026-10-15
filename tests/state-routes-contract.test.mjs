@@ -106,6 +106,7 @@ const SAVED_AS = {
   researchJobs: "researchJobs",
   contactDrafts: "contactDrafts",
   triageDecisions: "triageDecisions",
+  leadgenDigestSentOn: "leadgenDigestSentOn",
   emailChecks: "emailChecks",
   workSeen: "workSeen",
   espMailboxGrants: "espMailboxGrants",

@@ -12,6 +12,8 @@ import { handleKnowledgeLibraryApi } from "./knowledge/api.mjs";
 import { allEntries, append as espAppend, useJournal } from "./esp/journal.mjs";
 import { channelsFor as triageChannels, nextContact as nextTriageContact } from "./triage/queue.mjs";
 import { AUTO_TACTIC, tacticData, tacticForPrompt, tacticLabel, tacticOptions } from "./triage/tactics.mjs";
+import { digestDue, digestText, freshReplies, leadgenTelegram, replyText } from "./triage/leadgen-notify.mjs";
+import { firstMessageBoard } from "./warmup/first-messages.mjs";
 import { FOLLOW_UP_LIMIT, addSendsToDays, contactKeyOf, contactWork, dayActivity, dayOf, daysAround, followUpsDue, linkedinSends, logWork, useWorkLog, withLinkedinSends, workEntries, workUsers } from "./triage/work-log.mjs";
 import { checkEmail } from "./contacts/email-check.mjs";
 import { contactEmails, crmPatch } from "./contacts/enrich-crm.mjs";
@@ -436,6 +438,8 @@ const state = {
   // Головна (12.10): what a seller decided about a CRM contact while working a
   // folder — «не валідний» — by contact id. Such a person is not offered again.
   triageDecisions: {},
+  // The day the leadgens' morning Telegram line last went out (triage/leadgen-notify.mjs).
+  leadgenDigestSentOn: "",
   // What mail servers said about an address (contacts/email-check.mjs), by
   // address — a server is asked once a month, not every time a card opens.
   emailChecks: {},
@@ -753,6 +757,13 @@ server.listen(port, () => {
         .catch((error) => console.error("[esp] ramp review failed:", error.message));
     }, 3600_000).unref?.();
   }
+  // Лідгенам у Telegram: ранковий рядок о 09:00 за Києвом у робочі дні — дивимось
+  // кожні п'ять хвилин. LEADGEN_TELEGRAM=off вимикає.
+  if (process.env.LEADGEN_TELEGRAM !== "off") {
+    const tick = () => void leadgenDigestTick().catch((error) => console.error("[leadgen] digest failed:", error.message));
+    setTimeout(tick, 60_000).unref();
+    setInterval(tick, 5 * 60_000).unref();
+  }
   // Дослідження, яке урвав перезапуск, доробляється саме — з тієї стадії, на
   // якій його застали. Після того, як порт уже слухається, щоб сторінка бачила
   // прогрес із першої ж секунди.
@@ -988,6 +999,7 @@ async function handleApi(request, response, url) {
         }
       },
       network: linkedinNetwork,
+      onReply: announceReply,
       // Campaigns are workspace configuration, so the warm-up reads and writes
       // them through the state this app already persists rather than keeping a
       // store of its own.
@@ -3244,6 +3256,60 @@ async function answerFor(item, base, journal) {
   return value;
 }
 
+// ── Сповіщення лідгенам у Telegram (15.10) ─────────────────────────────────
+
+const leadgenBot = leadgenTelegram(process.env);
+const appUrl = () => String(process.env.PUBLIC_URL || process.env.COOLIFY_URL || "").split(",")[0].trim().replace(/\/$/, "");
+
+/** A lead answered in LinkedIn: one Telegram message per thread, with where to answer. */
+async function announceReply({ account, participant, inbound }) {
+  if (!leadgenBot.configured || process.env.LEADGEN_TELEGRAM === "off") return;
+  const messages = freshReplies(inbound);
+  if (!messages.length) return;
+  await leadgenBot.send(replyText({
+    name: participant?.name, headline: participant?.headline,
+    account: account?.login?.trim() || account?.label || "",
+    messages, url: appUrl() ? `${appUrl()}/#inbox` : ""
+  }));
+}
+
+/** The morning line: what waits for us today, and how yesterday went. */
+async function leadgenDigest(now = new Date()) {
+  const today = dayOf(now);
+  const yesterday = dayOf(new Date(now.getTime() - 86400000));
+  const [unread, planned, board, accounts, entries, replies] = await Promise.all([
+    listThreads({ unreadOnly: true }).catch(() => []),
+    plannedFollowUps(today).catch(() => ({ items: [], total: 0 })),
+    firstMessageBoard(null, { limit: 2000 }).catch(() => ({ toWrite: [] })),
+    warmupAnty.from("wl_accounts").select("id,status,health").rows().catch(() => []),
+    workEntries(),
+    // Read a little wider than the day and cut by the Kyiv calendar (dayOf): the offset changes in late October.
+    warmupAnty.from("wl_events").select("created_at").eq("type", "message.in")
+      .gte("created_at", `${yesterday}T00:00:00-04:00`).lt("created_at", `${today}T00:00:00+04:00`).limit(4000).rows()
+      .then((rows) => rows.filter((row) => dayOf(row.created_at) === yesterday).length).catch(() => 0)
+  ]);
+  const retired = new Set(accounts.filter((row) => row.health === "blocked" || row.status === "excluded").map((row) => row.id));
+  const sends = await linkedinSendsAround(yesterday, entries);
+  const written = withLinkedinSends(dayActivity(entries, { date: yesterday, user: "all" }), sends, { date: yesterday }).total.contacts;
+  return digestText({
+    unread: unread.map((thread) => ({ name: thread.participant?.name })),
+    planned: { total: planned.total, carried: planned.items.filter((item) => item.carriedDays > 0).length },
+    accepted: (board.toWrite || []).filter((row) => !retired.has(row.accountId)).length,
+    yesterday: { written, replies: Number(replies) || 0 },
+    url: appUrl()
+  });
+}
+
+async function leadgenDigestTick() {
+  if (!leadgenBot.configured || !warmupAnty.configured()) return;
+  const { due, today } = digestDue(new Date(), state.leadgenDigestSentOn);
+  if (!due) return;
+  // Written first: a Telegram that fails does not get the same line twice an hour later.
+  state.leadgenDigestSentOn = today;
+  await writePersistentWorkspaceState();
+  await leadgenBot.send(await leadgenDigest());
+}
+
 /** The LinkedIn messages we sent in the two weeks around `date`, read back from the accounts' inboxes. */
 async function linkedinSendsAround(date, entries) {
   if (!warmupAnty.configured()) return [];
@@ -4766,6 +4832,7 @@ function applyPersistentWorkspaceState(saved = {}) {
   if (saved.triageDecisions && typeof saved.triageDecisions === "object" && !Array.isArray(saved.triageDecisions)) {
     state.triageDecisions = saved.triageDecisions;
   }
+  if (typeof saved.leadgenDigestSentOn === "string") state.leadgenDigestSentOn = saved.leadgenDigestSentOn;
   if (saved.emailChecks && typeof saved.emailChecks === "object" && !Array.isArray(saved.emailChecks)) {
     state.emailChecks = saved.emailChecks;
   }
@@ -5144,6 +5211,7 @@ async function writeWorkspaceStateNow() {
       researchJobs: state.researchJobs.slice(0, 100),
       contactDrafts: state.contactDrafts,
       triageDecisions: state.triageDecisions,
+      leadgenDigestSentOn: state.leadgenDigestSentOn,
       emailChecks: state.emailChecks,
       workSeen: state.workSeen,
       espMailboxGrants: state.espMailboxGrants,

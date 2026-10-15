@@ -1024,7 +1024,12 @@ export async function storeThread({ account, input, folderIds = [], now = new Da
 
   // `repeated` is the part of `skipped` that came back under a new id. Zero on
   // an agent whose ids are stable; a count every morning says they are not.
-  return { stored: fresh.length, skipped: skipped.length, repeated: repeats.length, invalid, undated, cards, threadKey, ...outcome };
+  return {
+    stored: fresh.length, skipped: skipped.length, repeated: repeats.length, invalid, undated, cards, threadKey, ...outcome,
+    // What they wrote this time — for the leadgens' Telegram (triage/leadgen-notify.mjs).
+    inbound: inbound.map((message) => ({ body: String(message.body || "").slice(0, 600), sentAt: message.sentAt, sentAtIso: message.sentAtIso === true })),
+    contactId: contactId || null
+  };
 }
 
 /**

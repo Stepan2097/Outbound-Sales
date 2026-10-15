@@ -1136,7 +1136,7 @@ const RECHECK_REFUSALS = {
   expired: "Посилання застаріло — дочекайся наступного повідомлення в групі."
 };
 
-export async function handleWarmupApi({ request, response, url, sendJson, readJson, campaigns: campaignStore, writer = null, network = null }) {
+export async function handleWarmupApi({ request, response, url, sendJson, readJson, campaigns: campaignStore, writer = null, network = null, onReply = null }) {
   const path = url.pathname.replace(/^\/api\/warmup/, "") || "/";
   const method = request.method;
 
@@ -3682,7 +3682,14 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       if (action === "inbox.thread") {
         const input = normalizeThreadInput(body);
         if (input.error) return fail(response, sendJson, 400, input.error);
-        sendJson(response, 200, { success: true, ...await storeThread({ account, input, folderIds: runningFolderIds() }) });
+        const result = await storeThread({ account, input, folderIds: runningFolderIds() });
+        // A lead answered: the leadgens hear it now, not at their next look at «Вхідні».
+        if (onReply && result.inbound?.length) {
+          void Promise.resolve(onReply({ account, participant: input.participant, inbound: result.inbound, contactId: result.contactId, threadKey: input.threadKey }))
+            .catch((error) => console.warn(`[warmup] reply notice: ${error.message}`));
+        }
+        const { inbound: _inbound, ...answer } = result;
+        sendJson(response, 200, { success: true, ...answer });
         return true;
       }
 
