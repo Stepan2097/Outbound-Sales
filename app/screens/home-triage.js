@@ -13,6 +13,16 @@ import { api, escapeAttr, escapeHtml, onScreen, refreshIcons, state } from "../c
 onScreen("home", { open: () => void openTriage() });
 
 const FOLDER_KEY = "outbound.triage.folder";
+const TACTIC_KEY = "outbound.triage.tactic";
+const EVENT_KEY = "outbound.triage.event";
+const PREP_POLL_MS = 2000;
+// Тактики листа (triage/tactics.mjs): поки сервер не сказав, які можливі для людини, видно всі.
+const TACTIC_LIST = [
+  ["auto", "Сама вибере"], ["conference", "Конференція"], ["news", "Свіжа новина компанії"], ["role", "Їхня роль"],
+  ["product", "Їхній продукт чи застосунок"], ["market", "Ринок / GEO"], ["proof", "Кейс із цифрою"],
+  ["linkedin", "Ми вже на зв'язку"], ["question", "Одне питання"], ["insight", "Спостереження"], ["partnership", "Партнерство"]
+];
+const STEP_MARK = { done: "✓", skipped: "—", failed: "!", running: "…", pending: "·" };
 const LANGUAGES = [["en", "English"], ["uk", "Українською"], ["ru", "Русский"]];
 const PENDING_LABEL = { pending: "запит надіслано, ще не прийняв", waiting: "у черзі на запит", queued: "закріплено за акаунтом", declined: "не прийняв", withdrawn: "запит зник" };
 
@@ -25,8 +35,19 @@ const triage = {
   // The addresses ticked for the letter, and which contacts already had texts written automatically.
   selected: new Set(), autoDrafted: new Set(),
   productId: "", language: "en",
-  inviteAccounts: null, mailboxes: null, liveSend: false, mailbox: "", inviteAccount: ""
+  inviteAccounts: null, mailboxes: null, liveSend: false, mailbox: "", inviteAccount: "",
+  // Підготовка наперед (15.10): що сервер уже зібрав про людину і чи написав лист.
+  prep: null, prepTimer: null, tactic: readSaved(TACTIC_KEY) || "auto", event: readSaved(EVENT_KEY),
+  // Поля, які людина вже правила руками: лист від моделі їх не перезапише.
+  dirty: new Set()
 };
+
+function readSaved(key) {
+  try { return window.localStorage.getItem(key) || ""; } catch { return ""; }
+}
+function save(key, value) {
+  try { window.localStorage.setItem(key, value); } catch {}
+}
 
 const rootEl = () => document.getElementById("triageRoot");
 const shortDate = (iso) => (iso ? new Date(iso).toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit", year: "2-digit" }) : "");
@@ -46,7 +67,7 @@ async function openTriage() {
       triage.foldersError = error.message;
     }
     const saved = readSavedFolder();
-    if (saved && triage.folders.some((folder) => folder.id === saved)) triage.folderId = saved;
+    if (saved && (saved === "all" || triage.folders.some((folder) => folder.id === saved))) triage.folderId = saved;
   }
   // What sends: our mailboxes and whether real sending is on; accounts that can still send requests.
   void Promise.all([
@@ -74,10 +95,15 @@ async function loadNext() {
   triage.companyError = "";
   renderTriage();
   try {
-    const params = new URLSearchParams({ folderId: triage.folderId, cursor: String(triage.cursor), skip: triage.skip.slice(-300).join(",") });
+    const params = new URLSearchParams({
+      folderId: triage.folderId, cursor: String(triage.cursor), skip: triage.skip.slice(-300).join(","),
+      product: triage.productId || state?.selectedProductId || "", language: triage.language, tactic: triage.tactic, event: triage.event
+    });
     const item = await api(`/api/triage/next?${params}`);
     triage.item = item;
     triage.cursor = item.cursor || triage.cursor;
+    triage.dirty = new Set();
+    triage.prep = item.prep || null;
     fillTexts(item);
     tickConfirmed(true);
   } catch (error) {
@@ -86,7 +112,53 @@ async function loadNext() {
   }
   triage.loading = false;
   renderTriage();
-  if (triage.item?.contact) void afterOpen();
+  if (triage.item?.contact) watchPrep(triage.item.contact.id);
+}
+
+/**
+ * The preparation the server runs for this person (and the next two): read
+ * every two seconds until it is done, and whatever arrived — checked
+ * addresses, the company, what enrichment found, the letter — put on the card.
+ */
+function watchPrep(id) {
+  clearTimeout(triage.prepTimer);
+  const tick = async () => {
+    if (triage.item?.contact?.id !== id) return;
+    try {
+      const { prep } = await api(`/api/triage/prepare?contactId=${encodeURIComponent(id)}`);
+      if (triage.item?.contact?.id !== id) return;
+      if (!prep) {
+        // Nothing started yet (a server restarted in between): ask for it.
+        const started = await api("/api/triage/prepare", { method: "POST", body: JSON.stringify(prepOptions(id)) });
+        applyPrep(started.prep);
+      } else applyPrep(prep);
+    } catch { /* the card stays as it is; the buttons still work */ }
+    if (triage.item?.contact?.id === id && triage.prep?.state !== "done") triage.prepTimer = setTimeout(tick, PREP_POLL_MS);
+  };
+  void tick();
+}
+
+function prepOptions(contactId, extra = {}) {
+  return { contactId, productId: triage.productId || state?.selectedProductId || "", language: triage.language, tactic: triage.tactic, event: triage.event, ...extra };
+}
+
+function applyPrep(prep) {
+  if (!prep || !triage.item) return;
+  triage.prep = prep;
+  if (prep.contact) triage.item.contact = { ...triage.item.contact, ...prep.contact };
+  if (prep.emails) { mergeAddresses(prep.emails); tickConfirmed(); }
+  if (prep.company) triage.item.company = prep.company;
+  if (prep.enrich && !triage.enrich) triage.enrich = prep.enrich;
+  if (prep.drafts && prep.state === "done") {
+    triage.item.drafts = prep.drafts;
+    readTexts();
+    const friendDraft = triage.item.linkedin?.friends?.find((friend) => friend.draft)?.draft;
+    const fresh = { linkedin: friendDraft || prep.drafts.linkedin?.body || "", subject: prep.drafts.email?.subject || "", body: prep.drafts.email?.body || "" };
+    for (const field of Object.keys(fresh)) if (!triage.dirty.has(field)) triage.texts[field] = fresh[field];
+  }
+  renderTriage();
+  // The tactic was changed while the preparation was still writing with the old one.
+  if (prep.state === "done" && prep.tactic && prep.tactic !== triage.tactic && !triage.drafting && !(triage.tactic === "conference" && !triage.event)) void draftTexts();
 }
 
 /** The person's addresses, as the card holds them now. */
@@ -98,31 +170,6 @@ function tickConfirmed(reset = false) {
   for (const row of addresses()) {
     if (row.check?.status === "valid" && !row.written && !triage.selected.has(row.address) && !row.seen) triage.selected.add(row.address);
     row.seen = true;
-  }
-}
-
-/**
- * Right after a person opens: their addresses are checked if they were not
- * (an answer from their mail server, then «✓» or «!»), and the texts are
- * written once if there are none yet — the card is meant to arrive ready.
- */
-async function afterOpen() {
-  const id = triage.item.contact.id;
-  // The company is looked up alongside — a colleague at the same company is already known.
-  if (triage.item.contact.company && !triage.item.company) void loadCompany(id);
-  if (addresses().some((row) => !row.check)) {
-    try {
-      const { emails } = await api("/api/triage/check-emails", { method: "POST", body: JSON.stringify({ contactId: id }) });
-      if (triage.item?.contact?.id !== id) return;
-      mergeAddresses(emails);
-      tickConfirmed();
-      renderTriage();
-    } catch { /* the «перевіряємо…» stays; nothing is ticked */ }
-  }
-  const worthWriting = addresses().length || triage.item.linkedin?.friends?.length;
-  if (triage.item?.contact?.id === id && !triage.item.drafts && worthWriting && !triage.autoDrafted.has(id)) {
-    triage.autoDrafted.add(id);
-    await draftTexts({ quiet: true });
   }
 }
 
@@ -139,6 +186,34 @@ async function loadCompany(id, { force = false } = {}) {
   }
   if (triage.companyLoading === id) triage.companyLoading = "";
   renderTriage();
+}
+
+function prepHtml() {
+  const prep = triage.prep;
+  if (!prep) return '<section class="triage-prep"><h3><i data-lucide="list-checks"></i>Підготовка</h3><p class="triage-muted">Сервер збирає дані про людину й компанію…</p></section>';
+  const running = prep.state !== "done";
+  return `<section class="triage-prep ${running ? "is-running" : ""}">
+    <h3><i data-lucide="list-checks"></i>Підготовка${running ? " · збираємо" : " · готово"}</h3>
+    <ol>${prep.steps.map((step) => `<li class="is-${step.state}"><span class="triage-prep-mark">${STEP_MARK[step.state] || "·"}</span><b>${escapeHtml(step.label)}</b>${step.note ? `<small>${escapeHtml(step.note)}</small>` : ""}</li>`).join("")}</ol>
+    ${running ? '<p class="triage-muted">Лист пишеться останнім — коли зібрано все. Наступні двоє людей готуються вже зараз.</p>' : ""}
+  </section>`;
+}
+
+/** The tactic picker: «Сама вибере» and ten angles; the ones this person has no data for are greyed out with the reason. */
+function tacticHtml() {
+  const known = new Map((triage.prep?.tactics || []).map((row) => [row.id, row]));
+  const used = triage.item?.drafts?.tacticUsed;
+  const options = TACTIC_LIST.map(([id, label]) => {
+    const row = known.get(id);
+    const off = row && !row.available && id !== "conference";
+    return `<option value="${id}" ${id === triage.tactic ? "selected" : ""} ${off ? "disabled" : ""}>${escapeHtml(label)}${off ? ` — ${escapeHtml(row.why)}` : ""}</option>`;
+  }).join("");
+  const hint = known.get(triage.tactic)?.hint || "";
+  return `<div class="triage-tactic">
+    <label class="triage-field"><span>Тактика листа</span><select data-triage="tactic" ${triage.drafting ? "disabled" : ""}>${options}</select></label>
+    ${triage.tactic === "conference" ? `<label class="triage-field"><span>Конференція</span><input data-triage="event" placeholder="напр. SiGMA World, Рим, 2–5 листопада" value="${escapeAttr(triage.event)}" /></label>` : ""}
+    <p class="triage-muted">${hint ? `${escapeHtml(hint)}. ` : ""}${used && triage.tactic === "auto" ? `Модель вибрала: <b>${escapeHtml(TACTIC_LIST.find(([id]) => id === used)?.[1] || used)}</b>.` : ""}</p>
+  </div>`;
 }
 
 function companyHtml(item) {
@@ -194,7 +269,8 @@ function foldersHtml() {
   return `<div class="triage-toolbar">
     <label class="triage-field"><span>Папка бази</span>
       <select data-triage="folder">
-        <option value="">${folders.length ? "Оберіть папку…" : "Папок немає"}</option>
+        <option value="">Оберіть папку…</option>
+        <option value="all" ${triage.folderId === "all" ? "selected" : ""}>Усі контакти бази</option>
         ${folders.map((folder) => `<option value="${escapeAttr(folder.id)}" ${folder.id === triage.folderId ? "selected" : ""}>${escapeHtml(folder.name || "без назви")}${Number.isFinite(folder.contactCount) ? ` · ${folder.contactCount}` : ""}</option>`).join("")}
       </select>
     </label>
@@ -212,7 +288,7 @@ function progressHtml(item) {
   if (!item) return "";
   const where = item.phase === "friends"
     ? `<span class="pill tone-live"><i data-lucide="user-check"></i> друг нашого акаунта</span> друзів, яким ще не писали: <b>${item.friendsLeft}</b>`
-    : `папка: людина №<b>${(item.cursor || 0) + 1}</b>${item.total ? ` з ${item.total}` : ""} · друзів, яким ще не писали, тут більше немає`;
+    : `${triage.folderId === "all" ? "уся база" : "папка"}: людина №<b>${(item.cursor || 0) + 1}</b>${item.total ? ` з ${item.total.toLocaleString("uk-UA")}` : ""} · друзів, яким ще не писали, тут більше немає`;
   return `<p class="triage-progress">${where}</p>`;
 }
 
@@ -384,8 +460,9 @@ function emailHtml(item) {
       ? `<ul class="triage-addresses">${list.map(addressRowHtml).join("")}</ul>
          ${list.length > 1 ? '<p class="triage-muted">Позначте, на які адреси писати. Усі листи підуть з однієї пошти — вибраної нижче.</p>' : ""}`
       : '<ul class="triage-status"><li><i data-lucide="mail-x"></i> Адреси в базі немає — «Збагатити» може знайти й перевірити</li></ul>'}
+    ${tacticHtml()}
     <input data-triage-text="subject" placeholder="Тема" value="${escapeAttr(triage.texts.subject)}" />
-    <textarea data-triage-text="body" rows="8" placeholder="${triage.drafting ? "Модель пише текст…" : "Текст листа. Лише простий текст; підпис і відписка додаються самі."}">${escapeHtml(triage.texts.body)}</textarea>
+    <textarea data-triage-text="body" rows="8" placeholder="${triage.drafting || (triage.prep && triage.prep.state !== "done") ? "Лист пишеться, коли зібрано всі дані…" : "Текст листа. Лише простий текст; підпис і відписка додаються самі."}">${escapeHtml(triage.texts.body)}</textarea>
     <div class="triage-actions">
       ${mailboxPickerHtml(mailboxes)}
       <button type="button" class="primary-button" data-triage="send-email" ${!chosen.length || !mailboxes.length || locked || triage.sending ? "disabled" : ""} title="${escapeAttr(locked ? "Справжню відправку ще не ввімкнено (ESP_LIVE_SEND, після приймання ESP 11)" : "")}"><i data-lucide="send"></i><span>${escapeHtml(label)}</span></button>
@@ -401,11 +478,12 @@ function cardHtml(item) {
       <header class="triage-head">
         <div><h2>${escapeHtml(contact.name || "без імені")}</h2><p>${escapeHtml([contact.position, contact.company].filter(Boolean).join(" · "))}</p></div>
       </header>
+      ${prepHtml()}
       ${crmFieldsHtml(contact)}
       ${companyHtml(item)}
       ${enrichHtml()}
       <div class="triage-decide">
-        <button type="button" data-triage="draft" ${triage.drafting ? "disabled" : ""}><i data-lucide="wand-sparkles"></i><span>${triage.drafting ? "Пишемо…" : item.drafts ? "Переписати тексти" : "Згенерувати тексти"}</span></button>
+        <button type="button" data-triage="draft" ${triage.drafting ? "disabled" : ""}><i data-lucide="wand-sparkles"></i><span>${triage.drafting ? "Пишемо…" : item.drafts ? "Переписати лист" : "Написати лист"}</span></button>
         <div class="triage-decide-right">
           <button type="button" class="danger-button" data-triage="invalid"><i data-lucide="ban"></i><span>Не валідний</span></button>
           <button type="button" data-triage="skip"><span>Пропустити</span><i data-lucide="arrow-right"></i></button>
@@ -471,26 +549,24 @@ async function skip() {
   await loadNext();
 }
 
-async function draftTexts({ quiet = false } = {}) {
+/**
+ * «Переписати лист» and a new tactic: the server writes the letter again from
+ * the data it already gathered — nothing is researched twice.
+ */
+async function draftTexts() {
   const contact = triage.item?.contact;
   if (!contact || triage.drafting) return;
   readTexts();
   triage.drafting = true;
+  triage.dirty = new Set();
   renderTriage();
   try {
-    const { drafts } = await api(`/api/contacts/${encodeURIComponent(contact.id)}/messages`, {
-      method: "POST",
-      body: JSON.stringify({ productId: triage.productId || state?.selectedProductId || "", language: triage.language })
-    });
+    const { prep } = await api("/api/triage/prepare", { method: "POST", body: JSON.stringify(prepOptions(contact.id, { redraft: true })) });
     if (triage.item?.contact?.id !== contact.id) return;
-    triage.item.drafts = drafts;
-    const friendDraft = triage.item.linkedin?.friends?.find((friend) => friend.draft)?.draft;
-    // What somebody already typed is not replaced by an automatic draft.
-    const keep = (field, value) => (quiet && triage.texts[field].trim() ? triage.texts[field] : value);
-    triage.texts = { linkedin: keep("linkedin", friendDraft || drafts.linkedin?.body || ""), subject: keep("subject", drafts.email?.subject || ""), body: keep("body", drafts.email?.body || "") };
-    if (!quiet || drafts.verifyBeforeSending?.length) say(drafts.verifyBeforeSending?.length ? `Перевірте перед відправкою: ${drafts.verifyBeforeSending.join("; ")}` : "Тексти готові — перечитайте перед відправкою.", "");
+    triage.prep = prep;
+    watchPrep(contact.id);
   } catch (error) {
-    say(error.message || "Модель не написала тексти.", "is-bad");
+    say(error.message || "Модель не написала лист.", "is-bad");
   }
   triage.drafting = false;
   renderTriage();
@@ -513,11 +589,8 @@ async function enrich() {
   }
   triage.enriching = false;
   renderTriage();
-  // A found address with no letter yet: the letter is written now.
-  if (!triage.item?.drafts && addresses().length && triage.item?.contact?.id === contact.id) {
-    triage.autoDrafted.add(contact.id);
-    await draftTexts({ quiet: true });
-  }
+  // Something new went into the base: the letter is written again with it.
+  if (triage.enrich?.added?.length && triage.item?.contact?.id === contact.id && !triage.dirty.has("body")) await draftTexts();
 }
 
 async function sendLinkedin(outreachId) {
@@ -592,6 +665,14 @@ root?.addEventListener("change", (event) => {
     try { window.localStorage.setItem(FOLDER_KEY, triage.folderId); } catch {}
     Object.assign(triage, { cursor: 0, skip: [], item: null, notice: "" });
     void loadNext();
+  } else if (field === "tactic") {
+    triage.tactic = event.target.value;
+    save(TACTIC_KEY, triage.tactic);
+    if (triage.tactic !== "conference" || triage.event.trim()) void draftTexts(); else renderTriage();
+  } else if (field === "event") {
+    triage.event = event.target.value.trim();
+    save(EVENT_KEY, triage.event);
+    if (triage.tactic === "conference" && triage.event) void draftTexts();
   } else if (field === "product") triage.productId = event.target.value;
   else if (field === "language") triage.language = event.target.value;
   else if (field === "mailbox") { readTexts(); triage.mailbox = event.target.value; renderTriage(); }
@@ -606,7 +687,7 @@ root?.addEventListener("change", (event) => {
 });
 root?.addEventListener("input", (event) => {
   const field = event.target.dataset?.triageText;
-  if (field) triage.texts[field] = event.target.value;
+  if (field) { triage.texts[field] = event.target.value; triage.dirty.add(field); }
 });
 root?.addEventListener("click", (event) => {
   const button = event.target.closest("button");

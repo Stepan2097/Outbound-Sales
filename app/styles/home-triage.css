@@ -649,3 +649,98 @@
 .triage-picker-room.is-full {
   color: var(--amber);
 }
+
+/* Підготовка (15.10): що сервер уже зібрав про людину, крок за кроком. */
+.triage-prep {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-strong);
+}
+
+.triage-prep h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 14px;
+}
+
+.triage-prep h3 svg {
+  width: 16px;
+  height: 16px;
+}
+
+.triage-prep ol {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 6px 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.triage-prep li {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  column-gap: 4px;
+  font-size: 13px;
+}
+
+.triage-prep li small {
+  grid-column: 2;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.triage-prep-mark {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.triage-prep li.is-done .triage-prep-mark {
+  color: var(--green);
+}
+
+.triage-prep li.is-failed .triage-prep-mark {
+  color: var(--red);
+}
+
+.triage-prep li.is-running .triage-prep-mark {
+  color: var(--teal);
+  animation: triage-prep-pulse 1.2s ease-in-out infinite;
+}
+
+.triage-prep li.is-pending,
+.triage-prep li.is-skipped {
+  color: var(--muted);
+}
+
+@keyframes triage-prep-pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .triage-prep li.is-running .triage-prep-mark {
+    animation: none;
+  }
+}
+
+/* Тактика листа: вибір і, для конференції, її назва. */
+.triage-tactic {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  align-items: end;
+  gap: 6px 12px;
+}
+
+.triage-tactic .triage-muted {
+  grid-column: 1 / -1;
+  margin: 0;
+}

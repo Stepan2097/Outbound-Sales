@@ -42,6 +42,7 @@ const SAVED_ELSEWHERE_OR_NOTHING = {
   "/api/auth/bootstrap": "профіль першого адміна створює ensureWorkspaceUserProfile і зберігає його сам (persistWorkspaceState)",
   "/api/account/heartbeat": "секунди активності зберігаються з тротлінгом раз на 30 с (recordUserHeartbeat): удари приходять щохвилини з кожної вкладки",
   "/api/auth/logout": "сесія — це cookie в браузері, на сервері стану нема",
+  "/api/triage/prepare": "підготовка людини на Головній іде у фоні: листи й відомості зберігає prepareTriageContact, коли закінчить (writePersistentWorkspaceState наприкінці pipeline), а не маршрут до відповіді",
   "/api/auth/recover": "лист для відновлення паролю надсилає GoTrue, воркспейс нічого не змінює",
   "/api/auth/complete-recovery": "новий пароль приймає GoTrue, воркспейс нічого не змінює",
   "/api/account/password": "пароль живе в GoTrue, а не в стані воркспейсу",

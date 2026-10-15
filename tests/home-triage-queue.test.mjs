@@ -122,3 +122,18 @@ test("an emailed address says when and from which mailbox", async () => {
   assert.equal(channels.email.written, true);
   assert.equal(channels.email.writtenFrom, "anna@advantage-mail.com");
 });
+
+test("«Усі контакти бази»: та сама черга без папки — друзі з будь-якої папки, потім уся база", async () => {
+  const OTHER = "22222222-2222-4222-8222-222222222222";
+  rows.contacts.push({ id: id(7), folder_id: OTHER, name: "Person 7", company: "Beta", created_at: "2026-01-00T00:00:00Z", linkedin: "https://www.linkedin.com/in/seven" });
+  rows.wl_outreach.push({ id: "o-7", account_id: "acc-1", crm_contact_id: id(7), status: "accepted", person_linkedin: "https://www.linkedin.com/in/seven", created_at: "2026-10-08T00:00:00Z", responded_at: "2026-10-10T00:00:00Z" });
+  const all = (skip = []) => nextContact({ folderId: "all", cursor: 0, skip, decisions, emailed });
+  const friends = await all();
+  assert.equal(friends.phase, "friends");
+  assert.equal(friends.friendsLeft, 2, "друг з іншої папки теж у черзі");
+  const inFolder = await nextContact({ folderId: FOLDER, cursor: 0, skip: [], decisions, emailed });
+  assert.equal(inFolder.friendsLeft, 1, "у звичайній папці — лише її друзі");
+  const base = await all([id(2), id(7)]);
+  assert.equal(base.phase, "folder");
+  assert.equal(base.contact.id, id(1));
+});

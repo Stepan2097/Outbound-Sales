@@ -10,7 +10,8 @@ import { CHANNEL_RULES, LANGUAGES, buildFallbackDrafts, draftsPromptPayload, nor
 import { invalidateContactCaches, contactAsProspect, contactsConfigured, contactsMissingConfig, crmKeyKind, folderContactAt, listContactFolders, listFolderContacts, searchFolderContacts, readContact, supabaseKeyKind } from "./contacts/store.mjs";
 import { handleKnowledgeLibraryApi } from "./knowledge/api.mjs";
 import { allEntries, append as espAppend, useJournal } from "./esp/journal.mjs";
-import { nextContact as nextTriageContact } from "./triage/queue.mjs";
+import { channelsFor as triageChannels, nextContact as nextTriageContact } from "./triage/queue.mjs";
+import { AUTO_TACTIC, tacticData, tacticForPrompt, tacticLabel, tacticOptions } from "./triage/tactics.mjs";
 import { FOLLOW_UP_LIMIT, contactKeyOf, contactWork, dayActivity, dayOf, daysAround, followUpsDue, logWork, useWorkLog, workEntries, workUsers } from "./triage/work-log.mjs";
 import { checkEmail } from "./contacts/email-check.mjs";
 import { contactEmails, crmPatch } from "./contacts/enrich-crm.mjs";
@@ -1252,8 +1253,17 @@ async function handleApi(request, response, url) {
           cacheScope
         });
         if (answer.contact) await logViewed(profile, answer.contact);
+        const prepOptions = {
+          productId: cleanText(url.searchParams.get("product") || ""),
+          language: cleanText(url.searchParams.get("language") || "en"),
+          tactic: cleanText(url.searchParams.get("tactic") || AUTO_TACTIC),
+          event: cleanText(url.searchParams.get("event") || "")
+        };
+        void prepareAhead({ folderId, answer, skip, decisions: state.triageDecisions, emailed: await emailedAddresses(), cacheScope, options: prepOptions })
+          .catch((error) => console.warn(`[triage] prepare ahead: ${error.message}`));
         sendJson(response, 200, {
           ...answer,
+          prep: answer.contact ? prepView(triagePrep.get(String(answer.contact.id))) : null,
           drafts: answer.contact ? state.contactDrafts[answer.contact.id] || null : null,
           company: answer.contact ? companyView(companyDossierForContact(answer.contact)) : null,
           prospectId: answer.contact ? prospectForCrmContact(answer.contact.id)?.id || null : null
@@ -1290,38 +1300,11 @@ async function handleApi(request, response, url) {
         const body = await readJson(request);
         const contact = await readContact(cleanText(body.contactId || ""), { cacheScope, fresh: true });
         if (!contact) { sendJson(response, 404, { error: "Контакт не знайдено в базі." }); return; }
-        const taken = takeCrmContactIntoQueue(contact);
-        if (!taken.prospect) { sendJson(response, 400, { error: taken.warning }); return; }
-        const prospect = taken.prospect;
-        prospect.contactDiscovery = await enrichProspectContacts(prospect, { phase: "contacts" });
-        prospect.updatedAt = new Date().toISOString();
-        const discovery = prospect.contactDiscovery || {};
-        const candidates = (discovery.candidates || []).slice(0, 30).map((item) => ({
-          type: item.type, value: cleanText(item.value || ""), source: item.source || "", confidence: item.confidence ?? null, url: item.url || null
-        }));
-        // 12.10, the owner: a found address is checked against its mail server
-        // and dropped if it fails; the CRM's own addresses are checked with it.
-        const checks = await checkEmailsCached([
-          ...contactEmails(contact).map((row) => row.address),
-          ...candidates.filter((item) => item.type === "email").map((item) => item.value)
-        ]);
-        const verdict = new Map(checks.map((check) => [check.email, check]));
-        const { patch, added } = crmPatch(contact, { candidates, checks });
-        const updated = await writeContactPatch(contact, patch);
-        addEvent("enrichment", `${prospect.name} enriched from Головна${added.length ? `; CRM: ${added.map((row) => row.field).join(", ")}` : ""}.`);
-        await logWork(profile, { action: "enriched", contactId: contact.id, name: contact.name, detail: added.map((row) => `${row.field}: ${row.value}`).join("; ") || "нічого нового" });
+        const found = await enrichTriageContact(contact);
+        await logWork(profile, { action: "enriched", contactId: contact.id, name: contact.name, detail: found.added.map((row) => `${row.field}: ${row.value}`).join("; ") || "нічого нового" });
         await writePersistentWorkspaceState();
-        sendJson(response, 200, {
-          success: true,
-          prospectId: prospect.id,
-          // Failed or unconfirmable guesses are not shown at all.
-          candidates: candidates.filter((item) => item.type !== "email" || verdict.get(item.value.toLowerCase())?.status === "valid"),
-          hidden: candidates.filter((item) => item.type === "email" && verdict.get(item.value.toLowerCase())?.status !== "valid").length,
-          added,
-          contact: updated,
-          emails: contactEmails(updated),
-          note: discovery.scraperNote || ""
-        });
+        rememberPrepEnrich(contact.id, found);
+        sendJson(response, 200, { success: true, ...found });
         return;
       }
 
@@ -1332,20 +1315,29 @@ async function handleApi(request, response, url) {
         const body = await readJson(request);
         const contact = await readContact(cleanText(body.contactId || ""), { cacheScope });
         if (!contact) { sendJson(response, 404, { error: "Контакт не знайдено в базі." }); return; }
-        const taken = takeCrmContactIntoQueue(contact);
-        if (!taken.prospect) { sendJson(response, 400, { error: taken.warning }); return; }
-        const prospect = taken.prospect;
-        const force = Boolean(body.force);
-        const note = await researchCompanyForProspect(prospect, { force });
-        const dossier = state.accountDossiers[accountKeyForProspect(prospect)];
-        if (dossier && (force || !dossier.brief)) {
-          try { dossier.brief = await writeCompanyBrief(prospect) || dossier.brief || null; }
-          catch (error) { console.warn(`[triage] company brief: ${error.message}`); }
-        }
-        try { await saveCompanyToCrm(dossier); }
-        catch (error) { console.warn(`[triage] company → CRM: ${error.message}`); }
+        const { note, company } = await researchTriageCompany(contact, { force: Boolean(body.force) });
         await writePersistentWorkspaceState();
-        sendJson(response, 200, { success: true, note, company: companyView(dossier) });
+        sendJson(response, 200, { success: true, note, company });
+        return;
+      }
+
+      // The preparation as it stands: steps ticked, and the drafts once written.
+      if (request.method === "GET" && url.pathname === "/api/triage/prepare") {
+        const contactId = cleanText(url.searchParams.get("contactId") || "");
+        if (!contactId) { sendJson(response, 400, { error: "Кого?" }); return; }
+        sendJson(response, 200, { success: true, prep: prepView(triagePrep.get(contactId)) });
+        return;
+      }
+
+      // Prepare now, or write the letter again with another tactic — from the
+      // data already gathered, without researching anything twice.
+      if (request.method === "POST" && url.pathname === "/api/triage/prepare") {
+        const body = await readJson(request);
+        const contactId = cleanText(body.contactId || "");
+        if (!contactId) { sendJson(response, 400, { error: "Кого?" }); return; }
+        const job = prepareTriageContact(contactId, body, { redraft: Boolean(body.redraft), cacheScope });
+        if (body.redraft) await logWork(profile, { action: "drafted", contactId, name: job.contact?.name || null, detail: tacticLabel(job.options.tactic) || null });
+        sendJson(response, 200, { success: true, prep: prepView(job) });
         return;
       }
 
@@ -2847,6 +2839,297 @@ async function emailedAddresses() {
     }
   } catch { /* a journal that cannot be read hides nobody */ }
   return sent;
+}
+
+// ── Головна: що збирається про людину і як (15.10) ─────────────────────────
+
+/**
+ * «Збагатити»: the CRM contact taken in as a lead (the same one the Contacts
+ * screen would make) and its contacts looked for — public web, and the
+ * scrapers when they are configured. A found address is checked against its
+ * mail server and dropped if it fails (owner 12.10); what passed, and a found
+ * site, phone or profile the source is sure of, goes into the CRM.
+ */
+async function enrichTriageContact(contact) {
+  const taken = takeCrmContactIntoQueue(contact);
+  if (!taken.prospect) throw Object.assign(new Error(taken.warning), { statusCode: 400 });
+  const prospect = taken.prospect;
+  prospect.contactDiscovery = await enrichProspectContacts(prospect, { phase: "contacts" });
+  prospect.updatedAt = new Date().toISOString();
+  const discovery = prospect.contactDiscovery || {};
+  const candidates = (discovery.candidates || []).slice(0, 30).map((item) => ({
+    type: item.type, value: cleanText(item.value || ""), source: item.source || "", confidence: item.confidence ?? null, url: item.url || null
+  }));
+  const checks = await checkEmailsCached([
+    ...contactEmails(contact).map((row) => row.address),
+    ...candidates.filter((item) => item.type === "email").map((item) => item.value)
+  ]);
+  const verdict = new Map(checks.map((check) => [check.email, check]));
+  const { patch, added } = crmPatch(contact, { candidates, checks });
+  const updated = await writeContactPatch(contact, patch);
+  addEvent("enrichment", `${prospect.name} enriched from Головна${added.length ? `; CRM: ${added.map((row) => row.field).join(", ")}` : ""}.`);
+  return {
+    prospectId: prospect.id,
+    // Failed or unconfirmable guesses are not shown at all.
+    candidates: candidates.filter((item) => item.type !== "email" || verdict.get(item.value.toLowerCase())?.status === "valid"),
+    hidden: candidates.filter((item) => item.type === "email" && verdict.get(item.value.toLowerCase())?.status !== "valid").length,
+    added,
+    contact: updated,
+    emails: contactEmails(updated),
+    note: discovery.scraperNote || "",
+    at: new Date().toISOString()
+  };
+}
+
+/**
+ * «Про компанію»: the company researched once (sites, news, apps — the dossier
+ * the rest of the app keeps per company), a short brief by the connected
+ * model, and the company written into the CRM.
+ */
+async function researchTriageCompany(contact, { force = false } = {}) {
+  const taken = takeCrmContactIntoQueue(contact);
+  if (!taken.prospect) throw Object.assign(new Error(taken.warning), { statusCode: 400 });
+  const prospect = taken.prospect;
+  const note = await researchCompanyForProspect(prospect, { force });
+  const dossier = state.accountDossiers[accountKeyForProspect(prospect)];
+  if (dossier && (force || !dossier.brief)) {
+    try { dossier.brief = await writeCompanyBrief(prospect) || dossier.brief || null; }
+    catch (error) { console.warn(`[triage] company brief: ${error.message}`); }
+  }
+  try { await saveCompanyToCrm(dossier); }
+  catch (error) { console.warn(`[triage] company → CRM: ${error.message}`); }
+  return { note, company: companyView(dossier) };
+}
+
+/**
+ * What the drafting model is told about this person beyond their CRM row: the
+ * company as researched, where we stand with them on LinkedIn, what was found.
+ * Only what is there — an empty section is left out, not sent as "unknown".
+ */
+function researchForDrafts({ company = null, channels = null, enrich = null } = {}) {
+  const research = {};
+  if (company && (company.summary || company.products?.length || company.apps?.length || company.signals?.length)) {
+    research.company = Object.fromEntries(Object.entries({
+      name: company.name, summary: company.summary, industry: company.industry, size: company.size,
+      headquarters: company.headquarters, audience: company.audience, website: company.website,
+      products: company.products, apps: company.apps,
+      news: (company.signals || []).map((row) => ({ title: row.title, date: row.date, publisher: row.publisher }))
+    }).filter(([, value]) => (Array.isArray(value) ? value.length : value)));
+  }
+  const friends = channels?.linkedin?.friends || [];
+  if (friends.length || channels?.linkedin?.pending?.length) {
+    research.linkedin = {
+      friendOf: friends.map((row) => row.accountName),
+      pendingWith: (channels.linkedin.pending || []).map((row) => row.accountName)
+    };
+  }
+  const found = (enrich?.candidates || []).map((item) => item.type);
+  if (found.length) research.foundOnTheWeb = [...new Set(found)];
+  return research;
+}
+
+// ── Головна: підготовка наперед (власник 15.10: «автоматично парсить дані про
+// користувача і компанію… наперед, щоб людина довго не чекала… листи писалися
+// після того як спарсяться всі дані»).
+//
+// When a person opens, the server is already working on the next two: their
+// addresses are checked, their contacts looked for (only when something is
+// missing — a confirmed address and a LinkedIn link need nothing more), the
+// company researched (once per company), and only then the letter written,
+// from all of it, with the chosen tactic. Two at a time; a job in memory per
+// contact, read by the card while it runs.
+
+const PREP_STEPS = [
+  ["emails", "Пошти перевірено"],
+  ["enrich", "Контакти знайдено"],
+  ["company", "Компанію досліджено"],
+  ["drafts", "Лист написано"]
+];
+const PREP_PARALLEL = 2;
+const PREP_ENRICH_FRESH_DAYS = 30;
+const triagePrep = new Map();
+const prepWaiting = [];
+let prepRunning = 0;
+
+function prepSlot(task) {
+  return new Promise((resolve, reject) => {
+    const run = async () => {
+      prepRunning += 1;
+      try { resolve(await task()); } catch (error) { reject(error); }
+      finally {
+        prepRunning -= 1;
+        prepWaiting.shift()?.();
+      }
+    };
+    if (prepRunning < PREP_PARALLEL) void run(); else prepWaiting.push(run);
+  });
+}
+
+function prepView(job) {
+  if (!job) return null;
+  return {
+    contactId: job.contactId,
+    state: job.state,
+    startedAt: job.startedAt,
+    finishedAt: job.finishedAt || null,
+    tactic: job.options.tactic,
+    steps: PREP_STEPS.map(([id, label]) => ({ id, label, state: job.steps[id].state, note: job.steps[id].note || "" })),
+    ...(job.contact ? { contact: job.contact, emails: contactEmails(job.contact) } : {}),
+    company: job.company || null,
+    enrich: job.enrich || null,
+    drafts: state.contactDrafts[job.contactId] || null,
+    tactics: job.tactics || null
+  };
+}
+
+/** A «Збагатити» pressed by hand is remembered for the card as if the preparation had done it. */
+function rememberPrepEnrich(contactId, found) {
+  const job = triagePrep.get(contactId);
+  if (job) { job.enrich = found; job.contact = found.contact; }
+}
+
+function enrichNeeded(contact) {
+  const prospect = prospectForCrmContact(contact.id);
+  const last = Date.parse(prospect?.contactDiscovery?.generatedAt || prospect?.updatedAt || "");
+  const recent = prospect?.contactDiscovery && Number.isFinite(last) && Date.now() - last < PREP_ENRICH_FRESH_DAYS * 86_400_000;
+  if (recent) return "уже шукали нещодавно";
+  const confirmed = contactEmails(contact).some((row) => row.check?.status === "valid");
+  if (confirmed && contact.linkedin) return "є перевірена пошта і LinkedIn";
+  if (!contact.name || !contact.company) return "немає імені або компанії";
+  return "";
+}
+
+function draftsCurrent(contactId, options) {
+  const drafts = state.contactDrafts[contactId];
+  return Boolean(drafts && drafts.research && drafts.tactic === options.tactic && drafts.productId === options.productId
+    && drafts.language === normalizeLanguage(options.language) && (drafts.event || "") === (options.event || ""));
+}
+
+/**
+ * Prepare one contact. Called for the person on screen and the two after them;
+ * a second call for a contact already prepared or being prepared returns that
+ * job, unless the drafts are asked for again (`redraft`: a new tactic).
+ */
+function prepareTriageContact(contactId, options = {}, { redraft = false, cacheScope = "" } = {}) {
+  const product = state.products.find((item) => item.id === options.productId) || currentProduct();
+  const wanted = {
+    productId: product?.id || "",
+    language: normalizeLanguage(options.language || "en"),
+    tactic: cleanText(options.tactic || AUTO_TACTIC).slice(0, 40) || AUTO_TACTIC,
+    event: cleanText(options.event || "").slice(0, 120)
+  };
+  const existing = triagePrep.get(contactId);
+  if (existing && (existing.state === "running" || (!redraft && existing.state === "done"))) return existing;
+
+  const job = {
+    contactId, options: wanted, state: "running", startedAt: new Date().toISOString(),
+    steps: Object.fromEntries(PREP_STEPS.map(([id]) => [id, { state: "pending", note: "" }])),
+    contact: existing?.contact || null, company: existing?.company || null, enrich: existing?.enrich || null
+  };
+  triagePrep.set(contactId, job);
+  if (triagePrep.size > 300) {
+    for (const [key, old] of triagePrep) { if (old.state !== "running") triagePrep.delete(key); if (triagePrep.size <= 200) break; }
+  }
+  const step = async (id, work) => {
+    job.steps[id].state = "running";
+    try {
+      const note = await work();
+      job.steps[id] = { state: note?.skipped ? "skipped" : "done", note: note?.note || "" };
+    } catch (error) {
+      job.steps[id] = { state: "failed", note: error?.message || "не вдалося" };
+    }
+  };
+
+  job.promise = prepSlot(async () => {
+    let contact = await readContact(contactId, { cacheScope, fresh: true });
+    if (!contact) {
+      for (const [id] of PREP_STEPS) job.steps[id] = { state: "failed", note: "контакт не знайдено в базі" };
+      return;
+    }
+    job.contact = contact;
+    const redrafting = redraft && existing?.state === "done";
+    if (redrafting) {
+      for (const id of ["emails", "enrich", "company"]) job.steps[id] = { ...existing.steps[id] };
+    } else {
+      await Promise.all([
+        (async () => {
+          await step("emails", async () => {
+            const addresses = contactEmails(contact).map((row) => row.address);
+            if (!addresses.length) return { skipped: true, note: "адрес у базі немає" };
+            const checks = await checkEmailsCached(addresses);
+            const { patch } = crmPatch(contact, { checks });
+            contact = await writeContactPatch(contact, patch);
+            job.contact = contact;
+            const valid = checks.filter((check) => check.status === "valid").length;
+            return { note: `${valid} з ${checks.length} підтверджено` };
+          });
+          await step("enrich", async () => {
+            const why = enrichNeeded(contact);
+            if (why) return { skipped: true, note: why };
+            const found = await enrichTriageContact(contact);
+            contact = found.contact;
+            job.contact = contact;
+            job.enrich = found;
+            return { note: found.added.length ? `у базу: ${found.added.map((row) => row.field).join(", ")}` : "нового не знайдено" };
+          });
+        })(),
+        step("company", async () => {
+          if (!contact.company) return { skipped: true, note: "у базі немає компанії" };
+          const fresh = companyDossierForContact(contact);
+          if (fresh?.brief) { job.company = companyView(fresh); return { note: "уже в досьє" }; }
+          const { company } = await researchTriageCompany(contact);
+          job.company = company;
+          return { note: company?.summary ? "досьє зібрано" : "у відкритих джерелах майже нічого" };
+        })
+      ]);
+    }
+    await step("drafts", async () => {
+      if (!redraft && draftsCurrent(contactId, wanted)) return { note: "уже написано з цими даними" };
+      const channels = await triageChannels(contact).catch(() => null);
+      const research = researchForDrafts({ company: job.company || companyView(companyDossierForContact(contact)), channels, enrich: job.enrich });
+      const data = tacticData({ contact, research, product, event: wanted.event });
+      job.tactics = tacticOptions(data);
+      const tactic = tacticForPrompt(wanted.tactic, data);
+      const drafts = await generateContactDrafts(contact, product, { language: wanted.language, research, tactic });
+      state.contactDrafts[contactId] = { ...drafts, tactic: wanted.tactic, event: wanted.event, research: Object.keys(research), tacticUsed: drafts.tacticUsed || (tactic.id !== AUTO_TACTIC ? tactic.id : null) };
+      return { note: `тактика: ${tacticLabel(state.contactDrafts[contactId].tacticUsed || wanted.tactic) || "сама вибере"}` };
+    });
+    if (!job.tactics) {
+      const research = researchForDrafts({ company: job.company, enrich: job.enrich });
+      job.tactics = tacticOptions(tacticData({ contact, research, product, event: wanted.event }));
+    }
+    trimContactDrafts();
+    await writePersistentWorkspaceState();
+  }).catch((error) => {
+    console.warn(`[triage] prepare ${contactId}: ${error.message}`);
+  }).finally(() => {
+    job.state = "done";
+    job.finishedAt = new Date().toISOString();
+  });
+  return job;
+}
+
+/** A workspace does not need last year's drafts, and the file they are saved in is read on every boot. */
+function trimContactDrafts() {
+  const kept = Object.entries(state.contactDrafts)
+    .sort((left, right) => new Date(right[1].generatedAt) - new Date(left[1].generatedAt))
+    .slice(0, 300);
+  state.contactDrafts = Object.fromEntries(kept);
+}
+
+/** The person on screen, and the two after them in the same queue, prepared in the background. */
+async function prepareAhead({ folderId, answer, skip, decisions, emailed, cacheScope, options }) {
+  if (!answer?.contact) return;
+  prepareTriageContact(String(answer.contact.id), options, { cacheScope });
+  let cursor = answer.cursor;
+  const passed = [...skip, String(answer.contact.id)];
+  for (let ahead = 0; ahead < 2; ahead += 1) {
+    const next = await nextTriageContact({ folderId, cursor, skip: passed, decisions, emailed, cacheScope }).catch(() => null);
+    if (!next?.contact) return;
+    prepareTriageContact(String(next.contact.id), options, { cacheScope });
+    passed.push(String(next.contact.id));
+    cursor = next.cursor;
+  }
 }
 
 // ── «По днях»: who did what, read off the routes (triage/work-log.mjs) ──────
@@ -14532,7 +14815,7 @@ function productForPrompt(product, context = "") {
  * from the brief. A page that offers nothing when OpenRouter is off would send
  * somebody back to a blank message box, which is where they started.
  */
-async function generateContactDrafts(contact, product, { language = "en", instruction = "" } = {}) {
+async function generateContactDrafts(contact, product, { language = "en", instruction = "", research = null, tactic = null } = {}) {
   const code = normalizeLanguage(language);
   const fallback = buildFallbackDrafts({ contact, product, language: code });
   const base = {
@@ -14563,11 +14846,11 @@ async function generateContactDrafts(contact, product, { language = "en", instru
       model: outreachModelForProfile("balanced"),
       taskType: "SEQUENCE_GENERATION",
       profile: "balanced",
-      maxTokens: 1500,
+      maxTokens: 1800,
       messages: [
         {
           role: "system",
-          content: "You are a plain-spoken outbound writer. Return only strict JSON with escaped newlines inside string values. The copy sounds like one professional writing to another: calm, specific, low-pressure. Never invent a fact about the person or the company; the contact record and the product are the only sources. product.brief holds the team's own answers about what they sell, and product.knowledgeLibrary their written rules — follow both over your own habits. Avoid 'I hope this finds you well', compliments, three-adjective lists, sentences about the industry rather than the reader, and any request for a call in a first touch."
+          content: "You are a plain-spoken outbound writer. Return only strict JSON with escaped newlines inside string values. The copy sounds like one professional writing to another: calm, specific, low-pressure. Never invent a fact about the person or the company; the contact record, the research gathered for them (when given) and the product are the only sources. product.brief holds the team's own answers about what they sell, and product.knowledgeLibrary their written rules — follow both over your own habits. Avoid 'I hope this finds you well', compliments, three-adjective lists, sentences about the industry rather than the reader, and any request for a call in a first touch."
         },
         {
           role: "user",
@@ -14575,7 +14858,9 @@ async function generateContactDrafts(contact, product, { language = "en", instru
             contact,
             product: productForPrompt(product, context),
             language: code,
-            instruction
+            instruction,
+            research: research && Object.keys(research).length ? research : null,
+            tactic
           }))
         }
       ]

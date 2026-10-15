@@ -165,6 +165,26 @@ export async function listFolderContacts({ folderId = "", search = "", limit = 2
     });
 }
 
+/**
+ * «Усі контакти» on Головна (власник 15.10: «додати загальну папку всіх
+ * контактів срм»): the whole base, in the queue's order, a page at a time. No
+ * search — that is what made the folderless query time out — and the total
+ * counted once per ten minutes (166 916 rows took 3 s on 15.10), not per page.
+ */
+export const ALL_CONTACTS = "all";
+
+export async function listAllContacts({ limit = 25, offset = 0, cacheScope, fresh = false } = {}) {
+  const size = Math.min(Math.max(Number(limit) || 25, 1), MAX_PAGE);
+  const from = Math.max(Number(offset) || 0, 0);
+  const [contacts, total] = await Promise.all([
+    reads.read(cacheKey(cacheScope, "all-page", size, from), { ttl: MINUTE, fresh, tags: ["pages"] },
+      () => crm.from("contacts").select(LIST_COLUMNS).order("created_at", { ascending: true }).order("id", { ascending: true }).limit(size).offset(from).rows()),
+    reads.read(cacheKey(cacheScope, "all-count"), { ttl: 10 * MINUTE, tags: ["pages"] },
+      () => crm.from("contacts").select("id").count()).catch(() => null)
+  ]);
+  return { contacts, total, limit: size, offset: from };
+}
+
 /** One contact, with everything the CRM knows about them. */
 export async function readContact(id, { cacheScope, fresh = false } = {}) {
   // A malformed id is nobody we have — answered as "not found" rather than

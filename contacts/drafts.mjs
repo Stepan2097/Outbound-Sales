@@ -76,11 +76,14 @@ export function contactForPrompt(contact = {}) {
  * contact record and the product are the only facts, and a guess has to be
  * written as a guess rather than as something we know about their company.
  */
-export function draftsPromptPayload({ contact, product, language, instruction = "" }) {
+export function draftsPromptPayload({ contact, product, language, instruction = "", research = null, tactic = null }) {
   return {
     instruction: [
       "Write three first-touch drafts for this one contact: an email, a Telegram message, and LinkedIn (an invitation note plus the first message after it is accepted).",
-      "Use only the contact record and the product below. Never invent a company fact, a metric, a mutual connection, a recent event, or anything the sources do not state.",
+      research
+        ? "Use only the contact record, the research and the product below. The research was gathered for this person before writing (the company, its news, products and apps, where we stand with them on LinkedIn) — use the most specific true fact it holds. Never invent a company fact, a metric, a mutual connection, a recent event, or anything the sources do not state."
+        : "Use only the contact record and the product below. Never invent a company fact, a metric, a mutual connection, a recent event, or anything the sources do not state.",
+      tactic ? `Angle (the seller's chosen tactic «${tactic.label}»): ${tactic.instruction}` : "",
       "A guess is allowed when it is written as a guess — 'usually', 'from the outside', 'if I am reading this right' — and it must be specific enough to be wrong.",
       "No compliments, no 'I hope this finds you well', no three-adjective lists, no landscape sentences about the industry, no 'quick call'.",
       "One ask per draft, and it is a question, not a meeting.",
@@ -93,10 +96,13 @@ export function draftsPromptPayload({ contact, product, language, instruction = 
       telegram: { body: "string" },
       linkedin: { invite: "string", body: "string" },
       // What the drafts lean on, and what a human should check before sending.
-      grounding: ["the exact fact from the contact record or the product each draft used"],
-      verifyBeforeSending: ["anything written as a guess that a human should confirm"]
+      grounding: ["the exact fact from the contact record, the research or the product each draft used"],
+      verifyBeforeSending: ["anything written as a guess that a human should confirm"],
+      ...(tactic?.tactics ? { tacticUsed: "the id of the tactic chosen from `tactics`" } : {})
     },
     contact: contactForPrompt(contact),
+    ...(research ? { research } : {}),
+    ...(tactic?.tactics ? { tactics: tactic.tactics } : {}),
     product
   };
 }
@@ -218,6 +224,7 @@ export function normalizeDrafts(data, fallback) {
     // says the draft was written without a model — and this one was not.
     verifyBeforeSending: stringList(source.verifyBeforeSending).length
       ? stringList(source.verifyBeforeSending)
-      : ["Модель не назвала, що перевірити — перечитай сам перед відправкою."]
+      : ["Модель не назвала, що перевірити — перечитай сам перед відправкою."],
+    ...(typeof source.tacticUsed === "string" && source.tacticUsed.trim() ? { tacticUsed: source.tacticUsed.trim().slice(0, 40) } : {})
   };
 }

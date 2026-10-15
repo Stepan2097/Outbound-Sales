@@ -16,7 +16,7 @@
 // are still pending, whether their address was already written to.
 
 import { contactEmails } from "../contacts/enrich-crm.mjs";
-import { listFolderContacts, readContact } from "../contacts/store.mjs";
+import { ALL_CONTACTS, listAllContacts, listFolderContacts, readContact } from "../contacts/store.mjs";
 import { anty, crm } from "../warmup/db.mjs";
 import { firstMarks, firstMessageBoard, talkingTo } from "../warmup/first-messages.mjs";
 import { linkedinSlug } from "../warmup/outreach.mjs";
@@ -91,8 +91,9 @@ export async function nextContact({ folderId, cursor = 0, skip = [], decisions =
     }
   } catch { friends = []; }
   const friendIds = [...new Set(friends.map((row) => row.crmContactId))];
-  const inFolder = new Set();
-  for (let at = 0; at < friendIds.length; at += 100) {
+  const everyone = folderId === ALL_CONTACTS;
+  const inFolder = new Set(everyone ? friendIds : []);
+  for (let at = 0; !everyone && at < friendIds.length; at += 100) {
     const rows = await crm.from("contacts").select("id").eq("folder_id", folderId).in("id", friendIds.slice(at, at + 100)).rows();
     for (const row of rows) inFolder.add(String(row.id));
   }
@@ -108,7 +109,9 @@ export async function nextContact({ folderId, cursor = 0, skip = [], decisions =
   // 2. The folder, oldest first, past whoever was decided, written to, skipped or already shown as a friend.
   if (!contactId) {
     for (let page = 0; page < MAX_PAGES && !contactId; page += 1) {
-      const answer = await listFolderContacts({ folderId, limit: PAGE, offset: position, queueOrder: true, cacheScope });
+      const answer = everyone
+        ? await listAllContacts({ limit: PAGE, offset: position, cacheScope })
+        : await listFolderContacts({ folderId, limit: PAGE, offset: position, queueOrder: true, cacheScope });
       total = answer.total;
       if (!answer.contacts.length) break;
       const outreach = await outreachByContact(answer.contacts.map((row) => String(row.id)));
