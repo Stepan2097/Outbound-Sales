@@ -226,14 +226,15 @@ test("«Відключити»: somebody else's only by an admin; the token is r
   assert.equal((await registry()).senders.find((row) => row.email === "anna@advantage-send.com").status, "active");
 });
 
-test("«Прибрати з прогріву»: the mailbox stops, leaves the table, is not woken by «Запустити всі», and comes back paused", async (t) => {
+test("«Прибрати з прогріву»: the mailbox stops, stays in the table as «не гріється», is not woken by «Запустити всі», and comes back paused", async (t) => {
   const { call } = await routes(t);
   const state = new URL((await call("POST", "/oauth/google/start")).payload.url).searchParams.get("state");
   await call("GET", `/oauth/google/callback?state=${state}&code=c`);
   await call("POST", "/warmup/start", { body: { mailbox: "anna@advantage-send.com" }, profile: PAVLO });
   assert.equal((await call("POST", "/warmup/remove", { body: { mailbox: "anna@advantage-send.com" }, profile: PAVLO })).status, 200);
   let view = (await call("GET", "/warmup", { profile: PAVLO })).payload;
-  assert.deepEqual([view.rows.length, view.removed], [0, ["anna@advantage-send.com"]]);
+  // Still in the table (15.10: every mailbox is listed), saying it does not warm.
+  assert.deepEqual(view.rows.map((row) => [row.email, row.status]), [["anna@advantage-send.com", "removed"]]);
   const all = await call("POST", "/warmup/start", { body: { all: true }, profile: PAVLO });
   assert.deepEqual(all.payload.changed, [], "«Запустити всі» leaves it alone");
   assert.equal((await call("POST", "/warmup/remove", { body: { mailbox: "anna@advantage-send.com" }, profile: OLENA })).status, 403, "a seller without the limits right cannot");

@@ -24,7 +24,7 @@ export function readAccountsReturn() {
   const parts = window.location.hash.replace(/^#/, "").split("/");
   if (parts[0] !== "mail-warmup" || parts[1] !== "mailbox") return;
   const value = decodeURIComponent(parts.slice(3).join("/") || "");
-  if (parts[2] === "ok") Object.assign(accounts, { notice: `Пошту ${value} додано. Натисніть «Старт», щоб вона почала грітися.`, tone: "is-ok" });
+  // A successful sign-in needs no sentence: the mailbox is simply in the table (owner 15.10).
   if (parts[2] === "error") Object.assign(accounts, { notice: value || "Не вдалося додати пошту.", tone: "is-bad" });
   window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#mail-warmup`);
 }

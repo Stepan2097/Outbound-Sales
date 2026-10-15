@@ -8,7 +8,7 @@ import { api, escapeAttr, escapeHtml, onScreen, refreshIcons, uaPlural } from ".
 import { accountActionsHtml, accountNotesHtml, accountsNoticeHtml, addButtonHtml, addDialogHtml, afterAccountsRender, bindAccounts, loadAccounts, onAccountsChange, readAccountsReturn, tagEditorHtml } from "./mail-accounts.js";
 
 const STATUS = {
-  running: ["іде", "tone-live"], paused: ["на паузі", "tone-warn"], never: ["не запущено", "tone-muted"], blocked: ["не можна", "tone-bad"]
+  running: ["іде", "tone-live"], paused: ["на паузі", "tone-warn"], never: ["не запущено", "tone-muted"], blocked: ["не можна", "tone-bad"], removed: ["не гріється", "tone-muted"]
 };
 
 export const mailWarmupState = { data: null, error: "", notice: "", busy: "", tag: null };
@@ -97,6 +97,7 @@ function tableHtml(data) {
   const action = (row) => {
     if (!canChange) return "";
     if (row.status === "running") return `<button type="button" class="text-button" data-warmup-pause="${escapeAttr(row.email)}"${mailWarmupState.busy ? " disabled" : ""}><i data-lucide="pause"></i><span>Пауза</span></button>`;
+    if (row.status === "removed") return `<button type="button" class="text-button" data-warmup-restore="${escapeAttr(row.email)}"${mailWarmupState.busy ? " disabled" : ""}><i data-lucide="undo-2"></i><span>Повернути в прогрів</span></button>`;
     if (row.status === "blocked") return `<span class="esp-subtle" title="${escapeAttr(row.blocked)}">${escapeHtml(row.blocked)}</span>`;
     return `<button type="button" class="primary-button" data-warmup-start="${escapeAttr(row.email)}"${mailWarmupState.busy ? " disabled" : ""}><i data-lucide="play"></i><span>Старт</span></button>`;
   };
@@ -121,7 +122,7 @@ function tableHtml(data) {
           <td class="is-number warmup-mail-pair"><span title="Скільки відповідей прийшло на листи цієї пошти"><b>${row.repliesReceived}</b> отримала</span><small title="На скільки чужих листів прогріву відповіла вона сама">відповіла сама: ${row.repliesSent}</small></td>
           <td class="is-number warmup-mail-pair" title="Листи цієї пошти, що в інших наших пошт потрапили у «Спам». Прогрів виймає їх усі й позначає важливими."><span class="${spamShare(row) >= 10 ? "is-bad" : ""}"><b>${row.landedInSpam}</b> з ${row.sent}</span><small>${row.sent ? `${spamShare(row)}%` : "—"}</small></td>
           <td class="is-number">${row.coldToday} / ${row.limit}<small>сьогодні з ліміту</small></td>
-          <td class="warmup-mail-action">${action(row)}${accountActionsHtml(row.email)}${canChange ? `<button type="button" class="icon-button warmup-mail-remove" data-warmup-remove="${escapeAttr(row.email)}" title="Прибрати з прогріву" aria-label="Прибрати ${escapeAttr(row.email)} з прогріву"${mailWarmupState.busy ? " disabled" : ""}><i data-lucide="trash-2"></i></button>` : ""}${row.lastError && row.status === "running" ? `<small class="is-bad" title="${escapeAttr(row.lastError.error)}">остання відмова ${escapeHtml(when(row.lastError.at))}</small>` : ""}</td>
+          <td class="warmup-mail-action">${action(row)}${accountActionsHtml(row.email)}${canChange && row.status !== "removed" ? `<button type="button" class="icon-button warmup-mail-remove" data-warmup-remove="${escapeAttr(row.email)}" title="Прибрати з прогріву" aria-label="Прибрати ${escapeAttr(row.email)} з прогріву"${mailWarmupState.busy ? " disabled" : ""}><i data-lucide="trash-2"></i></button>` : ""}${row.lastError && row.status === "running" ? `<small class="is-bad" title="${escapeAttr(row.lastError.error)}">остання відмова ${escapeHtml(when(row.lastError.at))}</small>` : ""}</td>
         </tr>${tagEditorHtml(row.email) ? `<tr class="warmup-mail-tag-row"><td colspan="9">${tagEditorHtml(row.email)}</td></tr>` : ""}`;
       }).join("")}</tbody>
     </table></div>

@@ -533,8 +533,12 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
       scopes: esp.connector?.describe().scopes || [],
       // A mailbox disconnected from the platform is not ours to warm any more,
       // and one taken off this page («Прибрати з прогріву») is listed apart.
-      rows: warmupView(entries, { senders: senders.filter((sender) => !isDisconnected(sender) && !removedFromWarmup(entries).has(sender.email)), domains }),
-      removed: [...removedFromWarmup(entries)].filter((email) => senders.some((sender) => sender.email === email && !isDisconnected(sender) && sender.status !== "retired")).sort(),
+      // Every connected mailbox is in the table (owner 15.10: «пошта має бути в
+      // списку навіть якщо вона не прогрівається»); one taken off the warm-up
+      // says so in its row and can be put back there.
+      rows: warmupView(entries, { senders: senders.filter((sender) => !isDisconnected(sender)), domains })
+        .map((row) => (removedFromWarmup(entries).has(row.email) ? { ...row, status: "removed", removed: true } : row)),
+      removed: [],
       log: warmupLog(entries),
       plan: warmupPlan(entries), planBounds: PLAN_BOUNDS,
       tagCatalog: tagCatalog(senders),
