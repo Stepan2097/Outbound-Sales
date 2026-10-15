@@ -511,7 +511,10 @@ function senderTagFilterHtml(senders) {
 
 function sendingHtml(campaign) {
   const limits = page.limits;
-  const usable = (limits?.senders || []).filter((sender) => sender.status === "active" || campaign.senders.includes(sender.email));
+  // By domain A→Z, inside each the addresses A→Z, a small gap between domains (owner 15.10).
+  const domainOf = (sender) => sender.email.split("@")[1] || "";
+  const usable = (limits?.senders || []).filter((sender) => sender.status === "active" || campaign.senders.includes(sender.email))
+    .sort((left, right) => domainOf(left).localeCompare(domainOf(right)) || left.email.localeCompare(right.email));
   const signature = page.signature || {};
   const window_ = limits?.window || { startHour: 8, endHour: 17 };
   return `<section class="mc-step-page">
@@ -519,7 +522,7 @@ function sendingHtml(campaign) {
     <form class="mc-sending" data-mc-form="sending">
       <fieldset class="mc-fieldset"><legend>Пошти</legend>
         ${senderTagFilterHtml(usable)}
-        ${usable.length ? usable.map((sender) => `<label class="mc-sender" data-mc-sender-tags="${escapeAttr((sender.tags || []).join("|"))}" ${senderHidden(sender, campaign, senderTagOf(usable)) ? "hidden" : ""}>
+        ${usable.length ? usable.map((sender, index) => `<label class="mc-sender${index && domainOf(usable[index - 1]) !== domainOf(sender) ? " is-domain-start" : ""}" data-mc-sender-tags="${escapeAttr((sender.tags || []).join("|"))}" ${senderHidden(sender, campaign, senderTagOf(usable)) ? "hidden" : ""}>
             <input type="checkbox" name="sender" value="${escapeAttr(sender.email)}" ${campaign.senders.includes(sender.email) ? "checked" : ""} ${campaign.state === "done" ? "disabled" : ""} />
             <span><strong>${escapeHtml(sender.email)}</strong><small>${sender.status === "active" ? "надсилає" : "на паузі"} · сьогодні ${sender.today} з ${sender.limit} · етап рампи ${sender.rampStage ?? "—"}</small>${senderTagPills(sender)}</span>
             <span class="mc-meter"><span style="width:${percent(sender.today, sender.limit)}%"></span></span>

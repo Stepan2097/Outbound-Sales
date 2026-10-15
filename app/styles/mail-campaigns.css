@@ -1513,3 +1513,10 @@ div.mc-subject {
   font-size: 12px;
   font-weight: 700;
 }
+
+/* Пошти кампанії — групами за доменом, з проміжком між доменами (15.10). */
+.mc-sender.is-domain-start {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
