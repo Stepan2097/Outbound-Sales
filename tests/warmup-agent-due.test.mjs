@@ -206,7 +206,8 @@ test("an account whose session just ended rests before it is handed out again", 
   const answer = await decideNext({ now: insideTheWindow() });
   assert.equal(answer.next, null);
   assert.equal(answer.reason, "Chloe Stewart is resting between sessions");
-  assert.ok(answer.retryAfterSeconds >= 300 && answer.retryAfterSeconds <= 540);
+  // Every two minutes now (15.10): an approved message must not wait for the next poll.
+  assert.equal(answer.retryAfterSeconds, 120);
   const refused = await leaseAccount({ accountId: "acc-1", now: insideTheWindow() });
   assert.equal(refused.ok, false);
   assert.equal(refused.error, "Chloe Stewart is resting between sessions");
@@ -335,7 +336,8 @@ test("an account in cool-off is named, and the answer is still a normal idle wai
   const answer = await decideNext({ now: insideTheWindow() });
   assert.equal(answer.next, null);
   assert.equal(answer.reason, "Chloe Stewart is in cool-off");
-  assert.ok(answer.retryAfterSeconds >= 300 && answer.retryAfterSeconds <= 540);
+  // Every two minutes now (15.10): an approved message must not wait for the next poll.
+  assert.equal(answer.retryAfterSeconds, 120);
 });
 
 test("nothing left in today's quota reads as nothing owing, not as a fault", async () => {
@@ -350,7 +352,8 @@ test("nothing left in today's quota reads as nothing owing, not as a fault", asy
   const answer = await decideNext({ now: insideTheWindow() });
   assert.equal(answer.next, null);
   assert.equal(answer.reason, "nothing owes work today");
-  assert.ok(answer.retryAfterSeconds >= 300 && answer.retryAfterSeconds <= 540);
+  // Every two minutes now (15.10): an approved message must not wait for the next poll.
+  assert.equal(answer.retryAfterSeconds, 120);
 });
 
 test("an agent that never reads the inbox is woken for it once a day, not all morning", async (t) => {
@@ -418,7 +421,7 @@ test("no wait ever exceeds the 900 seconds the worker was promised", async () =>
     await leaseAccount({ accountId: "acc-1", now });
     const answer = await decideNext({ now });
     assert.match(answer.reason, /is already running/);
-    assert.equal(answer.retryAfterSeconds, 900, "a lease somebody lengthened must not lengthen the worker's sleep");
+    assert.equal(answer.retryAfterSeconds, 120, "a lease somebody lengthened must not lengthen the worker's sleep — and the poll is every two minutes (15.10)");
   } finally {
     delete process.env.WARMUP_LEASE_MINUTES;
   }
@@ -454,7 +457,8 @@ test("every profile open means nobody is due, and the answer says which", async 
   const answer = await decideNext({ now });
   assert.equal(answer.next, null);
   assert.equal(answer.reason, "Chloe Stewart already has its profile open");
-  assert.ok(answer.retryAfterSeconds >= 300 && answer.retryAfterSeconds <= 540);
+  // Every two minutes now (15.10): an approved message must not wait for the next poll.
+  assert.equal(answer.retryAfterSeconds, 120);
 });
 
 test("a deleted profile carries a stale status and is not open anywhere", async () => {
@@ -608,4 +612,51 @@ test("a failed run is handed out again when its cool-off ends, and its log line 
   t.mock.timers.setTime(later.getTime());
   const back = await decideNext({ now: later });
   assert.equal(back.next?.accountId, "acc-1", "the fifteen minutes the line promised, not the hour a finished session rests");
+});
+
+// ── позачергова сесія для схваленого (власник 15.10: «треба одразу відправляти») ──
+
+test("схвалене повідомлення вночі: акаунт видається одразу, план — лише відправити, після сесії він не «відпочиває»", async () => {
+  const night = new Date(); night.setHours(22, 0, 0, 0);
+  rows.wl_events = [{ id: "q1", account_id: "acc-1", type: "outbox.queued", created_at: new Date().toISOString(), meta: { threadKey: "t1", body: "Hi Ana", participantName: "Ana" } }];
+
+  const answer = await decideNext({ now: night });
+  assert.equal(answer.window.open, false);
+  assert.equal(answer.next.accountId, "acc-1");
+  assert.equal(answer.next.urgent, true);
+  assert.equal(answer.retryAfterSeconds, 120);
+
+  const taken = await leaseAccount({ accountId: "acc-1", now: night });
+  assert.equal(taken.ok, true);
+  assert.equal(taken.lease.urgent, true);
+
+  const plan = await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" });
+  assert.equal(plan.payload.urgent, true);
+  assert.equal(plan.payload.runnable, true);
+  assert.deepEqual(plan.payload.plan, [], "ні переглядів, ні лайків");
+  assert.deepEqual(plan.payload.invites.toSend, [], "ні запитів у друзі");
+  assert.equal(plan.payload.inbox.due, false, "вхідні не читає");
+  assert.equal(plan.payload.network.due, false);
+  assert.equal(plan.payload.outbox.toSend[0].text, "Hi Ana");
+
+  // Without a waiting message nothing is handed out at night — the window still holds for warming.
+  rows.wl_events = [];
+  const { finishRun } = await import("../warmup/scheduler.mjs");
+  await finishRun({ account: rows.wl_accounts[0], run: rows.wl_runs[0], leaseId: taken.lease.leaseId, ok: true, now: night });
+  const quiet = await decideNext({ now: night });
+  assert.equal(quiet.next, null);
+  assert.match(quiet.reason, /outside/);
+});
+
+test("у вікні схвалене йде перед звичайною сесією, і звичайна після нього не чекає відпочинку", async () => {
+  const now = insideTheWindow();
+  inboxReadToday();
+  rows.wl_events.push({ id: "q2", account_id: "acc-2", type: "outbox.queued", created_at: new Date().toISOString(), meta: { threadKey: "t2", body: "Hello", participantName: "Bo" } });
+  const answer = await decideNext({ now });
+  assert.equal(answer.next.urgent, true);
+  const taken = await leaseAccount({ accountId: answer.next.accountId, now });
+  assert.equal(taken.lease.urgent, true);
+  const { finishRun, restingUntil } = await import("../warmup/scheduler.mjs");
+  await finishRun({ account: { id: answer.next.accountId }, run: null, leaseId: taken.lease.leaseId, ok: true, now });
+  assert.equal(restingUntil(answer.next.accountId), 0, "позачергова сесія не робить звичайну пізнішою");
 });

@@ -9,6 +9,7 @@ import {
   openConversationCounts, pendingCounts
 } from "./invites.mjs";
 import { syncedTodayAccounts } from "./inbox.mjs";
+import { repliesToSend } from "./outbox.mjs";
 import { connectCeiling, weeklyConnectCounts } from "./weekly.mjs";
 import { claimCutoff, folderWork, fromDayLookup } from "./campaigns.mjs";
 import { folderFeeds } from "./feed.mjs";
@@ -359,17 +360,77 @@ export function activeLease(nowMs = Date.now()) {
  * "Chloe Stewart is already running" is answered on every poll for twenty-five
  * minutes, and it should not cost a query each time.
  */
-export function grantLease(account, nowMs = Date.now()) {
+export function grantLease(account, nowMs = Date.now(), { urgent = false } = {}) {
   const lease = {
     leaseId: randomUUID(),
     accountId: account.id,
     label: account.label,
     grantedAt: nowMs,
-    expiresAt: nowMs + leaseMinutes() * 60_000
+    expiresAt: nowMs + leaseMinutes() * 60_000,
+    urgent
   };
   leases.set(account.id, lease);
-  noteSessionStarted(lease);
+  // A send-only session is not the day's session: it neither counts as one
+  // nor makes the account rest before the session that does the warming.
+  if (!urgent) noteSessionStarted(lease);
   return lease;
+}
+
+/** The lease this account holds now, if any — `GET /agent` reads whether it is a send-only one. */
+export function leaseOf(accountId, nowMs = Date.now()) {
+  const lease = leases.get(accountId);
+  return lease && lease.expiresAt > nowMs ? lease : null;
+}
+
+// ── Позачергова сесія для схваленого (власник 15.10: «треба одразу
+// відправляти») ────────────────────────────────────────────────────────────
+//
+// A message a person approved — a first message from Головна, a reply written
+// in «Вхідні» — used to wait for the account's next session in the window,
+// which could be the next morning. Now an account holding one is handed out
+// at once, inside the window or outside it, for a session that only sends:
+// no views, no likes, no invitations, no inbox read (`GET /agent` cuts the
+// plan to the outbox). What still holds it back is what keeps the account
+// safe: a pause after a warning, a cool-off after a failed session, another
+// account already running, the day's message limit, and a few minutes since
+// its last send-only session.
+export const URGENT_POLL_SECONDS = 120;
+const URGENT_MIN_GAP_MS = 3 * 60_000;
+const urgentEnded = new Map();
+
+export async function urgentCandidates(nowMs = Date.now()) {
+  const accounts = await anty.from("wl_accounts").select("*")
+    .in("status", LIVE_ACCOUNT_STATUSES).eq("health", "ok").notNull("profile_remote_id").rows();
+  if (!accounts.length) return [];
+  const runs = await anty.from("wl_runs").select("*").in("account_id", accounts.map((account) => account.id)).in("state", LIVE_RUN_STATES).rows();
+  const todayIso = today();
+  const found = [];
+  for (const account of accounts) {
+    const run = runs.find((row) => row.account_id === account.id);
+    if (!run || pausedOn(run, todayIso)) continue;
+    if ((coolingOff.get(account.id) ?? 0) > nowMs) continue;
+    if ((leases.get(account.id)?.expiresAt ?? 0) > nowMs) continue;
+    if (nowMs - (urgentEnded.get(account.id) ?? 0) < URGENT_MIN_GAP_MS) continue;
+    const work = await repliesToSend(account.id, { todayIso, nowMs });
+    if (!work.toSend.length) continue;
+    found.push({
+      account, run, day: dayOfRun(run, new Date(nowMs)), mode: "urgent", remaining: 0, kinds: [], invites: 0,
+      upkeep: { checks: 0, inbox: false, any: false }, replies: work.toSend.length
+    });
+  }
+  return found;
+}
+
+async function grantUrgent(pick, nowMs) {
+  const lease = grantLease(pick.account, nowMs, { urgent: true });
+  await logEvent({
+    accountId: pick.account.id,
+    runId: pick.run.id,
+    type: "scheduler.started",
+    message: `Handed to a worker out of turn — ${pick.replies} approved message(s) to send now, nothing else`,
+    meta: { urgent: true, replies: pick.replies, leaseId: lease.leaseId }
+  });
+  return { ok: true, lease: { ...offer(pick), urgent: true, replies: pick.replies, leaseId: lease.leaseId, leaseExpiresAt: new Date(lease.expiresAt).toISOString() } };
 }
 
 /**
@@ -792,16 +853,29 @@ export async function decideNext({ now = new Date(), random = Math.random, campa
   if (schedulerDisabled()) {
     return idle("the scheduler is switched off on this deployment", OUTSIDE_WINDOW_CAP);
   }
-  if (!window.open) {
-    return idle(`outside ${window.label}`, secondsUntilWindowOpens(now));
-  }
-
   sweepLeases(nowMs);
   const running = activeLease(nowMs);
   // One account at a time, across every worker: two profiles opening within the
   // same minute from one machine is the pattern the whole warm-up avoids.
   if (running) {
-    return idle(`${running.label} is already running`, secondsUntil(running.expiresAt, nowMs));
+    return idle(`${running.label} is already running`, Math.min(secondsUntil(running.expiresAt, nowMs), URGENT_POLL_SECONDS));
+  }
+
+  // An approved message goes before everything else, window or not.
+  const urgent = await urgentCandidates(nowMs).catch(() => []);
+  if (urgent.length) {
+    return {
+      success: true,
+      window,
+      next: { ...offer(urgent[0]), urgent: true, replies: urgent[0].replies, leaseId: null, leaseExpiresAt: null },
+      reason: null,
+      retryAfterSeconds: URGENT_POLL_SECONDS
+    };
+  }
+  // Outside the window the worker still asks every two minutes — for the
+  // approved messages above, not for warming.
+  if (!window.open) {
+    return idle(`outside ${window.label}`, Math.min(secondsUntilWindowOpens(now), URGENT_POLL_SECONDS));
   }
 
   const { ready, held, busy } = await candidates(today(), nowMs, campaigns);
@@ -809,7 +883,7 @@ export async function decideNext({ now = new Date(), random = Math.random, campa
     // The open profile is reported ahead of the cool-off: one says wait, the
     // other says something is running this account that did not ask us, and
     // that is the sentence somebody needs to see.
-    return idle(blockedReason(busy[0], held[0]), between(IDLE, random));
+    return idle(blockedReason(busy[0], held[0]), Math.min(between(IDLE, random), URGENT_POLL_SECONDS));
   }
 
   return {
@@ -885,14 +959,17 @@ export async function leaseAccount({ accountId, now = new Date(), random = Math.
   if (schedulerDisabled()) {
     return refuse("the scheduler is switched off on this deployment", OUTSIDE_WINDOW_CAP);
   }
-  if (!insideWindow(now)) {
-    return refuse(`outside ${windowLabel()}`, secondsUntilWindowOpens(now));
-  }
-
   sweepLeases(nowMs);
   const running = activeLease(nowMs);
   if (running) {
     return refuse(`${running.label} is already running`, secondsUntil(running.expiresAt, nowMs));
+  }
+
+  // A send-only session for approved messages, window or not.
+  const urgentPick = (await urgentCandidates(nowMs).catch(() => [])).find((item) => item.account.id === accountId);
+  if (urgentPick && !activeLease(nowMs)) return grantUrgent(urgentPick, nowMs);
+  if (!insideWindow(now)) {
+    return refuse(`outside ${windowLabel()}`, Math.min(secondsUntilWindowOpens(now), URGENT_POLL_SECONDS));
   }
 
   const { ready, held, busy } = await candidates(today(), nowMs, campaigns);
@@ -959,7 +1036,8 @@ export async function finishRun({ account, run, leaseId, ok, note, now = new Dat
   // nothing added to it. A report for a lease that has already run out is
   // still a session that ended now. One for somebody else's live lease is not:
   // that run's own report will say when it ended.
-  if (ok && (released || !held)) noteSessionFinished(account.id, nowMs);
+  if (held?.urgent) urgentEnded.set(account.id, nowMs);
+  else if (ok && (released || !held)) noteSessionFinished(account.id, nowMs);
   // A session handed the inbox read that finished has had its chance today,
   // read or not. Only a finished one: a failed session is cooled off and may
   // be woken again for the read once the cool-off ends.

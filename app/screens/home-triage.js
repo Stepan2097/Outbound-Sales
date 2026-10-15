@@ -645,7 +645,12 @@ async function sendLinkedin(outreachId) {
   try {
     const answer = await api("/api/warmup/first-messages/send", { method: "POST", body: JSON.stringify({ outreachId, text: triage.texts.linkedin }) });
     void loadRecent();
-    say(`Повідомлення стало в чергу ${friend?.accountName || "акаунта"}${answer.goesOutAt ? ` — піде ${new Date(answer.goesOutAt).toLocaleString("uk-UA", { weekday: "short", hour: "2-digit", minute: "2-digit" })}` : ""}.`);
+    const when = (iso) => new Date(iso).toLocaleString("uk-UA", { weekday: "short", hour: "2-digit", minute: "2-digit" });
+    say(answer.goesOutNow
+      ? `Повідомлення піде з ${friend?.accountName || "акаунта"} за кілька хвилин — окремою короткою сесією.`
+      : answer.limitReached
+        ? `Денний ліміт повідомлень ${friend?.accountName || "акаунта"}${answer.perDay ? ` (${answer.perDay})` : ""} вичерпано — повідомлення піде ${answer.goesOutAt ? when(answer.goesOutAt) : "у наступну сесію"}.`
+        : `Повідомлення стало в чергу ${friend?.accountName || "акаунта"}${answer.goesOutAt ? ` — піде ${when(answer.goesOutAt)}` : ""}: акаунт зараз не можна відкрити (пауза чи потрібен вхід).`);
     triage.sending = "";
     await loadNext();
   } catch (error) {

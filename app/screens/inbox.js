@@ -507,12 +507,17 @@ function warmupMessageHtml(message, participantName, accountName) {
 }
 
 /**
- * Коли піде відповідь, яку щойно написали: у наступну сесію акаунта, і ця сесія
- * має час. Не «зараз»: відповідь вирушає з самого акаунта, разом з його щоденним
- * заходом, а не за кліком.
+ * Коли піде відповідь, яку щойно написали. З 15.10 (власник: «треба одразу
+ * відправляти») — за кілька хвилин окремою короткою сесією акаунта; пізніше,
+ * лише коли денний ліміт повідомлень вичерпано або акаунт зараз не відкрити.
  */
 function warmupGoesOutText(reply) {
+  if (reply?.goesOutNow) return "за кілька хвилин";
   if (!reply?.goesOutAt) return "у наступну сесію акаунта";
+  if (reply.limitReached) {
+    const next = new Date(reply.goesOutAt);
+    return `денний ліміт повідомлень${reply.perDay ? ` (${reply.perDay})` : ""} вичерпано — ${reply.goesOutToday ? "сьогодні" : "завтра"} близько ${next.toLocaleTimeString("uk", { hour: "2-digit", minute: "2-digit" })}`;
+  }
   if (reply.goesOutSoon) return "найближчим часом, у вікні сесій";
   const at = new Date(reply.goesOutAt);
   if (!Number.isFinite(at.getTime())) return "у наступну сесію акаунта";

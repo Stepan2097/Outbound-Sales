@@ -109,11 +109,14 @@ if (!plan.runnable) {
 // The window is the portal's, not the script's. A schedule nothing enforces is
 // a suggestion, and a profile that opens at 22:00 is a signal in itself —
 // --anytime is there for a deliberate catch-up, not for the daily run.
-if (!plan.window?.open && !ANYTIME) {
+// A send-only session (the server's «позачергова сесія»): approved messages
+// go now, window or not — the plan it hands over holds nothing else.
+if (plan.urgent) log(`позачергова сесія: лише надіслати схвалене (${plan.outbox?.toSend?.length ?? 0})`);
+if (!plan.window?.open && !ANYTIME && !plan.urgent) {
   log(`зараз поза вікном прогріву (${plan.window?.label ?? '?'}) — не запускаю`);
   return 0;
 }
-if (!plan.window?.open) log(`поза вікном прогріву (${plan.window?.label ?? '?'}) — запуск вручну, --anytime`);
+if (!plan.window?.open && !plan.urgent) log(`поза вікном прогріву (${plan.window?.label ?? '?'}) — запуск вручну, --anytime`);
 
 log(`день ${plan.day} — «${plan.phase}»`);
 for (const row of plan.plan ?? []) log(`  план: ${row.label} ${row.done}/${row.quota} (лишилось ${row.remaining})`);

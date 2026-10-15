@@ -39,7 +39,7 @@ import {
 import {
   REPLY_LIMIT, cancelReply, markReplyFailed, markReplySent, prepareReply, queueReply, repliesOf, repliesToSend, visibleReplies
 } from "./outbox.mjs";
-import { activeLease, decideNext, finishRun, leaseAccount, upkeepFor, viewsHeldBackFor } from "./scheduler.mjs";
+import { URGENT_POLL_SECONDS, activeLease, decideNext, finishRun, leaseAccount, leaseOf, upkeepFor, viewsHeldBackFor } from "./scheduler.mjs";
 import {
   DEFAULT_FROM_DAY, allowanceReason, claimCapacity, claimCutoff, defaultFilters, describeCampaign, feedingFor,
   folderRoom, fromDayLookup, isCampaignState, migrateCampaigns, moveTo, nextOrder, normalizeCampaign, parseFromDay,
@@ -1082,6 +1082,20 @@ async function outboxPlan(accountId) {
  * tomorrow's — at the time that session is planned for.
  */
 async function replyGoesOut(account) {
+  // Позачергова сесія (15.10): an approved message goes within minutes —
+  // unless the account cannot be opened now or has used today's messages.
+  const [run, work] = await Promise.all([
+    activeRun(account.id).catch(() => null),
+    repliesToSend(account.id, { todayIso: today() }).catch(() => null)
+  ]);
+  const limited = Boolean(work && work.sentToday >= work.perDay);
+  if (run && !pausedOn(run, today()) && account.health === "ok" && account.status !== "excluded" && !limited) {
+    return { at: new Date(Date.now() + (URGENT_POLL_SECONDS + 120) * 1000).toISOString(), today: true, soon: true, now: true };
+  }
+  if (limited) {
+    const next = nextSession(account.id, { outstanding: false });
+    return { at: next.at, today: next.today, soon: false, limit: true, perDay: work.perDay };
+  }
   const read = await syncedTodayAccounts([account.id], today());
   const next = nextSession(account.id, { outstanding: !read.has(account.id) });
   return { at: next.at, today: next.today, soon: next.overdue };
@@ -1377,7 +1391,8 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         const goesOut = await replyGoesOut(account);
         sendJson(response, queued.duplicate ? 200 : 201, {
           success: true, reply: queued.reply, duplicate: queued.duplicate,
-          goesOutAt: goesOut.at, goesOutToday: goesOut.today, goesOutSoon: goesOut.soon, window: windowLabel()
+          goesOutAt: goesOut.at, goesOutToday: goesOut.today, goesOutSoon: goesOut.soon, goesOutNow: Boolean(goesOut.now),
+          limitReached: Boolean(goesOut.limit), perDay: goesOut.perDay ?? null, window: windowLabel()
         });
         return true;
       });
@@ -3127,7 +3142,8 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         const goesOut = await replyGoesOut(account);
         sendJson(response, queued.duplicate ? 200 : 201, {
           success: true, reply: queued.reply, duplicate: queued.duplicate,
-          goesOutAt: goesOut.at, goesOutToday: goesOut.today, goesOutSoon: goesOut.soon, window: windowLabel()
+          goesOutAt: goesOut.at, goesOutToday: goesOut.today, goesOutSoon: goesOut.soon, goesOutNow: Boolean(goesOut.now),
+          limitReached: Boolean(goesOut.limit), perDay: goesOut.perDay ?? null, window: windowLabel()
         });
         return true;
       });
@@ -3374,6 +3390,28 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         // window on screen moves it for today's run too.
         window: { ...SESSION_WINDOW, label: windowLabel(), open: insideWindow() }
       };
+
+      // A send-only session (scheduler.mjs, «Позачергова сесія»): the approved
+      // messages and nothing else — no plan, no invitations, no inbox read, no
+      // contacts list — so an account opened at night does only what a person
+      // asked it to.
+      if (leaseOf(account.id)?.urgent && run && !paused && account.status !== "excluded") {
+        sendJson(response, 200, {
+          ...base,
+          urgent: true,
+          // Stays true when the last message has gone: the agent asks this
+          // between steps and reads false as «stop the visit», which would
+          // end a session that did everything it was for as a failure.
+          runnable: true,
+          reason: base.outbox.toSend.length ? "Approved messages to send now" : "Nothing approved is waiting any more",
+          runId: run.id,
+          plan: [],
+          invites: { ...base.invites, toSend: [], toCheck: [] },
+          inbox: { ...base.inbox, due: false },
+          network: { due: false }
+        });
+        return true;
+      }
 
       if (account.status === "excluded") {
         sendJson(response, 200, { ...base, runnable: false, reason: "Excluded from warm-up", plan: [] });
