@@ -170,9 +170,29 @@ export function harvestConversations() {
  * so any "find the biggest list" heuristic finds the wrong one. The guard is
  * structural: a message list contains no links to other conversations.
  */
-export function harvestThread() {
+export function harvestThread(scope = 'document') {
   const flat = (el) => (el?.textContent ?? '').replace(/\s+/g, ' ').trim();
   const notes = [];
+  // The message window LinkedIn opens over a profile (a first message) lives in
+  // a shadow root (`#interop-outlet`, 15.10.2026), out of reach of a query on
+  // the document — and the profile around it is full of lists that would pass
+  // for a conversation. Asked for the overlay, the search stays inside the
+  // shadow root that holds a message form; a conversation page is read as before.
+  let root = document;
+  if (scope === 'overlay') {
+    const stack = [document];
+    root = null;
+    while (stack.length && !root) {
+      const here = stack.shift();
+      for (const el of here.querySelectorAll('*')) {
+        if (!el.shadowRoot) continue;
+        if (el.shadowRoot.querySelector('form [contenteditable="true"][role="textbox"]')) { root = el.shadowRoot; break; }
+        stack.push(el.shadowRoot);
+      }
+    }
+    // The window as LinkedIn drew it before: in the document itself.
+    if (!root) root = document;
+  }
 
   // Tried in order. The class hints are LinkedIn's own semantic names, which
   // have outlived several redesigns of the feed; the substring match means a
@@ -180,14 +200,14 @@ export function harvestThread() {
   // structural pass below still works, and `how` says which one answered — a
   // run that quietly changes strategy is a run that has started to rot.
   let how = 'class hint';
-  let items = [...document.querySelectorAll(
+  let items = [...root.querySelectorAll(
     'li[class*="message-list__event"], li[class*="event-listitem"], li[class*="msg-s-message-list"]',
   )];
 
   if (!items.length) {
     how = 'structure';
     let best = [];
-    for (const list of document.querySelectorAll('ul, ol')) {
+    for (const list of root.querySelectorAll('ul, ol')) {
       // The conversation list. Not this one.
       if (list.querySelector('a[href*="/messaging/thread/"]')) continue;
       const kids = [...list.children].filter((li) => li.querySelector('p, time') || flat(li).length > 20);

@@ -378,6 +378,26 @@ describe('the first message, from the profile', () => {
     assert.match(await page.evaluate(() => document.querySelector('.msg-s-message-list-content').innerText), /thanks for connecting/);
   });
 
+  test('вікно в shadow DOM (LinkedIn з 15.10): знаходить поле, пише, надсилає й бачить надіслане', async (t) => {
+    if (!page) return t.skip('Chrome не знайдено');
+    mode = 'shadow'; lastOurs = ''; hits = [];
+    const portal = firstPortal();
+    const result = await sendFirst(portal);
+    assert.equal(result.sent, 1, JSON.stringify(result.notes));
+    assert.deepEqual(names(portal), ['prepare', 'sent']);
+    assert.equal(await sends(), 1);
+    assert.match(await page.evaluate(() => document.getElementById('overlay-root').shadowRoot.querySelector('.msg-s-message-list-content').innerText), /thanks for connecting/);
+  });
+
+  test('вікно в shadow DOM, а ці слова вже стоять останніми — вдруге не пише', async (t) => {
+    if (!page) return t.skip('Chrome не знайдено');
+    mode = 'shadow'; lastOurs = 'Hi Person, thanks for connecting!';
+    const portal = firstPortal();
+    const result = await sendFirst(portal);
+    assert.equal(result.failed, 1);
+    assert.equal(await sends(), 0);
+  });
+
   test('не в контактах (2-й ступінь) — нічого не відкриває й не пише: це був би InMail', async (t) => {
     if (!page) return t.skip('Chrome не знайдено');
     mode = 'second'; lastOurs = '';

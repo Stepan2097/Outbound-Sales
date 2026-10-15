@@ -46,24 +46,35 @@ export function flatText(value) {
  * top of the thread gives two, and typing into the wrong one sends words to the
  * wrong person.
  */
-export function markComposer() {
-  for (const old of document.querySelectorAll('[data-outbound-composer], [data-outbound-send]')) {
+export function markComposer(scope = 'document') {
+  // Every root: the document and every open shadow root under it. The marks are
+  // cleared everywhere; the composer is looked for in the document on a
+  // conversation page, and only inside shadow roots for the window LinkedIn
+  // opens over a profile (15.10.2026: `#interop-outlet`) — so a bubble of some
+  // other conversation never becomes a second candidate on a conversation page.
+  const roots = [document];
+  for (let at = 0; at < roots.length; at += 1) {
+    for (const el of roots[at].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+  }
+  const all = (selector, where) => where.flatMap((root) => [...root.querySelectorAll(selector)]);
+  for (const old of all('[data-outbound-composer], [data-outbound-send]', roots)) {
     old.removeAttribute('data-outbound-composer');
     old.removeAttribute('data-outbound-send');
   }
-  let how = 'class hint';
-  let found = [];
-  for (const selector of [
-    'form[class*="msg-form"] [contenteditable="true"][role="textbox"]',
-    '[class*="msg-form__contenteditable"][contenteditable="true"]',
-  ]) {
-    found = [...document.querySelectorAll(selector)];
-    if (found.length) break;
-  }
-  if (!found.length) {
-    how = 'structure';
-    found = [...document.querySelectorAll('[contenteditable="true"][role="textbox"]')].filter((el) => el.closest('form'));
-  }
+  // The window over a profile: its shadow roots first; when none holds a field,
+  // the document — the window as LinkedIn drew it before 15.10.
+  const pick = (searched, label) => {
+    for (const selector of [
+      'form[class*="msg-form"] [contenteditable="true"][role="textbox"]',
+      '[class*="msg-form__contenteditable"][contenteditable="true"]',
+    ]) {
+      const hits = all(selector, searched);
+      if (hits.length) return { hits, how: `${label}class hint` };
+    }
+    return { hits: all('[contenteditable="true"][role="textbox"]', searched).filter((el) => el.closest('form')), how: `${label}structure` };
+  };
+  let { hits: found, how } = scope === 'overlay' ? pick(roots.slice(1), 'overlay ') : pick([document], '');
+  if (scope === 'overlay' && !found.length) ({ hits: found, how } = pick([document], ''));
   if (found.length !== 1) return { ok: false, count: found.length, how };
 
   const composer = found[0];
@@ -78,15 +89,29 @@ export function markComposer() {
   return { ok: true, how, hasSend: Boolean(send) };
 }
 
-const composerText = (page) => page.evaluate(() => document.querySelector('[data-outbound-composer]')?.innerText ?? '');
-const composerFocused = (page) => page.evaluate(() => {
-  const composer = document.querySelector('[data-outbound-composer]');
-  return Boolean(composer) && (document.activeElement === composer || composer.contains(document.activeElement));
-});
-const sendIsLive = (page) => page.evaluate(() => {
-  const button = document.querySelector('[data-outbound-send]');
+// The marked field and button may sit in a shadow root (the window over a
+// profile), so these look through every open one.
+function deepOne(selector) {
+  const roots = [document];
+  for (let at = 0; at < roots.length; at += 1) {
+    const hit = roots[at].querySelector(selector);
+    if (hit) return hit;
+    for (const el of roots[at].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+  }
+  return null;
+}
+const composerText = (page) => page.evaluate((find) => new Function(`return (${find})`)()('[data-outbound-composer]')?.innerText ?? '', deepOne.toString());
+const composerFocused = (page) => page.evaluate((find) => {
+  const composer = new Function(`return (${find})`)()('[data-outbound-composer]');
+  // Focus inside a shadow root shows on the document as its host: follow it down.
+  let active = document.activeElement;
+  while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
+  return Boolean(composer) && (active === composer || composer.contains(active));
+}, deepOne.toString());
+const sendIsLive = (page) => page.evaluate((find) => {
+  const button = new Function(`return (${find})`)()('[data-outbound-send]');
   return Boolean(button) && !button.disabled && button.getAttribute('aria-disabled') !== 'true';
-});
+}, deepOne.toString());
 
 /** Press where the element is, the way every other click in this folder does. */
 async function pressOn(page, handle, pace) {
@@ -197,7 +222,17 @@ async function openFromProfile(page, reply, { origin, guard, pace, shot = async 
   // field of its own, and "a field is there" would then be true at once — about
   // somebody else. What is waited for is a new one; and when that leaves two on
   // the page, `markComposer` refuses to choose.
-  const countFields = () => page.evaluate(() => document.querySelectorAll('[contenteditable="true"][role="textbox"]').length);
+  // Shadow roots included: the window opened over a profile keeps its field in
+  // one (15.10.2026), and a count of the document alone stays at zero.
+  const countFields = () => page.evaluate(() => {
+    const roots = [document];
+    let count = 0;
+    for (let at = 0; at < roots.length; at += 1) {
+      count += roots[at].querySelectorAll('[contenteditable="true"][role="textbox"]').length;
+      for (const el of roots[at].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+    }
+    return count;
+  });
   const fieldsBefore = await countFields();
   await pressOn(page, control, pace);
   // The conversation opens over the page a moment later, not at once.
@@ -228,7 +263,7 @@ async function openFromProfile(page, reply, { origin, guard, pace, shot = async 
     await shot(page, 'first-message-not-open').catch(() => {});
     return { fail: 'натиснув «Повідомлення», але розмова не відкрилась' };
   }
-  return { harvest: await page.evaluate(harvestThread).catch(() => ({ items: [] })) };
+  return { harvest: await page.evaluate(harvestThread, 'overlay').catch(() => ({ items: [] })) };
 }
 
 /** How many times these words stand in the conversation as it is drawn. */
@@ -320,7 +355,8 @@ export async function sendReplies(page, {
       }
 
       await sleep(rand(2500, 6000) * pace);   // reading what they wrote
-      const marked = await page.evaluate(markComposer);
+      const scope = first ? 'overlay' : 'document';
+      const marked = await page.evaluate(markComposer, scope);
       if (!marked.ok) {
         await fail(item, marked.count > 1
           ? `на сторінці ${marked.count} полів для повідомлення — не знаю, у яке писати`
@@ -360,7 +396,7 @@ export async function sendReplies(page, {
       if (!live) { await fail(item, 'кнопка «Надіслати» не стала активною — нічого не надсилав'); continue; }
 
       const snippet = snippetOf(text);
-      const said = timesSaid(await page.evaluate(harvestThread), snippet);
+      const said = timesSaid(await page.evaluate(harvestThread, scope), snippet);
       await shot(page, '7-reply-typed');
       await pressOn(page, await page.$('[data-outbound-send]'), pace);
 
@@ -370,7 +406,7 @@ export async function sendReplies(page, {
       const deadline = Date.now() + confirmMs;
       while (Date.now() < deadline) {
         await sleep(Math.max(50, 1000 * pace));
-        const harvest = await page.evaluate(harvestThread).catch(() => null);
+        const harvest = await page.evaluate(harvestThread, scope).catch(() => null);
         if (harvest && timesSaid(harvest, snippet) > said) { seen = harvest; break; }
       }
       if (!seen) {

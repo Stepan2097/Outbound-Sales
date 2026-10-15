@@ -74,13 +74,21 @@
     list.appendChild(li);
   }
 
-  if (MODE === 'two') document.getElementById('overlay-root').insertAdjacentHTML('beforeend', bubble('someone-else'));
+  // 'shadow': the window as LinkedIn draws it since 15.10.2026 — inside an open
+  // shadow root (#interop-outlet), out of reach of a query on the document.
+  let overlayHost = document.getElementById('overlay-root');
+  if (MODE === 'shadow') {
+    const inner = document.createElement('div');
+    overlayHost.attachShadow({ mode: 'open' }).appendChild(inner);
+    overlayHost = inner;
+  }
+  if (MODE === 'two') overlayHost.insertAdjacentHTML('beforeend', bubble('someone-else'));
 
   document.getElementById('message')?.addEventListener('click', () => {
     if (MODE === 'dead') return;
     setTimeout(() => {
-      document.getElementById('overlay-root').insertAdjacentHTML('beforeend', bubble('person-one'));
-      const all = document.querySelectorAll('.msg-overlay-conversation-bubble');
+      overlayHost.insertAdjacentHTML('beforeend', bubble('person-one'));
+      const all = overlayHost.querySelectorAll('.msg-overlay-conversation-bubble');
       const mine = all[all.length - 1];
       const list = mine.querySelector('ul');
       const composer = mine.querySelector('[contenteditable]');
