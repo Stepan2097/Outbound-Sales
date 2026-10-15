@@ -431,3 +431,26 @@ test("зі спаму виймається кожен лист від наших
   const view = warmupView(await allEntries(), { ...(await registry()), now: at(0, 31) });
   assert.equal(view.find((row) => row.email === ANNA).repliesReceived, 1);
 });
+
+test("наші листи у «Вхідних» — прочитати трохи згодом, за кілька годин перекласти в «Прогрів»; лист, що чекає відповіді, лишається (15.10)", async (t) => {
+  const { connector, tick, start } = await world(t);
+  for (const mailbox of [ANNA, BORIS]) await start(mailbox, at(0));
+  t.mock.timers.setTime(at(0).getTime());
+  const letter = connector.deliver(ANNA, `From: Boris <${BORIS}>\r\nTo: ${ANNA}\r\nSubject: hi\r\nMessage-ID: <x1@x>\r\n\r\nhello`, { labels: ["INBOX", "UNREAD"] });
+  await tick(at(0, 1), { replyPercent: 0 });
+  assert.deepEqual(letter.labels.sort(), ["INBOX", "UNREAD"], "одразу — нічого");
+  await tick(at(0, 61), { replyPercent: 0 });
+  assert.equal(letter.labels.includes("UNREAD"), false, "за годину — прочитано");
+  assert.equal(letter.labels.includes("INBOX"), true, "але ще у «Вхідних»");
+  const summary = await tick(at(0, 301), { replyPercent: 0 });
+  const keep = letter.labels.includes("INBOX");
+  if (!keep) {
+    assert.deepEqual(letter.labels, ["Label_Прогрів"], "за 5 годин — у «Прогрів», не у «Вхідних»");
+    assert.equal(summary.filed, 1);
+  }
+  // At night nothing moves.
+  const night = connector.deliver(ANNA, `From: Boris <${BORIS}>\r\nTo: ${ANNA}\r\nSubject: late\r\nMessage-ID: <x2@x>\r\n\r\nhi`, { labels: ["INBOX", "UNREAD"] });
+  night.receivedAt = new Date(at(0, -600).getTime()).toISOString();
+  await tick(new Date("2026-10-12T21:30:00Z"), { replyPercent: 0 });
+  assert.ok(night.labels.includes("UNREAD"), "о 00:30 за Києвом нічого не чіпаємо");
+});

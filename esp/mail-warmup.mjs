@@ -444,6 +444,14 @@ export async function runWarmupTick({ journal, senders, connector, gate, now = n
     }
   }
 
+  // (1c) Our letters in the Inbox — known by their sender, no marker in the
+  // letter (owner 15.10) — are read a little later and, a few hours on, filed
+  // under «Прогрів» out of the Inbox, so the mailbox's own mail stays in view.
+  // Each letter has its own delays (read 5–60 min, filed 1.5–5 h after it
+  // came), only between 08:00 and 22:00, one in ten stays in the Inbox read,
+  // and a letter still owed a reply waits for it.
+  await fileWarmupLetters({ live, ours, connector, journal, entries, now, replyPercent, summary });
+
   const fresh = await journal.allEntries();
   let ledger = sendLedger(fresh, { now });
   const usedThisPass = new Set();
@@ -536,6 +544,56 @@ export async function runWarmupTick({ journal, senders, connector, gate, now = n
     if (await send(from, to, letter, { kind: "first", writtenBy: text ? "model" : "template" })) summary.sent += 1;
   }
   return summary;
+}
+
+export const WARMUP_LABEL = "Прогрів";
+export const READ_AFTER_MINUTES = { min: 5, max: 60 };
+export const FILE_AFTER_MINUTES = { min: 90, max: 300 };
+export const KEEP_IN_INBOX_PERCENT = 10;
+
+async function fileWarmupLetters({ live, ours, connector, journal, entries, now, replyPercent, summary }) {
+  if (!connector.labelId) return;
+  const hour = localTime(now, COUNTING_ZONE).hour;
+  if (hour < WARMUP_WINDOW.startHour || hour >= WARMUP_WINDOW.endHour) return;
+  const answered = new Set(entries.filter((entry) => entry.type === "warmup.sending" && entry.data?.kind === "reply").map((entry) => entry.data.inReplyTo));
+  const received = new Map(entries.filter((entry) => entry.type === "warmup.received").map((entry) => [`${entry.data.mailbox}|${entry.data.gmailId}`, entry]));
+  const filed = new Set(entries.filter((entry) => entry.type === "warmup.filed").map((entry) => `${entry.data.mailbox}|${entry.data.gmailId}`));
+  for (const mailbox of live) {
+    let letters = [];
+    try {
+      letters = await connector.lettersFrom(mailbox.email, ours, { inInbox: true, newerThanDays: 30 });
+    } catch (error) {
+      summary.errors.push({ mailbox: mailbox.email, stage: "inbox", error: error.message });
+      continue;
+    }
+    let label = null;
+    for (const letter of letters) {
+      const key = `${mailbox.email}|${letter.id}`;
+      if (filed.has(key) || !letter.labels.includes("INBOX")) continue;
+      const came = new Date(letter.receivedAt || 0).getTime();
+      if (!came) continue;
+      const after = (salt, range) => came + seeded(`${letter.id}|${salt}`, range.min, range.max) * 60_000;
+      try {
+        if (letter.labels.includes("UNREAD") && now.getTime() >= after("read", READ_AFTER_MINUTES)) {
+          await connector.setLabels(mailbox.email, letter.id, { remove: ["UNREAD"] });
+          letter.labels = letter.labels.filter((name) => name !== "UNREAD");
+        }
+        if (seeded(`${letter.id}|keep`, 1, 100) <= KEEP_IN_INBOX_PERCENT || now.getTime() < after("file", FILE_AFTER_MINUTES)) continue;
+        // A first letter of ours that will be answered stays until the answer has gone.
+        const known = received.get(key);
+        const owed = known && known.data.kind !== "reply" && !answered.has(known.data.messageId) && seeded(`${known.data.messageId}|answer`, 1, 100) <= replyPercent;
+        if (owed) continue;
+        label ||= await connector.labelId(mailbox.email, WARMUP_LABEL);
+        await connector.setLabels(mailbox.email, letter.id, { add: [label], remove: ["INBOX", "UNREAD"] });
+        await journal.append({ type: "warmup.filed", actor: "esp-warmup", data: { mailbox: mailbox.email, from: letter.from, gmailId: letter.id } });
+        filed.add(key);
+        summary.filed = (summary.filed || 0) + 1;
+      } catch (error) {
+        summary.errors.push({ mailbox: mailbox.email, stage: "file", error: error.message, code: error.code || null });
+        break;
+      }
+    }
+  }
 }
 
 /** The last things the warm-up did, for the page's log. */

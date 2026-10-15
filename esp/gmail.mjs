@@ -246,12 +246,13 @@ export class GmailApiConnector {
    * and Trash unless asked. Headers only: the warm-up needs who, which letter
    * and where it landed, not the text.
    */
-  async lettersFrom(value, senders, { newerThanDays = 3, inSpam = false } = {}) {
+  async lettersFrom(value, senders, { newerThanDays = 3, inSpam = false, inInbox = false } = {}) {
     const mailbox = normalizeMailbox(value);
     const from = [...new Set(senders.map((email) => normalizeMailbox(email)).filter((email) => email !== mailbox))];
     if (!from.length) return [];
     // `inSpam`: only what sits in Spam — the warm-up takes out every letter of ours there (15.10).
-    const query = `${inSpam ? "in:spam " : ""}from:(${from.join(" OR ")}) newer_than:${Math.max(1, Number(newerThanDays) || 3)}d`;
+    // `inInbox`: only what is still in the Inbox — to be read and filed under «Прогрів».
+    const query = `${inSpam ? "in:spam " : inInbox ? "in:inbox " : ""}from:(${from.join(" OR ")}) newer_than:${Math.max(1, Number(newerThanDays) || 3)}d`;
     const list = await this.call(mailbox, `/messages?q=${encodeURIComponent(query)}&includeSpamTrash=true&maxResults=100`);
     const letters = [];
     for (const row of list.messages || []) {
@@ -259,10 +260,26 @@ export class GmailApiConnector {
       letters.push({
         id: message.id, threadId: message.threadId || null, labels: message.labelIds || [],
         from: (metaHeader(message, "from").match(/<([^>]+)>/)?.[1] || metaHeader(message, "from")).trim().toLowerCase(),
-        messageId: metaHeader(message, "message-id"), inReplyTo: metaHeader(message, "in-reply-to"), subject: metaHeader(message, "subject")
+        messageId: metaHeader(message, "message-id"), inReplyTo: metaHeader(message, "in-reply-to"), subject: metaHeader(message, "subject"),
+        receivedAt: message.internalDate ? new Date(Number(message.internalDate)).toISOString() : null
       });
     }
     return letters;
+  }
+
+  /** The id of a label of this mailbox by its name, created when there is none (labels only — gmail.modify). */
+  async labelId(value, name) {
+    const mailbox = normalizeMailbox(value);
+    this.labelIds ||= new Map();
+    const key = `${mailbox}|${name}`;
+    if (this.labelIds.has(key)) return this.labelIds.get(key);
+    const list = await this.call(mailbox, "/labels", {}, WARMUP_SCOPES);
+    let label = (list.labels || []).find((row) => row.name === name);
+    if (!label) {
+      label = await this.call(mailbox, "/labels", { method: "POST", body: JSON.stringify({ name, labelListVisibility: "labelShow", messageListVisibility: "show" }) }, WARMUP_SCOPES);
+    }
+    this.labelIds.set(key, label.id);
+    return label.id;
   }
 
   /**
@@ -331,7 +348,7 @@ export class StubGmailConnector {
     const mailbox = normalizeMailbox(value);
     if (!this.inboxes.has(mailbox)) this.inboxes.set(mailbox, []);
     const list = this.inboxes.get(mailbox);
-    const message = { id: `in-${randomUUID()}`, threadId: threadId || `thread-${randomUUID()}`, raw: String(raw), labels: [...labels] };
+    const message = { id: `in-${randomUUID()}`, threadId: threadId || `thread-${randomUUID()}`, raw: String(raw), labels: [...labels], receivedAt: new Date().toISOString() };
     list.push(message);
     return message;
   }
@@ -343,14 +360,16 @@ export class StubGmailConnector {
     return { messages: list.slice(from).filter((message) => !message.labels?.includes("SPAM")), cursor: String(list.length) };
   }
 
-  async lettersFrom(value, senders, { inSpam = false } = {}) {
+  async labelId(_value, name) { return `Label_${name}`; }
+
+  async lettersFrom(value, senders, { inSpam = false, inInbox = false } = {}) {
     const from = new Set(senders.map((email) => normalizeMailbox(email)));
     const read = (raw, name) => (String(raw).match(new RegExp(`^${name}:\\s*(.*)$`, "im")) || [])[1]?.trim() || "";
     return (this.inboxes.get(normalizeMailbox(value)) || []).map((message) => ({
       id: message.id, threadId: message.threadId, labels: [...(message.labels || [])],
       from: (read(message.raw, "From").match(/<([^>]+)>/)?.[1] || read(message.raw, "From")).toLowerCase(),
-      messageId: read(message.raw, "Message-ID"), inReplyTo: read(message.raw, "In-Reply-To"), subject: read(message.raw, "Subject")
-    })).filter((letter) => from.has(letter.from) && (!inSpam || letter.labels.includes("SPAM")));
+      messageId: read(message.raw, "Message-ID"), inReplyTo: read(message.raw, "In-Reply-To"), subject: read(message.raw, "Subject"), receivedAt: message.receivedAt || null
+    })).filter((letter) => from.has(letter.from) && (!inSpam || letter.labels.includes("SPAM")) && (!inInbox || letter.labels.includes("INBOX")));
   }
 
   async setLabels(value, id, { add = [], remove = [] } = {}) {
