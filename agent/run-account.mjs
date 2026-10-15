@@ -118,7 +118,7 @@ if (!plan.window?.open && !ANYTIME && !plan.urgent) {
 }
 if (!plan.window?.open && !plan.urgent) log(`поза вікном прогріву (${plan.window?.label ?? '?'}) — запуск вручну, --anytime`);
 
-log(`день ${plan.day} — «${plan.phase}»`);
+if (!plan.urgent) log(`день ${plan.day} — «${plan.phase}»`);
 for (const row of plan.plan ?? []) log(`  план: ${row.label} ${row.done}/${row.quota} (лишилось ${row.remaining})`);
 
 const remaining = Object.fromEntries((plan.plan ?? []).map((r) => [r.kind, r.remaining]));

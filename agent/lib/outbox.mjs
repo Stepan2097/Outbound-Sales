@@ -157,7 +157,7 @@ const MESSAGE_LONG = /^(message|надіслати повідомлення|на
  * the conversation it opens has exactly one composer, which `markComposer`
  * checks afterwards like for any reply.
  */
-async function openFromProfile(page, reply, { origin, guard, pace }) {
+async function openFromProfile(page, reply, { origin, guard, pace, shot = async () => {}, log = () => {} }) {
   const slug = profileSlug(reply.linkedin);
   if (!slug) return { fail: 'немає посилання на профіль' };
   const response = await page.goto(`${origin}/in/${encodeURIComponent(slug)}/`, { waitUntil: 'domcontentloaded', timeout: 45_000 });
@@ -208,7 +208,26 @@ async function openFromProfile(page, reply, { origin, guard, pace }) {
     opened = await countFields() > fieldsBefore;
   }
   await guard();
-  if (!opened) return { fail: 'натиснув «Повідомлення», але розмова не відкрилась' };
+  if (!opened) {
+    // 15.10: the window LinkedIn opened was on screen, yet no field counted. What
+    // the page holds at that moment — fields in the document and inside shadow
+    // roots, the address — goes to the log and a screenshot, so the next fix is
+    // made from evidence rather than from a guess. Nothing here types or sends.
+    const seen = await page.evaluate(() => {
+      const fields = [];
+      const walk = (root, depth) => {
+        for (const el of root.querySelectorAll('*')) {
+          if (el.matches('[contenteditable], textarea')) fields.push(`${depth ? `shadow${depth}:` : ''}${el.tagName.toLowerCase()}[ce=${el.getAttribute('contenteditable')}][role=${el.getAttribute('role')}]${el.closest('form') ? ' in form' : ''}`);
+          if (el.shadowRoot) walk(el.shadowRoot, depth + 1);
+        }
+      };
+      walk(document, 0);
+      return { url: location.pathname, fields: fields.slice(0, 8) };
+    }).catch(() => null);
+    log(`  діагностика: ${JSON.stringify(seen)}`);
+    await shot(page, 'first-message-not-open').catch(() => {});
+    return { fail: 'натиснув «Повідомлення», але розмова не відкрилась' };
+  }
   return { harvest: await page.evaluate(harvestThread).catch(() => ({ items: [] })) };
 }
 
@@ -279,7 +298,7 @@ export async function sendReplies(page, {
       if (first) {
         // The first message to somebody who accepted: there is no conversation
         // yet to open by its address, so it is opened from their profile.
-        const opened = await openFromProfile(page, { ...prepared.reply, name: prepared.reply.name ?? item.name }, { origin, guard, pace });
+        const opened = await openFromProfile(page, { ...prepared.reply, name: prepared.reply.name ?? item.name }, { origin, guard, pace, shot, log });
         if (opened.fail) { await fail(item, opened.fail); continue; }
         harvestBefore = opened.harvest;
       } else {
