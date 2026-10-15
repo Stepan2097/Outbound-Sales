@@ -12,7 +12,7 @@ import { handleKnowledgeLibraryApi } from "./knowledge/api.mjs";
 import { allEntries, append as espAppend, useJournal } from "./esp/journal.mjs";
 import { channelsFor as triageChannels, nextContact as nextTriageContact } from "./triage/queue.mjs";
 import { AUTO_TACTIC, tacticData, tacticForPrompt, tacticLabel, tacticOptions } from "./triage/tactics.mjs";
-import { FOLLOW_UP_LIMIT, contactKeyOf, contactWork, dayActivity, dayOf, daysAround, followUpsDue, logWork, useWorkLog, workEntries, workUsers } from "./triage/work-log.mjs";
+import { FOLLOW_UP_LIMIT, addSendsToDays, contactKeyOf, contactWork, dayActivity, dayOf, daysAround, followUpsDue, linkedinSends, logWork, useWorkLog, withLinkedinSends, workEntries, workUsers } from "./triage/work-log.mjs";
 import { checkEmail } from "./contacts/email-check.mjs";
 import { contactEmails, crmPatch } from "./contacts/enrich-crm.mjs";
 import { logAdminAction } from "./esp/access.mjs";
@@ -1387,9 +1387,13 @@ async function handleApi(request, response, url) {
         const asked = cleanText(url.searchParams.get("date") || "");
         const date = /^\d{4}-\d{2}-\d{2}$/.test(asked) ? asked : dayOf(new Date());
         const wanted = cleanText(url.searchParams.get("user") || "").toLowerCase();
-        const user = admin ? wanted || viewer : viewer;
+        // An administrator opens on the team's day (owner 15.10: «Моя» was empty
+        // while the accounts were writing); «me» is one's own, for «Щойно написали».
+        const user = !admin || wanted === "me" ? viewer : wanted || "all";
         const entries = await workEntries();
-        const activity = dayActivity(entries, { date, user });
+        // The team view also counts what was really sent in LinkedIn (triage/work-log.mjs linkedinSends).
+        const sends = user === "all" ? await linkedinSendsAround(date, entries) : [];
+        const activity = user === "all" ? withLinkedinSends(dayActivity(entries, { date, user }), sends, { date }) : dayActivity(entries, { date, user });
         const listed = activity.contacts.slice(0, 300);
         const bases = await baseContacts([...new Set(listed.map((item) => item.contactId).filter(Boolean))]);
         const journal = await allEntries().catch(() => []);
@@ -1417,7 +1421,7 @@ async function handleApi(request, response, url) {
           date, user, admin, viewer,
           today: dayOf(new Date()),
           users: admin ? workUsers(entries) : [],
-          days: daysAround(entries, { user, date, today: dayOf(new Date()) }),
+          days: user === "all" ? addSendsToDays(daysAround(entries, { user, date, today: dayOf(new Date()) }), sends, entries) : daysAround(entries, { user, date, today: dayOf(new Date()) }),
           total: { ...activity.total, answered: contacts.filter((item) => item.answer).length, fresh: contacts.filter((item) => item.fresh).length },
           byUser: activity.users.map((person) => ({ ...person, counts: { ...person.counts, answered: answeredBy.get(person.user) || 0 } })),
           contacts,
@@ -3238,6 +3242,23 @@ async function answerFor(item, base, journal) {
   answerCache.set(cacheKey, { at: Date.now(), value });
   if (answerCache.size > 5000) answerCache.clear();
   return value;
+}
+
+/** The LinkedIn messages we sent in the two weeks around `date`, read back from the accounts' inboxes. */
+async function linkedinSendsAround(date, entries) {
+  if (!warmupAnty.configured()) return [];
+  try {
+    const from = new Date(Date.parse(`${date}T00:00:00Z`) - 9 * 86400000).toISOString();
+    const to = new Date(Date.parse(`${date}T00:00:00Z`) + 9 * 86400000).toISOString();
+    const [events, accounts] = await Promise.all([
+      warmupAnty.from("wl_events").select("account_id,created_at,meta").eq("type", "message.out").gte("created_at", from).lt("created_at", to).limit(4000).rows(),
+      warmupAnty.from("wl_accounts").select("id,label").rows()
+    ]);
+    return linkedinSends(events, { accounts: new Map(accounts.map((row) => [row.id, row.label])), entries });
+  } catch (error) {
+    console.warn(`[work] LinkedIn sends: ${error.message}`);
+    return [];
+  }
 }
 
 /**

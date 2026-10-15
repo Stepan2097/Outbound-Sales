@@ -1016,6 +1016,8 @@ dialog {
 
 .pill.tone-live { background: var(--teal-weak); color: var(--teal); }
 
+.pill.tone-good { background: color-mix(in srgb, var(--green) 16%, transparent); color: var(--green); }
+
 .pill.tone-warn { background: rgba(183, 121, 31, 0.16); color: var(--amber); }
 
 .pill.tone-bad { background: rgba(194, 65, 53, 0.14); color: var(--red); }

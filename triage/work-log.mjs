@@ -236,3 +236,84 @@ export function followUpsDue(threads, { today, accounts = new Map(), skipAccount
   }
   return [...newest.values()].sort((left, right) => right.carriedDays - left.carriedDays || left.lastAt.localeCompare(right.lastAt));
 }
+
+/**
+ * What was really written in LinkedIn (власник 15.10: «логіка сторінки по днях
+ * слабо пропрацьована»): the log above holds only what was done through this
+ * platform's buttons, so a message typed in LinkedIn itself — or one the agent
+ * sent days after it was queued — never reached the day. These are the
+ * messages the agent read back from the accounts' inboxes (`message.out`),
+ * counted on the day they were sent.
+ *
+ * A message is credited to whoever queued it here (a `wrote`/`replied` line for
+ * that person in the three days before), otherwise to «з LinkedIn-акаунта» —
+ * typed in LinkedIn by hand or sent by the agent on its own, which the inbox
+ * cannot tell apart.
+ * Only the team view («Уся команда») shows them: nobody's own day is filled
+ * with work they did not do through their login.
+ */
+export const LINKEDIN_DIRECT = "linkedin";
+
+export function linkedinSends(events, { accounts = new Map(), entries = [] } = {}) {
+  const queuedBy = new Map();
+  for (const row of entries) {
+    if (row.channel !== "linkedin" || !["wrote", "replied"].includes(row.action) || !row.contactId) continue;
+    (queuedBy.get(row.contactId) || queuedBy.set(row.contactId, []).get(row.contactId)).push(row);
+  }
+  const sends = [];
+  for (const event of events) {
+    const meta = event.meta || {};
+    if (!meta.threadKey) continue;
+    const at = meta.sentAtIso && Number.isFinite(Date.parse(meta.sentAt)) ? meta.sentAt : event.created_at;
+    const contactId = meta.crmContactId ? String(meta.crmContactId) : null;
+    const queued = contactId
+      ? (queuedBy.get(contactId) || []).filter((row) => row.at <= at && Date.parse(at) - Date.parse(row.at) < 3 * 86400000).at(-1)
+      : null;
+    sends.push({
+      at,
+      key: contactId ? `id:${contactId}` : `thread:${event.account_id}:${meta.threadKey}`,
+      contactId,
+      name: String(meta.participant?.name || "").replace(/^(переглянути профіль|view profile( of)?)\s+/i, "").trim() || null,
+      accountId: event.account_id,
+      accountName: accounts.get(event.account_id) || null,
+      user: queued?.user || LINKEDIN_DIRECT,
+      userName: queued?.userName || "з LinkedIn-акаунта"
+    });
+  }
+  return sends;
+}
+
+/** The day's people, with the LinkedIn sends nobody logged merged in — the team view. */
+export function withLinkedinSends(activity, sends, { date }) {
+  const contacts = new Map(activity.contacts.map((item) => [item.key, item]));
+  let added = 0;
+  for (const send of sends) {
+    if (dayOf(send.at) !== date) continue;
+    const action = { at: send.at, action: "wrote", channel: "linkedin", user: send.user, userName: send.userName, accountId: send.accountId, accountName: send.accountName, mailbox: null, fromInbox: true };
+    const known = contacts.get(send.key);
+    if (known) {
+      // Already on the day through a button: only a send at another moment is added.
+      if (!known.actions.some((row) => row.channel === "linkedin" && Math.abs(Date.parse(row.at) - Date.parse(send.at)) < 6 * 3600000)) known.actions.push(action);
+      continue;
+    }
+    contacts.set(send.key, { key: send.key, contactId: send.contactId, emails: [], name: send.name, actions: [action], firstAt: send.at, lastAt: send.at, users: [send.user] });
+    added += 1;
+  }
+  const list = [...contacts.values()].sort((left, right) => right.lastAt.localeCompare(left.lastAt));
+  return { ...activity, contacts: list, total: { ...activity.total, contacts: list.length, wroteLinkedin: activity.total.wroteLinkedin + added } };
+}
+
+/** The day strip in the team view: people written to per day, from the log and from LinkedIn. */
+export function addSendsToDays(days, sends, entries) {
+  const byDay = new Map();
+  for (const row of entries) {
+    if (!OUTREACH_ACTIONS.has(row.action)) continue;
+    const day = dayOf(row.at);
+    (byDay.get(day) || byDay.set(day, new Set()).get(day)).add(contactKeyOf(row));
+  }
+  for (const send of sends) {
+    const day = dayOf(send.at);
+    (byDay.get(day) || byDay.set(day, new Set()).get(day)).add(send.key);
+  }
+  return days.map((day) => ({ ...day, contacts: day.future ? 0 : byDay.get(day.date)?.size || 0 }));
+}

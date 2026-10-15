@@ -744,3 +744,68 @@
   grid-column: 1 / -1;
   margin: 0;
 }
+
+/* Щойно написали сьогодні: люди не зникають, коли відкривається наступна картка. */
+.triage-recent {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.triage-recent header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+
+.triage-recent h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 15px;
+}
+
+.triage-recent h3 svg {
+  width: 16px;
+  height: 16px;
+}
+
+.triage-recent h3 b {
+  color: var(--teal);
+}
+
+.triage-recent ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.triage-recent li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+}
+
+.triage-recent-who {
+  display: grid;
+  min-width: 0;
+}
+
+.triage-recent-who small {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

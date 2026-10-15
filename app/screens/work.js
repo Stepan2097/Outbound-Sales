@@ -7,6 +7,7 @@
 // — з /api/warmup/history і /api/esp/contacts/timeline, як у картках лідів.
 
 import { api, escapeAttr, escapeHtml, onScreen, refreshIcons } from "../core.js";
+import { pathTracks } from "./work-path.js";
 
 onScreen("work", { open: () => void openWork() });
 
@@ -67,8 +68,8 @@ async function load({ quiet = false } = {}) {
 function toolbarHtml(data) {
   const date = work.date || data?.today || "";
   const users = data?.admin ? `<label class="work-user"><span>Чия робота</span><select data-work="user">
-      <option value="${escapeAttr(data.viewer)}" ${work.user === data.viewer ? "selected" : ""}>Моя</option>
       <option value="all" ${work.user === "all" ? "selected" : ""}>Уся команда</option>
+      <option value="${escapeAttr(data.viewer)}" ${work.user === data.viewer ? "selected" : ""}>Моя</option>
       ${(data.users || []).filter((row) => row.user !== data.viewer).map((row) => `<option value="${escapeAttr(row.user)}" ${work.user === row.user ? "selected" : ""}>${escapeHtml(row.name || row.user)}</option>`).join("")}
     </select></label>` : "";
   return `<div class="work-toolbar">
@@ -228,6 +229,7 @@ function dialogHtml() {
       <p>${escapeHtml([contact.position || item.position, contact.company || item.company].filter(Boolean).join(" · "))}</p>
       <div class="work-links">${link(contact.linkedin || item.linkedin, "LinkedIn")}${link(contact.website, "Сайт")}${(dialog.emails || []).map((email) => `<span><i data-lucide="mail"></i>${escapeHtml(email)}</span>`).join("")}</div>
     </header>
+    ${pathHtml(dialog)}
     <section>
       <h4>Розмова</h4>
       ${messages.length ? `<ol class="work-thread">${messages.map((row) => `<li class="is-${row.side}">
@@ -242,6 +244,28 @@ function dialogHtml() {
       <ul class="work-log">${(dialog.work || []).map((row) => `<li><span>${escapeHtml(when(row.at))}</span> <b>${escapeHtml(row.userName || row.user)}</b> ${escapeHtml(WORK_LABEL[row.action] || row.action)}${row.channel === "email" ? " (пошта)" : row.action === "wrote" ? " (LinkedIn)" : ""}${row.accountName || row.mailbox ? ` · ${escapeHtml(row.accountName || row.mailbox)}` : ""}${row.detail && row.action !== "wrote" && row.action !== "replied" ? ` <small>${escapeHtml(row.detail)}</small>` : ""}</li>`).join("") || '<li class="work-muted">Записів немає.</li>'}</ul>
     </section>
   </aside>`;
+}
+
+/** «Шлях»: from the request to the answer, per channel — what happened, what is waiting, what comes next. */
+function pathHtml(dialog) {
+  const tracks = pathTracks(dialog);
+  if (!tracks.length) return "";
+  const stamp = (step) => (step.at ? escapeHtml(when(step.at)) : step.state === "now" ? "чекаємо" : "");
+  return `<section class="work-path">
+    <h4>Шлях</h4>
+    ${tracks.map((track) => `<div class="work-path-track">
+      <span class="work-path-channel"><i data-lucide="${track.channel === "email" ? "mail" : "message-square"}"></i>${escapeHtml(track.label)}</span>
+      <ol>${track.steps.map((step) => `<li class="is-${step.state} ${step.bad ? "is-bad" : ""}"><b>${escapeHtml(step.label)}</b><small>${step.state === "next" && step.at ? `з ${escapeHtml(when(step.at))}` : stamp(step)}</small></li>`).join("")}</ol>
+    </div>`).join("")}
+  </section>`;
+}
+
+/** From another screen (Головна → «Щойно написали»): today, this person's card open. */
+export function openWorkContact(key) {
+  document.querySelector('.nav-item[data-view="work"]')?.click();
+  const today = work.data?.today;
+  if (today && work.date !== today) { work.date = today; void load().then(() => openDialog(key)); return; }
+  void openDialog(key);
 }
 
 async function openDialog(key) {

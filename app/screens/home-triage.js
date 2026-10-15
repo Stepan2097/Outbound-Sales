@@ -39,7 +39,9 @@ const triage = {
   // Підготовка наперед (15.10): що сервер уже зібрав про людину і чи написав лист.
   prep: null, prepTimer: null, tactic: readSaved(TACTIC_KEY) || "auto", event: readSaved(EVENT_KEY),
   // Поля, які людина вже правила руками: лист від моделі їх не перезапише.
-  dirty: new Set()
+  dirty: new Set(),
+  // «Щойно написали сьогодні»: кому цей логін написав чи надіслав запит сьогодні.
+  recent: null
 };
 
 function readSaved(key) {
@@ -83,8 +85,49 @@ async function openTriage() {
     if (!triage.inviteAccount) triage.inviteAccount = triage.inviteAccounts?.find((account) => account.canSend)?.id || "";
     renderTriage();
   });
+  void loadRecent();
   if (triage.folderId && !triage.item) await loadNext();
   else renderTriage();
+}
+
+/** Today's people from this login (/api/work/day): whom we wrote to, and how each one stands now. */
+async function loadRecent() {
+  try {
+    const data = await api("/api/work/day?user=me");
+    triage.recent = (data.contacts || []).slice(0, 15);
+  } catch {
+    triage.recent = triage.recent || [];
+  }
+  renderTriage();
+}
+
+const RECENT_WORD = { invited: "запит у друзі", replied: "відповідь у розмові" };
+const recentTime = (iso) => (iso ? new Date(iso).toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Kyiv" }) : "");
+
+/**
+ * Under the card: the people just written to, so they do not vanish when the
+ * next card opens — what was done, how they stand (answered, accepted, waiting)
+ * and «Шлях», their whole way in «По днях».
+ */
+function recentHtml() {
+  const rows = triage.recent || [];
+  if (!rows.length) return "";
+  return `<section class="triage-recent">
+    <header><h3><i data-lucide="history"></i>Щойно написали сьогодні <b>${rows.length}</b></h3><span class="triage-muted">Повна історія й шлях кожного — у «По днях»</span></header>
+    <ul>${rows.map((row) => {
+      const last = row.actions.at(-1) || {};
+      const what = last.action === "wrote" ? (last.channel === "email" ? "лист" : "повідомлення в LinkedIn") : RECENT_WORD[last.action] || last.action;
+      const status = row.answer ? '<span class="pill tone-live">відповів</span>'
+        : row.bounced ? '<span class="pill tone-bad">лист не дійшов</span>'
+          : row.accepted ? '<span class="pill tone-good">прийняв запит</span>'
+            : '<span class="pill tone-muted">чекаємо</span>';
+      return `<li>
+        <span class="triage-recent-who"><b>${escapeHtml(row.name)}</b><small>${escapeHtml(what)}${last.accountName || last.mailbox ? ` · ${escapeHtml(last.accountName || last.mailbox)}` : ""} · ${escapeHtml(recentTime(last.at))}</small></span>
+        ${status}
+        <button type="button" class="text-button" data-triage-path="${escapeAttr(row.key)}"><i data-lucide="route"></i><span>Шлях</span></button>
+      </li>`;
+    }).join("")}</ul>
+  </section>`;
 }
 
 async function loadNext() {
@@ -507,7 +550,7 @@ export function renderTriage() {
   else if (triage.error) body = `<p class="esp-notice is-bad">${escapeHtml(triage.error)}</p>`;
   else if (item?.done || !item?.contact) body = '<div class="triage-empty"><i data-lucide="party-popper"></i><strong>У цій папці всіх уже опрацьовано</strong><p>Кожному або вже писали, або його позначено невалідним. Пропущені сьогодні повернуться після перезавантаження.</p><button type="button" data-triage="restart">Почати папку спочатку</button></div>';
   else body = `${progressHtml(item)}${cardHtml(item)}`;
-  root.innerHTML = `${foldersHtml()}${triage.notice ? `<p class="esp-notice ${triage.tone}" role="status">${escapeHtml(triage.notice)}</p>` : ""}${body}`;
+  root.innerHTML = `${foldersHtml()}${triage.notice ? `<p class="esp-notice ${triage.tone}" role="status">${escapeHtml(triage.notice)}</p>` : ""}${body}${recentHtml()}`;
   refreshIcons(root);
 }
 
@@ -601,6 +644,7 @@ async function sendLinkedin(outreachId) {
   renderTriage();
   try {
     const answer = await api("/api/warmup/first-messages/send", { method: "POST", body: JSON.stringify({ outreachId, text: triage.texts.linkedin }) });
+    void loadRecent();
     say(`Повідомлення стало в чергу ${friend?.accountName || "акаунта"}${answer.goesOutAt ? ` — піде ${new Date(answer.goesOutAt).toLocaleString("uk-UA", { weekday: "short", hour: "2-digit", minute: "2-digit" })}` : ""}.`);
     triage.sending = "";
     await loadNext();
@@ -635,6 +679,7 @@ async function sendEmail() {
     return renderTriage();
   }
   say(`Надіслано з ${triage.mailbox}: ${went.join(", ")}.`);
+  void loadRecent();
   await loadNext();
 }
 
@@ -646,6 +691,7 @@ async function invite() {
   try {
     await api("/api/warmup/invites", { method: "POST", body: JSON.stringify({ crmContactId: contact.id, accountId: triage.inviteAccount }) });
     const account = triage.inviteAccounts.find((row) => row.id === triage.inviteAccount);
+    void loadRecent();
     say(`Запит у друзі від ${account?.label || "акаунта"} стоїть у черзі — після прийняття людина повернеться сюди першою.`);
     triage.sending = "";
     triage.skip.push(String(contact.id));
@@ -693,6 +739,10 @@ root?.addEventListener("click", (event) => {
   const button = event.target.closest("button");
   if (!button) return;
   if (button.dataset.triageSendLinkedin) return void sendLinkedin(button.dataset.triageSendLinkedin);
+  if (button.dataset.triagePath) {
+    const key = button.dataset.triagePath;
+    return void import("./work.js").then((module) => module.openWorkContact(key));
+  }
   if (button.dataset.triagePick) {
     readTexts();
     Object.assign(triage, { mailbox: button.dataset.triagePick, pickerOpen: false });
