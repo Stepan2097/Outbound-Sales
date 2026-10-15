@@ -51,6 +51,9 @@ function bannerHtml(data) {
   return lines.map((line) => `<div class="mail-banner" role="status"><i data-lucide="circle-alert"></i><p>${escapeHtml(line)}</p></div>`).join("");
 }
 
+/** What share of this mailbox's warm-up letters landed in somebody's Spam. */
+const spamShare = (row) => (row.sent ? Math.round((row.landedInSpam / row.sent) * 100) : 0);
+
 function summaryHtml(rows) {
   const running = rows.filter((row) => row.status === "running");
   const sum = (key) => rows.reduce((total, row) => total + (row[key] || 0), 0);
@@ -58,7 +61,7 @@ function summaryHtml(rows) {
     ["mail-plus", "Гріються", `${running.length} з ${rows.length}`, "пошт"],
     ["send", "Сьогодні листів", `${number(sum("firstsToday"))} / ${number(running.reduce((total, row) => total + row.plannedToday, 0))}`, `і ${number(sum("repliesToday"))} ${uaPlural(sum("repliesToday"), "відповідь", "відповіді", "відповідей")}`],
     ["reply", "Відповідей отримано", number(sum("repliesReceived")), "за весь прогрів"],
-    ["shield-check", "Вийнято зі спаму", number(sum("rescued")), `${number(sum("landedInSpam"))} ${uaPlural(sum("landedInSpam"), "лист потрапив", "листи потрапили", "листів потрапило")} у спам`]
+    ["shield-check", "Вийнято зі спаму", number(sum("rescued")), `${number(sum("landedInSpam"))} ${uaPlural(sum("landedInSpam"), "лист потрапив", "листи потрапили", "листів потрапило")} у спам${sum("sent") ? ` — ${Math.round((sum("landedInSpam") / sum("sent")) * 100)}% від надісланих` : ""}`]
   ];
   return `<div class="warmup-mail-cards">${cards.map(([icon, label, value, note]) => `
     <article class="warmup-mail-card"><span class="warmup-mail-icon"><i data-lucide="${icon}"></i></span><div><span>${label}</span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(note)}</small></div></article>`).join("")}</div>`;
@@ -112,8 +115,8 @@ function tableHtml(data) {
           <td><span class="pill ${tone}">${word}</span>${row.status === "paused" && row.pausedAt ? `<small>з ${escapeHtml(when(row.pausedAt))}</small>` : row.status === "running" && row.startedAt ? `<small>старт ${escapeHtml(when(row.startedAt))}</small>` : ""}</td>
           <td class="is-number">${row.day || "—"}</td>
           <td class="is-number">${row.status === "running" ? `<div class="warmup-mail-progress"><span style="width:${share}%"></span></div>` : ""}${row.firstsToday} / ${row.plannedToday}${row.repliesToday ? `<small>+ ${row.repliesToday} ${uaPlural(row.repliesToday, "відповідь", "відповіді", "відповідей")}</small>` : ""}</td>
-          <td class="is-number">${row.repliesReceived}<small>сама відповіла: ${row.repliesSent}</small></td>
-          <td class="is-number">${row.rescued}<small>її листів у спамі: ${row.landedInSpam}</small></td>
+          <td class="is-number warmup-mail-pair"><span title="Скільки відповідей прийшло на листи цієї пошти"><b>${row.repliesReceived}</b> отримала</span><small title="На скільки чужих листів прогріву відповіла вона сама">відповіла сама: ${row.repliesSent}</small></td>
+          <td class="is-number warmup-mail-pair"><span title="Скільки листів наших пошт прогрів вийняв зі «Спаму» цієї пошти"><b>${row.rescued}</b> вийнято</span><small title="Скільки листів цієї пошти інші пошти отримали у «Спам»" class="${spamShare(row) >= 10 ? "is-bad" : ""}">її листів у спамі: ${row.landedInSpam}${row.sent ? ` з ${row.sent} (${spamShare(row)}%)` : ""}</small></td>
           <td class="is-number">${row.coldToday} / ${row.limit}<small>ліміт росте рампою</small></td>
           <td class="warmup-mail-action">${action(row)}${canChange ? `<button type="button" class="icon-button warmup-mail-remove" data-warmup-remove="${escapeAttr(row.email)}" title="Прибрати з прогріву" aria-label="Прибрати ${escapeAttr(row.email)} з прогріву"${mailWarmupState.busy ? " disabled" : ""}><i data-lucide="trash-2"></i></button>` : ""}${row.lastError && row.status === "running" ? `<small class="is-bad" title="${escapeAttr(row.lastError.error)}">остання відмова ${escapeHtml(when(row.lastError.at))}</small>` : ""}</td>
         </tr>`;

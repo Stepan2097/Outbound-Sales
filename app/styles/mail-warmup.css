@@ -347,3 +347,19 @@
   border-bottom: 0;
   background: var(--surface-sunk);
 }
+
+/* Відповіді й спам — підписані числа (15.10). */
+.warmup-mail-pair span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.warmup-mail-pair span b {
+  color: var(--ink);
+  font-size: 15px;
+}
+
+.warmup-mail-pair small.is-bad {
+  color: var(--amber);
+}

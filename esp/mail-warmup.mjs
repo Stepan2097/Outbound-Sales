@@ -553,7 +553,7 @@ export function warmupLog(entries, { limit = 30 } = {}) {
     "warmup.sending": (data) => `${data.from} → ${data.to}: ${data.kind === "reply" ? "відповідь" : "лист"} «${data.subject}»`,
     "warmup.failed": (data) => `не пішло: ${data.error}`,
     "warmup.received": (data) => `${data.mailbox} отримала від ${data.from}${data.inSpam ? " — у спамі" : ""}`,
-    "warmup.rescued": (data) => `${data.mailbox}: лист від ${data.from} вийнято зі спаму, позначено важливим`,
+    "warmup.rescued": (data) => `${data.mailbox}: ${data.other ? "інший лист" : "лист прогріву"} від ${data.from} вийнято зі спаму, позначено важливим`,
     "warmup.rescue_refused": (data) => `${data.mailbox}: Google не дав змінити мітки — немає scope gmail.modify`,
     "warmup.plan": (data) => `план прогріву: старт ${data.start}, +${data.step} щодня, до ${data.max}`,
     "warmup.removed": (data) => `${data.mailbox}: прибрано з прогріву`,
