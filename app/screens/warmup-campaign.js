@@ -465,11 +465,15 @@ export function renderWarmupCampaignDetail() {
     ? '<p class="warmup-forecast-stale">Ці числа — для збереженої кампанії. Збережи, щоб порахувати те, що на екрані.</p>'
     : "";
 
+  // The forecast box (in the folder, already approached, per day, to the end)
+  // is no longer shown here — owner 15.10: «цей текст в жовтому теж видали».
+  // Only a problem with it still reaches the screen, as a sentence.
   const { tone, html } = warmupForecastHtml(campaign, { stale });
+  const problem = tone === "is-bad" ? (html.match(/<p class="warmup-forecast-hint">([\s\S]*?)<\/p>/) || [])[1] || "" : "";
   const note = campaignStateNote(campaign, WARMUP_DEFAULT_FROM_DAY);
 
   host.innerHTML = `
-    <div class="warmup-forecast ${tone}">${html}</div>
+    ${problem ? `<p class="warmup-campaign-problem">${problem}</p>` : ""}${stale}
     <div class="warmup-campaign-detail-foot">
       <p class="warmup-campaign-accounts">${warmupState.campaignNotice
         ? `<em class="warmup-campaign-problem">${escapeHtml(warmupState.campaignNotice)}</em>`

@@ -67,7 +67,6 @@
           <div class="nav-group" data-nav-group="linkedin">
             <button class="nav-group-toggle" type="button" aria-expanded="true"><i data-lucide="folder-open"></i><span>LinkedIn</span><i data-lucide="chevron-down" class="nav-group-chevron"></i></button>
             <div class="nav-group-items">
-              <button class="nav-item" data-view="linkedin-home" aria-label="LinkedIn: огляд" title="LinkedIn: огляд"><i data-lucide="layout-dashboard"></i><span>Огляд</span></button>
               <button class="nav-item" data-view="warmup" aria-label="Прогрів LinkedIn" title="Прогрів LinkedIn"><i data-lucide="flame"></i><span>Прогрів</span></button>
               <button class="nav-item" data-view="inbox" aria-label="Вхідні LinkedIn" title="Вхідні LinkedIn"><i data-lucide="inbox"></i><span>Вхідні</span><span class="nav-badge" id="warmupNavBadge" hidden></span></button>
             </div>
@@ -109,11 +108,6 @@
         <!-- «По днях» (12.10): кому писали за день, хто відповів, діалог — app/screens/work.js. -->
         <section class="view" id="view-work">
           <div class="work-page" id="workRoot"></div>
-        </section>
-
-        <!-- LinkedIn → «Огляд» — колишня головна: увага, кому написати, відповіді, акаунти (app/screens/home.js). -->
-        <section class="view" id="view-linkedin-home">
-          <div class="home-layout" id="linkedinHomeRoot"></div>
         </section>
 
         <section class="view" id="view-account">

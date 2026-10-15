@@ -2,7 +2,6 @@
 // Each screen registers itself with the shell when it loads, so importing it
 // is all it takes; the badge and the boot wait until every screen is here.
 import { bootApplication } from "./core.js";
-import "./screens/home.js";
 import "./screens/home-triage.js";
 import "./screens/work.js";
 import "./screens/warmup-accounts.js";

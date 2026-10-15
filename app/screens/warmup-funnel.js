@@ -4,10 +4,40 @@
 // Ті самі числа, що й раніше, з того самого /api/warmup/home.
 
 import { escapeHtml, onScreen, refreshIcons } from "../core.js";
-import { homeFunnelHtml } from "./home.js";
 import { warmupApi, warmupCount } from "./warmup-accounts.js";
 
 onScreen("warmup", { open: () => void loadWarmupFunnel() });
+
+// The funnel itself — moved here from home.js when «LinkedIn · огляд» was removed (15.10).
+function homePercent(part, whole) {
+  return whole > 0 ? `${Math.round((part / whole) * 100)}%` : "";
+}
+
+const HOME_STEPS = [
+  { key: "queued", label: "У черзі", hint: "з папок кампаній, ще не запрошені" },
+  { key: "invited", label: "Запрошено", hint: "запит на контакт надіслано" },
+  { key: "accepted", label: "Прийняли", hint: "у контактах акаунта" },
+  { key: "written", label: "Ми написали", hint: "перше повідомлення пішло" },
+  { key: "replied", label: "Відповіли", hint: "написали у відповідь" }
+];
+
+export function homeFunnelHtml(data) {
+  const funnel = data.funnel || {};
+  const today = data.today || {};
+  const extra = {
+    invited: today.invited ? `+${warmupCount(today.invited)} сьогодні` : "",
+    accepted: homePercent(funnel.accepted, funnel.invited) ? `${homePercent(funnel.accepted, funnel.invited)} запрошених` : "",
+    written: data.toWriteTotal ? `${warmupCount(data.toWriteTotal)} чекають на повідомлення` : "",
+    replied: today.replied ? `+${warmupCount(today.replied)} сьогодні` : (homePercent(funnel.replied, funnel.accepted) ? `${homePercent(funnel.replied, funnel.accepted)} прийнятих` : "")
+  };
+  return `<ol class="home-funnel">${HOME_STEPS.map((step) => `
+    <li class="home-step is-${step.key}">
+      <span class="home-step-label">${escapeHtml(step.label)}</span>
+      <strong class="home-step-value">${warmupCount(Number(funnel[step.key]) || 0)}</strong>
+      <span class="home-step-hint">${escapeHtml(extra[step.key] || step.hint)}</span>
+    </li>`).join("")}</ol>`;
+}
+
 
 let funnel = { data: null, error: "" };
 

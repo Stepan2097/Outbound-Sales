@@ -11,7 +11,7 @@ function element(initial) {
   };
 }
 
-test("auth reset erases Home and Warmup rendered content synchronously, before new screen reads", () => {
+test("auth reset erases Warmup rendered content synchronously, before new screen reads", () => {
   const elements = new Map();
   const getElementById = (id) => {
     if (!elements.has(id)) elements.set(id, element("Previous user's private content"));
@@ -19,37 +19,19 @@ test("auth reset erases Home and Warmup rendered content synchronously, before n
   };
   const resets = [];
   const main = loadMain([
-    "homeState", "resetHomeScreen", "warmupState", "WARMUP_INITIAL", "warmupRecalled", "warmupInboxRecalled", "resetWarmupScreen"
+    "warmupState", "WARMUP_INITIAL", "warmupRecalled", "warmupInboxRecalled", "resetWarmupScreen"
   ], { document: { getElementById }, onCacheReset: (reset) => { resets.push(reset); } }, [
-    "onCacheReset(resetHomeScreen);", "onCacheReset(resetWarmupScreen);"
+    "onCacheReset(resetWarmupScreen);"
   ]);
-  main.get("homeState").data = { previousUser: true };
   main.get("warmupState").profiles = [{ name: "Private profile" }];
   for (const reset of resets) reset();
-  assert.equal(main.get("homeState").data, null);
   assert.equal(main.get("warmupState").profiles.length, 0);
   // The campaign panel keeps its markup and listeners; what carried the last
   // person's campaigns is cleared (12.10: an empty frame stayed for the session).
-  for (const id of ["linkedinHomeRoot", "warmupCampaignList", "warmupCampaignDetail", "warmupProfileTableBody", "warmupDetailBody", "warmupDetailSubtitle", "warmupSummary", "warmupConfigNote"]) {
+  for (const id of ["warmupCampaignList", "warmupCampaignDetail", "warmupProfileTableBody", "warmupDetailBody", "warmupDetailSubtitle", "warmupSummary", "warmupConfigNote"]) {
     assert.equal(getElementById(id).innerHTML, "", id);
   }
   assert.equal(getElementById("warmupCampaignPanel").innerHTML === "", false, "the panel itself is not wiped");
   assert.equal(getElementById("warmupDetailPanel").hidden, true);
   assert.equal(getElementById("warmupDetailTitle").textContent, "Акаунт");
-});
-
-test("Home draws an empty loading state before awaiting the next authenticated user's response", async () => {
-  const root = element("Previous user's cards");
-  let resolve;
-  const pending = new Promise((yes) => { resolve = yes; });
-  const main = loadMain(["homeState", "HOME_CACHE", "loadHome", "renderHome"], {
-    document: { getElementById: () => root },
-    getCacheEpoch: () => 0, recallScreen: () => null, rememberScreen: () => {},
-    warmupApi: () => pending, draftMissing: () => {}, refreshIcons: () => {}, escapeHtml: String
-  });
-  const opening = main.get("loadHome")();
-  assert.match(root.innerHTML, /Завантажуємо головну/);
-  assert.doesNotMatch(root.innerHTML, /Previous user's/);
-  resolve(null);
-  await opening;
 });
