@@ -1,0 +1,452 @@
+/* «Смисли» — картки продуктів для лідгенів (app/screens/pitch.js).
+   ПК насамперед: список ліворуч, картка праворуч, рядки «назва розділу · зміст».
+   Вужче за 860 px — одна колонка: список, тап відкриває картку з «← Усі продукти». */
+
+.pitch-page {
+  display: grid;
+  gap: 12px;
+}
+
+/* textarea не успадковує шрифт сам — без цього поля апдейтів моноширинні. */
+.pitch-page textarea { font: inherit; }
+
+/* ── вступ ── */
+
+.pitch-intro summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  list-style: none;
+  font-weight: 600;
+}
+
+.pitch-intro summary::-webkit-details-marker { display: none; }
+.pitch-intro summary svg { width: 16px; height: 16px; color: var(--muted); transition: transform 0.15s ease; }
+.pitch-intro[open] summary svg { transform: rotate(180deg); }
+
+.pitch-intro-body {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  max-width: 92ch;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.pitch-intro-body p { margin: 0; }
+.pitch-intro-body b { color: var(--ink); }
+.pitch-intro-form { display: grid; gap: 8px; }
+.pitch-intro-form label { display: grid; gap: 6px; }
+
+.pitch-inline-edit { justify-self: start; }
+
+/* ── розкладка ── */
+
+.pitch-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.pitch-side {
+  position: sticky;
+  top: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.pitch-side-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pitch-side-head h2 { margin: 0; }
+
+.pitch-new {
+  display: grid;
+  gap: 6px;
+}
+
+.pitch-new[hidden] { display: none; }
+
+.pitch-list {
+  display: grid;
+  gap: 4px;
+}
+
+.pitch-list-item {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  min-height: 0;
+  padding: 9px 10px;
+  text-align: left;
+  /* Базова кнопка центрує вміст — список читається з лівого краю. */
+  justify-content: stretch;
+  justify-items: start;
+  white-space: normal;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 8px;
+}
+
+.pitch-list-item:hover { background: var(--surface-strong); border-color: var(--line); }
+
+.pitch-list-item.active {
+  background: var(--teal-weak);
+  border-color: rgba(52, 214, 189, 0.34);
+}
+
+.pitch-list-name {
+  font-weight: 600;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.pitch-list-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* ── позначка продукту ── */
+
+.pitch-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.pitch-badge.tone-priority { background: var(--teal-weak); border-color: transparent; color: var(--teal); }
+.pitch-badge.tone-exception { border-color: var(--red); color: var(--red); }
+.pitch-badge.tone-low { border-color: var(--line); color: var(--muted); }
+
+/* ── картка ── */
+
+.pitch-card {
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.pitch-head {
+  display: grid;
+  gap: 6px;
+  padding: 18px 20px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.pitch-back { display: none; justify-self: start; }
+
+.pitch-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+
+.pitch-title-row h2 {
+  margin: 0;
+  font-size: 19px;
+  overflow-wrap: anywhere;
+}
+
+.pitch-price {
+  margin: 0;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 13.5px;
+  color: var(--ink);
+}
+
+.pitch-pitch {
+  margin: 0;
+  color: var(--muted);
+  font-style: italic;
+  max-width: 80ch;
+}
+
+.pitch-stamp-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.pitch-stamp { color: var(--muted); font-size: 12px; }
+
+.pitch-notice {
+  margin: 12px 20px 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--teal-weak);
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.pitch-notice.is-error { background: rgba(239, 124, 114, 0.12); color: var(--red); }
+
+.pitch-rows {
+  display: grid;
+}
+
+.pitch-row {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  gap: 16px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.pitch-row:last-child { border-bottom: 0; }
+
+.pitch-key {
+  padding-top: 2px;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.pitch-row-send .pitch-key { color: var(--teal); }
+
+.pitch-val {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.pitch-val p { margin: 0; }
+.pitch-val ul { margin: 0; padding-left: 18px; display: grid; gap: 5px; }
+.pitch-val b { color: var(--ink); font-weight: 600; }
+
+.pitch-empty { margin: 0; color: var(--muted); font-size: 13px; }
+
+/* посилання й файли */
+
+.pitch-links,
+.pitch-files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.pitch-links li,
+.pitch-files li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-sunk);
+}
+
+.pitch-links a,
+.pitch-files a {
+  flex: 1 1 260px;
+  min-width: 0;
+  color: var(--blue);
+  overflow-wrap: anywhere;
+}
+
+.pitch-files a { display: inline-flex; align-items: center; gap: 6px; }
+.pitch-files a svg { width: 15px; height: 15px; flex: none; }
+.pitch-file-meta { color: var(--muted); font-size: 12px; }
+
+.pitch-item-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pitch-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.pitch-copy svg { width: 14px; height: 14px; }
+.pitch-copy.is-copied { border-color: var(--teal); color: var(--teal); }
+.pitch-copy.is-failed { border-color: var(--red); color: var(--red); }
+
+.pitch-oneliner {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--teal);
+  border-radius: 8px;
+  background: var(--surface-sunk);
+}
+
+.pitch-inline-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 6px;
+}
+
+.pitch-upload {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.pitch-upload-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-strong);
+}
+
+.pitch-upload:hover .pitch-upload-btn { border-color: rgba(52, 214, 189, 0.55); }
+.pitch-upload-btn svg { width: 15px; height: 15px; }
+
+/* апдейти */
+
+.pitch-update-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.pitch-update-form textarea { min-height: 60px; }
+
+.pitch-updates {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.pitch-updates li {
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line);
+}
+
+.pitch-updates li:first-child { border-top: 0; padding-top: 0; }
+.pitch-update-when { color: var(--muted); font-size: 12px; padding-top: 2px; }
+.pitch-update-text { display: grid; gap: 4px; }
+
+.pitch-hint { margin: 0; color: var(--muted); font-size: 12px; }
+
+/* ── редактор ── */
+
+.pitch-editor {
+  display: grid;
+  gap: 12px;
+  padding: 18px 20px;
+}
+
+.pitch-editor label { display: grid; gap: 6px; }
+
+.pitch-editor-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pitch-editor-head h2 { margin: 0; }
+.pitch-editor .pitch-notice { margin: 0; }
+
+.pitch-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.pitch-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.pitch-sections {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.pitch-sections legend { padding: 0 6px; font-weight: 600; }
+.pitch-sections > button { justify-self: start; }
+.pitch-sections [data-sections] { display: grid; gap: 10px; }
+
+.pitch-section-edit {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--surface-sunk);
+}
+
+.pitch-section-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  gap: 6px;
+}
+
+.pitch-editor-foot {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+/* ── вузький екран ── */
+
+@media (max-width: 860px) {
+  .pitch-layout { grid-template-columns: minmax(0, 1fr); }
+  .pitch-side { position: static; }
+  .pitch-layout.is-reading .pitch-side { display: none; }
+  .pitch-layout:not(.is-reading) .pitch-card { display: none; }
+  .pitch-back { display: inline-flex; }
+  .pitch-row { grid-template-columns: minmax(0, 1fr); gap: 6px; padding: 12px 14px; }
+  .pitch-head { padding: 14px; }
+  .pitch-notice { margin: 10px 14px 0; }
+  .pitch-editor { padding: 14px; }
+  .pitch-grid,
+  .pitch-inline-form,
+  .pitch-update-form,
+  .pitch-oneliner { grid-template-columns: minmax(0, 1fr); }
+  .pitch-updates li { grid-template-columns: minmax(0, 1fr) auto; }
+  .pitch-update-when { grid-column: 1 / -1; }
+}

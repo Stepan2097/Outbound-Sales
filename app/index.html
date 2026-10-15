@@ -23,6 +23,7 @@
     <link rel="stylesheet" href="/styles/mail-leads.css" />
     <link rel="stylesheet" href="/styles/mail-reports.css" />
     <link rel="stylesheet" href="/styles/mail-warmup.css" />
+    <link rel="stylesheet" href="/styles/pitch.css" />
     <script defer src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
     <script defer type="module" src="/main.js"></script>
   </head>
@@ -69,6 +70,7 @@
             <div class="nav-group-items">
               <button class="nav-item" data-view="warmup" aria-label="Прогрів LinkedIn" title="Прогрів LinkedIn"><i data-lucide="flame"></i><span>Прогрів</span></button>
               <button class="nav-item" data-view="inbox" aria-label="Вхідні LinkedIn" title="Вхідні LinkedIn"><i data-lucide="inbox"></i><span>Вхідні</span><span class="nav-badge" id="warmupNavBadge" hidden></span></button>
+              <button class="nav-item" data-view="pitch" aria-label="Смисли продуктів" title="Смисли продуктів: що продаємо і як про це говорити"><i data-lucide="book-open-text"></i><span>Смисли</span></button>
             </div>
           </div>
           <div class="nav-group" data-nav-group="mail">
@@ -365,6 +367,11 @@
               <div id="warmupDetailBody"></div>
             </section>
           </div>
+        </section>
+
+        <!-- «Смисли» (15.10, таск 1b128e83): картки продуктів для лідгенів — app/screens/pitch.js. -->
+        <section class="view" id="view-pitch">
+          <div class="pitch-page" id="pitchRoot"></div>
         </section>
 
         <section class="view" id="view-campaigns">

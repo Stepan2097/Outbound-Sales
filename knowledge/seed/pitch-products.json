@@ -1,0 +1,127 @@
+{
+  "version": 1,
+  "source": "Артефакт «Смисли продуктів» (15.10.2026) з правками власника: доступ до всіх програм навчання — 5 місяців; тріал = повний Full з Traffstore; розділ для дева не входить.",
+  "intro": "Картка на кожен продукт: кому, коли пропонувати, ціна й формат, головні смисли, чим довести (реальні цифри й стаття в DM), типові заперечення і чого не обіцяти. Ціни — з ноди-драбини, цифри — з наших кейсів і блогу. Якщо чогось тут немає, його не вигадуємо.\n\nПріоритет продажу — **FB навчання**. Трафік — не продукт, а виняток за моделлю оплати від спенду. Blackhat, клоаку й обхід модерації в DM не розписуємо: це доказова база для дзвінка, а не тема листування.",
+  "products": [
+    {
+      "id": "fb-training",
+      "name": "FB навчання — Black Affiliate",
+      "badgeLabel": "Пріоритет",
+      "badgeTone": "priority",
+      "price": "Knowledge Base €1 550 · Mentorship €4 000 (€2 000 + €2 000 через 30 днів)",
+      "pitch": "«Ми самі ллємо Meta на казино — і зібрали це в систему, щоб ваша команда лила сама.»",
+      "sections": [
+        { "title": "Кому", "text": "Баєр, тімлід, агенція або оператор, що будує внутрішній Meta-баїнг. Головне джерело доходу агенції." },
+        { "title": "Коли", "text": "Лід уже ллє або серйозно збирається, має бюджет і хоче не «зробіть за нас», а свою спроможність. Оператор, що хоче in-house." },
+        { "title": "Формат", "text": "- **Knowledge Base** — самостійне проходження на платформі: 8 модулів, ~80 уроків (у шопі «8 modules · 86 lessons»), Road Map, Checklist, Tools, бот-чат.\n- **Mentorship** — усе з KB + архів прелендів, особистий чат ~2 місяці, дзвінки.\n- Доступ до курсу — **5 місяців**." },
+        { "title": "Смисли", "text": "- **Перевага в аукціоні Meta + системність**, а не «реклама». Ми продаємо спроможність, що лишається в команді.\n- **Креатив — витратний матеріал**, не «золотий». Конвеєр, а не одне відео.\n- Повний технічний флоу iGaming: акаунти, трекінг, оффер, PWA/app-воронки, масштабування.\n- Для оператора рамка інша: не «курс», а «зберемо й навчимо вам відділ баїнгу». Так закрито вже ~8 операторів." },
+        { "title": "Пруф", "text": "Кейс Meta-аудиту (The Multiple): CPA за FTD знизили з $600+ (Німеччина) до $250. Кейс мультигео PWA на FB (Угорщина): spend $20 052, ~246 FTD, ROI 47%." },
+        { "title": "Заперечення", "text": "- «Mentorship — це багато зараз» + **вже ллє** → аудит $500. + **ще не ллє** → тріал платформи.\n- «Скільки?» → ціну лідген не називає, це для дзвінка." },
+        { "title": "Не обіцяти", "text": "Гарантований дохід, «акаунти без банів», «секретну схему». У DM не розписуємо обхід модерації — це на дзвінок." }
+      ],
+      "links": [
+        { "label": "Безкоштовний плейбук, на якому стоїть програма: The Decision Chain from Ad Account to Scale", "url": "https://www.advantage-agency.co/blog/facebook-media-buying-for-igaming-the-decision-chain-from-ad-account-to-scale" },
+        { "label": "Свіжий привід: FB Ads Digest, September 2026", "url": "https://www.advantage-agency.co/blog/facebook-ads-digest-september-2026-verification-assign-partner-costly-rejects" }
+      ],
+      "oneLiner": "We run Meta on casino ourselves and productised it into a program, so your team runs it in-house — accounts, tracking, funnels, scaling. Worth a look?"
+    },
+    {
+      "id": "fb-audit",
+      "name": "FB аудит — Strategic Audit",
+      "badgeLabel": "Low-ticket, рятівна сходинка",
+      "badgeTone": "low",
+      "price": "$500, одноразово · вести в Telegram, оплати на платформі немає",
+      "pitch": "«Перш ніж вкладатись у менторство — платний розбір того, що у вас уже крутиться, і де тече бюджет.»",
+      "sections": [
+        { "title": "Кому", "text": "Хто **вже ллє FB**, уперся в стелю або в непередбачувані збитки, але KB/mentorship задорого саме через ціну." },
+        { "title": "Коли", "text": "Є що аудитувати (реальні кампанії) і відмова саме через ціну програми. Хто нічого не ллє — аудит не пропонуємо, аудитувати нічого." },
+        { "title": "Що входить", "text": "- Повний огляд FB-сетапу: креативи, лендинги, оффер, таргетинг.\n- Письмовий звіт: що зупинити, а що почати, плюс актуальна стратегія роботи.\n- Відповіді на питання, що блокують рух. Специфічному клієнту — бонусом місяць підписки на платформу." },
+        { "title": "Смисли", "text": "- Це **не курс**, а діагностика з рекомендаціями — найменший крок, щоб не палити лід.\n- Місток нагору: після аудиту видно, чи потрібне менторство.\n- BH-рекомендації дає сам аудит за потреби — але в публічній картці й у DM це не афішуємо." },
+        { "title": "Не обіцяти", "text": "Конкретні цифри покращення наперед. Строки виконання ніде не зафіксовані — не називати, поки власник не підтвердить." }
+      ],
+      "links": [
+        { "label": "Top 5 Mistakes Media Buyers Make — стаття сама веде на аудит", "url": "https://www.advantage-agency.co/blog/5-mistakes-casino-campaigns" }
+      ],
+      "oneLiner": "If mentorship feels big right now and you’re already running FB, a paid audit is the better first move: we go through accounts, funnel and numbers and tell you what’s actually costing you. $500, one-off."
+    },
+    {
+      "id": "inapp-unity",
+      "name": "In-App / Unity навчання",
+      "badgeLabel": "Свіжий talking point",
+      "badgeTone": "priority",
+      "price": "Knowledge Base €899 · 1 людина · доступ 5 місяців · mentorship немає",
+      "pitch": "«Після змін Moloco команди перейшли на Unity. In-app не банить гемблінг так, як Facebook — ми ллємо й навчаємо саме цьому.»",
+      "sections": [
+        { "title": "Кому", "text": "Баєр чи команда, що вже ллє (Meta, push) і шукає стабільніше джерело; хто втомився від банів FB." },
+        { "title": "Коли", "text": "Скарги на бани й нестабільність Meta; питання про Moloco; оператор, що хоче друге джерело." },
+        { "title": "Формат", "text": "8 модулів, 42 уроки, 7 домашок і фінальний проєкт. Калькулятор max bid і ROAS, Launch Checklist, контакти провайдерів RMG-акаунтів. Безкоштовний урок-калькулятор на сторінці." },
+        { "title": "Смисли", "text": "- **Легальна RMG-доріжка:** акаунти з RMG-статусом не банять гемблінг-трафік, як Meta. Ціна — сувора модерація і MMP-трекінг, і саме це ми закриваємо навчанням.\n- Playable-креативи — рідний формат in-app.\n- Чесно про поріг: аукціон Unity вужчий за Meta, популярні гео швидко дорожчають; перші 2–4 тижні — набір статистики." },
+        { "title": "Пруф", "text": "Наш запуск Unity (Словаччина): $48 000 спенду, ~550 FTD, $87 за депозитора, spend-модель. Бенчмарки з ~1 млн інсталів: install→reg 22–25%, reg→dep 10–13%." },
+        { "title": "Не обіцяти", "text": "«Без банів взагалі», швидкий старт. Кейси Італії та Польщі в базі — **чужі** (iRent, CPALenta), за свої не видавати." }
+      ],
+      "links": [
+        { "label": "Why In-App Doesn’t Ban the Gambling That Facebook Bans", "url": "https://www.advantage-agency.co/blog/why-in-app-doesnt-ban-the-gambling-that-facebook-bans" },
+        { "label": "Цифри: Unity Ads Launch: $87 per Depositor Across $48K", "url": "https://www.advantage-agency.co/blog/unity-ads-launch-87-per-depositor-across-48k" }
+      ],
+      "oneLiner": "Since the Moloco shake-up a lot of teams moved to Unity — in-app has a legal RMG lane for gambling that Facebook doesn’t. We run it and teach it. Curious if it’s on your radar?"
+    },
+    {
+      "id": "google-playbook",
+      "name": "Google Ads for iGaming · Playbook",
+      "badgeLabel": "Low-ticket",
+      "badgeTone": "low",
+      "price": "€200 · доступ 5 місяців · кнопка «Get the playbook» → Telegram (Bohdan)",
+      "pitch": "«Google-трафік — це пошуковий намір: гравець сам шукає казино. Найтепліший клік і найтехнічніший канал.»",
+      "sections": [
+        { "title": "Кому", "text": "Хто **вже ллє з іншого каналу** (Meta, in-app, push) і дивиться в бік Google. Оператор, що будує Google in-house." },
+        { "title": "Коли", "text": "Лід уже ллє й питає про Google. Новачку без досвіду — спершу Meta, не Google." },
+        { "title": "Формат", "text": "Самостійне проходження (Knowledge Base), 11 модулів · 57 уроків. Не повна програма «від A до Z» і не менторство." },
+        { "title": "Смисли", "text": "- Доступ, верифікація, трекінг і структура ключів вирішують, чи кампанія запуститься і чи окупиться клік.\n- Показуємо, де команди втрачають гроші на старті.\n- Найдорожчий і найтехнічніший канал — тому це плейбук, а не «запусти за вечір»." },
+        { "title": "Не обіцяти", "text": "«Повна програма» чи менторство. Гарантоване схвалення верифікації чи акаунтів. Регулярні оновлення." }
+      ],
+      "links": [
+        { "label": "Google Ads vs Meta for iGaming — і одразу видно, новачок чи ні", "url": "https://www.advantage-agency.co/blog/google-ads-vs-meta-igaming" }
+      ],
+      "oneLiner": "If you already run traffic from another channel and are eyeing Google, we have a focused playbook — access, verification, tracking, keywords, scaling, and where teams lose money first. €200."
+    },
+    {
+      "id": "platform",
+      "name": "Платформа з тулами",
+      "badgeLabel": "Low-ticket · самопродаж",
+      "badgeTone": "low",
+      "price": "Core $39 · Pro $59 · Full $84 за користувача/міс · тріал 72 год без картки",
+      "pitch": "«Увесь робочий цикл баєра в одному акаунті — від пошуку зв’язки до повторного депозиту. Не збираєш зоопарк сервісів.»",
+      "sections": [
+        { "title": "Кому", "text": "Баєр, що вже ллє і хоче інструменти без навчання: трекер, антидетект, Spy, креативи. Фолбек для теплого, що не на менторство." },
+        { "title": "Коли", "text": "Практик, якому менторство «занадто / не зараз». Соло-баєр. Теж верх воронки, що годує high-ticket." },
+        { "title": "Що входить", "text": "- **Core** — Spy, FB Storm Radar, GEO Insights, Offers, Play Demo, Creative Center, Calculator, Anty Browser.\n- **Pro** — + Uniqueizer, Trafftrack (трекер із клоакою), ізольовані workspaces і ролі.\n- **Full** — + Playables & Pre-landers, **Traffstore (PWA)** і пуші за подією, Trafftrack з AI-командами, FB-інтеграція трекера.\n- Кожне наступне місце — за пів ціни. Знижки: 3 міс −25%, 6 міс −35%, 12 міс −50%. Оплата криптою." },
+        { "title": "Traffstore", "text": "**Власна розробка (реліз 10.2026):** конструктор вітрини-«магазину» (вигляд Google Play / App Store), імпорт застосунку з Google Play, пуші за подіями (install, reg, deposit, redeposit). **Ігрові преленди** під слот (gates-of-olympus, sweet-bonanza) або crash-подібні (chicken-road, tower-rush) — перед сторінкою скачування або після інсталу. Частина лексики — PWA, Flow, split." },
+        { "title": "Тріал", "text": "**Тріал — це повний Full на 72 години, без картки, включно з Traffstore.** Людина за три дні бачить увесь стек: трекер, антидетект, конструктор PWA з ігровими прелендами й пушами. Це головний аргумент «просто затестьте»." },
+        { "title": "Не обіцяти", "text": "Трекер і антидетект окремо не продаємо й не порівнюємо з іншими трекерами (партнерство з Voluum)." }
+      ],
+      "links": [
+        { "label": "PWA Install Base: The Asset That Outlives Your Ad Account (Аргентина, ROI 44%)", "url": "https://www.advantage-agency.co/blog/pwa-install-base-in-igaming-the-asset-that-outlives-your-ad-account" },
+        { "label": "Пояснити формати: App, PWA and WebView, Explained Simply", "url": "https://www.advantage-agency.co/blog/app-vs-pwa-vs-webview-igaming" }
+      ],
+      "oneLiner": "We built our own stack — Spy, antidetect, tracker, and a PWA store builder with game pre-landers (slot or crash-style) and event pushes — all in one login. There’s a full 72h trial if you want to poke around."
+    },
+    {
+      "id": "traffic",
+      "name": "Трафік — тільки як виняток",
+      "badgeLabel": "Не продукт",
+      "badgeTone": "exception",
+      "price": "Лише spend-модель: 16–18% від спенду (агентські FB-акаунти в ціні) · тест від $10K/міс · CPA/RevShare — ні",
+      "pitch": "«Трафік ми даємо кільком клієнтам і тільки за моделлю оплати від спенду. Наш фокус — навчити вас лити самостійно.»",
+      "sections": [
+        { "title": "Коли", "text": "Лід питає про трафік. **Триаж:** готовий платити за спенд і має бюджет від $10K → можемо поставити в чергу після кваліфікації. Хоче лише CPA/RevShare або бюджет менший → не наш, чемний вихід." },
+        { "title": "Як відповідати", "text": "- CPA і RevShare не беремо — для нас невигідно. Лише spend-модель, 16–18%, агентські акаунти в ціні.\n- Відділ трафіку зараз завантажений і має чергу → натомість пропонуємо **освітній напрям**: навчимо залучати трафік самостійно, щоб він лишався ваш.\n- Це головний розворот: від «дайте трафік» до «збудуйте свою спроможність»." },
+        { "title": "Не обіцяти", "text": "Managed-сервіс «під ключ». Відсоток, вартість акаунтів і поріг на /traffic публічно не називаються — це в особистій розмові після брифу." }
+      ],
+      "links": [
+        { "label": "CPA vs Spend Model in iGaming", "url": "https://www.advantage-agency.co/blog/spend-vs-cpa-2026" },
+        { "label": "Афіліату на CPA: Affiliate Payout Holds", "url": "https://www.advantage-agency.co/blog/affiliate-payout-holds-the-media-buyers-hidden-cost-of-financing-a-partner-for-f" }
+      ],
+      "oneLiner": "We only run traffic on a spend model (16–18%, agency accounts included, tests from $10K) and the desk is booked out. What we can start today is the education side — we help teams build that traffic in-house."
+    }
+  ]
+}

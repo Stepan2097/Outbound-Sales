@@ -47,6 +47,17 @@ use — the lead workspace had not changed since 02.10 and the model had been
 called once, ever. Only the interface went: the saved state, the server routes
 and their tests are untouched, so nothing anybody entered is lost.
 
+**Смисли** (LinkedIn, since 15.10.2026, task 1b128e83) — what we sell and how to
+talk about it: a card per product with who and when to offer it, price, the
+meanings, proof, objections, what not to promise, links to send in a DM and the
+DM one-liner, each with a copy button. Everyone signed in reads it; only an admin
+edits it, adds updates (dated by themselves), links, files and new products. It
+lives beside the workspace state (`pitch/index.json`, `pitch/files/` on the
+`/data` volume), is seeded once from `knowledge/seed/pitch-products.json` and is
+separate from the products the AI drafts are written from. Code:
+`knowledge/pitch.mjs`, `knowledge/pitch-api.mjs` (`/api/pitch`),
+`app/screens/pitch.js`; tests: `tests/pitch.test.mjs`.
+
 **Removed screens must not come back by a merge.** They did once — the merge
 `f20ee6d` on 02.10 brought a long-lived branch's screens back with it.
 `tests/ui-screens-fence.test.mjs` now fails when the menu is anything but these

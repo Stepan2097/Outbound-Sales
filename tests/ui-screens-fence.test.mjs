@@ -25,6 +25,13 @@ import test from "node:test";
  * first messages to people who accepted, written by the model, to approve. It is
  * not the removed «overview» (an OpenRouter traffic dashboard): nothing of that
  * comes back with it.
+ *
+ * «Смисли» (`pitch`) joined LinkedIn on 15.10.2026 (task 1b128e83): the owner
+ * asked for the product meanings — who to offer what, price, proof, objections,
+ * what not to promise — to sit where the lead-gens work, editable by an admin.
+ * It is not the removed «Продукти» (`products`, the AI-draft brief editor with
+ * its knowledge editor): those stay removed and fenced below; this screen does
+ * not touch the drafts' products at all.
  */
 
 const APP = new URL("../app/", import.meta.url);
@@ -38,7 +45,7 @@ function sources(dir = APP.pathname) {
   });
 }
 
-const SCREENS = [["home", "Головна"], ["work", "По днях"], ["warmup", "Прогрів"], ["inbox", "Вхідні"], ["mail-warmup", "Прогрів пошт"], ["campaigns", "Кампанії"], ["mail-inbox", "Вхідні"], ["leads", "Ліди"], ["reports", "Звіти"], ["contacts", "Контакти"], ["account", "Налаштування"]];
+const SCREENS = [["home", "Головна"], ["work", "По днях"], ["warmup", "Прогрів"], ["inbox", "Вхідні"], ["pitch", "Смисли"], ["mail-warmup", "Прогрів пошт"], ["campaigns", "Кампанії"], ["mail-inbox", "Вхідні"], ["leads", "Ліди"], ["reports", "Звіти"], ["contacts", "Контакти"], ["account", "Налаштування"]];
 
 const REMOVED_VIEWS = ["email", "prospects", "ai", "products", "overview", "models", "routing", "budgets", "privacy", "evaluation"];
 
@@ -92,6 +99,7 @@ const SCREEN_FILES = {
   work: ["screens/work.js"],
   warmup: ["screens/warmup-accounts.js", "screens/warmup-campaign.js"],
   inbox: ["screens/inbox.js"],
+  pitch: ["screens/pitch.js"],
   contacts: ["screens/contacts.js"],
   account: ["screens/settings.js"]
 };

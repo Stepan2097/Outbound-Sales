@@ -7,6 +7,7 @@ import "./screens/work.js";
 import "./screens/warmup-accounts.js";
 import "./screens/warmup-campaign.js";
 import { startWarmupBadge } from "./screens/inbox.js";
+import "./screens/pitch.js";
 import "./screens/contacts.js";
 import "./screens/settings.js";
 import "./screens/esp.js";

@@ -9,6 +9,8 @@ import { fileURLToPath } from "node:url";
 import { CHANNEL_RULES, LANGUAGES, buildFallbackDrafts, draftsPromptPayload, normalizeDrafts, normalizeLanguage } from "./contacts/drafts.mjs";
 import { invalidateContactCaches, contactAsProspect, contactsConfigured, contactsMissingConfig, crmKeyKind, folderContactAt, listContactFolders, listFolderContacts, searchFolderContacts, readContact, supabaseKeyKind } from "./contacts/store.mjs";
 import { handleKnowledgeLibraryApi } from "./knowledge/api.mjs";
+import { handlePitchApi } from "./knowledge/pitch-api.mjs";
+import { loadPitchBook } from "./knowledge/pitch.mjs";
 import { allEntries, append as espAppend, useJournal } from "./esp/journal.mjs";
 import { channelsFor as triageChannels, nextContact as nextTriageContact } from "./triage/queue.mjs";
 import { AUTO_TACTIC, tacticData, tacticForPrompt, tacticLabel, tacticOptions } from "./triage/tactics.mjs";
@@ -649,6 +651,8 @@ await loadPersistentWorkspaceState();
 // same path and, on a volume that has never held one, seeded from the
 // documents shipped with the repo.
 await loadKnowledgeLibrary(stateFilePath, () => state.products.map((product) => product.id));
+// «Смисли» — довідник продуктів для лідгенів, теж поруч зі станом (pitch/).
+await loadPitchBook(stateFilePath);
 initializeRuntimeConfigFromEnv();
 void warmRuntimeConnections();
 // Read once at boot so the sign-in screen knows whether a user base exists
@@ -1062,6 +1066,21 @@ async function handleApi(request, response, url) {
       sendJson,
       readJson,
       actingUser: request.auth?.profile?.email || request.auth?.profile?.name || ""
+    });
+    if (handled) return;
+  }
+
+  // «Смисли»: картки продуктів для лідгенів. Читають усі, хто увійшов; пише
+  // адміністратор (перевірка в модулі). Окремо від продуктів AI-чернеток.
+  if (url.pathname === "/api/pitch" || url.pathname.startsWith("/api/pitch/")) {
+    const handled = await handlePitchApi({
+      request,
+      response,
+      url,
+      sendJson,
+      readJson,
+      readRaw: readBody,
+      profile: request.auth?.profile
     });
     if (handled) return;
   }
