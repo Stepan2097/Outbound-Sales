@@ -3317,6 +3317,10 @@ const appUrl = () => String(process.env.PUBLIC_URL || process.env.COOLIFY_URL ||
 async function announceReply({ account, participant, inbound }) {
   // Пінг «Відповісти» в CRM — за кілька секунд, і без Telegram теж (triage/today.mjs, етап 1/6).
   reconcileSoon();
+  // «💬 Відповів …» більше не йде в групу (власник 16.10: «не відсилай в групу
+  // цих сповіщень»): відповідь — це пінг у CRM тому, хто веде акаунт. Повернути
+  // в групу — LEADGEN_REPLY_TELEGRAM=on. Збої акаунтів і ранкове зведення — як були.
+  if (process.env.LEADGEN_REPLY_TELEGRAM !== "on") return;
   if (!leadgenBot.configured || process.env.LEADGEN_TELEGRAM === "off") return;
   const messages = freshReplies(inbound);
   if (!messages.length) return;
