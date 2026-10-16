@@ -463,3 +463,45 @@
   color: var(--muted);
   font-size: 13px;
 }
+
+/* Папка CRM: додати вибраних у папку, вибрати всю папку, перевірка адрес. */
+.leads-send input {
+  min-height: 40px;
+  width: 200px;
+}
+
+.leads-check {
+  align-items: flex-start;
+}
+
+.leads-check-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.leads-check-line .leads-chips {
+  margin-left: 0;
+}
+
+.leads-check-line small,
+.leads-check-hint {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.leads-check-line small.is-bad {
+  color: var(--danger, #b42318);
+}
+
+.leads-select-all {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-soft, var(--surface));
+  font-size: 13px;
+  text-align: center;
+}

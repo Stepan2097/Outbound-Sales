@@ -38,7 +38,9 @@ function fakeCrm({ timeoutsFirst = 0 } = {}) {
     let from = 0;
     const self = {
       select: () => self,
-      eq: (column, value) => { filters.push((row) => String(row[column]) === String(value)); return self; },
+      // A folder is a membership: `m.folder_id` is any of the contact's folders.
+      eq: (column, value) => { filters.push((row) => (column === "m.folder_id" ? (row.folders || [row.folder_id]).includes(value) : String(row[column]) === String(value))); return self; },
+      gt: (column, value) => { filters.push((row) => String(row[column]) > String(value)); return self; },
       neq: (column, value) => { filters.push((row) => row[column] !== value); return self; },
       notNull: (column) => { filters.push((row) => row[column] !== null && row[column] !== undefined); return self; },
       in: (column, values) => { filters.push((row) => values.includes(row[column])); return self; },

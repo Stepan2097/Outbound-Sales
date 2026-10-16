@@ -43,8 +43,15 @@ export const leadsState = {
   error: "",
   busy: false,
   card: null,        // { email, data, events, tab }
-  noteText: ""
+  noteText: "",
+  allInFolder: false, // у папці CRM: вибрано всю папку (або все, що знайшов пошук), а не лише сторінку
+  folderTarget: "",   // куди додати вибраних: "" — нова папка, інакше id папки CRM
+  folderName: "",
+  check: null        // { run, deep } — перевірка адрес відкритої папки CRM
 };
+
+const CHECK_STATE_WORD = { running: "іде", done: "завершено", stopped: "зупинено", failed: "не вдалася" };
+let checkTimer = null;
 
 onScreen("leads", { open: () => void openLeads() });
 
@@ -56,6 +63,7 @@ async function openLeads() {
   const firstCrm = (leadsState.meta?.crmFolders || []).find((row) => row.withEmail > 0);
   if (!leadsState.view && !leadsState.meta?.lists.length && firstCrm) leadsState.view = `crm:${firstCrm.id}`;
   if (!leadsState.card && leadsState.view !== EXCLUSIONS && leadsState.view !== PRIVACY) await loadPage();
+  void loadCheck();
 }
 
 async function loadMeta() {
@@ -68,6 +76,26 @@ async function loadMeta() {
     leadsState.error = error?.status === 403 ? "Лідів бачить команда з правом читати відповіді — його дає адміністратор." : error?.message || "Списки не прочиталися.";
   }
   renderLeads();
+}
+
+async function loadCheck() {
+  window.clearTimeout(checkTimer);
+  if (!leadsState.view.startsWith("crm:")) { leadsState.check = null; return; }
+  const folderId = leadsState.view.slice(4);
+  try {
+    const answer = await api(`/api/esp/leads/crm/check?folder=${encodeURIComponent(folderId)}`);
+    if (leadsState.view !== `crm:${folderId}`) return;
+    leadsState.check = { run: answer.run, deep: answer.deep };
+  } catch {
+    leadsState.check = null;
+  }
+  renderLeads();
+  if (leadsState.check?.run?.state === "running") checkTimer = window.setTimeout(async () => {
+    const wasRunning = leadsState.check?.run?.state === "running";
+    await loadCheck();
+    // Finished while the page was open: the dots on the page change too.
+    if (wasRunning && leadsState.check?.run?.state !== "running" && !leadsState.card) void loadPage();
+  }, 3000);
 }
 
 async function loadPage() {
@@ -139,6 +167,48 @@ function chipsHtml(counts, scope = "") {
   return `${scope === "page" ? '<span class="leads-crm-note">перевірка адрес на цій сторінці:</span>' : ""}<div class="leads-chips" aria-label="Верифікація адрес">${["valid", "risky", "invalid", "unknown", "none"].filter((tone) => counts[tone]).map((tone) => `<span class="leads-chip" title="${TONE_WORD[tone]}"><i class="leads-dot is-${tone}"></i>${counts[tone]}</span>`).join("")}</div>`;
 }
 
+function checkHtml(crmFolder) {
+  const check = leadsState.check;
+  const run = check?.run;
+  const button = run?.state === "running"
+    ? `<button type="button" class="text-button" data-leads-check-stop><i data-lucide="square"></i><span>Зупинити перевірку</span></button>`
+    : `<button type="button" class="text-button" data-leads-check${crmFolder.withEmail ? "" : " disabled"}><i data-lucide="shield-check"></i><span>Перевірити адреси (${crmFolder.withEmail ?? 0})</span></button>`;
+  if (!check) return button;
+  const n = (value) => Number(value || 0).toLocaleString("uk-UA");
+  const line = run ? (() => {
+    const c = run.counts;
+    const parts = [
+      `<span class="leads-chip" title="${TONE_WORD.valid}"><i class="leads-dot is-valid"></i>${n(c.valid)}</span>`,
+      `<span class="leads-chip" title="${TONE_WORD.invalid}"><i class="leads-dot is-invalid"></i>${n(c.invalid)}</span>`,
+      `<span class="leads-chip" title="catch-all — сервер приймає будь-яку адресу"><i class="leads-dot is-risky"></i>${n(c.catch_all)}</span>`,
+      `<span class="leads-chip" title="${TONE_WORD.unknown}"><i class="leads-dot is-unknown"></i>${n(c.unknown)}</span>`
+    ].join("");
+    const progress = `${n(run.done)} з ${run.total == null ? "…" : n(run.total)}`;
+    const extra = [
+      c.domainOk ? `домен приймає пошту: ${n(c.domainOk)} (скриньку не перевірено)` : "",
+      c.earlier ? `уже перевірені раніше: ${n(c.earlier)}` : "",
+      c.failed ? `не записалось у CRM: ${n(c.failed)}` : "",
+      run.credits != null ? `кредитів MillionVerifier лишилось: ${n(run.credits)}` : ""
+    ].filter(Boolean).join(" · ");
+    return `<div class="leads-check-line"><span>Перевірка ${CHECK_STATE_WORD[run.state] || run.state}: ${progress}</span><div class="leads-chips">${parts}</div>${extra ? `<small>${escapeHtml(extra)}</small>` : ""}${run.error ? `<small class="is-bad">${escapeHtml(run.error)}</small>` : ""}</div>`;
+  })() : "";
+  const hint = check.deep ? "" : `<small class="leads-check-hint">Без ключа MillionVerifier перевіряється адреса й домен (чи існує, чи приймає пошту, чи не одноразовий). Чи існує сама скринька — лише через MillionVerifier: з нашого сервера поштові сервери не питаються.</small>`;
+  return `${button}${line}${hint}`;
+}
+
+function folderAddHtml(crmFolder, count) {
+  const others = (leadsState.meta?.crmFolders || []).filter((row) => row.id !== crmFolder.id);
+  return `
+    <form class="leads-send" id="leadsToFolder">
+      <select name="folderId" aria-label="Папка CRM"${count ? "" : " disabled"}>
+        <option value=""${leadsState.folderTarget ? "" : " selected"}>Нова папка…</option>
+        ${others.map((row) => `<option value="${escapeAttr(row.id)}"${leadsState.folderTarget === row.id ? " selected" : ""}>${escapeHtml(row.name)}</option>`).join("")}
+      </select>
+      ${leadsState.folderTarget ? "" : `<input name="name" placeholder="Назва нової папки" maxlength="80" value="${escapeAttr(leadsState.folderName)}"${count ? "" : " disabled"} />`}
+      <button type="submit" class="primary-button"${count && !leadsState.busy ? "" : " disabled"}><i data-lucide="folder-input"></i><span>${leadsState.busy ? "Додаю..." : `Додати в папку${count ? ` (${count.toLocaleString("uk-UA")})` : ""}`}</span></button>
+    </form>`;
+}
+
 function listHtml() {
   const meta = leadsState.meta;
   if (leadsState.error && !meta) return `<div class="empty-state">${escapeHtml(leadsState.error)}</div>`;
@@ -156,7 +226,13 @@ function listHtml() {
         ? `<form class="leads-rename" id="leadsRename"><input name="name" value="${escapeAttr(list.name)}" maxlength="80" required autofocus /><button type="submit" class="primary-button">Зберегти</button><button type="button" class="text-button" data-leads-rename-cancel>Скасувати</button></form>`
         : `<h2>${escapeHtml(title)}</h2>${crmFolder ? `<span class="leads-crm-note">папка CRM · з поштою ${crmFolder.withEmail ?? "—"} із ${crmFolder.contacts ?? "—"} контактів</span>` : ""}${list ? `<button type="button" class="icon-button" data-leads-rename aria-label="Перейменувати" title="Перейменувати"><i data-lucide="pencil"></i></button><button type="button" class="icon-button" data-leads-delete aria-label="Видалити список" title="Видалити список"><i data-lucide="trash-2"></i></button>` : ""}`}
     </div>`;
-  const toolbar = `
+  const pickedCount = crmFolder && leadsState.allInFolder ? page?.total || 0 : picked.length;
+  const toolbar = crmFolder ? `
+    <div class="leads-toolbar">
+      ${folderAddHtml(crmFolder, pickedCount)}
+      ${chipsHtml(page?.verification, page?.verificationScope)}
+    </div>
+    <div class="leads-toolbar leads-check">${checkHtml(crmFolder)}</div>` : `
     <div class="leads-toolbar">
       ${crmFolder ? "" : `<button type="button" class="primary-button" data-leads-add${list ? "" : ' disabled title="Спершу виберіть або створіть список"'}><i data-lucide="user-plus"></i><span>Додати лідів</span></button>`}
       <form class="leads-send" id="leadsSend">
@@ -185,6 +261,10 @@ function listHtml() {
         <button type="button" class="icon-button" data-leads-page="1" aria-label="Наступна сторінка"${page && to < page.total ? "" : " disabled"}><i data-lucide="chevron-right"></i></button>
       </div>
     </div>`;
+  const more = crmFolder && allChecked && page && page.total > rows.length
+    ? `<div class="leads-select-all">${leadsState.allInFolder
+      ? `Вибрано всіх ${page.total.toLocaleString("uk-UA")}${leadsState.q ? ", кого знайшов пошук" : " у папці"}. <button type="button" class="text-button" data-leads-all-folder="0">Лише цю сторінку</button>`
+      : `Вибрано ${rows.length} на цій сторінці. <button type="button" class="text-button" data-leads-all-folder="1">Вибрати всіх ${page.total.toLocaleString("uk-UA")}${leadsState.q ? ", кого знайшов пошук" : " у папці"}</button>`}</div>` : "";
   const empty = !page ? '<div class="empty-state">Читаємо список...</div>'
     : !rows.length ? `<div class="empty-state">${leadsState.q ? "Нікого не знайдено." : crmFolder ? "У цій папці CRM немає людей з поштою." : list ? "У списку нікого немає — «Додати лідів»." : meta?.lists.length ? "Лідів ще немає." : "Виберіть папку CRM ліворуч — або створіть список і вставте лідів."}</div>` : "";
   const table = rows.length ? `
@@ -201,7 +281,7 @@ function listHtml() {
           <td class="leads-date">${escapeHtml(day(row.addedAt))}</td>
         </tr>`).join("")}</tbody>
     </table></div>` : "";
-  return `${head}${toolbar}${adding}${notice}<div class="mail-main">${bar}${empty}${table}</div>`;
+  return `${head}${toolbar}${adding}${notice}<div class="mail-main">${bar}${more}${empty}${table}</div>`;
 }
 
 function timelineItem(event, card) {
@@ -365,10 +445,11 @@ async function act(work) {
 
 function showView(view) {
   // The table empties at once: the old list's rows must not stand under the new one's name.
-  Object.assign(leadsState, { view, card: null, offset: 0, adding: false, renaming: false, notice: "", error: "", page: null });
+  Object.assign(leadsState, { view, card: null, offset: 0, adding: false, renaming: false, notice: "", error: "", page: null, allInFolder: false, check: null });
   leadsState.selected.clear();
   renderLeads();
   if (view !== EXCLUSIONS && view !== PRIVACY) void loadPage();
+  void loadCheck();
 }
 
 const root = () => document.getElementById("leadsPage");
@@ -407,7 +488,19 @@ root()?.addEventListener("click", async (event) => {
   if (page) {
     leadsState.offset = Math.max(0, leadsState.offset + Number(page) * (leadsState.page?.limit || 50));
     leadsState.selected.clear();
+    leadsState.allInFolder = false;
     return loadPage();
+  }
+  const allFolder = target.closest("[data-leads-all-folder]")?.dataset.leadsAllFolder;
+  if (allFolder) { leadsState.allInFolder = allFolder === "1"; return renderLeads(); }
+  if (target.closest("[data-leads-check]") || target.closest("[data-leads-check-stop]")) {
+    const stop = Boolean(target.closest("[data-leads-check-stop]"));
+    const folderId = leadsState.view.slice(4);
+    return act(async () => {
+      await api("/api/esp/leads/crm/check", { method: "POST", body: JSON.stringify({ folderId, stop }) });
+      await loadCheck();
+      return stop ? "Перевірку зупинено — що встигла, записано в CRM. Наступний запуск продовжить з того місця." : "";
+    });
   }
   const open = target.closest("[data-leads-open]")?.dataset.leadsOpen;
   if (open) return openCard(open);
@@ -426,10 +519,13 @@ root()?.addEventListener("change", (event) => {
   const target = event.target;
   if (target.id === "leadsAll") {
     for (const row of leadsState.page?.rows || []) target.checked ? leadsState.selected.add(row.id) : leadsState.selected.delete(row.id);
+    if (!target.checked) leadsState.allInFolder = false;
     return renderLeads();
   }
+  if (target.name === "folderId" && target.closest("#leadsToFolder")) { leadsState.folderTarget = target.value; return renderLeads(); }
   const pick = target.dataset?.leadsPick;
   if (pick) {
+    leadsState.allInFolder = false;
     target.checked ? leadsState.selected.add(pick) : leadsState.selected.delete(pick);
     renderLeads();
   }
@@ -438,21 +534,39 @@ root()?.addEventListener("change", (event) => {
 let searchTimer = null;
 root()?.addEventListener("input", (event) => {
   if (event.target.id === "leadsAddText") { leadsState.addText = event.target.value; return; }
+  if (event.target.name === "name" && event.target.closest("#leadsToFolder")) { leadsState.folderName = event.target.value; return; }
   if (event.target.name === "text" && event.target.closest("#leadsNote")) { leadsState.noteText = event.target.value; return; }
   if (event.target.id !== "leadsSearch") return;
   window.clearTimeout(searchTimer);
   searchTimer = window.setTimeout(() => {
     leadsState.q = event.target.value.trim();
     leadsState.offset = 0;
+    leadsState.allInFolder = false;
+    leadsState.selected.clear();
     void loadPage();
   }, 300);
 });
 
 root()?.addEventListener("submit", async (event) => {
   const form = event.target;
-  if (!["leadsNewList", "leadsRename", "leadsAdd", "leadsSend", "leadsNote"].includes(form.id)) return;
+  if (!["leadsNewList", "leadsRename", "leadsAdd", "leadsSend", "leadsNote", "leadsToFolder"].includes(form.id)) return;
   event.preventDefault();
   const values = Object.fromEntries(new FormData(form).entries());
+  if (form.id === "leadsToFolder") {
+    const fromFolderId = leadsState.view.slice(4);
+    const all = leadsState.allInFolder;
+    const ids = [...leadsState.selected];
+    const name = String(values.name || "").trim();
+    if (!values.folderId && !name) { leadsState.notice = "Дайте новій папці назву або виберіть наявну."; return renderLeads(); }
+    return act(async () => {
+      const result = await api("/api/esp/leads/crm/folder", { method: "POST", body: JSON.stringify({ fromFolderId, all, q: leadsState.q, ids, folderId: values.folderId || "", name }) });
+      leadsState.selected.clear();
+      Object.assign(leadsState, { allInFolder: false, folderName: "", folderTarget: result.folder.id });
+      await loadMeta();
+      renderLeads();
+      return `У папку CRM «${result.folder.name}» додано: ${result.added.toLocaleString("uk-UA")}. У «${leadsState.meta?.crmFolders?.find((row) => row.id === fromFolderId)?.name || "попередній папці"}» вони теж лишились. Папка — ліворуч; там можна запустити перевірку адрес.`;
+    });
+  }
   if (form.id === "leadsNewList") {
     return act(async () => {
       const { list } = await api("/api/esp/leads/lists", { method: "POST", body: JSON.stringify({ name: values.name }) });

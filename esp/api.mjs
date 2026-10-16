@@ -431,6 +431,11 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
       }
       return true;
     }
+    if (method === "GET" && path === "/leads/crm/check") {
+      if (!esp.folderCheck) return badRequest(sendJson, response, "Перевірку папок на цьому сервері не підключено.");
+      sendJson(response, 200, { success: true, run: esp.folderCheck.status(String(url.searchParams.get("folder") || "")), deep: esp.folderCheck.deepAvailable() });
+      return true;
+    }
     if (method === "GET" && path === "/leads") {
       const entries = await allEntries();
       const page = leadPage(esp.leads, {
@@ -494,6 +499,33 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
         const ids = (Array.isArray(body.ids) ? body.ids : []).map(String);
         if (!ids.length) return badRequest(sendJson, response, "Кого прибрати?");
         sendJson(response, 200, { success: true, ...(await esp.leads.removeLeads(ids)) });
+        return true;
+      }
+      // CRM folders (власник 16.10): people picked on a folder's page — or the
+      // whole folder, or all a search finds there — into another CRM folder,
+      // new or existing; and a folder's addresses checked in the background.
+      if (method === "POST" && path === "/leads/crm/folder") {
+        if (!esp.crmLeads?.configured()) return badRequest(sendJson, response, "CRM не підключено.");
+        const fromFolderId = String(body.fromFolderId || "");
+        const ids = body.all
+          ? await esp.crmLeads.idsInFolder(fromFolderId, String(body.q || ""))
+          : (Array.isArray(body.ids) ? body.ids : []).map(String).map((id) => id.replace(/^crm:/, ""));
+        try {
+          const result = await esp.crmLeads.addToFolder({ ids, folderId: String(body.folderId || ""), name: String(body.name || ""), fromFolderId });
+          await logged("crm_folder_filled", { folderId: result.folder.id, added: result.added });
+          sendJson(response, 200, { success: true, ...result });
+        } catch (error) {
+          sendJson(response, error.status || 502, { success: false, error: error.status ? error.message : `CRM не відповіла: ${error.message}` });
+        }
+        return true;
+      }
+      if (method === "POST" && path === "/leads/crm/check") {
+        if (!esp.folderCheck) return badRequest(sendJson, response, "Перевірку папок на цьому сервері не підключено.");
+        const folderId = String(body.folderId || "");
+        if (!/^[0-9a-f-]{36}$/i.test(folderId)) return badRequest(sendJson, response, "Такої папки CRM немає.");
+        const run = body.stop ? esp.folderCheck.stop(folderId) : esp.folderCheck.start(folderId);
+        if (!body.stop) await logged("crm_folder_check", { folderId, deep: run?.deep || false });
+        sendJson(response, 200, { success: true, run, deep: esp.folderCheck.deepAvailable() });
         return true;
       }
       if (method === "POST" && path === "/leads/to-campaign") {

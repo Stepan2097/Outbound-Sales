@@ -128,6 +128,11 @@ class Query {
     return this;
   }
 
+  gt(column, value) {
+    this.params.append(column, `gt.${filterValue(value)}`);
+    return this;
+  }
+
   gte(column, value) {
     this.params.append(column, `gte.${filterValue(value)}`);
     return this;
