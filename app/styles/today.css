@@ -181,6 +181,10 @@
 .today-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .today-hint { color: var(--muted); font-size: 12px; }
 
+.today-status { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.today-status label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+.today-status select { width: auto; min-height: 32px; }
+
 .today-move {
   display: flex;
   flex-wrap: wrap;

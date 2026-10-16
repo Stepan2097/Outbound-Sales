@@ -13,13 +13,14 @@ import { acceptedRows, firstMarks } from "../warmup/first-messages.mjs";
 import { INVITE_ACCEPTED } from "../warmup/invites.mjs";
 import { accountName } from "../warmup/activities.mjs";
 import { acceptOpenDialogs, openDialogs, suggestOpenDialogs } from "./open-dialogs.mjs";
+import { CLOSING, EXIT_REASONS, LEAD_STATUSES, ORIGIN, statusPatch } from "./statuses.mjs";
 import {
   PING_QUEUE, REASONS, blockOf, clearSuperseded, compareItems, dayIn, desiredPing, manualDueDay, markSuperseded,
   newContactsAllowed, parseTaskMarks, planPingChanges, reasonOfKey, taskDescription, taskReason, zonedIso
 } from "./pings.mjs";
 
 const TASK_COLUMNS = "id,title,description,contact_id,owner_id,assigned_to,due_date,completed,status,task_type,queue,created_at,updated_at";
-const CONTACT_COLUMNS = "id,name,position,company,owner_id,linkedin,country,lead_status";
+const CONTACT_COLUMNS = "id,name,position,company,owner_id,linkedin,country,lead_status,exit_reason";
 /** Статус CRM «Не відповідає» — після останнього кроку кампанії й тиші (етап 3/6). */
 export const NO_REPLY_STATUS = "no_response";
 const STILL_TRYING = ["new", "in_progress"];
@@ -213,7 +214,7 @@ async function applyAction(action, { contactId, contact, owner, nowIso }) {
       status: "todo",
       task_type: "To-do",
       priority: "None",
-      queue: PING_QUEUE,
+      queue: PING_QUEUE, origin: ORIGIN,
       updated_at: nowIso
     }).rows();
     return "created";
@@ -275,7 +276,7 @@ export async function reconcilePings({ now = new Date() } = {}) {
       const contact = contacts.get(contactId);
       if (!next.key && next.noReplyDue && state?.campaignId && next.noReplyDue <= todayDay && STILL_TRYING.includes(contact?.lead_status || "new")) {
         try {
-          await crm.from("contacts").update({ lead_status: NO_REPLY_STATUS }).eq("id", contactId).rows();
+          await crm.from("contacts").update({ lead_status: NO_REPLY_STATUS, exit_reason: "no_reply" }).eq("id", contactId).rows();
           stats.noReply += 1;
         } catch (error) {
           stats.failed += 1;
@@ -372,6 +373,8 @@ function itemOf(task, { contact, state, today, now, emails, accounts = new Map()
     reassigned: state?.reassigned ? { from: state.reassigned.from, to: state.reassigned.to, at: state.reassigned.at } : null,
     preview: thread?.lastMessage ? { direction: thread.lastMessage.direction, body: String(thread.lastMessage.body || "").slice(0, 200), at: thread.lastMessage.at } : null,
     queued: (state?.pending || []).filter((item) => item.state === "waiting").length,
+    status: contact?.lead_status || null,
+    exitReason: contact?.exit_reason || null,
     assignee: emails.get(task.assigned_to) || null,
     crmUrl: contactId ? `${CRM_CONTACT_URL}/contacts/${contactId}` : null
   };
@@ -396,6 +399,7 @@ export async function todayList({ viewerId, scope = "mine", now = new Date() }) 
   return {
     configured: true, today, scope, blocks, later,
     newContactsAllowed: newContactsAllowed(blocks),
+    statuses: LEAD_STATUSES, exitReasons: EXIT_REASONS, closing: [...CLOSING],
     reconciledAt: lastStats?.at || null
   };
 }
@@ -503,9 +507,52 @@ export async function setManualPing({ pingId = "", contactId = "", when, call = 
     description: taskDescription(reason, `manual:${nowIso}`),
     owner_id: assignee, assigned_to: assignee, contact_id: targetContact,
     due_date: zonedIso(dueDay), completed: false, status: "todo",
-    task_type: call ? "Call" : "To-do", priority: "None", queue: PING_QUEUE, updated_at: nowIso
+    task_type: call ? "Call" : "To-do", priority: "None", queue: PING_QUEUE, origin: ORIGIN, updated_at: nowIso
   }).select("id").rows();
   return { pingId: made?.id || null, dueDay };
+}
+
+/**
+ * Статус контакту з «Сьогодні» — у CRM, тож CRM бачить його одразу (етап 5/6).
+ * Вихідний статус закриває відкриті пінги контакту; «Дзвінок» — угода з міткою
+ * Outbound, якщо в контакту ще немає жодної.
+ */
+export async function setContactStatus({ contactId, status, exitReason = "", viewer, now = new Date() }) {
+  const target = String(contactId || "");
+  if (!target) throw refuse("Потрібен контакт.", 400);
+  const checked = statusPatch(status, exitReason);
+  if (checked.error) throw refuse(checked.error, 400);
+  const [open] = await crm.from("tasks").select("id,assigned_to").eq("queue", PING_QUEUE).eq("contact_id", target).eq("completed", false).limit(1).rows();
+  if (open && !mayTouch(open, viewer)) throw refuse("Це контакт іншого лідгена.", 403);
+  const [contact] = await crm.from("contacts").select("id,name,company,lead_status").eq("id", target).limit(1).rows();
+  if (!contact) throw refuse("Контакт не знайдено.", 404);
+  const nowIso = now.toISOString();
+  if (contact.lead_status !== checked.patch.lead_status || checked.patch.exit_reason) {
+    await crm.from("contacts").update(checked.patch).eq("id", target).rows();
+  }
+  let closed = 0;
+  if (CLOSING.has(status)) {
+    const tasks = await crm.from("tasks").select("id,description").eq("queue", PING_QUEUE).eq("contact_id", target).eq("completed", false).rows();
+    for (const task of tasks) {
+      await crm.from("tasks").update({ completed: true, status: "done", updated_at: nowIso, description: `${task.description || ""}\nЗакрито: статус «${LEAD_STATUSES.find(([key]) => key === status)?.[1] || status}».`.trim() }).eq("id", task.id).rows();
+      closed += 1;
+    }
+  }
+  let dealId = null;
+  if (status === "booked_call") {
+    const links = await crm.from("deal_contacts").select("deal_id").eq("contact_id", target).limit(1).rows();
+    if (!links.length) {
+      const [deal] = await crm.from("deals").insert({
+        deal_name: `${contact.company || contact.name || "Контакт"} — дзвінок`, stage: "meeting", pipeline: "sales",
+        owner_id: viewer.id || null, origin: ORIGIN
+      }).select("id").rows();
+      if (deal?.id) {
+        await crm.from("deal_contacts").insert({ deal_id: deal.id, contact_id: target }).rows();
+        dealId = deal.id;
+      }
+    }
+  }
+  return { status: checked.patch.lead_status, exitReason: checked.patch.exit_reason, closedPings: closed, dealId };
 }
 
 /* ── HTTP ────────────────────────────────────────────────────────────────── */
@@ -589,6 +636,11 @@ export async function handleTodayApi({ request, response, url, sendJson, readJso
         sendJson(response, 200, result);
         return true;
       }
+    }
+    if (request.method === "POST" && path === "/api/today/status") {
+      const body = await readJson(request);
+      sendJson(response, 200, await setContactStatus({ contactId: body?.contactId, status: body?.status, exitReason: body?.exitReason || "", viewer }));
+      return true;
     }
     if (request.method === "POST" && path === "/api/today/refresh") {
       sendJson(response, 200, { reconciled: await reconcilePings() });

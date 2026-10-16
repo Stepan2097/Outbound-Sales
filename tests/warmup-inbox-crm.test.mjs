@@ -300,6 +300,7 @@ test("both sides of a conversation reach the contact, each message once however 
   assert.match(rows.activities[1].content, /Відповідь на акаунт chloe@example\.com · 2026-09-20 11:30 UTC\nПривіт! Розкажіть більше\./);
   // Їхня відповідь у CRM — вхідна, наше — вихідне (до 16.10 обидва ставали outgoing).
   assert.deepEqual(rows.activities.map((row) => row.direction), ["outgoing", "incoming"]);
+  assert.ok(rows.activities.every((row) => row.origin === "outbound"), "мітка джерела — Outbound (етап 5/6)");
 
   // Tomorrow the agent reads the same thread again, with one new message in it.
   const second = await thread([THEIRS_AGAIN, THEIRS, OURS]);

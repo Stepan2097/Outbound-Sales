@@ -199,3 +199,15 @@ test("дотики читаються сторінками: CRM віддає д�
   assert.equal(rows.length, 2345);
   assert.deepEqual(seen, [0, 1000, 2000]);
 });
+
+// Етап 5/6: статуси й причини виходу — спільні з CRM.
+import { statusPatch } from "../triage/statuses.mjs";
+
+test("статус і причина виходу: вихідний статус — з причиною із закритого списку; інший — причину знімає", () => {
+  assert.deepEqual(statusPatch("qualification").patch, { lead_status: "qualification", exit_reason: null });
+  assert.deepEqual(statusPatch("not_interested", "traffic_only").patch, { lead_status: "not_interested", exit_reason: "traffic_only" });
+  assert.deepEqual(statusPatch("not_icp").patch, { lead_status: "not_icp", exit_reason: "not_icp" }, "«Не ICP» має свою причину за замовчуванням");
+  assert.match(statusPatch("not_interested").error, /причину/);
+  assert.match(statusPatch("not_interested", "bogus").error, /причину/);
+  assert.match(statusPatch("won").error, /Невідомий/);
+});

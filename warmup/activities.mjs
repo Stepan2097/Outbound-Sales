@@ -115,7 +115,9 @@ export async function copyToCrm({ accountId, contactId, entries, error = null, n
           content: clampContent(entry.content),
           // Їхнє повідомлення — вхідне. Без цього колонка брала своє «outgoing», і
           // відповіді лідів у CRM рахувались як наші (виправлено 16.10, етап 1/6).
-          direction: entry.direction === "incoming" ? "incoming" : "outgoing"
+          direction: entry.direction === "incoming" ? "incoming" : "outgoing",
+          // Мітка джерела (етап 5/6): цей рядок записав Outbound Sales, а не людина в CRM.
+          origin: "outbound"
           // `user_id` is left to the column's own default, which a service-role
           // insert resolves to null. That is right: nobody on the sales team
           // wrote this, and attributing it to whoever holds the key would be a

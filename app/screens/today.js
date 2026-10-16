@@ -348,6 +348,7 @@ function workHtml() {
           <span class="today-hint">Піде з цього акаунта в найближчу сесію. Наступний пінг — через 3 робочі дні.</span>
         </div>
       </div>` : item.channel === "moved" ? "" : `<p class="today-note">Переписки з цим контактом тут немає — відкрийте його в CRM або перенесіть пінг.</p>`}
+    ${statusHtml(item)}
     <div class="today-move">
       <span>Перенести:</span>
       <button type="button" data-today="move" data-when="+1">+1 день</button>
@@ -357,6 +358,37 @@ function workHtml() {
       <button type="button" data-today="move-date">На дату</button>
       <button type="button" data-today="call"><i data-lucide="phone"></i><span>Дзвінок на дату</span></button>
     </div>`;
+}
+
+/** Статус і причина виходу — ті самі, що в CRM, і записуються в CRM (етап 5/6). */
+function statusHtml(item) {
+  const data = today.data;
+  if (!data?.statuses || !item.contactId) return "";
+  const current = today.statusDraft?.pingId === item.pingId ? today.statusDraft : { status: item.status || "new", exitReason: item.exitReason || "" };
+  const closing = (data.closing || []).includes(current.status);
+  return `<div class="today-status">
+    <label><span>Статус у CRM</span><select data-today-status="status">${data.statuses.map(([key, label]) => `<option value="${escapeAttr(key)}"${key === current.status ? " selected" : ""}>${escapeHtml(label)}</option>`).join("")}</select></label>
+    ${closing ? `<label><span>Причина виходу</span><select data-today-status="exit"><option value="">— оберіть —</option>${data.exitReasons.map(([key, label]) => `<option value="${escapeAttr(key)}"${key === current.exitReason ? " selected" : ""}>${escapeHtml(label)}</option>`).join("")}</select></label>` : ""}
+    <button type="button" data-today="status-save" ${current.status === (item.status || "new") && (current.exitReason || "") === (item.exitReason || "") ? "disabled" : ""}>Зберегти статус</button>
+    ${closing ? `<span class="today-hint">Вихід із воронки — пінги цього контакту закриються.</span>` : current.status === "booked_call" ? `<span class="today-hint">«Дзвінок» — у CRM з'явиться угода, якщо її ще немає.</span>` : ""}
+  </div>`;
+}
+
+async function saveStatus() {
+  const item = today.detail?.item;
+  const draft = today.statusDraft;
+  if (!item || !draft) return;
+  try {
+    const result = await api("/api/today/status", { method: "POST", body: JSON.stringify({ contactId: item.contactId, status: draft.status, exitReason: draft.exitReason }) });
+    const label = today.data.statuses.find(([key]) => key === result.status)?.[1] || result.status;
+    today.statusDraft = null;
+    const name = item.name;
+    await openToday({ keepSelection: true });
+    say(`${name}: статус «${label}» у CRM${result.closedPings ? `, пінгів закрито: ${result.closedPings}` : ""}${result.dealId ? ", угоду створено" : ""}.`);
+  } catch (error) {
+    if (error?.name !== "AbortError") say(error.message || "Не вдалося змінити статус.", "is-error");
+  }
+  render();
 }
 
 function render() {
@@ -457,6 +489,7 @@ document.addEventListener("click", (event) => {
     return render();
   }
   if (act === "import-accept") return void acceptImports();
+  if (act === "status-save") return void saveStatus();
   if (act === "rewrite") return void writeDraft(true);
   if (act === "send") return void send();
   if (act === "move") return void movePing(target.dataset.when);
@@ -481,5 +514,14 @@ document.addEventListener("change", (event) => {
     else { today.importPick.delete(id); today.importPick.add(`x:${id}`); }
   }
   if (kind === "reason" || kind === "due") today.importEdits.set(id, { ...(today.importEdits.get(id) || {}), [kind]: field.value });
+  render();
+});
+
+document.addEventListener("change", (event) => {
+  const field = event.target.closest?.("#todayRoot [data-today-status]");
+  const item = today.detail?.item;
+  if (!field || !item) return;
+  const base = today.statusDraft?.pingId === item.pingId ? today.statusDraft : { pingId: item.pingId, status: item.status || "new", exitReason: item.exitReason || "" };
+  today.statusDraft = { ...base, [field.dataset.todayStatus === "exit" ? "exitReason" : "status"]: field.value };
   render();
 });

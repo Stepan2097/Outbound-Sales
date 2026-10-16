@@ -83,6 +83,7 @@ export async function reassignBlockedAccount({ account, campaigns, movedBy = "" 
       await crm.from("activities").insert({
         contact_id: row.crm_contact_id,
         type: "note",
+        origin: "outbound",
         content: `Outbound: акаунт ${fromName} заблоковано в LinkedIn — людину перепризначено на ${toName}. Новий запит у друзі піде з ${toName} у межах його лімітів; переписка вище лишається.`
       }).rows().catch((error) => console.warn(`[reassign] CRM note for ${row.crm_contact_id}: ${error.message}`));
     }

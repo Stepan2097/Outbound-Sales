@@ -296,3 +296,37 @@ test("перепризначений після бану: пінг лишаєт�
   assert.deepEqual(detail.messages.map((message) => message.body), ["Hi, tell me more"], "переписка лишається історією");
   assert.notEqual(detail.item.block, "replies", "відповісти зі старого акаунта нема куди — пінг за датою");
 });
+
+import { setContactStatus } from "../triage/today.mjs";
+
+test("статус із «Сьогодні» — у CRM: вихід закриває пінги й ставить причину; «Дзвінок» — одна угода з міткою Outbound; пінг, закритий у CRM, зникає з «Сьогодні»", async () => {
+  rows.deals = [];
+  rows.deal_contacts = [];
+  await reconcilePings();
+  const [ping] = openOf("c1");
+  assert.equal(ping.origin, "outbound", "пінг у CRM — з міткою джерела");
+
+  const call = await setContactStatus({ contactId: "c1", status: "booked_call", viewer: BOHDAN });
+  assert.equal(rows.contacts.find((row) => row.id === "c1").lead_status, "booked_call");
+  assert.ok(call.dealId);
+  assert.equal(rows.deals[0].origin, "outbound");
+  assert.deepEqual(rows.deal_contacts.map((row) => row.contact_id), ["c1"]);
+  await setContactStatus({ contactId: "c1", status: "booked_call", viewer: BOHDAN });
+  assert.equal(rows.deals.length, 1, "друга угода не створюється");
+
+  await assert.rejects(setContactStatus({ contactId: "c1", status: "not_interested", exitReason: "other", viewer: { id: "u-other", role: "seller" } }), /іншого лідгена/);
+  const out = await setContactStatus({ contactId: "c1", status: "not_interested", exitReason: "traffic_only", viewer: BOHDAN });
+  assert.equal(out.closedPings, 1);
+  const contact = rows.contacts.find((row) => row.id === "c1");
+  assert.deepEqual([contact.lead_status, contact.exit_reason], ["not_interested", "traffic_only"]);
+  assert.equal(openOf("c1").length, 0);
+
+  // Закрито в самій CRM — у «Сьогодні» зникає (Outbound читає задачі CRM наживо).
+  rows.contacts.find((row) => row.id === "c1").lead_status = "in_progress";
+  rows.wl_events.push(message("in", "Actually, let's talk", 1));
+  await reconcilePings();
+  const [fresh] = openOf("c1");
+  assert.ok((await todayList({ viewerId: "u-bohdan" })).blocks.replies.some((item) => item.pingId === fresh.id));
+  fresh.completed = true;
+  assert.equal((await todayList({ viewerId: "u-bohdan" })).blocks.replies.some((item) => item.pingId === fresh.id), false);
+});

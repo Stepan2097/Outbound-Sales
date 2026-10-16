@@ -227,7 +227,7 @@ export async function acceptOpenDialogs({ items, assignee, now = new Date() }) {
       owner_id: assignee, assigned_to: assignee, contact_id: contactId,
       due_date: zonedIso(item.due), completed: false, status: "todo",
       task_type: item.reason === "call" ? "Call" : "To-do", priority: item.priority === "high" ? "High" : "None",
-      queue: PING_QUEUE, updated_at: nowIso
+      queue: PING_QUEUE, origin: "outbound", updated_at: nowIso
     }).rows();
     created += 1;
   }
