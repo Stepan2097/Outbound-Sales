@@ -194,8 +194,8 @@ export function renderEspRegistry() {
       <summary><h3 class="esp-title">Відправники · ${senders.length}</h3></summary>
       <div class="esp-list">${senderRows}</div>
     </details>
-    ${forms}
-    ${watch}
+    ${forms ? `<details class="esp-fold" data-esp-fold="add"${espFoldOpen.has("add") ? " open" : ""}><summary><h3 class="esp-title">Додати домен або відправника</h3></summary>${forms}</details>` : ""}
+    ${watch ? `<details class="esp-fold" data-esp-fold="watch"${espFoldOpen.has("watch") ? " open" : ""}><summary><h3 class="esp-title">Моніторинг DNS і блоклистів</h3></summary>${watch}</details>` : ""}
     ${canEdit ? `<div class="esp-foot"><button class="text-button" type="button" data-esp-verify><i data-lucide="shield-check"></i><span>Перевірити цілість журналу</span></button>${verify}</div>` : ""}`;
   refreshIcons();
 }
