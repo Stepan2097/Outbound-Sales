@@ -769,3 +769,37 @@ test("вікно на сторінках — за Києвом, хоч серв�
     if (previous === undefined) delete process.env.WARMUP_LABEL_ZONE; else process.env.WARMUP_LABEL_ZONE = previous;
   }
 });
+
+// ── вхідні: усі діалоги за місяць, «відповіли» / «не відповіли» (власник 16.10) ──
+
+test("місяць у вхідних: план каже, з якої дати дочитувати; звіт агента зберігає, докуди дійшов, і «дочитано» закриває", async () => {
+  const plan = await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" });
+  const backfill = plan.payload.inbox.backfill;
+  assert.ok(backfill, "ще не дочитано — є що дочитувати");
+  const days = (Date.now() - Date.parse(backfill.from)) / 86_400_000;
+  assert.ok(days > 29 && days < 31, `${days} днів`);
+  assert.equal(backfill.before, null);
+  assert.equal(backfill.maxThreads, 30);
+
+  const done = await call({ method: "POST", path: "/api/warmup/agent", body: { accountId: "acc-1", action: "inbox.done", threadsSeen: 12, backfill: { from: backfill.from, before: "2026-10-01T10:00:00Z", complete: false, read: 10 } } });
+  assert.equal(done.status, 200);
+  const event = written.find((row) => row.table === "wl_events" && row.body?.type === "inbox.backfill");
+  assert.equal(event.body.meta.before, "2026-10-01T10:00:00.000Z");
+  assert.equal(event.body.meta.complete, false);
+
+  rows.wl_events = [{ id: "b1", account_id: "acc-1", type: "inbox.backfill", created_at: new Date().toISOString(), meta: { from: backfill.from, before: "2026-10-01T10:00:00.000Z", complete: false } }];
+  const next = await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" });
+  assert.equal(next.payload.inbox.backfill.before, "2026-10-01T10:00:00.000Z", "наступна сесія — звідти, де зупинились");
+  rows.wl_events = [{ id: "b2", account_id: "acc-1", type: "inbox.backfill", created_at: new Date().toISOString(), meta: { from: backfill.from, complete: true } }];
+  assert.equal((await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" })).payload.inbox.backfill, null, "дочитано — більше не просить");
+});
+
+test("розмова знає, чи людина хоч раз відповіла — для вкладок «Відповіли» / «Не відповіли»", async () => {
+  const { deriveThreads } = await import("../warmup/inbox.mjs");
+  const event = (id, type, threadKey) => ({ id, account_id: "acc", type, created_at: `2026-10-1${id}T10:00:00Z`, meta: { threadKey, body: `m${id}`, participant: { name: threadKey } } });
+  const threads = deriveThreads([event(1, "message.out", "ana"), event(2, "message.in", "ana"), event(3, "message.out", "bo")]);
+  assert.deepEqual(Object.fromEntries(threads.map((thread) => [thread.threadKey, thread.answered])), { ana: true, bo: false });
+  const page = (await import("node:fs")).readFileSync(new URL("../app/screens/inbox.js", import.meta.url), "utf8");
+  assert.match(page, /\["answered", "Відповіли"\], \["silent", "Не відповіли"\]/);
+  assert.match(page, /data-warmup-inbox-replied/);
+});

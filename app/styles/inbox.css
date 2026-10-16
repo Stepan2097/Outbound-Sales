@@ -752,3 +752,35 @@
 .inbox-chip.is-retired.is-active {
   border-style: solid;
 }
+
+/* «Усі · Відповіли · Не відповіли» над списком розмов (16.10). */
+.warmup-inbox-replied {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 2px 10px;
+}
+
+.warmup-inbox-replied button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 4px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.warmup-inbox-replied button b {
+  color: var(--ink);
+}
+
+.warmup-inbox-replied button.is-active {
+  border-color: var(--teal);
+  background: var(--teal-weak);
+  color: var(--ink);
+}

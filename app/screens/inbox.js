@@ -49,6 +49,11 @@ let inboxAccountFilter = null;
  * значенням, і «UA » ставало б «UA», а пробіл, який людина щойно набрала, зникав.
  */
 let inboxSearch = "";
+// «Відповіли» / «Не відповіли» (власник 16.10): усі розмови акаунта, або лише ті,
+// де людина хоч раз написала, або ті, де писали тільки ми.
+let inboxReplied = "all";
+const INBOX_REPLIED = [["all", "Усі"], ["answered", "Відповіли"], ["silent", "Не відповіли"]];
+const repliedTest = { all: () => true, answered: (thread) => thread.answered !== false, silent: (thread) => thread.answered === false };
 
 // A newly loaded dataset changes the array identity. Sorting and normalising
 // once per dataset keeps every keypress proportional to this account's rows,
@@ -335,8 +340,14 @@ function warmupInboxEmptyHtml(sync) {
  */
 function warmupInboxRows() {
   const terms = inboxSearchTerms();
-  const rows = warmupInboxIndex().accounts.get(warmupInboxAccountId()) || [];
+  const rows = (warmupInboxIndex().accounts.get(warmupInboxAccountId()) || []).filter(repliedTest[inboxReplied] || repliedTest.all);
   return terms.length ? rows.filter((thread) => warmupInboxMatches(thread, terms)) : rows;
+}
+
+/** The three tabs over the list, each with how many of this account's conversations it holds. */
+function warmupInboxRepliedHtml() {
+  const all = warmupInboxIndex().accounts.get(warmupInboxAccountId()) || [];
+  return `<div class="warmup-inbox-replied" role="tablist">${INBOX_REPLIED.map(([key, label]) => `<button type="button" role="tab" class="${inboxReplied === key ? "is-active" : ""}" aria-selected="${inboxReplied === key}" data-warmup-inbox-replied="${key}">${label} <b>${all.filter(repliedTest[key]).length}</b></button>`).join("")}</div>`;
 }
 
 /**
@@ -679,10 +690,12 @@ function renderWarmupInboxList() {
   const inbox = warmupState.inbox;
   if (!inbox.ready || !inbox.available || inbox.error || !inbox.threads.length) return;
   const rows = warmupInboxRows();
-  const filterLine = warmupInboxFilterHtml(rows.length);
+  const filterLine = `${warmupInboxRepliedHtml()}${warmupInboxFilterHtml(rows.length)}`;
   const html = rows.length
     ? `${filterLine}<div class="warmup-threads">${rows.map((thread) => warmupThreadRowHtml(thread)).join("")}</div>`
-    : `${filterLine}${inboxSearchTerms().length
+    : `${filterLine}${inboxReplied !== "all" && !inboxSearchTerms().length
+      ? `<div class="warmup-inbox-note is-calm"><strong>${inboxReplied === "answered" ? "Тут ще ніхто не відповів." : "Усі, кому писали, відповіли."}</strong></div>`
+      : inboxSearchTerms().length
       ? '<div class="warmup-inbox-note is-calm"><strong>За цим запитом нічого не знайшлось.</strong><span>Шукається в імені, посаді й тексті останньої відповіді.</span></div>'
       : '<div class="warmup-inbox-note is-calm"><strong>Від цього акаунта відповідей немає.</strong></div>'}`;
   setInboxMarkup(body, html);
@@ -1263,6 +1276,12 @@ document.getElementById("warmupInboxAccounts")?.addEventListener("click", (event
 document.getElementById("warmupInboxLayout")?.addEventListener("click", (event) => {
   if (event.target.closest("[data-warmup-inbox-back]")) {
     closeWarmupThread();
+    return;
+  }
+  const replied = event.target.closest("[data-warmup-inbox-replied]");
+  if (replied) {
+    inboxReplied = replied.dataset.warmupInboxReplied;
+    renderWarmupInboxList();
     return;
   }
   if (event.target.closest("[data-warmup-inbox-reset]")) {

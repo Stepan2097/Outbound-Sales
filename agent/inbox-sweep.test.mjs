@@ -88,7 +88,7 @@ function stubPortal(overrides = {}) {
         ? overrides.thread(payload)
         : { success: true, stored: payload.messages.length, skipped: 0, invalid: 0, undated: 0 };
     },
-    async inboxDone(threadsSeen) { calls.done.push(threadsSeen); return { success: true }; },
+    async inboxDone(threadsSeen, backfill = null) { calls.done.push(threadsSeen); calls.backfill = backfill; return { success: true }; },
     async log(type, message, meta, level) { calls.logs.push({ type, message, meta, level }); return { success: true }; },
   };
 }
@@ -145,6 +145,29 @@ describe('a sweep of the messenger', () => {
     // Yesterday morning: the 2h and Yesterday rows are newer, the 3d one is not.
     await sweep(portal, { since: NOW - 30 * 3600_000 });
     assert.deepEqual(portal.calls.threads.map((p) => p.threadKey), [MARTA, DMYTRO]);
+  });
+
+  // 16.10, the owner: «підтягнуло всі діалоги за останній місяць».
+  test('reads back the past month after the fresh ones, marks them as such, and says how far it got', async (t) => {
+    if (!page) return t.skip('Chrome не знайдено');
+    inboxFixture = 'messaging-list.html';
+    const portal = stubPortal();
+    const result = await sweep(portal, { since: NOW - 30 * 3600_000, backfill: { from: NOW - 30 * 86_400_000, before: null, maxThreads: 10 } });
+    const keys = portal.calls.threads.map((p) => p.threadKey);
+    assert.deepEqual(keys.slice(0, 2), [MARTA, DMYTRO], 'спершу свіжі');
+    assert.ok(keys.length > 2, 'потім старші за останню синхронізацію');
+    assert.ok(portal.calls.threads.slice(2).every((p) => p.backfill === true), 'старі позначено як дочитування');
+    assert.ok(portal.calls.threads.slice(0, 2).every((p) => !p.backfill), 'свіжі — ні');
+    assert.equal(portal.calls.backfill.complete, true, 'список скінчився — місяць дочитано');
+    assert.equal(result.threadsSeen, keys.length);
+  });
+
+  test('without a month to read back, nothing changes and no backfill is reported', async (t) => {
+    if (!page) return t.skip('Chrome не знайдено');
+    inboxFixture = 'messaging-list.html';
+    const portal = stubPortal();
+    await sweep(portal, { since: NOW - 30 * 3600_000 });
+    assert.equal(portal.calls.backfill, null);
   });
 
   test('an empty inbox is reported as empty, and not as a failure', async (t) => {

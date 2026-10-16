@@ -456,6 +456,11 @@ log(`сесію відкрито (${session.sessionId}${session.resumed ? ', п�
         shot,
         since: Number.isFinite(since) ? since : null,
         limit: Number(plan.inbox?.maxThreads) > 0 ? Number(plan.inbox.maxThreads) : 20,
+        backfill: plan.inbox?.backfill?.from ? {
+          from: Date.parse(plan.inbox.backfill.from),
+          before: plan.inbox.backfill.before ? Date.parse(plan.inbox.backfill.before) : null,
+          maxThreads: Number(plan.inbox.backfill.maxThreads) || 30
+        } : null,
       });
     } catch (e) {
       // Its own catch: the visit already happened and the quota work already

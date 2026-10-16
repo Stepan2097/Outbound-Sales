@@ -79,7 +79,7 @@ export class Portal {
   inviteSent(outreachId, outcome, leaseId = this.leaseId) { return this.#post({ action: 'invite.sent', outreachId, outcome, leaseId }); }
   invitesChecked(results) { return this.#post({ action: 'invites.checked', results }); }
   inboxThread(thread) { return this.#post({ action: 'inbox.thread', ...thread }); }
-  inboxDone(threadsSeen) { return this.#post({ action: 'inbox.done', threadsSeen }); }
+  inboxDone(threadsSeen, backfill = null) { return this.#post({ action: 'inbox.done', threadsSeen, ...(backfill ? { backfill } : {}) }); }
   /** All of the account's LinkedIn connections, in parts; `first` starts a new read. */
   networkBatch(people, first = false) { return this.#post({ action: 'network.batch', people, first }); }
   networkDone({ total = null, complete = false } = {}) { return this.#post({ action: 'network.done', total, complete }); }

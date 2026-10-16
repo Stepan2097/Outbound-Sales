@@ -187,6 +187,19 @@ async function openConversation(page, row, origin, pace = 1) {
  * stranger replied, which moves an outreach row to `connected` and writes an
  * activity into the CRM that a seller reads as a lead answering.
  */
+/** Down the conversation list, the way somebody scrolling back through their messages would. */
+async function scrollConversationList(page, pace) {
+  const last = page.locator('a[href*="/messaging/thread/"]').last();
+  await last.scrollIntoViewIfNeeded().catch(() => {});
+  const box = await last.boundingBox().catch(() => null);
+  if (!box) return;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 6 });
+  for (let step = 0; step < 4; step += 1) {
+    await page.mouse.wheel(0, 700);
+    await sleep(Math.max(20, 250 * pace));
+  }
+}
+
 export async function syncInbox(page, {
   portal,
   self,
@@ -195,6 +208,9 @@ export async function syncInbox(page, {
   shot = async () => {},
   since = null,
   limit = 20,
+  // The past month, read back a portion a session (owner 16.10): `{ from, before, maxThreads }`
+  // in ms — conversations from `from` up to `before` (or up to what the fresh read covers).
+  backfill = null,
   nowMs = Date.now(),
   // Where the messenger lives. A parameter with one real value, so that the
   // sweep — the polling, the clicking, the order things happen in — can be run
@@ -238,7 +254,27 @@ export async function syncInbox(page, {
     return result;
   }
 
-  const raw = await page.evaluate(harvestConversations).catch((e) => ({ rows: [], notes: [`читання списку впало: ${e.message}`], chars: 0 }));
+  let raw = await page.evaluate(harvestConversations).catch((e) => ({ rows: [], notes: [`читання списку впало: ${e.message}`], chars: 0 }));
+  // Reading back the month: the list loads further down as it is scrolled, so
+  // it is scrolled until it reaches the month's start, stops growing (the end of
+  // all conversations) or holds 300 rows.
+  let listEnded = false;
+  if (backfill?.from) {
+    let stalled = 0;
+    for (let round = 0; round < 40; round += 1) {
+      const now = (raw.rows ?? []).map((r) => conversationRow(r, nowMs));
+      const oldest = Math.min(...now.map((r) => r.at ?? Infinity));
+      if (now.length >= 300 || (Number.isFinite(oldest) && oldest < backfill.from)) break;
+      await guard();
+      await scrollConversationList(page, pace);
+      await sleep(rand(1500, 2800) * pace);
+      const next = await page.evaluate(harvestConversations).catch(() => null);
+      if (!next) break;
+      stalled = (next.rows ?? []).length > now.length ? 0 : stalled + 1;
+      raw = next;
+      if (stalled >= 3) { listEnded = true; break; }
+    }
+  }
   result.notes.push(...(raw.notes ?? []));
   const rows = (raw.rows ?? []).map((r) => conversationRow(r, nowMs));
   result.listed = rows.length;
@@ -253,8 +289,22 @@ export async function syncInbox(page, {
     log(`  ⚠️ жодної розмови, але на сторінці ${raw.times ?? 0} міток часу і ${raw.chars ?? 0} символів — схоже, селектори протухли`);
   }
 
-  const { picked, skipped } = pickConversations(rows, { since, limit });
-  log(`  розмов у списку: ${rows.length}, беру ${picked.length}${skipped.length ? `, пропускаю ${skipped.length}` : ''}`);
+  const fresh = pickConversations(rows, { since, limit });
+  const { skipped } = fresh;
+  // The month's older ones, after the fresh: not already picked, dated, inside
+  // [from, before) — `before` is where the previous session stopped.
+  const backlog = new Set();
+  let backlogMore = false;
+  if (backfill?.from) {
+    const chosen = new Set(fresh.picked.map((row) => row.threadKey ?? row.rowMark));
+    const ceiling = backfill.before ?? nowMs + 1;
+    const pool = rows.filter((row) => !chosen.has(row.threadKey ?? row.rowMark) && row.at != null && row.at >= backfill.from && row.at < ceiling);
+    for (const row of pool.slice(0, backfill.maxThreads ?? 30)) backlog.add(row);
+    backlogMore = pool.length > backlog.size;
+  }
+  const picked = [...fresh.picked, ...backlog];
+  let oldestRead = null;
+  log(`  розмов у списку: ${rows.length}, беру ${fresh.picked.length}${backlog.size ? ` + ${backlog.size} за минулий місяць` : ''}${skipped.length ? `, пропускаю ${skipped.length}` : ''}`);
 
   const opened = new Set();
   for (const row of picked) {
@@ -298,7 +348,7 @@ export async function syncInbox(page, {
       }
       result.notes.push(...built.notes.map((n) => `${threadKey}: ${n}`));
 
-      const res = await portal.inboxThread(built.payload);
+      const res = await portal.inboxThread(backlog.has(row) ? { ...built.payload, backfill: true } : built.payload);
       if (!res.success) {
         // "Unknown action" means this portal has no inbox — asking it nineteen
         // more times teaches nobody anything.
@@ -313,6 +363,7 @@ export async function syncInbox(page, {
       }
 
       result.threadsSeen += 1;
+      if (backlog.has(row) && row.at != null) oldestRead = Math.min(oldestRead ?? Infinity, row.at);
       result.stored += Number(res.stored ?? 0);
       result.skipped += Number(res.skipped ?? 0);
       result.invalid += Number(res.invalid ?? 0);
@@ -332,7 +383,22 @@ export async function syncInbox(page, {
   // looked, and a zero with a mark on it is a different fact from a zero
   // without one.
   await guard();
-  const done = await portal.inboxDone(result.threadsSeen).catch((e) => ({ success: false, error: e.message }));
+  // Read to the month's start, or to the end of all conversations, with
+  // nothing left over: done. Otherwise the next session goes on from the
+  // oldest one read here.
+  let backfillReport = null;
+  if (backfill?.from) {
+    const oldestListed = Math.min(...rows.map((row) => row.at ?? Infinity));
+    const complete = !backlogMore && (listEnded || rows.length >= 300
+      || (Number.isFinite(oldestListed) && oldestListed < backfill.from) || (!backlog.size && !rows.length));
+    backfillReport = {
+      from: new Date(backfill.from).toISOString(),
+      before: oldestRead != null ? new Date(oldestRead).toISOString() : (backfill.before ? new Date(backfill.before).toISOString() : null),
+      complete, read: [...backlog].length
+    };
+    log(`  минулий місяць: ${complete ? 'дочитано' : `прочитано до ${backfillReport.before ?? '—'}, решта — наступного разу`}`);
+  }
+  const done = await portal.inboxDone(result.threadsSeen, backfillReport).catch((e) => ({ success: false, error: e.message }));
   if (!done?.success) result.notes.push(`inbox.done: ${done?.error ?? 'не пройшов'}`);
 
   // `invalid` climbing is the portal's own view of the same rot: messages that

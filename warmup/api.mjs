@@ -1083,6 +1083,26 @@ async function outboxPlan(accountId) {
  * when it reads the inbox. Today's, if it has not happened yet, otherwise
  * tomorrow's — at the time that session is planned for.
  */
+// ── усі діалоги за останній місяць (власник 16.10: «наразі підтягує тільки
+// свіжі, зроби щоб підтягнуло всі діалоги за останній місяць») ──────────────
+const BACKFILL_TYPE = "inbox.backfill";
+const BACKFILL_DAYS = 30;
+const BACKFILL_PER_SESSION = 30;
+const BACKFILL_FRESH_MS = 48 * 3600_000;
+
+/** What is left of the month to read, or null when it was read to the end. */
+async function inboxBackfill(accountId) {
+  const rows = await anty.from("wl_events").select("meta,created_at").eq("account_id", accountId).eq("type", BACKFILL_TYPE)
+    .order("created_at", { ascending: false }).limit(1).rows().catch(() => []);
+  const last = rows[0]?.meta || null;
+  if (last?.complete) return null;
+  return {
+    from: last?.from || new Date(Date.now() - BACKFILL_DAYS * 86_400_000).toISOString(),
+    before: last?.before || null,
+    maxThreads: BACKFILL_PER_SESSION
+  };
+}
+
 async function replyGoesOut(account) {
   // Позачергова сесія (15.10): an approved message goes within minutes —
   // unless the account cannot be opened now or has used today's messages.
@@ -3369,7 +3389,9 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         inbox: {
           lastSyncedAt: await lastSyncedAt(account.id),
           maxThreads: paused ? 0 : MAX_THREADS_PER_RUN,
-          due: upkeep.inbox
+          due: upkeep.inbox,
+          // The past month's conversations, read back a portion a session until done (16.10).
+          backfill: paused ? null : await inboxBackfill(account.id)
         },
         // Усі друзі LinkedIn (14.10): прочитати сторінку «Контакти» в цій
         // сесії — раз на кілька днів або коли на сторінці акаунта натиснули
@@ -3742,6 +3764,12 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         const input = normalizeThreadInput(body);
         if (input.error) return fail(response, sendJson, 400, input.error);
         const result = await storeThread({ account, input, folderIds: runningFolderIds() });
+        // A conversation read back from the past month (16.10): its old replies
+        // are history, not news — the thread is not left «unread» for them.
+        if (body.backfill === true && result.inbound?.length) {
+          const fresh = result.inbound.some((message) => !message.sentAtIso || Date.now() - Date.parse(message.sentAt) < BACKFILL_FRESH_MS);
+          if (!fresh) await markRead(account.id, input.threadKey).catch(() => {});
+        }
         // A lead answered: the leadgens hear it now, not at their next look at «Вхідні».
         if (onReply && result.inbound?.length) {
           void Promise.resolve(onReply({ account, participant: input.participant, inbound: result.inbound, contactId: result.contactId, threadKey: input.threadKey }))
@@ -3761,6 +3789,15 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       // after the mark, so a CRM that is down cannot cost the account the one
       // row that says it was read today.
       if (action === "inbox.done") {
+        // How far back the month's read got (16.10): the next session goes on from there.
+        if (body.backfill && typeof body.backfill === "object") {
+          const until = (value) => (value && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : null);
+          await logEvent({
+            accountId: account.id, type: BACKFILL_TYPE,
+            message: body.backfill.complete ? "Inbox read back over the past month — done" : `Inbox read back over the past month — up to ${until(body.backfill.before) ?? "?"}`,
+            meta: { from: until(body.backfill.from), before: until(body.backfill.before), complete: body.backfill.complete === true, read: Number(body.backfill.read) || 0 }
+          });
+        }
         const seen = Number(body.threadsSeen);
         const threadsSeen = Number.isFinite(seen) ? Math.max(0, Math.trunc(seen)) : 0;
         const syncedAt = await markSynced(account.id, threadsSeen);

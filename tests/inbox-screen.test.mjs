@@ -17,7 +17,7 @@ import { loadMain, mainSource, declaration } from "./app-main-excerpt.mjs";
 const NAMES = [
   "escapeHtml", "escapeAttr", "uaPlural", "warmupCount",
   "WARMUP_OUTREACH_LABEL", "WARMUP_OUTREACH_TONE",
-  "WARMUP_SYNC_STALE_HOURS", "inboxAccountFilter", "inboxSearch", "inboxSearchTerms", "inboxPaneKey",
+  "WARMUP_SYNC_STALE_HOURS", "inboxAccountFilter", "inboxSearch", "inboxReplied", "INBOX_REPLIED", "repliedTest", "warmupInboxRepliedHtml", "inboxSearchTerms", "inboxPaneKey",
   "inboxIndexedThreads", "inboxIndexedAccounts", "inboxThreadIndex", "warmupInboxIndex",
   "inboxRenderedMarkup", "inboxLoadPromise", "inboxSessionVersion", "inboxOpenRequest", "setInboxMarkup", "warmupInboxNextHtml", "renderWarmupInboxNext", "renderWarmupInboxList",
   "warmupAgo", "warmupStamp", "warmupHoursSince", "WARMUP_PLACEHOLDERS", "warmupPlaceholder", "warmupBodyHtml",

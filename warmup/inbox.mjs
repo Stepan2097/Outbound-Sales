@@ -1367,6 +1367,8 @@ export function deriveThreads(events, { readMarks = new Map(), syncedAt = new Ma
       },
       trailingOut,
       trailingOutBodies,
+      // Whether the person ever wrote back here — «Відповіли» / «Не відповіли» on the Inbox screen (16.10).
+      answered: thread.messages.some((message) => message.direction === "in"),
       lastStoredAt,
       lastInboundStoredAt: thread.newestInboundStoredAt,
       messageCount: thread.messages.length,
