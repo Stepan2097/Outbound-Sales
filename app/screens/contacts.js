@@ -42,6 +42,14 @@ let contactFoldersLoaded = false;
 
 let contactFolderId = null;
 
+// Власний випадаючий список папок (власник 16.10: «отут кастомний дроп давн»):
+// відкритий він чи ні, що набрано в його пошуку, і який рядок підсвічено стрілками.
+let contactFolderMenuOpen = false;
+
+let contactFolderQuery = "";
+
+let contactFolderActive = 0;
+
 let crmContactRows = [];
 
 let contactTotal = 0;
@@ -152,6 +160,8 @@ function resetContacts() {
   contactFolders = [];
   contactFoldersLoaded = false;
   contactFolderId = null;
+  contactFolderMenuOpen = false;
+  contactFolderQuery = "";
   crmContactRows = [];
   contactTotal = 0;
   contactOffset = 0;
@@ -229,6 +239,90 @@ function contactLinkedInLink(value) {
  */
 const CONTACT_PAGE_SIZE = 25;
 
+const CONTACT_FOLDER_SYSTEM_HINT = {
+  friends: "усі друзі LinkedIn-акаунтів, яких не було в базі",
+  inbox: "ті, хто написав нашим LinkedIn-акаунтам"
+};
+
+/**
+ * Папки в тому порядку, в якому їх показує список: спершу ті, що наповнює сама
+ * система (друзі LinkedIn-акаунтів, вхідні розмови), далі решта, як віддала CRM
+ * (найбільші першими). Пошук — за частиною назви, без огляду на регістр.
+ */
+function contactFolderGroups() {
+  const terms = contactFolderQuery.toLowerCase().split(/\s+/).filter(Boolean);
+  const shown = contactFolders.filter((folder) => {
+    const name = String(folder.name || "").toLowerCase();
+    return terms.every((term) => name.includes(term));
+  });
+  const order = { friends: 0, inbox: 1 };
+  const system = shown.filter((folder) => folder.system).sort((left, right) => (order[left.system] ?? 9) - (order[right.system] ?? 9));
+  const rest = shown.filter((folder) => !folder.system);
+  return [
+    ...(system.length ? [{ label: "Наповнює система", folders: system }] : []),
+    ...(rest.length ? [{ label: system.length ? "Папки CRM" : "", folders: rest }] : [])
+  ];
+}
+
+function contactFolderOptionHtml(folder, index) {
+  const chosen = folder.id === contactFolderId;
+  const count = Number(folder.contactCount) || 0;
+  return `<button type="button" class="folder-picker-option ${chosen ? "is-chosen" : ""} ${index === contactFolderActive ? "is-active" : ""}" role="option" aria-selected="${chosen}" data-folder="${escapeAttr(folder.id)}">
+    <span class="folder-picker-option-main">
+      <span class="folder-picker-option-name">${escapeHtml(folder.name || "Без назви")}</span>
+      ${folder.system ? `<span class="folder-picker-option-hint">${escapeHtml(CONTACT_FOLDER_SYSTEM_HINT[folder.system] || "")}</span>` : ""}
+    </span>
+    <span class="folder-picker-option-count">${count.toLocaleString("uk-UA")}</span>
+  </button>`;
+}
+
+/** Кнопка з вибраною папкою і, коли відкрито, список із пошуком. */
+function renderContactFolderPicker() {
+  const button = document.getElementById("contactFolderButton");
+  const menu = document.getElementById("contactFolderMenu");
+  const options = document.getElementById("contactFolderOptions");
+  if (!button || !menu || !options) return;
+  const folder = contactFolders.find((item) => item.id === contactFolderId);
+  const count = Number(folder?.contactCount) || 0;
+  button.disabled = !contactFolders.length;
+  button.setAttribute?.("aria-expanded", String(contactFolderMenuOpen && contactFolders.length > 0));
+  button.innerHTML = folder
+    ? `<span class="folder-picker-name">${escapeHtml(folder.name || "Без назви")}</span><span class="folder-picker-count">${count.toLocaleString("uk-UA")} ${uaPlural(count, "контакт", "контакти", "контактів")}</span><i data-lucide="chevron-down"></i>`
+    : `<span class="folder-picker-name is-placeholder">${contactFolders.length ? "Вибери папку" : contactsLoading ? "Читаємо CRM..." : "Папок не знайдено"}</span><i data-lucide="chevron-down"></i>`;
+  menu.hidden = !(contactFolderMenuOpen && contactFolders.length);
+  if (menu.hidden) return;
+  const groups = contactFolderGroups();
+  const total = groups.reduce((sum, group) => sum + group.folders.length, 0);
+  contactFolderActive = Math.min(Math.max(contactFolderActive, 0), Math.max(total - 1, 0));
+  let index = 0;
+  options.innerHTML = total
+    ? groups.map((group) => `${group.label ? `<div class="folder-picker-group">${escapeHtml(group.label)}</div>` : ""}${group.folders.map((item) => contactFolderOptionHtml(item, index++)).join("")}`).join("")
+    : `<div class="folder-picker-empty">Немає папки «${escapeHtml(contactFolderQuery.trim())}»</div>`;
+  refreshIcons();
+}
+
+function contactFolderShown() {
+  return contactFolderGroups().flatMap((group) => group.folders);
+}
+
+function setContactFolderMenu(open) {
+  contactFolderMenuOpen = open && contactFolders.length > 0;
+  contactFolderQuery = "";
+  const query = document.getElementById("contactFolderQuery");
+  if (query) query.value = "";
+  // Відкритий — підсвічено вибрану папку, щоб Enter нічого не міняв.
+  contactFolderActive = Math.max(0, contactFolderShown().findIndex((folder) => folder.id === contactFolderId));
+  renderContactFolderPicker();
+  if (contactFolderMenuOpen) query?.focus?.();
+}
+
+async function chooseContactFolder(folderId) {
+  setContactFolderMenu(false);
+  document.getElementById("contactFolderButton")?.focus?.();
+  if (!folderId || folderId === contactFolderId) return;
+  await selectContactFolder(folderId);
+}
+
 function renderContacts() {
   const folderSelect = document.getElementById("contactFolderSelect");
   if (!folderSelect) return;
@@ -240,6 +334,7 @@ function renderContacts() {
       `<option value="${escapeAttr(folder.id)}"${folder.id === contactFolderId ? " selected" : ""}>${escapeHtml(folder.name || "Без назви")} · ${folder.contactCount} ${uaPlural(folder.contactCount, "контакт", "контакти", "контактів")}</option>`).join("")
     : `<option value="">${contactsLoading ? "Читаємо CRM..." : "Папок не знайдено"}</option>`;
   folderSelect.disabled = !contactFolders.length;
+  renderContactFolderPicker();
 
   const folder = contactFolders.find((item) => item.id === contactFolderId);
   setText(
@@ -825,6 +920,46 @@ document.getElementById("contactFolderSelect").addEventListener("change", async 
   const folderId = event.target.value;
   if (!folderId || folderId === contactFolderId) return;
   await selectContactFolder(folderId);
+});
+
+document.getElementById("contactFolderButton").addEventListener("click", () => {
+  setContactFolderMenu(!contactFolderMenuOpen);
+});
+
+document.getElementById("contactFolderOptions").addEventListener("click", async (event) => {
+  const option = event.target.closest("[data-folder]");
+  if (option) await chooseContactFolder(option.dataset.folder);
+});
+
+document.getElementById("contactFolderQuery").addEventListener("input", (event) => {
+  contactFolderQuery = event.target.value;
+  contactFolderActive = 0;
+  renderContactFolderPicker();
+});
+
+document.getElementById("contactFolderPicker").addEventListener("keydown", async (event) => {
+  if (!contactFolderMenuOpen) return;
+  const shown = contactFolderShown();
+  if (event.key === "Escape") {
+    event.preventDefault();
+    setContactFolderMenu(false);
+    document.getElementById("contactFolderButton")?.focus?.();
+  } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault();
+    if (!shown.length) return;
+    contactFolderActive = (contactFolderActive + (event.key === "ArrowDown" ? 1 : -1) + shown.length) % shown.length;
+    renderContactFolderPicker();
+    document.querySelector?.("#contactFolderOptions .is-active")?.scrollIntoView?.({ block: "nearest" });
+  } else if (event.key === "Enter" && event.target.id === "contactFolderQuery") {
+    event.preventDefault();
+    const folder = shown[contactFolderActive];
+    if (folder) await chooseContactFolder(folder.id);
+  }
+});
+
+// Клік поза списком закриває його.
+document.addEventListener("click", (event) => {
+  if (contactFolderMenuOpen && !event.target.closest?.("#contactFolderPicker")) setContactFolderMenu(false);
 });
 
 document.getElementById("crmContactList").addEventListener("click", async (event) => {

@@ -22,7 +22,9 @@ const INDEX = readFileSync(new URL("../app/index.html", import.meta.url), "utf8"
 const NAMES = [
   "escapeHtml", "escapeAttr", "uaPlural",
   "WARMUP_OUTREACH_LABEL", "WARMUP_OUTREACH_TONE", "CONTACTS_STALE_MS", "CONTACT_PAGE_SIZE",
-  "contactReads", "contactSearchTimer", "resetContacts", "contactFolders", "contactFoldersLoaded", "contactFolderId", "crmContactRows", "contactTotal", "contactOffset",
+  "contactReads", "contactSearchTimer", "resetContacts", "contactFolders", "contactFoldersLoaded", "contactFolderId",
+  "contactFolderMenuOpen", "contactFolderQuery", "contactFolderActive", "CONTACT_FOLDER_SYSTEM_HINT", "contactFolderGroups",
+  "contactFolderOptionHtml", "renderContactFolderPicker", "contactFolderShown", "setContactFolderMenu", "chooseContactFolder", "crmContactRows", "contactTotal", "contactOffset",
   "contactSearch", "selectedContactId", "contactRecord", "contactHistory", "contactHistoryFor",
   "contactHistoryNotice", "contactOutreach", "contactsLoadedAt", "contactsLoading", "contactsError",
   "contactChannelHint", "contactFieldLabels", "contactLinkedInLink", "historyEntryHtml",
@@ -38,6 +40,10 @@ const NAMES = [
 
 const LISTENERS = [
   'document.getElementById("contactFolderSelect").addEventListener("change"',
+  'document.getElementById("contactFolderButton").addEventListener("click"',
+  'document.getElementById("contactFolderOptions").addEventListener("click"',
+  'document.getElementById("contactFolderQuery").addEventListener("input"',
+  'document.getElementById("contactFolderPicker").addEventListener("keydown"',
   'document.getElementById("contactCardBody").addEventListener("submit"',
   'document.getElementById("contactCardBody").addEventListener("input"',
   'document.getElementById("contactCardBody").addEventListener("change"',
@@ -618,4 +624,43 @@ test("запит несе вибраний productId, і без нього те�
   await s.get("generateContactMessages")();
   assert.equal(sent.length, 1);
   assert.equal(sent[0].productId, "p-ad", "сервер інакше візьме застиглий state.selectedProductId");
+});
+
+test("папка — власний випадаючий список: друзі LinkedIn-акаунтів і вхідні розмови першими, пошук за назвою, вибір кліком і з клавіатури (власник 16.10)", async () => {
+  const folders = [
+    { id: "f-big", name: "Rewarded-CPE", contactCount: 27594 },
+    { id: "f-inbox", name: "Вхідні розмови LinkedIn", contactCount: 246, system: "inbox" },
+    { id: "f-friends", name: "Друзі LinkedIn-акаунтів", contactCount: 349, system: "friends" },
+    { id: "f-test", name: "Тест агента — Андрій", contactCount: 1 }
+  ];
+  const s = screen({ api: async (path) => (path.startsWith("/api/contacts?") ? { contacts: [], total: 0 } : { folders }) });
+  s.set("contactFolders", folders);
+  s.set("contactFolderId", "f-test");
+  s.get("renderContacts")();
+  assert.match(s.ids.contactFolderButton.innerHTML, /Тест агента — Андрій<\/span><span class="folder-picker-count">1 контакт/);
+  assert.equal(s.ids.contactFolderMenu.hidden, true, "закритий, поки не натиснули");
+
+  await s.handlers["contactFolderButton:click"]();
+  assert.equal(s.ids.contactFolderMenu.hidden, false);
+  const order = [...s.ids.contactFolderOptions.innerHTML.matchAll(/data-folder="([^"]+)"/g)].map((match) => match[1]);
+  assert.deepEqual(order, ["f-friends", "f-inbox", "f-big", "f-test"]);
+  assert.match(s.ids.contactFolderOptions.innerHTML, /Наповнює система[\s\S]*Друзі LinkedIn-акаунтів[\s\S]*усі друзі LinkedIn-акаунтів[\s\S]*Папки CRM/);
+  assert.match(s.ids.contactFolderOptions.innerHTML, /aria-selected="true" data-folder="f-test"/);
+
+  s.handlers["contactFolderQuery:input"]({ target: { value: "друзі" } });
+  assert.deepEqual([...s.ids.contactFolderOptions.innerHTML.matchAll(/data-folder="([^"]+)"/g)].map((match) => match[1]), ["f-friends"]);
+  await s.handlers["contactFolderPicker:keydown"]({ key: "Enter", target: { id: "contactFolderQuery" }, preventDefault() {} });
+  assert.equal(s.get("contactFolderId"), "f-friends", "Enter бере першу знайдену");
+  assert.equal(s.ids.contactFolderMenu.hidden, true, "після вибору список закривається");
+
+  await s.handlers["contactFolderButton:click"]();
+  s.handlers["contactFolderQuery:input"]({ target: { value: "немає такої" } });
+  assert.match(s.ids.contactFolderOptions.innerHTML, /Немає папки «немає такої»/);
+  await s.handlers["contactFolderPicker:keydown"]({ key: "Escape", target: {}, preventDefault() {} });
+  assert.equal(s.ids.contactFolderMenu.hidden, true);
+
+  await s.handlers["contactFolderButton:click"]();
+  await s.handlers["contactFolderOptions:click"]({ target: { closest: () => ({ dataset: { folder: "f-big" } }) } });
+  assert.equal(s.get("contactFolderId"), "f-big");
+  assert.ok(INDEX.includes('id="contactFolderButton"') && INDEX.includes('id="contactFolderQuery"'));
 });

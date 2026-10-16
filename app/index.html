@@ -394,10 +394,20 @@
                   <p id="contactListSubtitle">Вибери папку, щоб побачити людей</p>
                 </div>
               </div>
-              <label class="contact-folder-pick">
-                <span>Папка CRM</span>
-                <select id="contactFolderSelect" aria-label="Папка CRM"></select>
-              </label>
+              <div class="contact-folder-pick">
+                <span id="contactFolderLabel">Папка CRM</span>
+                <select id="contactFolderSelect" aria-label="Папка CRM" hidden></select>
+                <div class="folder-picker" id="contactFolderPicker">
+                  <button type="button" class="folder-picker-button" id="contactFolderButton" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="contactFolderLabel contactFolderButton"></button>
+                  <div class="folder-picker-menu" id="contactFolderMenu" hidden>
+                    <label class="folder-picker-search">
+                      <i data-lucide="search"></i>
+                      <input id="contactFolderQuery" type="search" placeholder="Знайти папку" autocomplete="off" aria-label="Знайти папку" />
+                    </label>
+                    <div class="folder-picker-options" id="contactFolderOptions" role="listbox" aria-label="Список папок"></div>
+                  </div>
+                </div>
+              </div>
               <label class="contact-search">
                 <i data-lucide="search"></i>
                 <input id="contactSearchInput" type="search" placeholder="Ім'я, компанія, посада або пошта" />

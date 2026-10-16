@@ -59,8 +59,205 @@
   color: var(--muted);
 }
 
-.contact-folder-pick select {
+.contact-folder-pick > span {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* Власний випадаючий список папок (16.10): кнопка, а під нею — пошук і папки,
+   ті, що наповнює система, — першими. */
+.folder-picker {
+  position: relative;
+}
+
+.folder-picker-button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-strong);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.folder-picker-button:hover:not(:disabled),
+.folder-picker-button[aria-expanded="true"] {
+  border-color: var(--teal);
+}
+
+.folder-picker-button:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.folder-picker-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-picker-name.is-placeholder {
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.folder-picker-count {
+  flex: none;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.folder-picker-button svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: var(--muted);
+  transition: transform 0.15s ease;
+}
+
+.folder-picker-button[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.folder-picker-menu {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.folder-picker-menu[hidden] {
+  display: none;
+}
+
+.folder-picker-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-strong);
+}
+
+.folder-picker-search svg {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  color: var(--muted);
+}
+
+.folder-picker-search input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  outline: none;
+}
+
+.folder-picker-options {
+  display: grid;
+  gap: 2px;
+  max-height: min(360px, 55vh);
+  overflow-y: auto;
+}
+
+.folder-picker-group {
+  padding: 8px 8px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.folder-picker-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  height: auto;
+  min-height: 40px;
+  padding: 8px 10px;
+  line-height: 1.3;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.folder-picker-option:hover,
+.folder-picker-option.is-active {
+  background: var(--surface-strong);
+}
+
+.folder-picker-option.is-chosen {
+  background: var(--teal-weak);
+}
+
+.folder-picker-option.is-chosen .folder-picker-option-name {
+  color: var(--teal);
+  font-weight: 600;
+}
+
+.folder-picker-option-main {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 2px;
+}
+
+.folder-picker-option-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-picker-option-hint {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-picker-option-count {
+  flex: none;
+  color: var(--muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.folder-picker-empty {
+  padding: 12px 10px;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .contact-search {
