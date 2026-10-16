@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import test from "node:test";
 
 import { reconcilePings, setLeadgenStore, setManualPing, todayItem, todayList } from "../triage/today.mjs";
-import { addWorkingDays, dayIn, parseTaskMarks } from "../triage/pings.mjs";
+import { addWorkingDays, dayIn, taskMarks } from "../triage/pings.mjs";
 
 // «Сьогодні» і пінги в CRM (етап 1/6, таск 5f5343cb) — через звірку, на заглушці,
 // що грає обидві бази: прогрів (wl_*) і CRM (contacts, tasks, profiles).
@@ -119,7 +119,8 @@ test("лід відповів → у CRM задача «Відповісти» �
   assert.equal(ping.assigned_to, "u-bohdan");
   assert.equal(ping.title, "Відповісти: Lead One");
   assert.equal(dayIn(ping.due_date), dayIn(new Date()));
-  assert.match(parseTaskMarks(ping.description).key, /^reply:c1:/);
+  assert.match(taskMarks(ping).key, /^reply:c1:/);
+  assert.doesNotMatch(ping.description, /⟦ob:/, "опис у CRM — без службового рядка");
 
   const list = await todayList({ viewerId: "u-bohdan" });
   assert.equal(list.blocks.replies[0]?.contactId, "c1");

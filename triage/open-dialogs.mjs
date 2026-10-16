@@ -223,7 +223,8 @@ export async function acceptOpenDialogs({ items, assignee, now = new Date() }) {
     seen.add(contactId);
     await crm.from("tasks").insert({
       title: `${TITLES[item.reason]}: ${names.get(contactId) || "контакт"}`,
-      description: taskDescription(item.reason === "call" ? "call" : item.reason, `import:${item.reason}:${contactId}`, item.why ? `Імпорт відкритих діалогів з 01.08: ${String(item.why).slice(0, 300)}` : "Імпорт відкритих діалогів з 01.08"),
+      description: taskDescription(item.reason === "call" ? "call" : item.reason, item.why ? `Імпорт відкритих діалогів з 01.08: ${String(item.why).slice(0, 300)}` : "Імпорт відкритих діалогів з 01.08"),
+      ping_key: `import:${item.reason}:${contactId}`,
       owner_id: assignee, assigned_to: assignee, contact_id: contactId,
       due_date: zonedIso(item.due), completed: false, status: "todo",
       task_type: item.reason === "call" ? "Call" : "To-do", priority: item.priority === "high" ? "High" : "None",

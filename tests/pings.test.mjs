@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {
   SILENT_LIMIT, addWorkingDays, blockOf, dayIn, desiredPing, manualDueDay, markSuperseded, newContactsAllowed,
-  parseTaskMarks, planPingChanges, taskDescription, zonedIso
+  parseTaskMarks, planPingChanges, stripMarks, taskDescription, taskMarks, zonedIso
 } from "../triage/pings.mjs";
 
 // Пінги (етап 1/6, таск 5f5343cb): правила без баз — що є наступним кроком
@@ -71,13 +71,13 @@ test("давніше за 14 днів — не цей етап (імпорт е�
 test("план: немає задачі → створити; є відкрита з тим самим ключем → нічого", () => {
   const next = desiredPing("c1", { threads: [thread()] }, { now: NOW });
   assert.deepEqual(planPingChanges(next, []).map((action) => action.op), ["create"]);
-  assert.deepEqual(planPingChanges(next, [task({ description: taskDescription("reply", next.key) })]), [], "дата, перенесена людиною, лишається");
+  assert.deepEqual(planPingChanges(next, [task({ ping_key: next.key })]), [], "дата, перенесена людиною, лишається");
 });
 
 test("план: нова подія закриває стару системну задачу як «замінену» і ставить нову", () => {
   const replyKey = "reply:c1:2026-10-16T08:00:00Z";
   const silent = desiredPing("c1", { threads: [thread()], pending: [{ threadKey: "t1", queuedAt: "2026-10-16T09:00:00Z" }] }, { now: NOW });
-  const actions = planPingChanges(silent, [task({ description: taskDescription("reply", replyKey) })]);
+  const actions = planPingChanges(silent, [task({ ping_key: replyKey })]);
   assert.deepEqual(actions.map((action) => action.op), ["supersede", "create"]);
 });
 
@@ -85,20 +85,20 @@ test("план: скасоване повідомлення повертає п�
   const replyKey = "reply:c1:2026-10-16T08:00:00Z";
   const reply = desiredPing("c1", { threads: [thread()] }, { now: NOW });
   const tasks = [
-    task({ id: "old", completed: true, description: markSuperseded(taskDescription("reply", replyKey)) }),
-    task({ id: "silent", created_at: "2026-10-16T09:01:00Z", description: taskDescription("silent", "silent:c1:2026-10-16T08:00:00Z:1") })
+    task({ id: "old", completed: true, ping_key: replyKey, ping_superseded: true }),
+    task({ id: "silent", created_at: "2026-10-16T09:01:00Z", ping_key: "silent:c1:2026-10-16T08:00:00Z:1" })
   ];
   assert.deepEqual(planPingChanges(reply, tasks).map((action) => [action.op, action.task?.id]), [["supersede", "silent"], ["reopen", "old"]]);
 });
 
 test("план: задачу, яку людина закрила сама, система не відкриває", () => {
   const reply = desiredPing("c1", { threads: [thread()] }, { now: NOW });
-  assert.deepEqual(planPingChanges(reply, [task({ completed: true, description: taskDescription("reply", reply.key) })]), []);
+  assert.deepEqual(planPingChanges(reply, [task({ completed: true, ping_key: reply.key })]), []);
 });
 
 test("план: ручний пінг після події — і є наступний крок; новіша подія його замінює", () => {
   const reply = desiredPing("c1", { threads: [thread()] }, { now: NOW });
-  const manual = task({ id: "m", created_at: "2026-10-16T10:00:00Z", description: taskDescription("manual", "manual:2026-10-16T10:00:00Z") });
+  const manual = task({ id: "m", created_at: "2026-10-16T10:00:00Z", ping_key: "manual:2026-10-16T10:00:00Z" });
   assert.deepEqual(planPingChanges(reply, [manual]), [], "поставлений після відповіді — лишається, нової задачі немає");
   const later = desiredPing("c1", { threads: [thread({ lastStoredAt: "2026-10-16T11:00:00Z", lastInboundStoredAt: "2026-10-16T11:00:00Z" })] }, { now: NOW });
   assert.deepEqual(planPingChanges(later, [manual]).map((action) => action.op), ["supersede", "create"]);
@@ -106,13 +106,17 @@ test("план: ручний пінг після події — і є насту
 
 test("план: пінгу бути не повинно → системні задачі закриваються", () => {
   const stop = { key: null, basisAt: "2026-10-16T09:00:00Z" };
-  assert.deepEqual(planPingChanges(stop, [task({ description: taskDescription("silent", "silent:c1:none:2") })]).map((action) => action.op), ["supersede"]);
+  assert.deepEqual(planPingChanges(stop, [task({ ping_key: "silent:c1:none:2" })]).map((action) => action.op), ["supersede"]);
 });
 
 test("опис задачі несе ключ і позначку «замінено»", () => {
-  const description = markSuperseded(taskDescription("reply", "reply:c1:x"));
-  assert.deepEqual(parseTaskMarks(description), { key: "reply:c1:x", superseded: true });
-  assert.deepEqual(parseTaskMarks("задача з CRM"), { key: null, superseded: false });
+  // Стара задача — ключ ще в описі; нова — у колонках, опис для людини.
+  const legacy = "Outbound Sales · лід відповів — відповісти\n⟦ob:reply:c1:x⟧\n⟦ob:superseded⟧";
+  assert.deepEqual(taskMarks({ description: legacy }), { key: "reply:c1:x", superseded: true });
+  assert.deepEqual(taskMarks({ description: "задача з CRM" }), { key: null, superseded: false });
+  assert.deepEqual(taskMarks({ description: taskDescription("reply"), ping_key: "reply:c1:y", ping_superseded: false }), { key: "reply:c1:y", superseded: false });
+  assert.equal(stripMarks(legacy), "Outbound Sales · лід відповів — відповісти");
+  assert.doesNotMatch(taskDescription("silent", "нотатка"), /⟦ob:/, "новий опис — без службового рядка");
 });
 
 test("блоки «Сьогодні»: відповіді вище за прострочені, нові контакти — лише коли обидва порожні", () => {

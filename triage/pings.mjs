@@ -91,9 +91,24 @@ export function parseTaskMarks(description) {
   return { key: marks.find((mark) => mark !== SUPERSEDED) || null, superseded: marks.includes(SUPERSEDED) };
 }
 
-export function taskDescription(reason, key, note = "") {
+/**
+ * Ключ і «замінено» задачі: з колонок tasks.ping_key / ping_superseded (з 16.10), а
+ * для задачі, записаної раніше, — з рядка ⟦ob:…⟧ в описі (поки його не прибрано).
+ */
+export function taskMarks(task) {
+  const legacy = parseTaskMarks(task?.description);
+  return { key: task?.ping_key || legacy.key, superseded: Boolean(task?.ping_superseded) || legacy.superseded };
+}
+
+/** Опис пінга для людини в CRM — без службових рядків: ключ живе в tasks.ping_key. */
+export function taskDescription(reason, note = "") {
   const line = REASONS[reason]?.line || REASONS.manual.line;
-  return [`Outbound Sales · ${line}`, note ? String(note).trim() : "", `⟦ob:${key}⟧`].filter(Boolean).join("\n");
+  return [`Outbound Sales · ${line}`, note ? String(note).trim() : ""].filter(Boolean).join("\n");
+}
+
+/** Опис без службових рядків ⟦ob:…⟧ — для прибирання старих задач. */
+export function stripMarks(description) {
+  return String(description || "").replace(/\n?⟦ob:[^⟧]*⟧/g, "").trim();
 }
 
 export function markSuperseded(description) {
@@ -119,7 +134,7 @@ const isSystemKey = (key) => ["reply", "first", "silent"].includes(String(key ||
 /** Причина задачі: дзвінок — за типом, решта — за ключем; чужа задача — «пінг». */
 export function taskReason(task) {
   if (task.task_type === "Call") return "call";
-  return reasonOfKey(parseTaskMarks(task.description).key);
+  return reasonOfKey(taskMarks(task).key);
 }
 
 /* ── гілка «мовчить» ─────────────────────────────────────────────────────── */
@@ -224,7 +239,7 @@ export function desiredPing(contactId, state, { now = new Date() } = {}) {
 export function planPingChanges(desired, tasks) {
   if (!desired) return [];
   const actions = [];
-  const parsed = tasks.map((task) => ({ task, ...parseTaskMarks(task.description), open: !task.completed }));
+  const parsed = tasks.map((task) => ({ task, ...taskMarks(task), open: !task.completed }));
   const closing = new Set();
 
   for (const item of parsed) {

@@ -15,11 +15,11 @@ import { accountName } from "../warmup/activities.mjs";
 import { acceptOpenDialogs, openDialogs, suggestOpenDialogs } from "./open-dialogs.mjs";
 import { CLOSING, EXIT_REASONS, LEAD_STATUSES, ORIGIN, statusPatch } from "./statuses.mjs";
 import {
-  PING_QUEUE, REASONS, blockOf, clearSuperseded, compareItems, dayIn, desiredPing, manualDueDay, markSuperseded,
-  newContactsAllowed, parseTaskMarks, planPingChanges, reasonOfKey, taskDescription, taskReason, zonedIso
+  PING_QUEUE, REASONS, blockOf, compareItems, dayIn, desiredPing, manualDueDay,
+  newContactsAllowed, planPingChanges, reasonOfKey, stripMarks, taskDescription, taskMarks, taskReason, zonedIso
 } from "./pings.mjs";
 
-const TASK_COLUMNS = "id,title,description,contact_id,owner_id,assigned_to,due_date,completed,status,task_type,queue,created_at,updated_at";
+const TASK_COLUMNS = "id,title,description,contact_id,owner_id,assigned_to,due_date,completed,status,task_type,queue,created_at,updated_at,ping_key,ping_superseded";
 const CONTACT_COLUMNS = "id,name,position,company,owner_id,linkedin,country,lead_status,exit_reason";
 /** Статус CRM «Не відповідає» — після останнього кроку кампанії й тиші (етап 3/6). */
 export const NO_REPLY_STATUS = "no_response";
@@ -205,7 +205,8 @@ async function applyAction(action, { contactId, contact, owner, nowIso }) {
     if (!assignee) throw new Error("немає кому призначити пінг");
     await crm.from("tasks").insert({
       title: taskTitle(desired.reason, contact),
-      description: taskDescription(desired.reason, desired.key),
+      description: taskDescription(desired.reason),
+      ping_key: desired.key,
       owner_id: assignee,
       assigned_to: assignee,
       contact_id: contactId,
@@ -221,7 +222,7 @@ async function applyAction(action, { contactId, contact, owner, nowIso }) {
   }
   if (action.op === "supersede") {
     await crm.from("tasks").update({
-      completed: true, status: "done", description: markSuperseded(action.task.description), updated_at: nowIso
+      completed: true, status: "done", ping_superseded: true, description: stripMarks(action.task.description), updated_at: nowIso
     }).eq("id", action.task.id).rows();
     return "superseded";
   }
@@ -231,7 +232,7 @@ async function applyAction(action, { contactId, contact, owner, nowIso }) {
   }
   if (action.op === "reopen") {
     await crm.from("tasks").update({
-      completed: false, status: "todo", description: clearSuperseded(action.task.description), updated_at: nowIso
+      completed: false, status: "todo", ping_superseded: false, description: stripMarks(action.task.description), updated_at: nowIso
     }).eq("id", action.task.id).rows();
     return "reopened";
   }
@@ -438,7 +439,7 @@ export async function todayItem({ pingId, viewer, now = new Date() }) {
   if (item.channel === "thread" || item.channel === "moved") messages = (await readThread({ accountId: item.accountId, threadKey: item.threadKey }))?.messages || [];
   let firstDraft = null;
   if (item.channel === "first" && item.outreachId) firstDraft = (await firstMarks([item.outreachId])).drafts.get(item.outreachId) || null;
-  const key = parseTaskMarks(task.description).key;
+  const key = taskMarks(task).key;
   return {
     item,
     contact,
@@ -458,7 +459,7 @@ export async function todayDraft({ pingId, viewer, force = false, writer }) {
   const detail = await todayItem({ pingId, viewer });
   if (detail.item.channel !== "thread") throw refuse("Чернетку першого повідомлення пише «Прогрів» — відкрийте його з картки.", 409);
   const task = await loadTask(pingId);
-  const cacheKey = `${pingId}|${parseTaskMarks(task.description).key}`;
+  const cacheKey = `${pingId}|${taskMarks(task).key}`;
   if (!force && drafts.has(cacheKey)) return drafts.get(cacheKey);
   if (!writer?.write) throw refuse("На цьому сервері немає кому писати чернетки.", 503);
   const kind = detail.messages.at(-1)?.direction === "in" ? "reply" : "follow-up";
@@ -490,10 +491,11 @@ export async function setManualPing({ pingId = "", contactId = "", when, call = 
     // Перенесений людиною — уже ручний пінг: його блок «Сьогодні» вирішує дата (завтра —
     // «На сьогодні», після — «Прострочені»), а не крок, з якого він почався. Нова
     // подія в діалозі його замінить, як будь-який ручний (planPingChanges).
-    const was = parseTaskMarks(task.description).key;
+    const was = taskMarks(task).key;
     const patch = {
       due_date: zonedIso(dueDay), updated_at: nowIso,
-      description: taskDescription(call ? "call" : "manual", `manual:${nowIso}`, was ? `Перенесено вручну (було: ${REASONS[reasonOfKey(was)]?.title || "пінг"})` : "Перенесено вручну")
+      ping_key: `manual:${nowIso}`, ping_superseded: false,
+      description: taskDescription(call ? "call" : "manual", was ? `Перенесено вручну (було: ${REASONS[reasonOfKey(was)]?.title || "пінг"})` : "Перенесено вручну")
     };
     if (call) Object.assign(patch, { task_type: "Call", title: taskTitle("call", contact) });
     await crm.from("tasks").update(patch).eq("id", task.id).rows();
@@ -504,7 +506,8 @@ export async function setManualPing({ pingId = "", contactId = "", when, call = 
   const reason = call ? "call" : "manual";
   const [made] = await crm.from("tasks").insert({
     title: taskTitle(reason, contact),
-    description: taskDescription(reason, `manual:${nowIso}`),
+    description: taskDescription(reason),
+    ping_key: `manual:${nowIso}`,
     owner_id: assignee, assigned_to: assignee, contact_id: targetContact,
     due_date: zonedIso(dueDay), completed: false, status: "todo",
     task_type: call ? "Call" : "To-do", priority: "None", queue: PING_QUEUE, origin: ORIGIN, updated_at: nowIso
