@@ -505,3 +505,36 @@
   font-size: 13px;
   text-align: center;
 }
+
+/* Провайдер пошти: колонка, фільтр, розклад по провайдерах у перевірці (16.10). */
+.leads-provider small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.leads-providers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  flex-basis: 100%;
+}
+
+.leads-provider-chip {
+  min-height: 0;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  font-size: 12px;
+}
+
+.leads-provider-chip.is-on {
+  border-color: var(--teal);
+  color: var(--teal);
+}
+
+#leadsProvider {
+  width: auto;
+  max-width: 220px;
+}

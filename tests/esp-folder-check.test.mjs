@@ -183,3 +183,40 @@ test("перевірка зупиняється сама, коли MillionVerifi
   assert.match(run.error, /Insufficient credits/);
   assert.ok(run.done < 20);
 });
+
+test("провайдер — за MX: Google, Microsoft, Zoho, Private Email, Amazon SES, шлюз, власний; особиста, загальна, опечатка", async () => {
+  const { providerOf } = await import("../esp/folder-check.mjs");
+  assert.equal(providerOf(["aspmx.l.google.com", "alt1.aspmx.l.google.com"]), "google");
+  assert.equal(providerOf(["acme-com.mail.protection.outlook.com"]), "microsoft");
+  assert.equal(providerOf(["mx.zoho.eu"]), "zoho");
+  assert.equal(providerOf(["mx1.privateemail.com."]), "privateemail");
+  assert.equal(providerOf(["inbound-smtp.us-east-1.amazonaws.com"]), "amazon");
+  assert.equal(providerOf(["eu-smtp-inbound-1.mimecast.com"]), "mimecast");
+  assert.equal(providerOf(["mail.acme.com"]), "own");
+  assert.equal(providerOf([]), "none");
+
+  const domainOf = domainChecker({ mx: async (domain) => [{ exchange: domain === "gmail.com" ? "gmail-smtp-in.l.google.com" : "mx1.privateemail.com", priority: 5 }] });
+  const zed = await quickCheck("info@acme.io", domainOf);
+  assert.deepEqual([zed.status, zed.provider, zed.role, zed.free], ["pass", "privateemail", true, false]);
+  const person = await quickCheck("olena@gmail.com", domainOf);
+  assert.deepEqual([person.provider, person.free], ["google", true]);
+  const typo = await quickCheck("olena@gmial.com", domainOf);
+  assert.deepEqual([typo.status, typo.code, typo.suggestion], ["invalid", "typo", "olena@gmail.com"]);
+});
+
+test("без ключа перевірка позначає провайдера кожній адресі (custom_fields.email_meta) і рахує їх", async () => {
+  const contacts = [
+    { id: id(1), email: "a@acme.com", folders: [FROM] },
+    { id: id(2), email: "b@gmail.com", folders: [FROM], custom_fields: { email_check: { "b@gmail.com": { status: "valid", checkedAt: new Date().toISOString() } } } }
+  ];
+  const crm = memoryCrm(contacts);
+  const domainOf = domainChecker({ mx: async (domain) => [{ exchange: domain === "gmail.com" ? "gmail-smtp-in.l.google.com" : "mx.zoho.com", priority: 10 }] });
+  const checker = folderChecker({ crm, deep: () => null, domainOf });
+  checker.start(FROM);
+  await checker.finished(FROM);
+  assert.deepEqual([contacts[0].custom_fields.email_meta.provider, contacts[1].custom_fields.email_meta.provider], ["zoho", "google"]);
+  assert.equal(contacts[1].custom_fields.email_check["b@gmail.com"].status, "valid", "свіжа визначена відповідь лишилась");
+  const run = checker.status(FROM);
+  assert.deepEqual(run.counts.providers, { zoho: 1, google: 1 });
+  assert.equal(run.counts.free, 1);
+});

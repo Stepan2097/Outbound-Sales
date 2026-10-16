@@ -18,6 +18,12 @@ function verificationOf(contact, email) {
   return { verification: status, verifiedAt: status ? String(check.checkedAt || "") : "" };
 }
 
+function metaOf(contact, email) {
+  const meta = contact?.custom_fields?.email_meta;
+  if (!meta || meta.email !== email) return { provider: "" };
+  return { provider: String(meta.provider || ""), ...(meta.free ? { free: true } : {}), ...(meta.role ? { role: true } : {}), ...(meta.suggestion ? { suggestion: meta.suggestion } : {}) };
+}
+
 /** One CRM contact as a lead row of the page — and as a lead for a campaign. */
 export function leadFromContact(contact, folderName = "") {
   const email = String(contact.email || "").trim().toLowerCase();
@@ -40,6 +46,8 @@ export function leadFromContact(contact, folderName = "") {
     // custom_fields.email_check): `valid`, `invalid`, `catch_all`, `unknown`,
     // or nothing when it was never checked.
     ...verificationOf(contact, email),
+    // Who runs the address's mail, and what else the folder check learnt about it (esp/folder-check.mjs).
+    ...metaOf(contact, email),
     addedAt: contact.created_at || null
   };
 }
@@ -72,6 +80,11 @@ export function crmLeadSource({ crm, listFolders, now = () => Date.now() }) {
     const term = String(q || "").trim().replace(/[(),*]/g, " ").trim();
     return term ? query.or(`name.ilike.*${term}*,company.ilike.*${term}*,position.ilike.*${term}*,email.ilike.*${term}*`) : query;
   };
+  const byProvider = (query, provider) => {
+    const kind = String(provider || "").replace(/[^a-z_]/g, "");
+    // «unchecked» — addresses the folder check has not looked at yet.
+    return kind === "unchecked" ? query.isNull("custom_fields->email_meta") : kind ? query.eq("custom_fields->email_meta->>provider", kind) : query;
+  };
   const mustFolder = (folderId) => {
     if (!UUID.test(String(folderId))) throw Object.assign(new Error("Такої папки CRM немає."), { status: 404 });
   };
@@ -90,16 +103,17 @@ export function crmLeadSource({ crm, listFolders, now = () => Date.now() }) {
     folders,
 
     /** A page of one folder: only people with an address; search by name, company, position, address. */
-    async page({ folderId, q = "", offset = 0, limit = 50 }) {
+    async page({ folderId, q = "", offset = 0, limit = 50, provider = "" }) {
       mustFolder(folderId);
       const name = (await listFolders()).find((folder) => folder.id === folderId)?.name || "";
       const term = String(q || "").trim();
-      const build = (columns) => searched(inFolder(columns, folderId), term);
+      const kind = String(provider || "").replace(/[^a-z_]/g, "");
+      const build = (columns) => byProvider(searched(inFolder(columns, folderId), term), kind);
       const size = Math.max(1, Math.min(100, Number(limit) || 50));
       const from = Math.max(0, Number(offset) || 0);
       // Without a search the folder's count is the one the side column already
       // has; with one, the CRM counts the matches.
-      const known = !term ? counts?.map.get(folderId) : null;
+      const known = !term && !kind ? counts?.map.get(folderId) : null;
       const [rows, total] = await Promise.all([
         twice(() => build(COLUMNS).order("created_at", { ascending: false }).order("id", { ascending: false }).limit(size).offset(from).rows()),
         known ?? twice(() => build("id").count())
@@ -121,12 +135,12 @@ export function crmLeadSource({ crm, listFolders, now = () => Date.now() }) {
      * finds), id by id — for «вся папка» on the page. Read in id order, a
      * thousand at a time, so a folder of twenty thousand is twenty-two reads.
      */
-    async idsInFolder(folderId, q = "") {
+    async idsInFolder(folderId, q = "", provider = "") {
       mustFolder(folderId);
       const ids = [];
       let after = "";
       for (;;) {
-        let query = searched(inFolder("id", folderId), q);
+        let query = byProvider(searched(inFolder("id", folderId), q), provider);
         if (after) query = query.gt("id", after);
         const rows = await twice(() => query.order("id").limit(1000).rows());
         ids.push(...rows.map((row) => row.id));

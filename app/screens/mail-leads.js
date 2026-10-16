@@ -47,8 +47,11 @@ export const leadsState = {
   allInFolder: false, // у папці CRM: вибрано всю папку (або все, що знайшов пошук), а не лише сторінку
   folderTarget: "",   // куди додати вибраних: "" — нова папка, інакше id папки CRM
   folderName: "",
-  check: null        // { run, deep } — перевірка адрес відкритої папки CRM
+  check: null,       // { run, deep, providers } — перевірка адрес відкритої папки CRM
+  provider: ""       // фільтр папки CRM за поштовим провайдером; "unchecked" — ще не перевірені
 };
+
+const providerWord = (key) => leadsState.check?.providers?.[key] || key;
 
 const CHECK_STATE_WORD = { running: "іде", done: "завершено", stopped: "зупинено", failed: "не вдалася" };
 let checkTimer = null;
@@ -85,7 +88,7 @@ async function loadCheck() {
   try {
     const answer = await api(`/api/esp/leads/crm/check?folder=${encodeURIComponent(folderId)}`);
     if (leadsState.view !== `crm:${folderId}`) return;
-    leadsState.check = { run: answer.run, deep: answer.deep };
+    leadsState.check = { run: answer.run, deep: answer.deep, providers: answer.providers || {} };
   } catch {
     leadsState.check = null;
   }
@@ -103,6 +106,7 @@ async function loadPage() {
   if (leadsState.view.startsWith("crm:")) params.set("crm", leadsState.view.slice(4));
   else if (leadsState.view) params.set("list", leadsState.view);
   if (leadsState.q) params.set("q", leadsState.q);
+  if (leadsState.provider && leadsState.view.startsWith("crm:")) params.set("provider", leadsState.provider);
   try {
     leadsState.page = await api(`/api/esp/leads?${params}`);
     leadsState.offset = leadsState.page.offset;
@@ -184,15 +188,19 @@ function checkHtml(crmFolder) {
       `<span class="leads-chip" title="${TONE_WORD.unknown}"><i class="leads-dot is-unknown"></i>${n(c.unknown)}</span>`
     ].join("");
     const progress = `${n(run.done)} з ${run.total == null ? "…" : n(run.total)}`;
+    const providers = Object.entries(c.providers || {}).sort((left, right) => right[1] - left[1])
+      .map(([key, count]) => `<button type="button" class="leads-chip leads-provider-chip${leadsState.provider === key ? " is-on" : ""}" data-leads-provider="${escapeAttr(key)}" title="Показати лише ці">${escapeHtml(providerWord(key))} <b>${n(count)}</b></button>`).join("");
     const extra = [
       c.domainOk ? `домен приймає пошту: ${n(c.domainOk)} (скриньку не перевірено)` : "",
+      c.free ? `особисті пошти (gmail.com тощо): ${n(c.free)}` : "",
+      c.role ? `загальні адреси (info@, sales@…): ${n(c.role)}` : "",
       c.earlier ? `уже перевірені раніше: ${n(c.earlier)}` : "",
       c.failed ? `не записалось у CRM: ${n(c.failed)}` : "",
       run.credits != null ? `кредитів MillionVerifier лишилось: ${n(run.credits)}` : ""
     ].filter(Boolean).join(" · ");
-    return `<div class="leads-check-line"><span>Перевірка ${CHECK_STATE_WORD[run.state] || run.state}: ${progress}</span><div class="leads-chips">${parts}</div>${extra ? `<small>${escapeHtml(extra)}</small>` : ""}${run.error ? `<small class="is-bad">${escapeHtml(run.error)}</small>` : ""}</div>`;
+    return `<div class="leads-check-line"><span>Перевірка ${CHECK_STATE_WORD[run.state] || run.state}: ${progress}</span><div class="leads-chips">${parts}</div>${providers ? `<div class="leads-providers">${providers}</div>` : ""}${extra ? `<small>${escapeHtml(extra)}</small>` : ""}${run.error ? `<small class="is-bad">${escapeHtml(run.error)}</small>` : ""}</div>`;
   })() : "";
-  const hint = check.deep ? "" : `<small class="leads-check-hint">Без ключа MillionVerifier перевіряється адреса й домен (чи існує, чи приймає пошту, чи не одноразовий). Чи існує сама скринька — лише через MillionVerifier: з нашого сервера поштові сервери не питаються.</small>`;
+  const hint = check.deep ? "" : `<small class="leads-check-hint">Перевіряється: формат адреси, опечатки в домені (gmial.com), одноразові пошти, чи існує домен і чи приймає пошту, хто провайдер пошти (Google, Microsoft, Zoho, Private Email, Amazon SES…), особиста чи загальна (info@) адреса. Чи існує сама скринька — не перевіряється: з нашого сервера поштові сервери не питаються.</small>`;
   return `${button}${line}${hint}`;
 }
 
@@ -227,8 +235,16 @@ function listHtml() {
         : `<h2>${escapeHtml(title)}</h2>${crmFolder ? `<span class="leads-crm-note">папка CRM · з поштою ${crmFolder.withEmail ?? "—"} із ${crmFolder.contacts ?? "—"} контактів</span>` : ""}${list ? `<button type="button" class="icon-button" data-leads-rename aria-label="Перейменувати" title="Перейменувати"><i data-lucide="pencil"></i></button><button type="button" class="icon-button" data-leads-delete aria-label="Видалити список" title="Видалити список"><i data-lucide="trash-2"></i></button>` : ""}`}
     </div>`;
   const pickedCount = crmFolder && leadsState.allInFolder ? page?.total || 0 : picked.length;
+  const providerOptions = Object.entries(leadsState.check?.providers || {}).filter(([key]) => key !== "unknown");
+  const providerFilter = crmFolder && providerOptions.length ? `<select id="leadsProvider" aria-label="Провайдер пошти">
+      <option value="">Усі провайдери</option>
+      ${providerOptions.map(([key, label]) => `<option value="${escapeAttr(key)}"${leadsState.provider === key ? " selected" : ""}>${escapeHtml(label)}</option>`).join("")}
+      <option value="unknown"${leadsState.provider === "unknown" ? " selected" : ""}>Не визначено</option>
+      <option value="unchecked"${leadsState.provider === "unchecked" ? " selected" : ""}>Ще не перевірені</option>
+    </select>` : "";
   const toolbar = crmFolder ? `
     <div class="leads-toolbar">
+      ${providerFilter}
       ${folderAddHtml(crmFolder, pickedCount)}
       ${chipsHtml(page?.verification, page?.verificationScope)}
     </div>
@@ -269,12 +285,13 @@ function listHtml() {
     : !rows.length ? `<div class="empty-state">${leadsState.q ? "Нікого не знайдено." : crmFolder ? "У цій папці CRM немає людей з поштою." : list ? "У списку нікого немає — «Додати лідів»." : meta?.lists.length ? "Лідів ще немає." : "Виберіть папку CRM ліворуч — або створіть список і вставте лідів."}</div>` : "";
   const table = rows.length ? `
     <div class="table-wrap"><table class="leads-table">
-      <thead><tr><th></th><th>Лід (${page.total})</th><th>Адреса</th><th>Країна</th><th>Джерело</th><th>Кампанії</th><th>Додано</th></tr></thead>
+      <thead><tr><th></th><th>Лід (${page.total})</th><th>Адреса</th><th>Провайдер</th><th>Країна</th><th>Джерело</th><th>Кампанії</th><th>Додано</th></tr></thead>
       <tbody>${rows.map((row) => `
         <tr class="${leadsState.selected.has(row.id) ? "is-picked" : ""}">
           <td><input type="checkbox" data-leads-pick="${escapeAttr(row.id)}" aria-label="Вибрати ${escapeAttr(row.name || row.email)}"${leadsState.selected.has(row.id) ? " checked" : ""} /></td>
           <td class="leads-who"><button type="button" class="leads-name" data-leads-open="${escapeAttr(row.email)}">${escapeHtml(row.name || row.email.split("@")[0])}</button><small>${escapeHtml([row.company, row.position].filter(Boolean).join(" · "))}</small></td>
           <td class="leads-email"><i class="leads-dot is-${row.tone}" title="${escapeAttr(TONE_WORD[row.tone])}${row.verifiedAt ? `, ${escapeAttr(row.verifiedAt)}` : ""}"></i>${escapeHtml(row.email)}${row.excluded ? ` <span class="pill tone-warn" title="${escapeAttr(row.excluded.note || "")}">виключено</span>` : ""}</td>
+          <td class="leads-provider">${row.provider ? `<span class="pill tone-muted">${escapeHtml(providerWord(row.provider))}</span>` : "—"}${row.free ? '<small>особиста</small>' : ""}${row.role ? '<small>загальна</small>' : ""}${row.suggestion ? `<small title="Опечатка в домені">мабуть, ${escapeHtml(row.suggestion)}</small>` : ""}</td>
           <td>${escapeHtml(row.country || "—")}</td>
           <td>${escapeHtml(row.crmId ? "CRM" : row.source || "—")}${row.sourceDate ? `<small>${escapeHtml(row.sourceDate)}</small>` : ""}</td>
           <td>${row.campaigns.length ? `<div class="leads-campaigns">${row.campaigns.map((item) => `<span class="pill ${ENROLL_TONE[item.status] || "tone-muted"}" title="${escapeAttr(item.name)}: ${escapeAttr(ENROLL_WORD[item.status] || item.status)}">${escapeHtml(item.name)}</span>`).join("")}</div>` : "—"}</td>
@@ -445,7 +462,7 @@ async function act(work) {
 
 function showView(view) {
   // The table empties at once: the old list's rows must not stand under the new one's name.
-  Object.assign(leadsState, { view, card: null, offset: 0, adding: false, renaming: false, notice: "", error: "", page: null, allInFolder: false, check: null });
+  Object.assign(leadsState, { view, card: null, offset: 0, adding: false, renaming: false, notice: "", error: "", page: null, allInFolder: false, check: null, provider: "" });
   leadsState.selected.clear();
   renderLeads();
   if (view !== EXCLUSIONS && view !== PRIVACY) void loadPage();
@@ -491,6 +508,12 @@ root()?.addEventListener("click", async (event) => {
     leadsState.allInFolder = false;
     return loadPage();
   }
+  const providerChip = target.closest("[data-leads-provider]")?.dataset.leadsProvider;
+  if (providerChip) {
+    Object.assign(leadsState, { provider: leadsState.provider === providerChip ? "" : providerChip, offset: 0, allInFolder: false });
+    leadsState.selected.clear();
+    return loadPage();
+  }
   const allFolder = target.closest("[data-leads-all-folder]")?.dataset.leadsAllFolder;
   if (allFolder) { leadsState.allInFolder = allFolder === "1"; return renderLeads(); }
   if (target.closest("[data-leads-check]") || target.closest("[data-leads-check-stop]")) {
@@ -523,6 +546,11 @@ root()?.addEventListener("change", (event) => {
     return renderLeads();
   }
   if (target.name === "folderId" && target.closest("#leadsToFolder")) { leadsState.folderTarget = target.value; return renderLeads(); }
+  if (target.id === "leadsProvider") {
+    Object.assign(leadsState, { provider: target.value, offset: 0, allInFolder: false });
+    leadsState.selected.clear();
+    return void loadPage();
+  }
   const pick = target.dataset?.leadsPick;
   if (pick) {
     leadsState.allInFolder = false;
@@ -559,7 +587,7 @@ root()?.addEventListener("submit", async (event) => {
     const name = String(values.name || "").trim();
     if (!values.folderId && !name) { leadsState.notice = "Дайте новій папці назву або виберіть наявну."; return renderLeads(); }
     return act(async () => {
-      const result = await api("/api/esp/leads/crm/folder", { method: "POST", body: JSON.stringify({ fromFolderId, all, q: leadsState.q, ids, folderId: values.folderId || "", name }) });
+      const result = await api("/api/esp/leads/crm/folder", { method: "POST", body: JSON.stringify({ fromFolderId, all, q: leadsState.q, provider: leadsState.provider, ids, folderId: values.folderId || "", name }) });
       leadsState.selected.clear();
       Object.assign(leadsState, { allInFolder: false, folderName: "", folderTarget: result.folder.id });
       await loadMeta();

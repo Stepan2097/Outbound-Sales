@@ -15,6 +15,7 @@ import { composeLetter } from "./compose.mjs";
 import { ReplyError, conversations, quickReply } from "./conversations.mjs";
 import { REPLY_LABELS } from "./replies.mjs";
 import { LeadError, decorateLeads, leadPage } from "./leads.mjs";
+import { PROVIDER_LABEL } from "./folder-check.mjs";
 import { PLAN_BOUNDS, cleanPlan, mailboxHistory, removedFromWarmup, warmupLog, warmupMode, warmupPlan, warmupView } from "./mail-warmup.mjs";
 import { UNIBOX_FOLDERS, uniboxList, uniboxProblems, uniboxThread } from "./unibox.mjs";
 import { recordAboutContact, recordFailed, recordSending, recordSent } from "./messages.mjs";
@@ -417,7 +418,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
     if (method === "GET" && path === "/leads" && url.searchParams.get("crm")) {
       if (!esp.crmLeads?.configured()) return badRequest(sendJson, response, "CRM не підключено — папок CRM не прочитати.");
       try {
-        const page = await esp.crmLeads.page({ folderId: url.searchParams.get("crm"), q: url.searchParams.get("q") || "", offset: url.searchParams.get("offset") || 0, limit: url.searchParams.get("limit") || 50 });
+        const page = await esp.crmLeads.page({ folderId: url.searchParams.get("crm"), q: url.searchParams.get("q") || "", offset: url.searchParams.get("offset") || 0, limit: url.searchParams.get("limit") || 50, provider: url.searchParams.get("provider") || "" });
         const entries = await allEntries();
         const rows = decorateLeads(page.rows, {
           enrollments: esp.campaigns?.enrollments() || [], campaigns: new Map((esp.campaigns?.list() || []).map((row) => [row.id, row.name])),
@@ -434,7 +435,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
     }
     if (method === "GET" && path === "/leads/crm/check") {
       if (!esp.folderCheck) return badRequest(sendJson, response, "Перевірку папок на цьому сервері не підключено.");
-      sendJson(response, 200, { success: true, run: esp.folderCheck.status(String(url.searchParams.get("folder") || "")), deep: esp.folderCheck.deepAvailable() });
+      sendJson(response, 200, { success: true, run: esp.folderCheck.status(String(url.searchParams.get("folder") || "")), deep: esp.folderCheck.deepAvailable(), providers: PROVIDER_LABEL });
       return true;
     }
     if (method === "GET" && path === "/leads") {
@@ -509,7 +510,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
         if (!esp.crmLeads?.configured()) return badRequest(sendJson, response, "CRM не підключено.");
         const fromFolderId = String(body.fromFolderId || "");
         const ids = body.all
-          ? await esp.crmLeads.idsInFolder(fromFolderId, String(body.q || ""))
+          ? await esp.crmLeads.idsInFolder(fromFolderId, String(body.q || ""), String(body.provider || ""))
           : (Array.isArray(body.ids) ? body.ids : []).map(String).map((id) => id.replace(/^crm:/, ""));
         try {
           const result = await esp.crmLeads.addToFolder({ ids, folderId: String(body.folderId || ""), name: String(body.name || ""), fromFolderId });
