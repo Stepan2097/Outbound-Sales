@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { anty, today } from "./db.mjs";
 import { SESSION_WINDOW, dutyGapMinutes, insideWindow, onDutyBreak, windowLabel } from "./schedule.mjs";
 import { dailyQuota, dayOfRun, hasPlanOn, inWorkingMode, noteAllowedOnDay, pausedOn } from "./strategy.mjs";
-import { INVITES_HELD, LIVE_ACCOUNT_STATUSES, LIVE_RUN_STATES, logEvent, readHoldsFrom, settlePause } from "./store.mjs";
+import { INVITES_HELD, LIVE_ACCOUNT_STATUSES, LIVE_RUN_STATES, invitesOffIds, logEvent, readHoldsFrom, settlePause } from "./store.mjs";
 import {
   MAX_INVITES_PER_RUN, MAX_INVITE_CHECKS_PER_RUN, checkedTodayAccounts, folderAddedToday, heldCounts,
   openConversationCounts, pendingCounts
@@ -833,6 +833,8 @@ async function candidates(todayIso, nowMs, campaigns = []) {
     const since = new Date(nowMs - 2 * 86_400_000).toISOString();
     const held = await anty.from("wl_events").select("account_id,meta").eq("type", INVITES_HELD).in("account_id", ids).gte("created_at", since).rows();
     for (const row of held) if ((row.meta?.until ?? "") >= todayIso) invitesHeld.add(row.account_id);
+    // Requests switched off for the account: as held, every day (16.10).
+    for (const id of await invitesOffIds(ids)) invitesHeld.add(id);
   } catch { /* unread: nothing is held back for it */ }
   return dueFrom({
     accounts, runs, dayActions, openProfiles, invitesWaiting, invitesClaimed, folderFeeds: feeds, folderAdded,

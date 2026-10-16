@@ -695,6 +695,30 @@ test("ліміт запрошень: акаунт не на паузі, у пл�
   assert.notEqual(next.payload.plan.find((row) => row.kind === "connect"), undefined, "наступного дня запити знову в плані");
 });
 
+// ── запити в друзі: перемикач на акаунт (власник 16.10: «Profile 42 тільки він хай додає в друзі») ──
+
+test("перемикач запитів: вимкнений акаунт не має запитів у плані щодня, перегляди лишаються; вмикається назад; маршрут пише подію", async () => {
+  rows.wl_runs = [run("acc-1", 12), run("acc-2", 12)];
+  rows.wl_events = [];
+  const switched = await call({ method: "POST", path: "/api/warmup/accounts/invites", body: { accountId: "acc-1", enabled: false } });
+  assert.equal(switched.status, 200);
+  const event = written.find((row) => row.table === "wl_events" && row.body?.type === "invites.setting");
+  assert.equal(event?.body?.meta?.enabled, false);
+  assert.equal((await call({ method: "POST", path: "/api/warmup/accounts/invites", body: { accountId: "acc-1" } })).status, 400);
+
+  rows.wl_events = [{ id: "s1", account_id: "acc-1", type: "invites.setting", created_at: new Date(Date.now() - 3 * 86400000).toISOString(), meta: { enabled: false } }];
+  const off = await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" });
+  assert.equal(off.payload.runnable, true);
+  assert.equal(off.payload.plan.find((row) => row.kind === "connect"), undefined, "вимкнено — і через три дні теж");
+  assert.ok(off.payload.plan.some((row) => row.kind === "profile_view"), "перегляди лишаються");
+  const other = await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-2" });
+  assert.notEqual(other.payload.plan.find((row) => row.kind === "connect"), undefined, "інший акаунт не зачеплено");
+
+  rows.wl_events.push({ id: "s2", account_id: "acc-1", type: "invites.setting", created_at: new Date().toISOString(), meta: { enabled: true } });
+  const on = await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" });
+  assert.notEqual(on.payload.plan.find((row) => row.kind === "connect"), undefined, "увімкнули — запити знову в плані");
+});
+
 // ── чергування у вхідних 8–20 (власник 16.10) ──
 
 test("чергування: акаунт заглядає у вхідні, коли востаннє дивився 12–20 хв тому; не під час перерви, не поза вікном, не з відкритим вручну профілем", async (t) => {

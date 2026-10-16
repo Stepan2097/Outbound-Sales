@@ -22,6 +22,7 @@ import { encryptSecret, secretsConfigured } from "./secretbox.mjs";
 import { RECHECK_DONE, RECHECK_REQUESTED, issueLoginCheck, readLoginCheck } from "./login-check.mjs";
 import {
   activeRun, checkQuota, commitAction, connectQuotaToday, describeAccount, ensureDefaultStrategy, heldUntil, holdInvites, invitesHeldOn,
+  invitesOff, invitesOffIds, setInvitesEnabled,
   latestWarnings, logEvent, loadAccount, loginIdentities, newestRun, openSession, pauseForWarning, probeEventWriteAccess, recordAction,
   toStrategy
 } from "./store.mjs";
@@ -179,6 +180,7 @@ async function connectAllowance(account) {
   // the first one also holds back the checks, which cost no allowance.
   if (pausedOn(run, today())) return { blocked: `Paused until ${run.paused_until}`, paused: true };
   // LinkedIn's invitation limit: no requests today, nothing else held (16.10).
+  if (await invitesOff(account.id)) return { run, day: dayOfRun(run), blocked: "Запити в друзі для цього акаунта вимкнено", off: true, quota: 0, spent: 0 };
   if (await invitesHeldOn(account.id)) return { run, day: dayOfRun(run), blocked: "LinkedIn обмежив запрошення — нові підуть завтра", held: true, quota: 0, spent: 0 };
 
   const allowance = await checkQuota(account, run, "connect", 1);
@@ -1618,6 +1620,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         .filter((account) => { const run = runByAccount.get(account.id); return run?.paused_until && run.paused_until >= todayIso; })
         .map((account) => account.id);
       const warningByAccount = await latestWarnings(pausedIds);
+      const invitesOffSet = await invitesOffIds(linked.map((account) => account.id)).catch(() => new Set());
 
       const byProfile = new Map(linked.map((account) => [account.profile_remote_id, account]));
 
@@ -1660,7 +1663,9 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           isRunningNow: row.status === "running",
           connections: {
             ...(connectionsByAccount.get(account?.id ?? "") || { today: 0, total: 0 }),
-            quota: connectCeiling(connectQuotaToday(account, run, todayIso),
+            // Switched off for this account (16.10): said in the column, with the switch.
+            off: Boolean(account && invitesOffSet.has(account.id)),
+            quota: account && invitesOffSet.has(account.id) ? 0 : connectCeiling(connectQuotaToday(account, run, todayIso),
               connectionsByAccount.get(account?.id)?.today ?? 0, weeklyByAccount.get(account?.id) ?? 0),
             weekly: weeklyAllowance(weeklyByAccount.get(account?.id) ?? 0, todayIso),
             startsDay: connectStartsDay(run)
@@ -1908,6 +1913,18 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
      * keeps advancing on a blocked account is exactly how the next account gets
      * treated the same way.
      */
+    // Запити в друзі для акаунта: увімкнути чи вимкнути (власник 16.10).
+    if (method === "POST" && path === "/accounts/invites") {
+      const body = await readJson(request);
+      if (!body?.accountId || typeof body.enabled !== "boolean") return fail(response, sendJson, 400, "Потрібні accountId і enabled");
+      const account = await loadAccount(String(body.accountId));
+      if (!account) return fail(response, sendJson, 404, "Акаунт не знайдено");
+      const actor = request.auth?.profile?.email || null;
+      await setInvitesEnabled({ accountId: account.id, enabled: body.enabled, actor });
+      sendJson(response, 200, { success: true, accountId: account.id, enabled: body.enabled });
+      return true;
+    }
+
     if (method === "POST" && path === "/accounts/health") {
       const body = await readJson(request);
       if (!body) return fail(response, sendJson, 400, "Некоректне тіло JSON");
@@ -3646,7 +3663,8 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       const weekly = await weeklyConnectAllowance(account.id);
       dayPlan.quotas.connect = connectCeiling(dayPlan.quotas.connect, doneByKind.get("connect") ?? 0, weekly.done);
       // LinkedIn's invitation limit hit today: no requests in the plan, the rest stays.
-      if (await invitesHeldOn(account.id)) dayPlan.quotas.connect = 0;
+      // Requests switched off for this account: none in the plan either (16.10).
+      if (await invitesHeldOn(account.id) || await invitesOff(account.id)) dayPlan.quotas.connect = 0;
 
       // On a day with more requests than one run carries, and people for
       // them, the first session leaves two views for the session that sends

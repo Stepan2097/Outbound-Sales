@@ -1301,6 +1301,35 @@ dialog {
   }
 }
 
+/* Запити в друзі з акаунта: число на сьогодні і перемикач поруч (16.10). */
+.warmup-invites-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.warmup-invites-switch {
+  min-height: 28px;
+  width: 28px;
+  padding: 0;
+  border-radius: 999px;
+}
+
+.warmup-invites-switch svg {
+  width: 15px;
+  height: 15px;
+}
+
+.warmup-invites-switch.is-on {
+  border-color: var(--teal);
+  background: var(--teal-weak);
+  color: var(--teal);
+}
+
+.warmup-invites-switch.is-off {
+  color: var(--muted);
+}
+
 /* Теги профілю Anty в таблиці акаунтів LinkedIn, з редагуванням на місці. */
 .warmup-tags {
   display: flex;

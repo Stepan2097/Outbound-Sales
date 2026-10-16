@@ -200,14 +200,49 @@ function warmupPhoneLine(profile) {
 }
 
 function warmupConnectionsCell(profile) {
-  const { today = 0, total = 0, quota = 0, startsDay = null } = profile.connections || {};
+  const { today = 0, total = 0, quota = 0, startsDay = null, off = false } = profile.connections || {};
   const week = profile.connections?.weekly;
   const all = `title="${total} за весь час${week ? ` · ${week.done}/${week.limit} за 7 днів` : ""}"`;
-  if (quota > 0) return `<span ${all}>${today}/${quota}</span>`;
-  if (startsDay) return `<span class="warmup-subtle" ${all}>з ${startsDay}-го дня</span>`;
+  let count;
+  if (off) count = `<span class="pill tone-muted" ${all}>вимкнено</span>`;
+  else if (quota > 0) count = `<span ${all}>${today}/${quota}</span>`;
+  else if (startsDay) count = `<span class="warmup-subtle" ${all}>з ${startsDay}-го дня</span>`;
   // No requests today: the column is about today, so it says nothing — the
   // all-time count read as today's in a column headed «сьогодні».
-  return `<span class="warmup-subtle" ${all}>—</span>`;
+  else count = `<span class="warmup-subtle" ${all}>—</span>`;
+  return `<span class="warmup-invites-cell">${count}${warmupInvitesSwitchHtml(profile)}</span>`;
+}
+
+/**
+ * Запити в друзі з цього акаунта — увімкнено чи ні (власник 16.10: «Profile 42
+ * тільки він хай додає в друзі всі інші ні і це має бути видно в інтерфейсі»).
+ * Off holds back requests only: views, likes, the inbox and replies go on.
+ */
+function warmupInvitesSwitchHtml(profile) {
+  const account = profile.account;
+  if (!account) return "";
+  const off = Boolean(profile.connections?.off);
+  const title = off
+    ? "Запити в друзі з цього акаунта вимкнено. Натисніть, щоб увімкнути."
+    : "Цей акаунт надсилає запити в друзі. Натисніть, щоб вимкнути — решта роботи акаунта триває.";
+  return `<button type="button" class="warmup-invites-switch ${off ? "is-off" : "is-on"}" role="switch" aria-checked="${!off}" data-warmup-invites="${escapeAttr(account.id)}" data-warmup-invites-on="${off ? "1" : "0"}" title="${escapeAttr(title)}" aria-label="${escapeAttr(`Запити в друзі з ${profile.name}: ${off ? "вимкнено" : "увімкнено"}`)}"><i data-lucide="${off ? "user-x" : "user-plus"}"></i></button>`;
+}
+
+async function setWarmupInvites(accountId, enabled) {
+  const profile = warmupState.profiles.find((row) => row.account?.id === accountId);
+  if (profile) {
+    profile.connections = { ...(profile.connections || {}), off: !enabled, ...(enabled ? {} : { quota: 0 }) };
+    renderWarmupProfiles();
+  }
+  try {
+    await warmupApi("/accounts/invites", { method: "POST", body: JSON.stringify({ accountId, enabled }) });
+  } catch (error) {
+    if (profile) profile.connections = { ...(profile.connections || {}), off: enabled };
+    renderWarmupProfiles();
+    window.alert?.(error?.message || "Не вдалося змінити запити в друзі.");
+    return;
+  }
+  await loadWarmupProfiles().catch(() => {});
 }
 
 function renderWarmupConfigNote() {
@@ -1143,6 +1178,12 @@ document.getElementById("warmupProfileTableBody")?.addEventListener("click", (ev
     renderWarmupProfiles();
     const input = document.querySelector("[data-warmup-tags-form] input");
     if (input) { input.value = typed; input.focus(); }
+    return;
+  }
+  const invites = event.target.closest("[data-warmup-invites]");
+  if (invites) {
+    event.stopPropagation();
+    void setWarmupInvites(invites.dataset.warmupInvites, invites.dataset.warmupInvitesOn === "1");
     return;
   }
   const jump = event.target.closest("[data-warmup-inbox-jump]");

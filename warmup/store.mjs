@@ -310,6 +310,45 @@ export async function holdInvites({ account, run = null, source, note = null, to
   return { until: todayIso };
 }
 
+/**
+ * Запити в друзі по акаунту (власник 16.10: «Profile 42 тільки він хай додає в
+ * друзі всі інші ні і це має бути видно в інтерфейсі»). A switch, kept as the
+ * account's own events like the hold above — the newest says — so no column
+ * is added to the production table. Off: no requests at all, by the agent or
+ * by hand; everything else the account does goes on. On unless switched off.
+ */
+export const INVITES_SETTING = "invites.setting";
+
+export async function setInvitesEnabled({ accountId, enabled, actor = null }) {
+  await logEvent({
+    accountId, level: "info", type: INVITES_SETTING,
+    message: enabled ? "Connection requests switched on for this account" : "Connection requests switched off for this account — nothing else changes",
+    meta: { enabled: Boolean(enabled), actor }
+  });
+  return { enabled: Boolean(enabled) };
+}
+
+/** Which of these accounts have requests switched off. */
+export async function invitesOffIds(accountIds) {
+  const ids = [...new Set((accountIds || []).filter(Boolean))];
+  const off = new Set();
+  if (!ids.length) return off;
+  const rows = await anty.from("wl_events").select("account_id,meta,created_at").eq("type", INVITES_SETTING).in("account_id", ids)
+    .order("created_at", { ascending: false }).limit(1000).rows();
+  const seen = new Set();
+  // Newest first, whatever order the rows arrived in: the newest switch says.
+  for (const row of rows.slice().sort((left, right) => String(right.created_at || "").localeCompare(String(left.created_at || "")))) {
+    if (seen.has(row.account_id)) continue;
+    seen.add(row.account_id);
+    if (row.meta?.enabled === false) off.add(row.account_id);
+  }
+  return off;
+}
+
+export async function invitesOff(accountId) {
+  return (await invitesOffIds([accountId])).has(accountId);
+}
+
 /** The day invitations are held to, when that is today — else null. */
 export async function invitesHeldOn(accountId, todayIso = today()) {
   const rows = await anty.from("wl_events").select("meta,created_at").eq("account_id", accountId).eq("type", INVITES_HELD)
@@ -449,6 +488,9 @@ export async function checkQuota(account, run, kind, step = 1) {
   // twentieth is refused here as "quota reached" whatever the snapshot says.
   const daily = dailyQuota(snapshot, account.id, day, kind);
   let quota = daily;
+  if (kind === "connect" && await invitesOff(account.id)) {
+    return { ok: false, status: 409, error: "Запити в друзі для цього акаунта вимкнено", quota: 0, done: 0, off: true };
+  }
   if (kind === "connect" && await invitesHeldOn(account.id)) {
     return { ok: false, status: 409, error: "LinkedIn limited invitations today — tried again tomorrow", quota: 0, done: 0, held: true };
   }
