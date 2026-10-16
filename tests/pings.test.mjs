@@ -133,3 +133,43 @@ test("ручний пінг: +1, +3, тиждень або день", () => {
   assert.equal(manualDueDay("2026-11-04", "2026-10-16"), "2026-11-04");
   assert.equal(manualDueDay("завтра", "2026-10-16"), "");
 });
+
+// Етап 2/6: відкриті діалоги з 01.08.
+import { isTheirs, pickOpenDialogs, ruleVerdict, spreadDates } from "../triage/open-dialogs.mjs";
+import { reasonOfKey } from "../triage/pings.mjs";
+
+test("відкритий діалог: лід відповів після 01.08 (зокрема наш рядок відповіді, записаний як outgoing) і статус відкритий; з пінгом — ні", () => {
+  const activities = [
+    { contact_id: "a", created_at: "2026-09-01T10:00:00Z", direction: "outgoing", content: "LinkedIn · Ми написали з акаунта X · …" },
+    { contact_id: "a", created_at: "2026-09-02T10:00:00Z", direction: "outgoing", content: "LinkedIn · Відповідь на акаунт X · …\nцікаво" },
+    { contact_id: "b", created_at: "2026-09-03T10:00:00Z", direction: "outgoing", content: "LinkedIn · Ми написали…" },
+    { contact_id: "c", created_at: "2026-09-04T10:00:00Z", direction: "incoming", content: "так" },
+    { contact_id: "d", created_at: "2026-09-05T10:00:00Z", direction: "incoming", content: "так" }
+  ];
+  const contacts = [
+    { id: "a", name: "A", lead_status: "in_progress" }, { id: "b", name: "B", lead_status: "responded" },
+    { id: "c", name: "C", lead_status: "bad_timing" }, { id: "d", name: "D", lead_status: "responded" }, { id: "e", name: "E", lead_status: "qualification" }
+  ];
+  const statusChanges = [{ contact_id: "b", new_status: "responded" }];
+  const picked = pickOpenDialogs({ activities, statusChanges, contacts, openPingContacts: new Set(["d"]) });
+  assert.deepEqual(picked.map((item) => item.contactId).sort(), ["a", "b"], "c закритий, d має пінг, e без дотику й переходу");
+  assert.equal(picked.find((item) => item.contactId === "a").lastBy, "them");
+  assert.equal(isTheirs({ direction: "outgoing", content: "LinkedIn · Відповідь на акаунт Y" }), true);
+});
+
+test("крок за правилом і дати: важливіші раніше, не більше межі на робочий день, із суботи — з понеділка", () => {
+  assert.equal(ruleVerdict({ status: "responded", lastBy: "them" }).reason, "reply");
+  assert.equal(ruleVerdict({ status: "booked_call", lastBy: "us" }).reason, "call");
+  assert.equal(ruleVerdict({ status: "responded", lastBy: "us" }).reason, "silent");
+  const items = Array.from({ length: 5 }, (_, index) => ({ contactId: `c${index}`, priority: index === 4 ? "high" : "normal", reason: "silent", lastAt: `2026-09-0${index + 1}` }));
+  const spread = spreadDates(items, { today: "2026-10-16", perDay: 2 });
+  assert.equal(spread[0].contactId, "c4", "високий пріоритет першим");
+  assert.deepEqual(spread.map((item) => item.due), ["2026-10-16", "2026-10-16", "2026-10-19", "2026-10-19", "2026-10-20"]);
+  assert.equal(spreadDates(items, { today: "2026-10-17", perDay: 10 })[0].due, "2026-10-19");
+});
+
+test("ключ імпорту дає крок для блоків «Сьогодні»", () => {
+  assert.equal(reasonOfKey("import:reply:c1"), "reply");
+  assert.equal(reasonOfKey("import:silent:c1"), "silent");
+  assert.equal(reasonOfKey("import:bogus:c1"), "manual");
+});

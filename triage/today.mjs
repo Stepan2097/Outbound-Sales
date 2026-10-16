@@ -12,6 +12,7 @@ import { repliesOf, sameText } from "../warmup/outbox.mjs";
 import { acceptedRows, firstMarks } from "../warmup/first-messages.mjs";
 import { INVITE_ACCEPTED } from "../warmup/invites.mjs";
 import { accountName } from "../warmup/activities.mjs";
+import { acceptOpenDialogs, openDialogs, suggestOpenDialogs } from "./open-dialogs.mjs";
 import {
   PING_QUEUE, REASONS, blockOf, clearSuperseded, compareItems, dayIn, desiredPing, manualDueDay, markSuperseded,
   newContactsAllowed, parseTaskMarks, planPingChanges, taskDescription, taskReason, zonedIso
@@ -493,6 +494,31 @@ export async function handleTodayApi({ request, response, url, sendJson, readJso
       reconcileSoon(500);
       sendJson(response, 200, { leadgens: next });
       return true;
+    }
+    // Етап 2/6: відкриті діалоги з 01.08 — лише адміністратор.
+    if (path.startsWith("/api/today/open-dialogs")) {
+      if (!isAdmin) throw refuse("Імпорт відкритих діалогів — для адміністратора.", 403);
+      if (request.method === "GET" && path === "/api/today/open-dialogs") {
+        const counts = new Map();
+        for (const id of Object.values(leadgenStore.read())) counts.set(id, (counts.get(id) || 0) + 1);
+        const defaultAssignee = [...counts.entries()].sort((left, right) => right[1] - left[1])[0]?.[0] || null;
+        const people = await crm.from("profiles").select("id,email").order("email").rows().catch(() => []);
+        sendJson(response, 200, { ...(await openDialogs()), people, defaultAssignee });
+        return true;
+      }
+      if (request.method === "POST" && path === "/api/today/open-dialogs/suggest") {
+        if (!writer?.classify) throw refuse("На цьому сервері немає моделі — лишаються пропозиції за правилом.", 503);
+        const started = await suggestOpenDialogs({ classify: writer.classify });
+        sendJson(response, 200, { job: { done: started.done, total: started.total, running: started.running, failed: started.failed } });
+        return true;
+      }
+      if (request.method === "POST" && path === "/api/today/open-dialogs/accept") {
+        const body = await readJson(request);
+        const result = await acceptOpenDialogs({ items: body?.items, assignee: String(body?.assignee || "") });
+        reconcileSoon(500);
+        sendJson(response, 200, result);
+        return true;
+      }
     }
     if (request.method === "POST" && path === "/api/today/refresh") {
       sendJson(response, 200, { reconciled: await reconcilePings() });

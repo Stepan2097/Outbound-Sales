@@ -30,6 +30,7 @@ function matches(row, params) {
     const value = columnValue(row, column);
     if (expression.startsWith("eq.") && String(value) !== expression.slice(3)) return false;
     if (expression.startsWith("in.(") && !listValues(expression.slice(3)).includes(String(value))) return false;
+    if (expression.startsWith("gte.") && !(String(value) >= expression.slice(4))) return false;
   }
   return true;
 }
@@ -207,4 +208,28 @@ test("акаунт веде лідген → пінги його діалогі�
   } finally {
     setLeadgenStore({ read: () => ({}), write: async () => {} });
   }
+});
+
+import { acceptOpenDialogs, openDialogs } from "../triage/open-dialogs.mjs";
+
+test("відкриті діалоги з 01.08: пропозиції → прийняти пачкою → 0 без пінга; повторне прийняття не дублює", async () => {
+  rows.contacts.push({ id: "c9", name: "Old Lead", company: "OldBet", lead_status: "responded", owner_id: "u-stepan" });
+  rows.activities = [
+    { id: "a1", contact_id: "c9", created_at: "2026-09-10T10:00:00Z", direction: "outgoing", content: "LinkedIn · Ми написали з акаунта chloe · …\nHi" },
+    { id: "a2", contact_id: "c9", created_at: "2026-09-11T10:00:00Z", direction: "outgoing", content: "LinkedIn · Відповідь на акаунт chloe · …\nInteresting, send details" }
+  ];
+  rows.contact_status_history = [];
+  const before = await openDialogs({ today: dayIn(new Date()) });
+  assert.deepEqual(before.items.map((item) => item.contactId), ["c9"]);
+  assert.equal(before.items[0].reason, "reply");
+  const items = before.items.map(({ contactId, reason, due, why }) => ({ contactId, reason, due, why }));
+  assert.deepEqual(await acceptOpenDialogs({ items, assignee: "u-bohdan" }), { created: 1, skipped: 0 });
+  const [ping] = openOf("c9");
+  assert.equal(ping.title, "Відповісти: Old Lead");
+  assert.equal(ping.assigned_to, "u-bohdan");
+  assert.equal((await openDialogs({ today: dayIn(new Date()) })).items.length, 0, "жодного відкритого діалогу без пінга");
+  assert.deepEqual(await acceptOpenDialogs({ items, assignee: "u-bohdan" }), { created: 0, skipped: 1 });
+  assert.equal(tasksOf("c9").length, 1);
+  const list = await todayList({ viewerId: "u-bohdan" });
+  assert.ok(list.blocks.replies.some((item) => item.contactId === "c9"), "імпортована відповідь — у «Відповідях»");
 });

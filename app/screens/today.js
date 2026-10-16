@@ -30,7 +30,9 @@ const today = {
   data: null, error: "", loading: false,
   scope: readScope(),
   selected: "", detail: null, detailError: "", detailLoading: false,
-  draftLoading: false, draftNote: "", sending: false, notice: "", tone: "", text: "", textFor: ""
+  draftLoading: false, draftNote: "", sending: false, notice: "", tone: "", text: "", textFor: "",
+  // Етап 2/6: відкриті діалоги з 01.08 (адмін).
+  imports: null, importOpen: false, importError: "", importPick: new Set(), importEdits: new Map(), importAssignee: "", importBusy: false, importTimer: null
 };
 
 function readScope() {
@@ -183,6 +185,90 @@ async function movePing(when, call = false) {
   }
 }
 
+/* ── відкриті діалоги з 01.08 (етап 2/6) ───────────────────────────────── */
+
+const STEP = { reply: "Відповісти", silent: "Нагадати", call: "Дзвінок" };
+const PRIORITY_LABEL = { high: "високий", normal: "звичайний", low: "низький" };
+
+async function loadImports() {
+  try {
+    today.imports = await api("/api/today/open-dialogs");
+    today.importError = "";
+    if (!today.importAssignee) today.importAssignee = today.imports.defaultAssignee || "";
+    // Нові кандидати вибрані одразу; зняте людиною лишається знятим.
+    for (const item of today.imports.items) if (!today.importEdits.has(item.contactId) && !today.importPick.has(`x:${item.contactId}`)) today.importPick.add(item.contactId);
+  } catch (error) {
+    if (error?.name !== "AbortError") today.importError = error.message || "Не вдалося прочитати відкриті діалоги.";
+  }
+  clearTimeout(today.importTimer);
+  if (today.importOpen && today.imports?.job?.running) today.importTimer = setTimeout(() => void loadImports(), 3000);
+  render();
+}
+
+function importValue(item, field) {
+  return today.importEdits.get(item.contactId)?.[field] ?? item[field];
+}
+
+function importHtml() {
+  const data = today.imports;
+  if (today.importError) return `<p class="today-empty is-error">${escapeHtml(today.importError)}</p>`;
+  if (!data) return `<p class="today-empty">Збираю відкриті діалоги з CRM…</p>`;
+  const picked = data.items.filter((item) => today.importPick.has(item.contactId));
+  const job = data.job;
+  const ai = job?.running ? `AI думає: ${job.done} з ${job.total}…` : job ? `AI переглянув ${job.done}${job.failed ? `, без відповіді ${job.failed} — за правилом` : ""}` : "";
+  return `
+    <div class="today-import-bar">
+      <p>${data.items.length ? `${data.items.length} відкритих діалогів без пінга. Дати розкладено до ${data.perDay} на робочий день, важливіші — раніше.` : "Відкритих діалогів без пінга немає."}</p>
+      <div class="today-import-actions">
+        <button type="button" data-today="import-ai" ${job?.running || !data.items.length ? "disabled" : ""}><i data-lucide="sparkles"></i><span>${job ? "Спитати AI ще раз" : "Спитати AI про кожного"}</span></button>
+        ${ai ? `<span class="today-hint">${escapeHtml(ai)}</span>` : ""}
+      </div>
+    </div>
+    ${data.items.length ? `<div class="today-import-accept">
+      <label><span>Кому пінги</span><select data-today-import="assignee">
+        <option value="">— оберіть —</option>
+        ${(data.people || []).map((person) => `<option value="${escapeAttr(person.id)}"${person.id === today.importAssignee ? " selected" : ""}>${escapeHtml(person.email)}</option>`).join("")}
+      </select></label>
+      <button type="button" data-today="import-all">${picked.length === data.items.length ? "Зняти всі" : "Вибрати всі"}</button>
+      <button type="button" class="primary-button" data-today="import-accept" ${!picked.length || !today.importAssignee || today.importBusy ? "disabled" : ""}><i data-lucide="check"></i><span>${today.importBusy ? "Ставлю пінги…" : `Прийняти вибрані (${picked.length})`}</span></button>
+    </div>
+    <div class="table-wrap today-import-table"><table>
+      <thead><tr><th></th><th>Хто</th><th>Останній дотик</th><th>Крок</th><th>Дата</th><th>Чому</th></tr></thead>
+      <tbody>${data.items.map((item) => {
+        const last = item.timeline.at(-1);
+        return `<tr>
+          <td><input type="checkbox" data-today-import="pick" data-id="${escapeAttr(item.contactId)}" ${today.importPick.has(item.contactId) ? "checked" : ""} aria-label="Вибрати"></td>
+          <td><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml([item.position, item.company].filter(Boolean).join(" · "))}</span><span class="pill tone-muted">${escapeHtml(item.status)}</span></td>
+          <td><span>${escapeHtml(item.lastBy === "them" ? "Лід" : "Ми")} · ${escapeHtml(item.lastAt ? new Date(item.lastAt).toLocaleDateString("uk-UA") : "")}</span><span class="today-import-snippet">${escapeHtml(String(last?.text || "").replace(/^LinkedIn · [^\n]*\n/, "").slice(0, 160))}</span></td>
+          <td><select data-today-import="reason" data-id="${escapeAttr(item.contactId)}">${Object.entries(STEP).map(([value, label]) => `<option value="${value}"${importValue(item, "reason") === value ? " selected" : ""}>${label}</option>`).join("")}</select></td>
+          <td><input type="date" data-today-import="due" data-id="${escapeAttr(item.contactId)}" value="${escapeAttr(importValue(item, "due"))}"></td>
+          <td><span>${escapeHtml(item.why || "")}</span><span class="today-hint">${item.by === "ai" ? "AI" : "правило"} · пріоритет ${escapeHtml(PRIORITY_LABEL[item.priority] || item.priority)}</span></td>
+        </tr>`;
+      }).join("")}</tbody>
+    </table></div>` : ""}`;
+}
+
+async function acceptImports() {
+  const data = today.imports;
+  const items = data.items.filter((item) => today.importPick.has(item.contactId)).map((item) => ({
+    contactId: item.contactId, reason: importValue(item, "reason"), due: importValue(item, "due"), why: item.why, priority: item.priority
+  }));
+  today.importBusy = true;
+  render();
+  try {
+    const result = await api("/api/today/open-dialogs/accept", { method: "POST", body: JSON.stringify({ items, assignee: today.importAssignee }) });
+    say(`Пінги поставлено: ${result.created}${result.skipped ? `, пропущено (уже мали пінг): ${result.skipped}` : ""}.`);
+    today.importEdits.clear();
+    await loadImports();
+    await openToday({ keepSelection: true });
+  } catch (error) {
+    if (error?.name !== "AbortError") say(error.message || "Не вдалося поставити пінги.", "is-error");
+  } finally {
+    today.importBusy = false;
+    render();
+  }
+}
+
 /* ── малювання ──────────────────────────────────────────────────────────── */
 
 function queueItem(item) {
@@ -301,10 +387,11 @@ function render() {
             <button type="button" data-today="scope" data-scope="mine" class="${today.scope === "mine" ? "active" : ""}">Мої</button>
             <button type="button" data-today="scope" data-scope="all" class="${today.scope === "all" ? "active" : ""}">Усі</button>
           </div>` : ""}
+          ${data.canSeeAll ? `<button type="button" data-today="import-toggle">${today.importOpen ? "До пінгів" : "Відкриті діалоги з 01.08"}</button>` : ""}
           <button type="button" class="icon-button" data-today="reload" title="Оновити" aria-label="Оновити"><i data-lucide="refresh-cw"></i></button>
         </div>
       </header>
-      ${allItems().length ? `<div class="today-layout">
+      ${today.importOpen ? `${today.notice ? `<p class="today-notice ${today.tone}" role="status">${escapeHtml(today.notice)}</p>` : ""}<div class="today-import">${importHtml()}</div>` : allItems().length ? `<div class="today-layout">
         <aside class="today-queue">${queueHtml()}</aside>
         <article class="today-work">${workHtml()}</article>
       </div>` : `${today.notice ? `<p class="today-notice ${today.tone}" role="status">${escapeHtml(today.notice)}</p>` : ""}<div class="today-queue today-queue-solo">${queueHtml()}</div>`}
@@ -347,6 +434,28 @@ document.addEventListener("click", (event) => {
     if (window.matchMedia("(max-width: 900px)").matches) document.querySelector("#todayRoot .today-work")?.scrollIntoView({ block: "start" });
     return void loadDetail(today.selected);
   }
+  if (act === "import-toggle") {
+    today.importOpen = !today.importOpen;
+    say("");
+    render();
+    if (today.importOpen) void loadImports();
+    return;
+  }
+  if (act === "import-ai") {
+    return void api("/api/today/open-dialogs/suggest", { method: "POST", body: "{}" })
+      .then(() => loadImports())
+      .catch((error) => { say(error.message || "AI зараз недоступний.", "is-warn"); render(); });
+  }
+  if (act === "import-all") {
+    const all = today.imports?.items || [];
+    const everyPicked = all.every((item) => today.importPick.has(item.contactId));
+    for (const item of all) {
+      if (everyPicked) { today.importPick.delete(item.contactId); today.importPick.add(`x:${item.contactId}`); }
+      else { today.importPick.add(item.contactId); today.importPick.delete(`x:${item.contactId}`); }
+    }
+    return render();
+  }
+  if (act === "import-accept") return void acceptImports();
   if (act === "rewrite") return void writeDraft(true);
   if (act === "send") return void send();
   if (act === "move") return void movePing(target.dataset.when);
@@ -358,4 +467,18 @@ document.addEventListener("click", (event) => {
     }
     return void movePing(day, act === "call");
   }
+});
+
+document.addEventListener("change", (event) => {
+  const field = event.target.closest?.("#todayRoot [data-today-import]");
+  if (!field) return;
+  const kind = field.dataset.todayImport;
+  const id = field.dataset.id;
+  if (kind === "assignee") today.importAssignee = field.value;
+  if (kind === "pick") {
+    if (field.checked) { today.importPick.add(id); today.importPick.delete(`x:${id}`); }
+    else { today.importPick.delete(id); today.importPick.add(`x:${id}`); }
+  }
+  if (kind === "reason" || kind === "due") today.importEdits.set(id, { ...(today.importEdits.get(id) || {}), [kind]: field.value });
+  render();
 });

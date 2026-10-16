@@ -106,8 +106,12 @@ export function clearSuperseded(description) {
 }
 
 export function reasonOfKey(key) {
-  const head = String(key || "").split(":")[0];
-  return ["reply", "first", "silent"].includes(head) ? head : "manual";
+  const [head, second] = String(key || "").split(":");
+  if (["reply", "first", "silent"].includes(head)) return head;
+  // Імпорт відкритих діалогів (етап 2): «import:<крок>:<контакт>» — крок, але задача
+  // поводиться як поставлена людиною: нова подія в діалозі її замінює.
+  if (head === "import" && ["reply", "silent", "call"].includes(second)) return second;
+  return "manual";
 }
 
 const isSystemKey = (key) => ["reply", "first", "silent"].includes(String(key || "").split(":")[0]);

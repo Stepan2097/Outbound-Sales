@@ -1097,7 +1097,7 @@ async function handleApi(request, response, url) {
     const handled = await handleTodayApi({
       request, response, url, sendJson, readJson,
       viewer: { id: profile?.id || "", role: profile?.role || "seller" },
-      writer: { write: writeTodayDraft }
+      writer: { write: writeTodayDraft, classify: classifyOpenDialog }
     });
     if (handled) return;
   }
@@ -15034,6 +15034,29 @@ async function generateContactDrafts(contact, product, { language = "en", instru
  * повідомлення, інакше робочий. Без моделі — порожньо: лідген пише сам.
  * Надсилає не це: кожне повідомлення погоджує людина (Марко, 16.10).
  */
+/**
+ * Етап 2/6: який наступний крок у давньому відкритому діалозі — з переписки в CRM.
+ * Повертає { reason: reply|silent|call, priority: high|normal|low, why }. Дату не
+ * вигадує: дати розкладає triage/open-dialogs.mjs. Без моделі — null (правило).
+ */
+async function classifyOpenDialog(candidate) {
+  if (!state.vault || state.providerHealth.status !== "healthy") return null;
+  const { data } = await callOpenRouterJson({
+    model: outreachModelForProfile("balanced"),
+    taskType: "SEQUENCE_GENERATION",
+    profile: "balanced",
+    maxTokens: 300,
+    messages: [
+      {
+        role: "system",
+        content: "You triage a sales lead-gen person's open LinkedIn conversations with iGaming operators and media buyers. Return only strict JSON {\"reason\": \"reply\"|\"silent\"|\"call\", \"priority\": \"high\"|\"normal\"|\"low\", \"why\": \"one short sentence in Ukrainian\"}. reason=reply when the lead wrote last and is waiting for us; call when a call was agreed or asked for; silent when we wrote last and should follow up. priority=high when the lead showed interest, asked a question, or a call is near; low when they declined softly or went cold long ago. Use only the timeline given; never invent."
+      },
+      { role: "user", content: JSON.stringify({ status: candidate.status, contact: { name: candidate.name, company: candidate.company, position: candidate.position }, timeline: candidate.timeline }) }
+    ]
+  });
+  return data && typeof data === "object" ? data : null;
+}
+
 // Оголошена функція, а не const: маршрут /api/today може прийти раніше, ніж модуль дочитано до цього рядка.
 async function writeTodayDraft({ contact, messages = [], kind = "reply", accountId = "" }) {
   if (!state.vault || state.providerHealth.status !== "healthy") return { text: "", model: null };

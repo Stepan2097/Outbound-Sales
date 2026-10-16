@@ -202,6 +202,23 @@
   font-size: 13px;
 }
 
+/* ── відкриті діалоги з 01.08 (етап 2/6) ── */
+
+.today-import { display: grid; gap: 10px; }
+.today-import-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.today-import-bar p { margin: 0; color: var(--muted); font-size: 13px; }
+.today-import-actions,
+.today-import-accept { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.today-import-accept label { display: inline-flex; align-items: center; gap: 6px; }
+.today-import-accept select { width: auto; }
+.today-import-table { max-height: 70vh; overflow: auto; }
+.today-import-table td { vertical-align: top; }
+.today-import-table td > span { display: block; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.today-import-table td > span.pill { display: inline-block; margin-top: 3px; }
+.today-import-table select,
+.today-import-table input[type="date"] { width: auto; min-height: 30px; }
+.today-import-snippet { color: var(--ink) !important; max-width: 340px; }
+
 @media (max-width: 900px) {
   .today-layout { grid-template-columns: minmax(0, 1fr); }
   .today-queue { max-height: none; }
