@@ -155,6 +155,32 @@ test("відповідь поставлена в чергу → пінг зак�
   assert.deepEqual(open.map((row) => row.id), [reply.id], "та сама задача «Відповісти» відкрита знову, «Нагадати» закрито");
 });
 
+test("стара задача з ключем лише в описі: заміна й повторне відкриття переносять ключ у ping_key, дублів немає", async () => {
+  await reconcilePings();
+  const [reply] = openOf("c1");
+  const key = reply.ping_key;
+  // Так задачу записував код до 16.10: ключ — рядком в описі, колонки порожні.
+  Object.assign(rows.tasks.find((row) => row.id === reply.id), { ping_key: null, ping_superseded: null, description: `${reply.description}\n⟦ob:${key}⟧` });
+
+  const queued = outboxQueued("Sure — what GEO do you run?", 5);
+  rows.wl_events.push(queued);
+  await reconcilePings();
+  const closed = rows.tasks.find((row) => row.id === reply.id);
+  assert.equal(closed.completed, true);
+  assert.equal(closed.ping_superseded, true);
+  assert.equal(closed.ping_key, key, "ключ перейшов з опису в колонку");
+  assert.doesNotMatch(closed.description, /⟦ob:/);
+
+  rows.wl_events.push({ id: `x-${++nextId}`, account_id: "acc-1", type: "outbox.cancelled", created_at: ago(1), meta: { replyId: queued.id } });
+  await reconcilePings();
+  const open = openOf("c1");
+  assert.deepEqual(open.map((row) => row.id), [reply.id], "відкрита знову та сама задача, нової не створено");
+  assert.equal(open[0].ping_key, key);
+  assert.equal(open[0].ping_superseded, false);
+  await reconcilePings();
+  assert.equal(openOf("c1").length, 1, "повторна звірка не дублює");
+});
+
 test("людина перенесла пінг на завтра — звірка дату не чіпає; чужий лідген перенести не може", async () => {
   await reconcilePings();
   const [ping] = openOf("c1");

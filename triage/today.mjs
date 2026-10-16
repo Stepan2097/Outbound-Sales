@@ -222,7 +222,9 @@ async function applyAction(action, { contactId, contact, owner, nowIso }) {
   }
   if (action.op === "supersede") {
     await crm.from("tasks").update({
-      completed: true, status: "done", ping_superseded: true, description: stripMarks(action.task.description), updated_at: nowIso
+      completed: true, status: "done", ping_superseded: true, description: stripMarks(action.task.description),
+      // Стара задача з ключем лише в описі: ключ переходить у колонку, а не зникає разом з рядком ⟦ob:…⟧.
+      ping_key: taskMarks(action.task).key, updated_at: nowIso
     }).eq("id", action.task.id).rows();
     return "superseded";
   }
@@ -232,7 +234,9 @@ async function applyAction(action, { contactId, contact, owner, nowIso }) {
   }
   if (action.op === "reopen") {
     await crm.from("tasks").update({
-      completed: false, status: "todo", ping_superseded: false, description: stripMarks(action.task.description), updated_at: nowIso
+      completed: false, status: "todo", ping_superseded: false, description: stripMarks(action.task.description),
+      // Стара задача з ключем лише в описі: ключ переходить у колонку, а не зникає разом з рядком ⟦ob:…⟧.
+      ping_key: taskMarks(action.task).key, updated_at: nowIso
     }).eq("id", action.task.id).rows();
     return "reopened";
   }
