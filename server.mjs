@@ -24,7 +24,7 @@ import { logAdminAction } from "./esp/access.mjs";
 import { knowledgeExcerptsForPrompt, knowledgeFilesForProduct, loadKnowledgeLibrary } from "./knowledge/library.mjs";
 import { handleWarmupApi } from "./warmup/api.mjs";
 import { networkStore } from "./warmup/network.mjs";
-import { adoptNetwork, networkFolderName } from "./warmup/network-contacts.mjs";
+import { adoptNetwork, networkAdoptionEnabled, networkFolderName } from "./warmup/network-contacts.mjs";
 import { adoptionFolderName } from "./warmup/people.mjs";
 import { handleEspApi } from "./esp/api.mjs";
 import { connectorFromEnv } from "./esp/gmail.mjs";
@@ -1138,7 +1138,7 @@ async function handleApi(request, response, url) {
       if (request.method === "GET" && url.pathname === "/api/contacts/folders") {
         // The folders the system fills itself (16.10) go first on the screen: the
         // LinkedIn accounts' friends and the people who wrote in.
-        const filled = new Map([[networkFolderName(), "friends"], [adoptionFolderName(), "inbox"]]);
+        const filled = new Map([...(networkAdoptionEnabled() ? [[networkFolderName(), "friends"]] : []), [adoptionFolderName(), "inbox"]]);
         const folders = (await listContactFolders({ cacheScope }))
           .map((folder) => (filled.has(folder.name) ? { ...folder, system: filled.get(folder.name) } : folder));
         // An empty CRM and a CRM read with the wrong key look identical from
