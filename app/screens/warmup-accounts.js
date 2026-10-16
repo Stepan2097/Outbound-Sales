@@ -383,12 +383,63 @@ function warmupAccountUnreadHtml(accountId) {
     title="${escapeAttr(`${label} на цьому акаунті — показати їх у вхідних`)}"><i data-lucide="mail"></i><span>${escapeHtml(label)}</span></button>`;
 }
 
+// ── теги профілю Anty (власник 16.10: «додай в табличці статуси tags … і
+// можливість їх редагувати») ──────────────────────────────────────────────
+// The same tags the Anty app shows on the profile; saved straight into it.
+const tagsEdit = { profileId: null, draft: [], busy: false, error: "" };
+
+function warmupTagTone(tag) {
+  if (/ban|бан|мертв|dead|блок/i.test(tag)) return "tone-warn";
+  if (/жив|live|active|ok/i.test(tag)) return "tone-live";
+  return "tone-muted";
+}
+
+function warmupTagsCell(profile) {
+  const tags = profile.tags || [];
+  if (tagsEdit.profileId !== profile.id) {
+    return `<div class="warmup-tags">${tags.map((tag) => `<span class="pill ${warmupTagTone(tag)}">${escapeHtml(tag)}</span>`).join("")}
+      <button type="button" class="icon-button warmup-tags-edit" data-warmup-tags-edit="${escapeAttr(profile.id)}" aria-label="Змінити теги" title="Змінити теги — так само, як в Anty"><i data-lucide="${tags.length ? "pencil" : "tag"}"></i></button></div>`;
+  }
+  const known = (warmupState.knownTags || []).filter((tag) => !tagsEdit.draft.some((item) => item.toLowerCase() === tag.toLowerCase()));
+  return `<div class="warmup-tags-editor" data-warmup-tags-editor>
+    <div class="warmup-tags">${tagsEdit.draft.map((tag, index) => `<span class="pill ${warmupTagTone(tag)}">${escapeHtml(tag)}<button type="button" data-warmup-tag-drop="${index}" aria-label="Прибрати ${escapeAttr(tag)}">×</button></span>`).join("") || '<span class="warmup-subtle">тегів немає</span>'}</div>
+    ${known.length ? `<div class="warmup-tags warmup-tags-known">${known.map((tag) => `<button type="button" class="pill tone-muted" data-warmup-tag-add="${escapeAttr(tag)}">+ ${escapeHtml(tag)}</button>`).join("")}</div>` : ""}
+    <form class="warmup-tags-form" data-warmup-tags-form><input name="tag" maxlength="40" placeholder="Новий тег" autocomplete="off" />
+      <button type="submit" class="primary-button"${tagsEdit.busy ? " disabled" : ""}>${tagsEdit.busy ? "Зберігаю..." : "Зберегти"}</button>
+      <button type="button" class="text-button" data-warmup-tags-cancel>Скасувати</button></form>
+    ${tagsEdit.error ? `<small class="warmup-tags-error">${escapeHtml(tagsEdit.error)}</small>` : ""}
+  </div>`;
+}
+
+function addDraftTag(value) {
+  const tag = String(value || "").replace(/\s+/g, " ").trim().slice(0, 40);
+  if (tag && !tagsEdit.draft.some((item) => item.toLowerCase() === tag.toLowerCase())) tagsEdit.draft.push(tag);
+}
+
+async function saveWarmupTags(profileId, typed) {
+  addDraftTag(typed);
+  tagsEdit.busy = true;
+  tagsEdit.error = "";
+  renderWarmupProfiles();
+  try {
+    await warmupApi("/profiles", { method: "PATCH", body: JSON.stringify({ id: profileId, tags: tagsEdit.draft }) });
+    const profile = warmupState.profiles.find((row) => row.id === profileId);
+    if (profile) profile.tags = [...tagsEdit.draft];
+    for (const tag of tagsEdit.draft) if (!(warmupState.knownTags || []).some((item) => item.toLowerCase() === tag.toLowerCase())) (warmupState.knownTags ||= []).push(tag);
+    Object.assign(tagsEdit, { profileId: null, draft: [], busy: false });
+  } catch (error) {
+    tagsEdit.busy = false;
+    tagsEdit.error = error?.message || "Теги не збереглися.";
+  }
+  renderWarmupProfiles();
+}
+
 export function renderWarmupProfiles() {
   const body = document.getElementById("warmupProfileTableBody");
   if (!body) return;
 
   if (!warmupState.profiles.length) {
-    body.innerHTML = '<tr><td colspan="6"><div class="empty-state">Акаунтів LinkedIn в Anty немає.</div></td></tr>';
+    body.innerHTML = '<tr><td colspan="7"><div class="empty-state">Акаунтів LinkedIn в Anty немає.</div></td></tr>';
     renderWarmupCampaignDetail();
     return;
   }
@@ -427,6 +478,7 @@ export function renderWarmupProfiles() {
             <div class="warmup-row-phone">${warmupStatusPill(profile)}${account && warmupPhoneLine(profile) ? ` <span class="warmup-subtle">${escapeHtml(warmupPhoneLine(profile))}</span>` : ""}</div>
           </td>
           <td>${warmupStatusPill(profile)}</td>
+          <td class="warmup-tags-cell">${warmupTagsCell(profile)}</td>
           <td>${escapeHtml(profile.day || "—")}</td>
           <td>${warmupConnectionsCell(profile)}</td>
           <td>${account
@@ -628,6 +680,7 @@ async function loadWarmupProfiles() {
   // profiles are not ours to show.
   const payload = await warmupApi("/profiles?platform=linkedin");
   warmupState.profiles = payload.profiles;
+  warmupState.knownTags = payload.knownTags || [];
   renderWarmupProfiles();
 }
 
@@ -987,6 +1040,28 @@ document.getElementById("warmupProfileTableBody")?.addEventListener("change", (e
 document.getElementById("warmupProfileTableBody")?.addEventListener("click", (event) => {
   // Ticking an account is not the same gesture as opening it.
   if (event.target.closest("[data-warmup-account-tick]")) return;
+  // Nor is editing its tags.
+  const editTags = event.target.closest("[data-warmup-tags-edit]");
+  if (editTags) {
+    const profile = warmupState.profiles.find((row) => row.id === editTags.dataset.warmupTagsEdit);
+    Object.assign(tagsEdit, { profileId: profile?.id || null, draft: [...(profile?.tags || [])], busy: false, error: "" });
+    renderWarmupProfiles();
+    document.querySelector("[data-warmup-tags-form] input")?.focus();
+    return;
+  }
+  if (event.target.closest("[data-warmup-tags-editor]")) {
+    const drop = event.target.closest("[data-warmup-tag-drop]");
+    const add = event.target.closest("[data-warmup-tag-add]");
+    if (drop) tagsEdit.draft.splice(Number(drop.dataset.warmupTagDrop), 1);
+    else if (add) addDraftTag(add.dataset.warmupTagAdd);
+    else if (event.target.closest("[data-warmup-tags-cancel]")) Object.assign(tagsEdit, { profileId: null, draft: [], error: "" });
+    else return;
+    const typed = document.querySelector("[data-warmup-tags-form] input")?.value || "";
+    renderWarmupProfiles();
+    const input = document.querySelector("[data-warmup-tags-form] input");
+    if (input) { input.value = typed; input.focus(); }
+    return;
+  }
   const jump = event.target.closest("[data-warmup-inbox-jump]");
   if (jump) {
     event.stopPropagation();
@@ -1119,4 +1194,12 @@ document.getElementById("warmupDetailBody")?.addEventListener("input", (event) =
   warmupNetwork.shown = 50;
   const list = document.getElementById("warmupPeopleList");
   if (list) { list.innerHTML = warmupPeopleListHtml(); refreshIcons(list); }
+});
+
+// Enter in the tag field, or «Зберегти»: what is typed is added, then all is saved into Anty.
+document.getElementById("warmupProfileTableBody")?.addEventListener("submit", (event) => {
+  const form = event.target.closest("[data-warmup-tags-form]");
+  if (!form || !tagsEdit.profileId) return;
+  event.preventDefault();
+  void saveWarmupTags(tagsEdit.profileId, form.querySelector("input")?.value || "");
 });

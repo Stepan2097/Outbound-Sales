@@ -110,3 +110,44 @@ export function proxyString(proxy) {
   const auth = proxy.username ? `${proxy.username}${proxy.password ? `:${proxy.password}` : ""}@` : "";
   return `${type}://${auth}${proxy.host}${proxy.port ? `:${proxy.port}` : ""}`;
 }
+
+/**
+ * The profile's own tags as people wrote them in Anty («живий», «Ban», «BM») —
+ * without the platform tag, which says what the profile is, not how it is.
+ */
+export function userTags(tags) {
+  if (!Array.isArray(tags)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const entry of tags) {
+    const name = String(entry && typeof entry === "object" ? entry.name ?? "" : entry ?? "").trim();
+    const key = name.toLowerCase();
+    if (!name || PLATFORM_TAG_PATTERN.test(key) || seen.has(key)) continue;
+    seen.add(key);
+    out.push(name);
+  }
+  return out;
+}
+
+/**
+ * New tags for a profile: the platform tag stays as it was, the rest becomes
+ * `wanted` (trimmed, one of each regardless of case, at most 20 of 40 chars).
+ * A tag that was there keeps the form Anty stored it in.
+ */
+export function withUserTags(tags, wanted) {
+  const current = Array.isArray(tags) ? tags : [];
+  const nameOf = (entry) => String(entry && typeof entry === "object" ? entry.name ?? "" : entry ?? "").trim();
+  const kept = current.filter((entry) => PLATFORM_TAG_PATTERN.test(nameOf(entry).toLowerCase()));
+  const byName = new Map(current.map((entry) => [nameOf(entry).toLowerCase(), entry]));
+  const seen = new Set();
+  const next = [];
+  for (const raw of Array.isArray(wanted) ? wanted : []) {
+    const name = String(raw ?? "").replace(/\s+/g, " ").trim().slice(0, 40);
+    const key = name.toLowerCase();
+    if (!name || PLATFORM_TAG_PATTERN.test(key) || seen.has(key)) continue;
+    seen.add(key);
+    next.push(byName.get(key) ?? name);
+    if (next.length >= 20) break;
+  }
+  return [...next, ...kept];
+}

@@ -8,7 +8,7 @@ import {
 } from "./strategy.mjs";
 import { SESSION_WINDOW, insideWindow, nextSession, windowLabel } from "./schedule.mjs";
 import { HEALTH_LABEL, HEALTH_VALUES, deriveStatus, isHealth, pauseCause } from "./status.mjs";
-import { PLATFORMS, parseProxy, platformOf, proxyString, retag } from "./platform.mjs";
+import { PLATFORMS, parseProxy, platformOf, proxyString, retag, userTags, withUserTags } from "./platform.mjs";
 import { CLAIM_STATUS, OUTREACH_COLUMNS, OUTREACH_STATUSES, describeClaim, describeOutreach, linkedinSlug, personSnapshot, sentBy } from "./outreach.mjs";
 import {
   ACCEPTED_STATUS, INVITE_HELD_OUTCOMES, INVITE_OUTCOMES, INVITE_PERSON_OUTCOMES, MAX_INVITES_PER_RUN, MAX_INVITE_CHECKS_PER_RUN,
@@ -1520,6 +1520,8 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           id: row.id,
           name: row.name,
           platform: platformOf(row),
+          // Anty's own tags on the profile («живий», «Ban») — shown and edited in the table.
+          tags: userTags(row.tags),
           startPage: row.start_page,
           proxy: row.proxy?.host ? proxyString(row.proxy) : null,
           lastLaunchedAt: row.last_launched_at,
@@ -1577,7 +1579,10 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         counts.all += 1;
       }
 
-      sendJson(response, 200, { success: true, profiles, counts, teamConfigured: Boolean(teamId) });
+      // Every tag the team's profiles carry, for the editor's suggestions.
+      const knownTags = [...new Map(profileRows.flatMap((row) => userTags(row.tags)).map((tag) => [tag.toLowerCase(), tag])).values()]
+        .sort((left, right) => left.localeCompare(right, "uk"));
+      sendJson(response, 200, { success: true, profiles, counts, knownTags, teamConfigured: Boolean(teamId) });
       return true;
     }
 
@@ -1622,6 +1627,16 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           }
           patch.tags = result.tags;
           changes.push(`marked as ${body.platform}`);
+        }
+      }
+
+      if (Array.isArray(body.tags)) {
+        // Applied over whatever a platform change above already set.
+        const next = withUserTags(patch.tags ?? profile.tags, body.tags);
+        const before = userTags(profile.tags).join("|");
+        if (userTags(next).join("|") !== before) {
+          patch.tags = next;
+          changes.push(`tags: ${userTags(next).join(", ") || "—"}`);
         }
       }
 

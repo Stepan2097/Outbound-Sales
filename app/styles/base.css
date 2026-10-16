@@ -1292,3 +1292,56 @@ dialog {
     width: auto;
   }
 }
+
+/* Теги профілю Anty в таблиці акаунтів LinkedIn, з редагуванням на місці. */
+.warmup-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.warmup-tags .pill button {
+  margin-left: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+.warmup-tags-edit {
+  opacity: 0.55;
+}
+
+tr:hover .warmup-tags-edit,
+.warmup-tags-edit:focus-visible {
+  opacity: 1;
+}
+
+.warmup-tags-editor {
+  display: grid;
+  gap: 6px;
+  min-width: 220px;
+}
+
+.warmup-tags-known .pill {
+  cursor: pointer;
+  border: 1px dashed var(--line);
+}
+
+.warmup-tags-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.warmup-tags-form input {
+  min-width: 0;
+  flex: 1 1 110px;
+}
+
+.warmup-tags-error {
+  color: var(--danger, #b42318);
+}
