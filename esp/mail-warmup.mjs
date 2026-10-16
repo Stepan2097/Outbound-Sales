@@ -332,7 +332,7 @@ async function written(writer, request) {
   }
 }
 
-export async function runWarmupTick({ journal, senders, connector, gate, now = new Date(), replyPercent = REPLY_PERCENT, writer = null }) {
+export async function runWarmupTick({ journal, senders, connector, gate, now = new Date(), replyPercent = REPLY_PERCENT, writer = null, pace = true }) {
   const summary = { received: 0, rescued: 0, replied: 0, sent: 0, skipped: [], errors: [] };
   const entries = await journal.allEntries();
   const { rows } = warmupLedger(entries, { now });
@@ -480,6 +480,7 @@ export async function runWarmupTick({ journal, senders, connector, gate, now = n
     const error = plan?.lastError;
     if (error && now.getTime() - new Date(error.at).getTime() < BACKOFF_MINUTES * 60_000) return { ok: false, reason: "backoff" };
     if (kind === "first" && today >= (plan?.plannedToday || 0)) return { ok: false, reason: "plan_done" };
+    if (kind === "first" && pace && !paceAllows(sender.email, today, plan?.plannedToday || 0, now)) return { ok: false, reason: "paced" };
     return sendDecision({ sender, recipient: OUR_SIDE, ledger, now, window: WARMUP_WINDOW, purpose: "warmup" });
   };
 
@@ -544,6 +545,24 @@ export async function runWarmupTick({ journal, senders, connector, gate, now = n
     if (await send(from, to, letter, { kind: "first", writtenBy: text ? "model" : "template" })) summary.sent += 1;
   }
   return summary;
+}
+
+/**
+ * The day's first letters spread over the whole warm-up window (owner 16.10:
+ * «якщо на сьогодні стоїть 5 листів то їх треба розділити на весь день, а не
+ * щоб вони до 10 вже всі відправилися»). The window 08:00–22:00 is cut into as
+ * many equal slots as the plan has letters; letter k waits for its slot, at a
+ * point inside it picked for this mailbox and day — so five letters land
+ * roughly at 9, 11, 14, 16, 19, differently each day and for each mailbox.
+ */
+export function paceAllows(email, sentToday, planned, now = new Date()) {
+  if (!planned) return false;
+  const local = localTime(now, COUNTING_ZONE);
+  const start = WARMUP_WINDOW.startHour * 60;
+  const span = (WARMUP_WINDOW.endHour - WARMUP_WINDOW.startHour) * 60;
+  const slot = span / planned;
+  const at = start + sentToday * slot + seeded(`${email}|${local.date}|${sentToday}|slot`, 0, Math.max(0, Math.floor(slot * 0.8)));
+  return local.hour * 60 + local.minute >= at;
 }
 
 export const WARMUP_LABEL = "Прогрів";

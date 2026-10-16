@@ -47,7 +47,8 @@ async function world(t, { annaDomain = "ramp", rampStage = 35 } = {}) {
   const gate = new SenderGate({ connector, store: registrySenderStore("test"), halted: () => halted });
   const tick = async (now, options = {}) => {
     t.mock.timers.setTime(now.getTime());
-    return runWarmupTick({ journal: { allEntries, append }, senders: (await registry()).senders, connector, gate, now, ...options });
+    // Pacing over the day has its own test; the others look at one pass at a time.
+    return runWarmupTick({ journal: { allEntries, append }, senders: (await registry()).senders, connector, gate, now, pace: false, ...options });
   };
   const start = async (mailbox, now) => {
     t.mock.timers.setTime(now.getTime());
@@ -453,4 +454,18 @@ test("наші листи у «Вхідних» — прочитати трох�
   night.receivedAt = new Date(at(0, -600).getTime()).toISOString();
   await tick(new Date("2026-10-12T21:30:00Z"), { replyPercent: 0 });
   assert.ok(night.labels.includes("UNREAD"), "о 00:30 за Києвом нічого не чіпаємо");
+});
+
+test("листи прогріву розкладені на весь день: 5 на день — по одному в кожній п'ятій частині 08:00–22:00, а не всі зранку (16.10)", async () => {
+  const { paceAllows } = await import("../esp/mail-warmup.mjs");
+  const kyiv = (hour, minute = 0) => new Date(Date.UTC(2026, 9, 16, hour - 3, minute));
+  // Before 08:00 nothing; the 1st letter somewhere in 08:00–10:15, the 5th not before 19:12.
+  assert.equal(paceAllows("a@x.com", 0, 5, kyiv(7, 59)), false);
+  assert.equal(paceAllows("a@x.com", 0, 5, kyiv(10, 30)), true);
+  assert.equal(paceAllows("a@x.com", 4, 5, kyiv(19, 0)), false, "п'ятий — не раніше 19:12");
+  assert.equal(paceAllows("a@x.com", 4, 5, kyiv(21, 50)), true);
+  // At 10:00 at most the first two of five are allowed.
+  let allowed = 0;
+  for (let sent = 0; sent < 5; sent += 1) if (paceAllows("a@x.com", sent, 5, kyiv(10, 0))) allowed += 1;
+  assert.ok(allowed <= 2, `до 10:00 — не більше двох, а не всі п'ять (${allowed})`);
 });
