@@ -11,6 +11,7 @@ import { invalidateContactCaches, contactAsProspect, contactsConfigured, contact
 import { handleKnowledgeLibraryApi } from "./knowledge/api.mjs";
 import { handlePitchApi } from "./knowledge/pitch-api.mjs";
 import { handleTodayApi, reconcileSoon, setCampaignsReader, setLeadgenStore, startPingReconciler } from "./triage/today.mjs";
+import { handleCampaignReportApi, setReportStores, startReplyLabeler } from "./triage/campaign-report.mjs";
 import { loadPitchBook } from "./knowledge/pitch.mjs";
 import { allEntries, append as espAppend, useJournal } from "./esp/journal.mjs";
 import { channelsFor as triageChannels, nextContact as nextTriageContact } from "./triage/queue.mjs";
@@ -291,6 +292,8 @@ const state = {
   warmupCampaigns: null,
   // Хто з лідгенів веде який акаунт LinkedIn: { accountId: id користувача CRM }. Пінги діалогів акаунта — йому (16.10).
   accountLeadgens: {},
+  // Мітки відповідей у звіті кампаній (етап 6/6): { contactId: { label, by: ai|human, basis, at } }.
+  replyLabels: {},
   // ESP 1: sending mailboxes Google stopped letting us act as, by address —
   // why and since when. A person lifts each one; nothing retries on its own.
   espSenderPauses: {},
@@ -741,6 +744,18 @@ server.listen(port, () => {
     }
   });
   setCampaignsReader(() => (Array.isArray(state.warmupCampaigns) ? state.warmupCampaigns : []));
+  // Звіт кампаній (етап 6/6): мітки відповідей — у стані робочого простору.
+  setReportStores({
+    labels: {
+      read: () => state.replyLabels || {},
+      async write(value) {
+        state.replyLabels = value;
+        await writePersistentWorkspaceState();
+      }
+    },
+    campaigns: () => (Array.isArray(state.warmupCampaigns) ? state.warmupCampaigns : [])
+  });
+  startReplyLabeler({ classify: classifyReply });
   startPingReconciler();
   // ESP 15: the daily DNS and blocklist watch. Asked hourly, runs once a day
   // (the journal remembers); the first look is a few minutes after start, so a
@@ -1104,6 +1119,13 @@ async function handleApi(request, response, url) {
       viewer: { id: profile?.id || "", role: profile?.role || "seller" },
       writer: { write: writeTodayDraft, classify: classifyOpenDialog }
     });
+    if (handled) return;
+  }
+
+  // «Звіти» → LinkedIn-кампанії (етап 6/6): кваліфіковані відповіді на 100 написаних,
+  // мітки відповідей (AI, лідген змінює одним кліком). triage/campaign-report.mjs.
+  if (url.pathname === "/api/campaign-report" || url.pathname.startsWith("/api/campaign-report/")) {
+    const handled = await handleCampaignReportApi({ request, response, url, sendJson, readJson, classify: classifyReply });
     if (handled) return;
   }
 
@@ -5038,6 +5060,9 @@ function applyPersistentWorkspaceState(saved = {}) {
   if (saved.accountLeadgens && typeof saved.accountLeadgens === "object" && !Array.isArray(saved.accountLeadgens)) {
     state.accountLeadgens = saved.accountLeadgens;
   }
+  if (saved.replyLabels && typeof saved.replyLabels === "object" && !Array.isArray(saved.replyLabels)) {
+    state.replyLabels = saved.replyLabels;
+  }
   if (Array.isArray(saved.warmupCampaigns)) {
     state.warmupCampaigns = saved.warmupCampaigns;
   }
@@ -5293,6 +5318,7 @@ async function writeWorkspaceStateNow() {
       accountDossiers: state.accountDossiers,
       warmupCampaigns: state.warmupCampaigns,
       accountLeadgens: state.accountLeadgens,
+      replyLabels: state.replyLabels,
       warmupTargeting: state.warmupTargeting,
       espSenderPauses: state.espSenderPauses,
       espTemplates: state.espTemplates,
@@ -15071,6 +15097,29 @@ async function classifyOpenDialog(candidate) {
         content: "You triage a sales lead-gen person's open LinkedIn conversations with iGaming operators and media buyers. Return only strict JSON {\"reason\": \"reply\"|\"silent\"|\"call\", \"priority\": \"high\"|\"normal\"|\"low\", \"why\": \"one short sentence in Ukrainian\"}. reason=reply when the lead wrote last and is waiting for us; call when a call was agreed or asked for; silent when we wrote last and should follow up. priority=high when the lead showed interest, asked a question, or a call is near; low when they declined softly or went cold long ago. Use only the timeline given; never invent."
       },
       { role: "user", content: JSON.stringify({ status: candidate.status, contact: { name: candidate.name, company: candidate.company, position: candidate.position }, timeline: candidate.timeline }) }
+    ]
+  });
+  return data && typeof data === "object" ? data : null;
+}
+
+/**
+ * Етап 6/6: мітка відповіді ліда для звіту кампаній — з переписки. Повертає
+ * { label: qualified|not_icp|refusal|traffic_only|other } або null без моделі.
+ */
+async function classifyReply({ person, messages = [] }) {
+  if (!state.vault || state.providerHealth.status !== "healthy") return null;
+  const conversation = messages.slice(-12).map((message) => ({ from: message.direction === "in" ? "them" : "us", text: String(message.body || "").slice(0, 1200) }));
+  const { data } = await callOpenRouterJson({
+    model: outreachModelForProfile("balanced"),
+    taskType: "SEQUENCE_GENERATION",
+    profile: "balanced",
+    maxTokens: 120,
+    messages: [
+      {
+        role: "system",
+        content: "You label a lead's replies in a LinkedIn outreach conversation for a team that runs and teaches iGaming media buying (paid traffic: Facebook, Unity, PWA). Return only strict JSON {\"label\": \"qualified\"|\"not_icp\"|\"refusal\"|\"traffic_only\"|\"other\"}. qualified: the person fits (works in iGaming / affiliate / media buying or runs such a team) and engages — asks questions, shows interest, agrees to talk or shares their situation. not_icp: not our audience (other industry, job seeker, irrelevant role). refusal: clearly declines or asks to stop. traffic_only: only wants to buy or sell traffic on CPA/RevShare terms, not our product. other: greetings, thanks, unclear, auto-replies. Judge by what they wrote; never invent."
+      },
+      { role: "user", content: JSON.stringify({ contact: { name: person?.name || "", position: person?.position || "", company: person?.company || "" }, conversation }) }
     ]
   });
   return data && typeof data === "object" ? data : null;

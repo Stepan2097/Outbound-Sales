@@ -1,0 +1,145 @@
+/* «Звіти» → LinkedIn-кампанії (етап 6/6) — app/screens/campaign-report.js. */
+
+.campaign-report {
+  margin-bottom: 24px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.campaign-report-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.campaign-report-head h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.campaign-report-head p,
+.campaign-report-job {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.campaign-report-scroll {
+  margin-top: 12px;
+  overflow-x: auto;
+}
+
+.campaign-report-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.campaign-report-table th,
+.campaign-report-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.campaign-report-table th:first-child,
+.campaign-report-table td:first-child {
+  text-align: left;
+}
+
+.campaign-report-table th {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.campaign-report-table small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.campaign-report-row {
+  cursor: pointer;
+}
+
+.campaign-report-row:hover,
+.campaign-report-row.is-open {
+  background: var(--surface-strong);
+}
+
+.campaign-report-row td:first-child small {
+  display: block;
+  margin-left: 26px;
+}
+
+.campaign-report-key {
+  font-weight: 700;
+  color: var(--green);
+}
+
+.campaign-report-replies td {
+  padding: 0 10px 12px;
+  text-align: left;
+  white-space: normal;
+  background: var(--surface-strong);
+}
+
+.campaign-report-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.campaign-report-list li {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.campaign-report-who {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.campaign-report-who span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.campaign-report-list p {
+  margin: 6px 0 8px;
+  white-space: pre-wrap;
+}
+
+.campaign-report-labels {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.campaign-report-label {
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.campaign-report-label.is-on {
+  border-color: var(--green);
+  background: color-mix(in srgb, var(--green) 14%, var(--surface));
+  font-weight: 600;
+}

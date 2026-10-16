@@ -113,6 +113,7 @@ const SAVED_AS = {
   accountDossiers: "accountDossiers",
   warmupCampaigns: "warmupCampaigns",
   accountLeadgens: "accountLeadgens",
+  replyLabels: "replyLabels",
   warmupTargeting: "warmupTargeting",
   espSenderPauses: "espSenderPauses",
   espTemplates: "espTemplates",
