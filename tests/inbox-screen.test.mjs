@@ -20,7 +20,7 @@ const NAMES = [
   "WARMUP_SYNC_STALE_HOURS", "inboxAccountFilter", "inboxSearch", "inboxReplied", "INBOX_REPLIED", "repliedTest", "warmupInboxRepliedHtml", "inboxSearchTerms", "inboxPaneKey",
   "inboxIndexedThreads", "inboxIndexedAccounts", "inboxThreadIndex", "warmupInboxIndex",
   "inboxRenderedMarkup", "inboxLoadPromise", "inboxSessionVersion", "inboxOpenRequest", "setInboxMarkup", "warmupInboxNextHtml", "renderWarmupInboxNext", "renderWarmupInboxList",
-  "warmupAgo", "warmupStamp", "warmupHoursSince", "WARMUP_PLACEHOLDERS", "warmupPlaceholder", "warmupBodyHtml",
+  "warmupAgo", "KYIV_DAY", "kyivDay", "warmupWhen", "warmupTimeHtml", "warmupMoment", "warmupStamp", "warmupHoursSince", "WARMUP_PLACEHOLDERS", "warmupPlaceholder", "warmupBodyHtml",
   "warmupPreviewHtml", "warmupProfileUrl",
   "WARMUP_UNNAMED", "WARMUP_NAME_NOISE", "warmupCleanName", "warmupParticipantUnnamed", "warmupParticipantName",
   "warmupParticipantNameAttr", "warmupThreadAccount", "warmupAccountTitle", "warmupInboxSync", "warmupInboxNoteHtml",
@@ -158,6 +158,24 @@ test("відкрито один акаунт — найсвіжіший, — і 
   assert.doesNotMatch(rowOf(els.warmupInboxBody.innerHTML, "t-read"), /is-unread/);
   assert.equal(els.warmupInboxPill.textContent, "2 непрочитані", "число над списком — усі непрочитані, а не одного акаунта");
   assert.equal(els.warmupInboxTitle.textContent, "Вхідні");
+});
+
+test("час на рядку й у розмові — коли повідомлення прийшло в LinkedIn, а не коли агент його прочитав (власник 16.10)", () => {
+  const welcome = thread({
+    threadKey: "t-welcome", participant: { name: "The LinkedIn Team", headline: "", slug: "" },
+    lastMessage: { direction: "in", body: "Hola, Lourdes Abigail", sentAt: minutesAgo(240), linkedinAt: null, linkedinDay: "2026-09-01" }
+  });
+  const fresh = thread({ threadKey: "t-fresh", lastMessage: { direction: "in", body: "Так", sentAt: minutesAgo(30), linkedinAt: minutesAgo(1), linkedinDay: null } });
+  const { els, get } = screen({ threads: [welcome, fresh] });
+  get("renderWarmupInbox")();
+  const row = rowOf(els.warmupInboxBody.innerHTML, "t-welcome");
+  assert.match(row, /1 вер/);
+  assert.match(row, /title="У LinkedIn: 1 вересня 2026 р\."/);
+  assert.doesNotMatch(row, /год тому/);
+  assert.deepEqual(orderOf(els.warmupInboxBody.innerHTML), ["t-fresh", "t-welcome"], "вересневе привітання нижче за сьогоднішню відповідь");
+  assert.match(rowOf(els.warmupInboxBody.innerHTML, "t-fresh"), /<time[^>]*>\d{2}:\d{2}<\/time>/, "сьогодні — годинник, як у LinkedIn");
+  assert.match(get("warmupMessageHtml")({ direction: "in", body: "x", sentAt: minutesAgo(240), linkedinDay: "2026-09-01" }, "LinkedIn", "Ви"), /1 вер/);
+  assert.match(get("warmupMessageHtml")({ direction: "in", body: "x", sentAt: minutesAgo(240) }, "Хтось", "Ви"), /4 год тому/, "LinkedIn нічого не сказав — як було");
 });
 
 test("рядок каже, від кого, яка посада, що саме написали і коли; акаунта на ньому нема — він уже вибраний зверху", () => {

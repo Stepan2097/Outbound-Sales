@@ -93,7 +93,7 @@ function warmupInboxIndex() {
       warmupPlaceholder(thread.lastMessage?.body) ? "" : thread.lastMessage?.body
     ].join(" ").toLowerCase());
   }
-  const sentAt = (thread) => Date.parse(thread?.lastMessage?.sentAt || "") || 0;
+  const sentAt = (thread) => warmupMoment(thread?.lastMessage);
   for (const rows of accounts.values()) rows.sort((left, right) => sentAt(right) - sentAt(left));
   // A blocked or excluded account goes last: it is kept to be read, not worked.
   const order = [...accounts.keys()].filter(Boolean).sort((left, right) =>
@@ -126,6 +126,41 @@ function warmupAgo(iso) {
   if (days === 1) return "вчора";
   if (days < 30) return `${days} дн тому`;
   return new Date(then).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" });
+}
+
+const KYIV_DAY = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Kyiv", year: "numeric", month: "2-digit", day: "2-digit" });
+const kyivDay = (ms) => KYIV_DAY.format(new Date(ms));
+
+/**
+ * Коли повідомлення прийшло в LinkedIn, а не коли агент його прочитав (власник
+ * 16.10: «став там дату коли це повідомлення приходить в лінкедин»): сьогодні —
+ * годинник, учора — «вчора», раніше — дата, як у самому LinkedIn. Де LinkedIn
+ * назвав лише день — лише день. Нічого не назвав — як було, від прочитання.
+ */
+function warmupWhen(message) {
+  const at = Date.parse(message?.linkedinAt || "");
+  const day = message?.linkedinDay || (Number.isFinite(at) ? kyivDay(at) : "");
+  if (!day) {
+    return { text: warmupAgo(message?.sentAt) || "—", title: warmupStamp(message?.sentAt), datetime: message?.sentAt || "" };
+  }
+  const today = kyivDay(Date.now());
+  const yesterday = kyivDay(Date.now() - 86_400_000);
+  const noon = Date.parse(`${day}T12:00:00Z`);
+  const date = new Date(noon).toLocaleDateString("uk-UA", { day: "numeric", month: "short", ...(day.slice(0, 4) !== today.slice(0, 4) ? { year: "numeric" } : {}), timeZone: "UTC" });
+  const clock = Number.isFinite(at) ? new Date(at).toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Kyiv" }) : "";
+  const text = day === today ? (clock || "сьогодні") : day === yesterday ? "вчора" : date;
+  const full = new Date(noon).toLocaleDateString("uk-UA", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
+  return { text, title: `У LinkedIn: ${full}${clock ? `, ${clock}` : ""}`, datetime: Number.isFinite(at) ? message.linkedinAt : day };
+}
+
+function warmupTimeHtml(message) {
+  const when = warmupWhen(message);
+  return `<time datetime="${escapeAttr(when.datetime)}" title="${escapeAttr(when.title)}">${escapeHtml(when.text)}</time>`;
+}
+
+/** The moment a thread is ordered by: LinkedIn's time, its day, else when it was read. */
+function warmupMoment(message) {
+  return Date.parse(message?.linkedinAt || "") || Date.parse(message?.linkedinDay ? `${message.linkedinDay}T12:00:00Z` : "") || Date.parse(message?.sentAt || "") || 0;
 }
 
 /** The same moment in full, for the tooltip behind the short version. */
@@ -395,7 +430,7 @@ function warmupThreadRowHtml(thread) {
       <span class="warmup-thread-main">
         <span class="warmup-thread-top">
           <strong${warmupParticipantNameAttr(participant)}>${escapeHtml(name)}</strong>
-          <time datetime="${escapeAttr(last.sentAt || "")}" title="${escapeAttr(warmupStamp(last.sentAt))}">${escapeHtml(warmupAgo(last.sentAt) || "—")}</time>
+          ${warmupTimeHtml(last)}
         </span>
         ${participant.headline ? `<span class="warmup-thread-headline">${escapeHtml(participant.headline)}</span>` : ""}
         <span class="warmup-thread-preview">${mine ? '<span class="warmup-thread-from">Ви:</span> ' : ""}${warmupPreviewHtml(last.body)}</span>
@@ -464,7 +499,7 @@ function warmupInboxFilterHtml(shown) {
  * when it holds none, so the buttons can say what is open.
  */
 function warmupInboxAccountOptions() {
-  const sentAt = (thread) => Date.parse(thread?.lastMessage?.sentAt || "") || 0;
+  const sentAt = (thread) => warmupMoment(thread?.lastMessage);
   const found = new Map();
   for (const thread of warmupState.inbox.threads) {
     if (!thread.accountId) continue;
@@ -551,7 +586,7 @@ function warmupMessageHtml(message, participantName, accountName) {
   return `<li class="warmup-message ${inbound ? "is-in" : "is-out"}">
     <div class="warmup-message-head">
       <strong>${escapeHtml(who)}</strong>
-      <time datetime="${escapeAttr(message.sentAt || "")}" title="${escapeAttr(warmupStamp(message.sentAt))}">${escapeHtml(warmupAgo(message.sentAt) || "—")}</time>
+      ${warmupTimeHtml(message)}
     </div>
     <div class="warmup-message-body">${warmupBodyHtml(message.body)}</div>
   </li>`;

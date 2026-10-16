@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { anty, CONTACT_ID_BATCH, leadsByLinkedin } from "./db.mjs";
+import { withLinkedinTimes } from "./linkedin-time.mjs";
 import { linkedinSlug } from "./outreach.mjs";
 import { nameFromSeenLine, withoutSeenLines } from "./receipts.mjs";
 import { REQUEST_EVENT_TYPES, moveStatus, requestLine } from "./invites.mjs";
@@ -1251,7 +1252,10 @@ function toMessage(event) {
     // what the thread is ordered by (`threadOrder`). Rows stored before
     // either was written carry neither.
     position: Number.isInteger(event.meta?.position) ? event.meta.position : null,
-    sentAtIso: event.meta?.sentAtIso === true
+    sentAtIso: event.meta?.sentAtIso === true,
+    // LinkedIn's own label when its time was not a reading (`withLinkedinTimes`).
+    sentAtGiven: event.meta?.sentAtGiven === true,
+    sentAtRaw: typeof event.meta?.sentAtRaw === "string" ? event.meta.sentAtRaw : null
   };
 }
 
@@ -1343,7 +1347,7 @@ export function deriveThreads(events, { readMarks = new Map(), syncedAt = new Ma
     const readAt = readMarks.get(threadId(thread.accountId, thread.threadKey)) || null;
     // The last in the order the thread screen shows (`threadOrder`), so the
     // list's preview is the message the thread ends on there.
-    const ordered = threadOrder(thread.messages);
+    const ordered = withLinkedinTimes(threadOrder(thread.messages));
     const lastMessage = ordered.at(-1) ?? null;
     // Our messages at the end with nothing from them after — «По днях» plans
     // the next follow-up from this (14.10).
@@ -1371,7 +1375,10 @@ export function deriveThreads(events, { readMarks = new Map(), syncedAt = new Ma
         sentAt: lastMessage.sentAt,
         // A real moment: LinkedIn's own time when it was readable as one,
         // otherwise when the agent stored it.
-        at: lastMessage.sentAtIso ? lastMessage.sentAt : lastMessage.storedAt
+        at: lastMessage.sentAtIso ? lastMessage.sentAt : lastMessage.storedAt,
+        // When LinkedIn says it came (16.10), for the screen: a time, or only a day.
+        linkedinAt: lastMessage.linkedinAt,
+        linkedinDay: lastMessage.linkedinDay
       },
       trailingOut,
       trailingOutBodies,
@@ -1506,11 +1513,13 @@ export async function readThread({ accountId, threadKey }) {
   const [thread] = deriveThreads(events, { readMarks: read, syncedAt: synced, contactMarks: contacts });
   if (!thread) return null;
 
-  const messages = threadOrder(events.filter((event) => !isServiceCard(event.meta?.body, event.meta?.participant)).map(toMessage))
+  const messages = withLinkedinTimes(threadOrder(events.filter((event) => !isServiceCard(event.meta?.body, event.meta?.participant)).map(toMessage)))
     .map((message) => ({
       direction: message.direction,
       body: message.body,
       sentAt: message.sentAt,
+      linkedinAt: message.linkedinAt,
+      linkedinDay: message.linkedinDay,
       externalId: message.externalId
     }));
 
