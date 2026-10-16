@@ -15193,7 +15193,7 @@ async function classifyReply({ person, messages = [] }) {
     model: outreachModelForProfile("balanced"),
     taskType: "SEQUENCE_GENERATION",
     profile: "balanced",
-    maxTokens: 120,
+    maxTokens: 400,
     messages: [
       {
         role: "system",
@@ -15216,7 +15216,8 @@ async function writeTodayDraft({ contact, messages = [], kind = "reply", account
     model: outreachModelForProfile("balanced"),
     taskType: "SEQUENCE_GENERATION",
     profile: "balanced",
-    maxTokens: 700,
+    // Із запасом (16.10): з увімкненим міркуванням моделі 700 токенів обривали чернетку на півслові.
+    maxTokens: 1600,
     messages: [
       {
         role: "system",
