@@ -10,7 +10,7 @@ import { CHANNEL_RULES, LANGUAGES, buildFallbackDrafts, draftsPromptPayload, nor
 import { invalidateContactCaches, contactAsProspect, contactsConfigured, contactsMissingConfig, crmKeyKind, folderContactAt, listContactFolders, listFolderContacts, searchFolderContacts, readContact, supabaseKeyKind } from "./contacts/store.mjs";
 import { handleKnowledgeLibraryApi } from "./knowledge/api.mjs";
 import { handlePitchApi } from "./knowledge/pitch-api.mjs";
-import { handleTodayApi, reconcileSoon, startPingReconciler } from "./triage/today.mjs";
+import { handleTodayApi, reconcileSoon, setLeadgenStore, startPingReconciler } from "./triage/today.mjs";
 import { loadPitchBook } from "./knowledge/pitch.mjs";
 import { allEntries, append as espAppend, useJournal } from "./esp/journal.mjs";
 import { channelsFor as triageChannels, nextContact as nextTriageContact } from "./triage/queue.mjs";
@@ -285,6 +285,8 @@ const state = {
   // rather than a record of anything that happened. Null until the first read,
   // which migrates `warmupTargeting` into the list.
   warmupCampaigns: null,
+  // Хто з лідгенів веде який акаунт LinkedIn: { accountId: id користувача CRM }. Пінги діалогів акаунта — йому (16.10).
+  accountLeadgens: {},
   // ESP 1: sending mailboxes Google stopped letting us act as, by address —
   // why and since when. A person lifts each one; nothing retries on its own.
   espSenderPauses: {},
@@ -725,6 +727,13 @@ server.listen(port, () => {
   startScheduler();
   // Пінги (етап 1/6): задачі CRM вирівнюються з діалогами кожні дві хвилини. Без
   // CRM і бази прогріву в оточенні (тести, локальний запуск) — не стартує.
+  setLeadgenStore({
+    read: () => state.accountLeadgens || {},
+    async write(value) {
+      state.accountLeadgens = value;
+      await writePersistentWorkspaceState();
+    }
+  });
   startPingReconciler();
   // ESP 15: the daily DNS and blocklist watch. Asked hourly, runs once a day
   // (the journal remembers); the first look is a few minutes after start, so a
@@ -5000,6 +5009,9 @@ function applyPersistentWorkspaceState(saved = {}) {
   if (saved.warmupTargeting && typeof saved.warmupTargeting === "object") {
     state.warmupTargeting = saved.warmupTargeting;
   }
+  if (saved.accountLeadgens && typeof saved.accountLeadgens === "object" && !Array.isArray(saved.accountLeadgens)) {
+    state.accountLeadgens = saved.accountLeadgens;
+  }
   if (Array.isArray(saved.warmupCampaigns)) {
     state.warmupCampaigns = saved.warmupCampaigns;
   }
@@ -5254,6 +5266,7 @@ async function writeWorkspaceStateNow() {
       espMailboxGrants: state.espMailboxGrants,
       accountDossiers: state.accountDossiers,
       warmupCampaigns: state.warmupCampaigns,
+      accountLeadgens: state.accountLeadgens,
       warmupTargeting: state.warmupTargeting,
       espSenderPauses: state.espSenderPauses,
       espTemplates: state.espTemplates,

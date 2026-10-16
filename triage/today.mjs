@@ -24,6 +24,15 @@ const CHUNK = 100;
 const FRESH_MS = 60_000;
 export const CRM_CONTACT_URL = (process.env.CRM_APP_URL || "https://advantage-crm.netlify.app").replace(/\/+$/, "");
 
+// Хто веде який акаунт: { accountId: id користувача CRM }. Живе в стані робочого
+// простору (server.mjs кладе сюди читання й запис); пінг діалогу акаунта — цьому
+// лідгенові, без позначки — власникові контакту (рішення Марко 16.10).
+let leadgenStore = { read: () => ({}), write: async () => {} };
+export function setLeadgenStore(store) {
+  if (store?.read && store?.write) leadgenStore = store;
+}
+const leadgenOf = (accountId) => (accountId && leadgenStore.read()[accountId]) || null;
+
 let lastGather = null;
 let lastRunAt = 0;
 let running = null;
@@ -144,9 +153,9 @@ function taskTitle(reason, contact) {
 
 async function applyAction(action, { contactId, contact, owner, nowIso }) {
   if (action.op === "create") {
-    const assignee = contact?.owner_id || owner;
-    if (!assignee) throw new Error("немає кому призначити пінг");
     const desired = action.desired;
+    const assignee = leadgenOf(desired.accountId) || contact?.owner_id || owner;
+    if (!assignee) throw new Error("немає кому призначити пінг");
     await crm.from("tasks").insert({
       title: taskTitle(desired.reason, contact),
       description: taskDescription(desired.reason, desired.key),
@@ -168,6 +177,10 @@ async function applyAction(action, { contactId, contact, owner, nowIso }) {
       completed: true, status: "done", description: markSuperseded(action.task.description), updated_at: nowIso
     }).eq("id", action.task.id).rows();
     return "superseded";
+  }
+  if (action.op === "reassign") {
+    await crm.from("tasks").update({ assigned_to: action.to, updated_at: nowIso }).eq("id", action.task.id).rows();
+    return "reassigned";
   }
   if (action.op === "reopen") {
     await crm.from("tasks").update({
@@ -196,10 +209,21 @@ export async function reconcilePings({ now = new Date() } = {}) {
     const ids = [...desired.keys()];
     const [tasks, contacts] = await Promise.all([tasksOf(ids), contactsOf(ids)]);
     const owner = await fallbackOwner(contacts);
-    const stats = { contacts: ids.length, created: 0, superseded: 0, reopened: 0, failed: 0 };
+    const stats = { contacts: ids.length, created: 0, superseded: 0, reopened: 0, reassigned: 0, failed: 0 };
     const nowIso = now.toISOString();
     for (const contactId of ids) {
-      for (const action of planPingChanges(desired.get(contactId), tasks.get(contactId) || [])) {
+      const next = desired.get(contactId);
+      const actions = planPingChanges(next, tasks.get(contactId) || []);
+      // Відкритий пінг акаунта, який хтось веде, — у того, хто веде: позначку
+      // поставили чи змінили — пінги переходять за нею при наступній звірці.
+      const leadgen = leadgenOf(next.accountId);
+      if (leadgen) {
+        const closing = new Set(actions.filter((action) => action.op === "supersede").map((action) => action.task.id));
+        for (const task of tasks.get(contactId) || []) {
+          if (!task.completed && !closing.has(task.id) && task.assigned_to !== leadgen) actions.push({ op: "reassign", task, to: leadgen });
+        }
+      }
+      for (const action of actions) {
         try {
           const done = await applyAction(action, { contactId, contact: contacts.get(contactId), owner, nowIso });
           if (done) stats[done] += 1;
@@ -211,7 +235,7 @@ export async function reconcilePings({ now = new Date() } = {}) {
     }
     lastRunAt = Date.now();
     lastStats = { ...stats, at: nowIso };
-    if (stats.created || stats.superseded || stats.reopened || stats.failed) console.log(`[pings] ${JSON.stringify(lastStats)}`);
+    if (stats.created || stats.superseded || stats.reopened || stats.reassigned || stats.failed) console.log(`[pings] ${JSON.stringify(lastStats)}`);
     return lastStats;
   })().finally(() => { running = null; });
   return running;
@@ -400,7 +424,8 @@ export async function setManualPing({ pingId = "", contactId = "", when, call = 
     await crm.from("tasks").update(patch).eq("id", task.id).rows();
     return { pingId: task.id, dueDay };
   }
-  const assignee = contact?.owner_id || viewer.id;
+  const known = lastGather?.states.get(targetContact);
+  const assignee = leadgenOf(newestThread(known)?.accountId || known?.accepted?.accountId) || contact?.owner_id || viewer.id;
   const reason = call ? "call" : "manual";
   const [made] = await crm.from("tasks").insert({
     title: taskTitle(reason, contact),
@@ -443,6 +468,30 @@ export async function handleTodayApi({ request, response, url, sendJson, readJso
       const body = await readJson(request);
       const result = await setManualPing({ pingId: String(body?.pingId || ""), contactId: String(body?.contactId || ""), when: body?.when, call: Boolean(body?.call), viewer });
       sendJson(response, 200, result);
+      return true;
+    }
+    // Хто веде які акаунти: читають усі, змінює адміністратор (у картці акаунта на «Прогріві»).
+    if (request.method === "GET" && path === "/api/today/leadgens") {
+      const people = await crm.from("profiles").select("id,email,role").order("email").rows().catch(() => []);
+      sendJson(response, 200, { leadgens: leadgenStore.read(), people: people.map(({ id, email }) => ({ id, email })), canEdit: isAdmin });
+      return true;
+    }
+    if (request.method === "POST" && path === "/api/today/leadgens") {
+      if (!isAdmin) throw refuse("Хто веде акаунт, позначає адміністратор.", 403);
+      const body = await readJson(request);
+      const accountId = String(body?.accountId || "").trim();
+      const userId = String(body?.userId || "").trim();
+      if (!accountId) throw refuse("Потрібен акаунт.", 400);
+      if (userId) {
+        const [person] = await crm.from("profiles").select("id").eq("id", userId).limit(1).rows();
+        if (!person) throw refuse("Такого користувача в CRM немає.", 400);
+      }
+      const next = { ...leadgenStore.read() };
+      if (userId) next[accountId] = userId;
+      else delete next[accountId];
+      await leadgenStore.write(next);
+      reconcileSoon(500);
+      sendJson(response, 200, { leadgens: next });
       return true;
     }
     if (request.method === "POST" && path === "/api/today/refresh") {

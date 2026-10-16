@@ -112,6 +112,7 @@ const SAVED_AS = {
   espMailboxGrants: "espMailboxGrants",
   accountDossiers: "accountDossiers",
   warmupCampaigns: "warmupCampaigns",
+  accountLeadgens: "accountLeadgens",
   warmupTargeting: "warmupTargeting",
   espSenderPauses: "espSenderPauses",
   espTemplates: "espTemplates",

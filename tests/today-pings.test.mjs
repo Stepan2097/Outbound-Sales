@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import test from "node:test";
 
-import { reconcilePings, setManualPing, todayItem, todayList } from "../triage/today.mjs";
+import { reconcilePings, setLeadgenStore, setManualPing, todayItem, todayList } from "../triage/today.mjs";
 import { addWorkingDays, dayIn, parseTaskMarks } from "../triage/pings.mjs";
 
 // «Сьогодні» і пінги в CRM (етап 1/6, таск 5f5343cb) — через звірку, на заглушці,
@@ -190,4 +190,21 @@ test("адміністратор бачить усі пінги, продаве�
   await reconcilePings();
   assert.equal((await todayList({ viewerId: "u-admin" })).blocks.replies.length, 0);
   assert.equal((await todayList({ viewerId: "u-admin", scope: "all" })).blocks.replies.length, 1);
+});
+
+test("акаунт веде лідген → пінги його діалогів у нього, і вже відкриті переходять за позначкою", async () => {
+  let leadgens = {};
+  setLeadgenStore({ read: () => leadgens, write: async (value) => { leadgens = value; } });
+  try {
+    await reconcilePings();
+    assert.equal(openOf("c1")[0].assigned_to, "u-bohdan", "без позначки — власник контакту");
+    leadgens = { "acc-1": "u-leadgen" };
+    await reconcilePings();
+    assert.equal(openOf("c1")[0].assigned_to, "u-leadgen", "відкритий пінг перейшов за позначкою");
+    rows.wl_events.push(outboxQueued("Sure", 1));
+    await reconcilePings();
+    assert.equal(openOf("c1")[0].assigned_to, "u-leadgen", "новий пінг — одразу лідгенові акаунта");
+  } finally {
+    setLeadgenStore({ read: () => ({}), write: async () => {} });
+  }
 });

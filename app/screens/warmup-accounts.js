@@ -9,6 +9,7 @@ import {
   api, escapeAttr, escapeHtml, onScreen, refreshIcons, uaPlural
 } from "../core.js";
 import { onCacheReset, recallScreen, rememberScreen } from "../cache.js";
+import { accountLeadgenSlot, fillAccountLeadgen } from "../account-leadgen.js";
 import {
   loadWarmupInbox, setWarmupUnread, showWarmupInboxAccount, warmupInboxUnreadFor
 } from "./inbox.js";
@@ -565,6 +566,7 @@ function renderWarmupDetail() {
         <button type="button" data-warmup-health><i data-lucide="save"></i><span>Зберегти</span></button>
       </div>
     </section>
+    ${accountLeadgenSlot(account.id)}
     <section class="wa-section">
       <h3>Сесії</h3>
       ${sessions}
@@ -575,6 +577,7 @@ function renderWarmupDetail() {
     </details>
   `;
   refreshIcons();
+  void fillAccountLeadgen();
 }
 
 /**
