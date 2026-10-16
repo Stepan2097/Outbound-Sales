@@ -95,6 +95,12 @@ export function digestText({ unread = [], planned = { total: 0, carried: 0 }, ac
   return lines.join("\n");
 }
 
+/** An account whose sessions keep failing, or that works again. */
+export function troubleText({ name, failures = 0, reason = "", recovered = false, url = "" }) {
+  if (recovered) return `✅ ${name}: знову працює.`;
+  return [`⚠️ ${name} не працює — ${failures} сесії поспіль не вдалися.`, `Причина: ${reason}`, "Агент пробує знову кожні 45 хв.", url].filter(Boolean).join("\n");
+}
+
 /** Whether the morning line is due now: a working day in Kyiv, 09:00–12:00, not yet sent today. */
 export function digestDue(now = new Date(), lastSentOn = "") {
   const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: ZONE, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hourCycle: "h23", weekday: "short" })

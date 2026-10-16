@@ -15,7 +15,7 @@ import { loadPitchBook } from "./knowledge/pitch.mjs";
 import { allEntries, append as espAppend, useJournal } from "./esp/journal.mjs";
 import { channelsFor as triageChannels, nextContact as nextTriageContact } from "./triage/queue.mjs";
 import { AUTO_TACTIC, tacticData, tacticForPrompt, tacticLabel, tacticOptions } from "./triage/tactics.mjs";
-import { digestDue, digestText, freshReplies, leadgenTelegram, replyText } from "./triage/leadgen-notify.mjs";
+import { digestDue, digestText, freshReplies, leadgenTelegram, replyText, troubleText } from "./triage/leadgen-notify.mjs";
 import { firstMessageBoard } from "./warmup/first-messages.mjs";
 import { FOLLOW_UP_LIMIT, addSendsToDays, contactKeyOf, contactWork, dayActivity, dayOf, daysAround, followUpsDue, linkedinSends, logWork, useWorkLog, withLinkedinSends, workEntries, workUsers } from "./triage/work-log.mjs";
 import { checkEmail } from "./contacts/email-check.mjs";
@@ -1020,6 +1020,7 @@ async function handleApi(request, response, url) {
       },
       network: linkedinNetwork,
       onReply: announceReply,
+      onTrouble: announceTrouble,
       onNetwork: async (account, people) => {
         const result = await adoptNetwork({ account, people });
         if (result.added || result.failed) console.log(`[warmup] friends → CRM (${account.login || account.label || account.id}): ${JSON.stringify(result)}`);
@@ -3324,6 +3325,12 @@ async function announceReply({ account, participant, inbound }) {
     account: account?.login?.trim() || account?.label || "",
     messages, url: appUrl() ? `${appUrl()}/#inbox` : ""
   }));
+}
+
+/** An account that keeps failing — or works again — said to the same group. */
+async function announceTrouble({ account, failures, reason, recovered }) {
+  if (!leadgenBot.configured || process.env.LEADGEN_TELEGRAM === "off") return;
+  await leadgenBot.send(troubleText({ name: account?.login?.trim() || account?.label || "акаунт", failures, reason, recovered, url: appUrl() ? `${appUrl()}/#warmup` : "" }));
 }
 
 /** The morning line: what waits for us today, and how yesterday went. */

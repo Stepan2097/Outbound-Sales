@@ -1107,6 +1107,38 @@ async function inboxBackfill(accountId) {
   };
 }
 
+// ── акаунт, що не працює — сповіщення (власник 16.10: «чому немає сповіщення
+// що щось сталося з акаунтом») ───────────────────────────────────────────
+const TROUBLE_AFTER = 2;
+const TROUBLE_REPEAT_MS = 6 * 3600_000;
+const troubles = new Map();
+
+/** The agent's words, as a person would want to read them. */
+export function troubleReason(message = "") {
+  const text = String(message || "");
+  if (/not available in this server scope/i.test(text)) return "цього профілю немає на серверній Anty — його створили лише в Anty на комп'ютері, на сервер він не перенесений";
+  if (/already running in Anty|already has its profile open/i.test(text)) return "профіль уже відкритий в Anty (відкритий вручну або завис браузер) — агент не може його відкрити";
+  if (/not signed in|needs_login|logged out|увійти/i.test(text)) return "LinkedIn просить увійти — акаунт розлогінений";
+  if (/checkpoint|captcha|verify/i.test(text)) return "LinkedIn показав перевірку (капча чи підтвердження особи)";
+  return text.slice(0, 200) || "сесія обірвалась без пояснення";
+}
+
+/** The second failure in a row (and at most every six hours after), and the first success after that. */
+export async function accountTrouble(account, ok, nowMs = Date.now()) {
+  const entry = troubles.get(account.id) || { failures: 0, alertedAt: 0 };
+  if (ok) {
+    troubles.delete(account.id);
+    return entry.alertedAt ? { account, recovered: true } : null;
+  }
+  entry.failures += 1;
+  troubles.set(account.id, entry);
+  if (entry.failures < TROUBLE_AFTER || nowMs - entry.alertedAt < TROUBLE_REPEAT_MS) return null;
+  entry.alertedAt = nowMs;
+  const [last] = await anty.from("wl_events").select("message,created_at").eq("account_id", account.id).eq("type", "agent.error")
+    .gte("created_at", new Date(nowMs - 15 * 60_000).toISOString()).order("created_at", { ascending: false }).limit(1).rows().catch(() => []);
+  return { account, failures: entry.failures, reason: troubleReason(last?.message) };
+}
+
 async function replyGoesOut(account) {
   // Позачергова сесія (15.10): an approved message goes within minutes —
   // unless the account cannot be opened now or has used today's messages.
@@ -1176,7 +1208,7 @@ const RECHECK_REFUSALS = {
   expired: "Посилання застаріло — дочекайся наступного повідомлення в групі."
 };
 
-export async function handleWarmupApi({ request, response, url, sendJson, readJson, campaigns: campaignStore, writer = null, network = null, onReply = null, onNetwork = null }) {
+export async function handleWarmupApi({ request, response, url, sendJson, readJson, campaigns: campaignStore, writer = null, network = null, onReply = null, onNetwork = null, onTrouble = null }) {
   const path = url.pathname.replace(/^\/api\/warmup/, "") || "/";
   const method = request.method;
 
@@ -3623,6 +3655,13 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           ok: body.ok !== false,
           note: typeof body.note === "string" ? body.note.slice(0, 300) : null
         });
+        // An account whose sessions keep failing is said to a person (16.10):
+        // the second failure in a row, with the reason the agent gave, and again
+        // when it works.
+        if (onTrouble) {
+          void accountTrouble(account, body.ok !== false).then((trouble) => trouble && onTrouble(trouble))
+            .catch((error) => console.warn(`[warmup] trouble notice: ${error.message}`));
+        }
         sendJson(response, 200, {
           success: true,
           nextInSeconds: outcome.nextInSeconds,

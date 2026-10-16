@@ -818,3 +818,24 @@ test("кнопки LinkedIn («Завантажити більше обгово�
   const api = (await import("node:fs")).readFileSync(new URL("../warmup/api.mjs", import.meta.url), "utf8");
   assert.match(api, /answered: thread\.answered === true,/);
 });
+
+// ── акаунт не працює — сповіщення (власник 16.10) ──
+
+test("акаунт, що падає: сповіщення на другий збій поспіль, з причиною людською мовою; не частіше раз на 6 год; «знову працює» — після", async () => {
+  const { accountTrouble, troubleReason } = await import("../warmup/api.mjs");
+  assert.match(troubleReason("Anty API: Profile is not available in this server scope"), /немає на серверній Anty/);
+  assert.match(troubleReason("Profile 48- linkedin is already running in Anty"), /уже відкритий в Anty/);
+  assert.equal(troubleReason(""), "сесія обірвалась без пояснення");
+
+  const account = { id: "acc-trouble", label: "Profile 42" };
+  rows.wl_events = [{ type: "agent.error", account_id: "acc-trouble", created_at: new Date().toISOString(), message: "Anty API: Profile is not available in this server scope" }];
+  const now = Date.now();
+  assert.equal(await accountTrouble(account, false, now), null, "перший збій — ще мовчимо");
+  const second = await accountTrouble(account, false, now + 60_000);
+  assert.equal(second.failures, 2);
+  assert.match(second.reason, /немає на серверній Anty/);
+  assert.equal(await accountTrouble(account, false, now + 3600_000), null, "за годину — не повторюємо");
+  assert.ok(await accountTrouble(account, false, now + 7 * 3600_000), "за 7 год — нагадуємо");
+  assert.deepEqual(await accountTrouble(account, true, now + 8 * 3600_000), { account, recovered: true });
+  assert.equal(await accountTrouble(account, true, now + 9 * 3600_000), null, "вдруге «працює» не кажемо");
+});

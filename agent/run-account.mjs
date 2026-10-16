@@ -549,6 +549,10 @@ try {
   exitCode = await main();
 } catch (error) {
   console.error(error.message);
+  // A run that fell before its work began — the profile is not on this Anty,
+  // it is already open, the browser would not start — says why to the portal,
+  // so the account's trouble reaches a person and not only this log (16.10).
+  if (portal.accountId) await portal.log('agent.error', error.message, { stage: 'start' }, 'error').catch(() => {});
   await closeBrowser?.().catch(error => console.error(`Browser cleanup: ${error.message}`));
 } finally {
   if (ownLeaseId) {

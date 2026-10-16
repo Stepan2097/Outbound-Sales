@@ -68,3 +68,11 @@ test("проводка: агентове inbox.thread кличе сповіще�
   assert.match(server, /process\.env\.LEADGEN_TELEGRAM !== "off"/);
   assert.match(server, /state\.leadgenDigestSentOn = today;\n  await writePersistentWorkspaceState\(\);\n  await leadgenBot\.send/);
 });
+
+test("акаунт не працює: хто, скільки збоїв, причина; і коли запрацював", async () => {
+  const { troubleText } = await import("../triage/leadgen-notify.mjs");
+  const text = troubleText({ name: "Profile 42", failures: 2, reason: "цього профілю немає на серверній Anty", url: "https://x/#warmup" });
+  assert.match(text, /^⚠️ Profile 42 не працює — 2 сесії поспіль не вдалися/);
+  assert.match(text, /Причина: цього профілю немає на серверній Anty/);
+  assert.equal(troubleText({ name: "Profile 42", recovered: true }), "✅ Profile 42: знову працює.");
+});
