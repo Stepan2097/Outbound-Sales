@@ -81,6 +81,15 @@ const PROVIDERS = [
   ["sophos", "Sophos (шлюз)", /(^|\.)sophos\.com$/],
   ["trendmicro", "Trend Micro (шлюз)", /(^|\.)(trendmicro\.(com|eu)|tmes\.trendmicro\.(com|eu))$/],
   ["cisco", "Cisco (шлюз)", /(^|\.)iphmx\.com$/],
+  ["rackspace", "Rackspace", /(^|\.)emailsrvr\.com$/],
+  ["siteground", "SiteGround", /(^|\.)mailspamprotection\.com$/],
+  ["intermedia", "Intermedia", /(^|\.)serverdata\.net$/],
+  ["twentyi", "20i / StackMail", /(^|\.)stackmail\.com$/],
+  ["cloudflare", "Cloudflare (переадресація)", /(^|\.)cloudflare\.net$/],
+  ["appriver", "AppRiver / Zix (шлюз)", /(^|\.)arsmtp\.com$/],
+  ["spamexperts", "SpamExperts / N-able (шлюз)", /(^|\.)(spamexperts\.(com|eu|net)|antispamcloud\.com)$/],
+  ["titanhq", "TitanHQ / SpamTitan (шлюз)", /(^|\.)(titanhq\.com|spamtitan\.com)$/],
+  ["hornetsecurity", "Hornetsecurity (шлюз)", /(^|\.)hornetsecurity\.com$/],
   ["mailgun", "Mailgun", /(^|\.)mailgun\.org$/],
   ["sendgrid", "SendGrid", /(^|\.)sendgrid\.net$/]
 ];
