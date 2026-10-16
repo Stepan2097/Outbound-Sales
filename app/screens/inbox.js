@@ -69,7 +69,7 @@ let inboxSearch = "";
 // де людина хоч раз написала, або ті, де писали тільки ми.
 let inboxReplied = "all";
 const INBOX_REPLIED = [["all", "Усі"], ["answered", "Відповіли"], ["silent", "Не відповіли"]];
-const repliedTest = { all: () => true, answered: (thread) => thread.answered !== false, silent: (thread) => thread.answered === false };
+const repliedTest = { all: () => true, answered: (thread) => thread.answered === true, silent: (thread) => thread.answered !== true };
 
 // A newly loaded dataset changes the array identity. Sorting and normalising
 // once per dataset keeps every keypress proportional to this account's rows,
@@ -695,7 +695,8 @@ function setInboxMarkup(element, html) {
 
 function warmupInboxNextHtml(placeholder) {
   const next = warmupNextUnread();
-  const button = next ? `<button class="primary-button${placeholder ? "" : " warmup-thread-next"}" type="button" data-warmup-inbox-next><span>${placeholder ? "Почати з непрочитаної" : "Наступна непрочитана"}: ${escapeHtml(warmupParticipantName(next.participant || {}))}</span><i data-lucide="arrow-right"></i></button>` : "";
+  // In an open conversation there is no «Наступна непрочитана» (owner 16.10); the empty pane still offers where to start.
+  const button = next && placeholder ? `<button class="primary-button${placeholder ? "" : " warmup-thread-next"}" type="button" data-warmup-inbox-next><span>${placeholder ? "Почати з непрочитаної" : "Наступна непрочитана"}: ${escapeHtml(warmupParticipantName(next.participant || {}))}</span><i data-lucide="arrow-right"></i></button>` : "";
   return `<div id="warmupInboxNext" data-placeholder="${placeholder}">${button}</div>`;
 }
 

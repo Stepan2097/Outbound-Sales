@@ -82,10 +82,15 @@ export const SERVICE_CARD_BODY = "[no text]";
  * first — is left out with the cards. New reads cannot do either: the agent no
  * longer sends cards, and names the person, not the sentence.
  */
+// LinkedIn's own buttons read in as a message (16.10.2026: «Завантажити більше
+// обговорень» under Dany Cuello's name) — the messenger's chrome, nobody's words.
+const MESSENGER_CHROME = /^(завантажити більше обговорень|завантажити більше|показати більше|load more conversations|load more|see more|show more|загрузить больше обсуждений|загрузить больше)$/i;
+
 export function isServiceCard(body, participant = null) {
   if (typeof body !== "string") return false;
   const text = body.trim().toLowerCase();
   if (text === SERVICE_CARD_BODY) return true;
+  if (MESSENGER_CHROME.test(text)) return true;
   return text === "[attachment]" && hasProfileWords(participant?.name);
 }
 

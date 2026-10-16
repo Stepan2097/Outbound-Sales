@@ -109,9 +109,9 @@ test("typing and resetting inbox search leave the conversation, draft, caret and
   assert.match(view.els.warmupInboxBody.innerHTML, /data-warmup-thread="tara"/);
   assert.doesNotMatch(view.els.warmupInboxBody.innerHTML, /data-warmup-thread="marta"/);
   assert.equal(view.els.warmupInboxBody.scrollTop, 45);
-  assert.match(view.els.warmupInboxNext.innerHTML, /Tara/);
+  assert.doesNotMatch(view.els.warmupInboxNext.innerHTML, /Наступна непрочитана/, "у відкритій розмові кнопки немає (16.10)");
   view.search("marta");
-  assert.match(view.els.warmupInboxNext.innerHTML, /Marta/);
+  assert.doesNotMatch(view.els.warmupInboxNext.innerHTML, /Наступна непрочитана/, "у відкритій розмові кнопки немає (16.10)");
   view.search("no match");
   assert.equal(view.els.warmupInboxNext.innerHTML, "");
   view.resetSearch();

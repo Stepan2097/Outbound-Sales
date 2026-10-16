@@ -834,6 +834,8 @@ function describeThread(thread, { labels, identities, outreach }) {
     lastMessage: thread.lastMessage,
     messageCount: thread.messageCount,
     unread: thread.unread,
+    // Whether the person ever wrote back — the «Відповіли» / «Не відповіли» tabs (16.10).
+    answered: thread.answered === true,
     // An approach of this account's names the contact first; otherwise the one
     // the thread was tied to when its messages were stored or the person was
     // added to the CRM.

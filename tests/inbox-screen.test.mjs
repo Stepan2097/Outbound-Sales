@@ -512,8 +512,8 @@ test("розмова перемальовується, лише коли вон�
   assert.equal(writes, 1, "розмову перемалювали без потреби");
   assert.equal(els.warmupInboxThread.scrollTop, 120);
 
-  // Змінився вміст (немає більше непрочитаних, зникла кнопка) — перемальовано, але на тому ж місці.
-  for (const row of warmupState.inbox.threads) row.unread = false;
+  // Змінився вміст (прийшло ще одне повідомлення) — перемальовано, але на тому ж місці.
+  warmupState.inbox.open.messages.push({ direction: "in", body: "І ще", sentAt: minutesAgo(1) });
   get("renderWarmupInbox")();
   assert.equal(writes, 2);
   assert.equal(els.warmupInboxThread.scrollTop, 120, "читача кинуло нагору, хоч розмова та сама");
@@ -988,30 +988,19 @@ function accountWithTwoUnread() {
   ];
 }
 
-test("в кінці розмови є кнопка до наступної непрочитаної, і вона називає, до кого веде", async () => {
-  const opened = [];
-  const { els, warmupState, listeners, get, calls } = screen({
+test("у відкритій розмові кнопки «Наступна непрочитана» немає (власник 16.10)", async () => {
+  const { els, get } = screen({
     threads: accountWithTwoUnread(),
     api: async (path) => {
       if (path.startsWith("/inbox/thread")) return { thread: thread({ threadKey: "t-new-unread", participant: { name: "Taras Bondar", headline: "", slug: "" } }), messages: [{ direction: "in", body: "Коли можна поговорити?", sentAt: minutesAgo(60) }] };
       if (path === "/inbox/read") return { success: true, unread: 2 };
       throw new Error(`невідомий маршрут ${path}`);
-    },
-    extra: { scrollTo: (x, y) => opened.push(["scroll", x, y]) }
+    }
   });
-  // Відкрито Тараса; непрочитаною в цьому ж акаунті лишилась Марта. Ірина на іншому акаунті — не наступна.
   await get("openWarmupThread")("acc-a", "t-new-unread");
   const html = els.warmupInboxThread.innerHTML;
-  assert.match(html, /data-warmup-inbox-next/);
-  assert.match(html, /Наступна непрочитана: Marta Kovalenko/);
-  assert.equal((html.match(/data-warmup-inbox-next/g) || []).length, 1);
-
-  // Клік відкриває саме її і піднімає сторінку нагору.
-  listeners["layout:click"]({ target: { closest: (selector) => (selector === "[data-warmup-inbox-next]" ? {} : null) } });
-  await tick();
-  assert.ok(calls.some((call) => call.path === "/inbox/thread?threadKey=t-marta&accountId=acc-a"), "відкрито не ту розмову");
-  assert.deepEqual(opened, [["scroll", 0, 0]]);
-  assert.equal(warmupState.inbox.openThreadKey, "t-marta");
+  assert.doesNotMatch(html, /Наступна непрочитана/);
+  assert.doesNotMatch(html, /data-warmup-inbox-next/);
 });
 
 test("наступна непрочитана береться з відкритого акаунта й пошуку, а коли її нема — кнопки теж нема", async () => {

@@ -806,3 +806,15 @@ test("розмова знає, чи людина хоч раз відповіл�
   assert.match(page, /\["answered", "Відповіли"\], \["silent", "Не відповіли"\]/);
   assert.match(page, /data-warmup-inbox-replied/);
 });
+
+test("кнопки LinkedIn («Завантажити більше обговорень») — не повідомлення; сторінка отримує, чи людина відповіла", async () => {
+  const { isServiceCard, deriveThreads } = await import("../warmup/inbox.mjs");
+  assert.equal(isServiceCard("Завантажити більше обговорень"), true);
+  assert.equal(isServiceCard("Load more conversations"), true);
+  assert.equal(isServiceCard("Можемо завантажити більше обговорень завтра?"), false, "речення людини — не кнопка");
+  const event = (id, type, body) => ({ id, account_id: "acc", type, created_at: `2026-10-1${id}T10:00:00Z`, meta: { threadKey: "t", body, participant: { name: "Dany" } } });
+  const [thread] = deriveThreads([event(1, "message.out", "Hi"), event(2, "message.in", "Завантажити більше обговорень")]);
+  assert.equal(thread.answered, false, "кнопка не робить розмову «відповіли»");
+  const api = (await import("node:fs")).readFileSync(new URL("../warmup/api.mjs", import.meta.url), "utf8");
+  assert.match(api, /answered: thread\.answered === true,/);
+});
