@@ -110,11 +110,24 @@ const TITLES = { reply: "Відповісти", silent: "Нагадати", call
 
 /* ── I/O ─────────────────────────────────────────────────────────────────── */
 
+/**
+ * Усі рядки, сторінками: PostgREST CRM віддає не більше 1000 за запит, і `limit`
+ * більший за це мовчки обрізається (16.10 — 2 600 дотиків, видно було до 16.09).
+ */
+export async function allRows(makeQuery, pageSize = 1000) {
+  const out = [];
+  for (let offset = 0; ; offset += pageSize) {
+    const page = await makeQuery().limit(pageSize).offset(offset).rows();
+    out.push(...page);
+    if (page.length < pageSize) return out;
+  }
+}
+
 async function crmCandidates() {
-  const activities = await crm.from("activities").select("contact_id,created_at,direction,content,type")
-    .gte("created_at", SINCE).order("created_at", { ascending: true }).limit(20000).rows();
-  const statusChanges = await crm.from("contact_status_history").select("contact_id,new_status,changed_at")
-    .gte("changed_at", SINCE).in("new_status", ADVANCED).limit(20000).rows();
+  const activities = await allRows(() => crm.from("activities").select("id,contact_id,created_at,direction,content,type")
+    .gte("created_at", SINCE).order("created_at", { ascending: true }).order("id", { ascending: true }));
+  const statusChanges = await allRows(() => crm.from("contact_status_history").select("id,contact_id,new_status,changed_at")
+    .gte("changed_at", SINCE).in("new_status", ADVANCED).order("changed_at", { ascending: true }).order("id", { ascending: true }));
   const ids = [...new Set([...activities.map((row) => row.contact_id), ...statusChanges.map((row) => row.contact_id)].filter(Boolean))];
   const contacts = [];
   const openPingContacts = new Set();

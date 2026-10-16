@@ -177,3 +177,20 @@ test("ключ імпорту дає крок для блоків «Сьогод
   assert.equal(reasonOfKey("import:silent:c1"), "silent");
   assert.equal(reasonOfKey("import:bogus:c1"), "manual");
 });
+
+import { allRows } from "../triage/open-dialogs.mjs";
+
+test("дотики читаються сторінками: CRM віддає до 1000 рядків за запит, решта не губиться", async () => {
+  const data = Array.from({ length: 2345 }, (_, index) => ({ id: index }));
+  const seen = [];
+  const makeQuery = () => {
+    const query = { size: 0, from: 0 };
+    query.limit = (size) => { query.size = Math.min(size, 1000); return query; };
+    query.offset = (from) => { query.from = from; seen.push(from); return query; };
+    query.rows = async () => data.slice(query.from, query.from + query.size);
+    return query;
+  };
+  const rows = await allRows(makeQuery);
+  assert.equal(rows.length, 2345);
+  assert.deepEqual(seen, [0, 1000, 2000]);
+});
