@@ -101,9 +101,10 @@ const secretVaultEnv = {
   supabaseVault: "SUPABASE_API_KEY",
   postgresVault: "POSTGRES_PASSWORD"
 };
+// Власник 16.10: «переведи все на Claude Haiku 5.5» — і аналіз, і письмо.
 const openRouterDefaults = {
-  analysisModel: "anthropic/claude-haiku-4.5",
-  writingModel: "anthropic/claude-sonnet-5"
+  analysisModel: "anthropic/claude-haiku-5.5",
+  writingModel: "anthropic/claude-haiku-5.5"
 };
 const defaultCompanyPeopleActorId = "harvestapi/linkedin-company-employees";
 const defaultContactFinderActorId = "inexhaustible_glass/linkedin-email-finder";
@@ -639,6 +640,7 @@ const CURATED_MODEL_CHOICES = [
   { id: "openai/gpt-5.6-luna-pro", label: "GPT 5.6 Luna", efforts: REASONING_EFFORTS, lastKnownPrice: [0.2, 1.2] },
   { id: "openai/gpt-5.6-terra-pro", label: "GPT 5.6 Terra", efforts: REASONING_EFFORTS, lastKnownPrice: [2, 12] },
   { id: "openai/gpt-5.6-sol-pro", label: "GPT 5.6 Sol", efforts: REASONING_EFFORTS, lastKnownPrice: [2, 10] },
+  { id: "anthropic/claude-haiku-5.5", label: "Claude Haiku 5.5", efforts: REASONING_EFFORTS, lastKnownPrice: [0.1, 0.5] },
   { id: "anthropic/claude-haiku-4.5", label: "Claude Haiku 4.5", efforts: REASONING_EFFORTS, lastKnownPrice: [1, 5] },
   { id: "anthropic/claude-sonnet-5", label: "Claude Sonnet 5", efforts: REASONING_EFFORTS, lastKnownPrice: [2, 10] },
   { id: "deepseek/deepseek-v4-pro", label: "DeepSeek V4 Pro", efforts: REASONING_EFFORTS, lastKnownPrice: [1.6, 3.2] }
