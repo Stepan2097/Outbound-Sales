@@ -111,7 +111,8 @@ if (!plan.runnable) {
 // --anytime is there for a deliberate catch-up, not for the daily run.
 // A send-only session (the server's «позачергова сесія»): approved messages
 // go now, window or not — the plan it hands over holds nothing else.
-if (plan.urgent) log(`позачергова сесія: лише надіслати схвалене (${plan.outbox?.toSend?.length ?? 0})`);
+if (plan.duty) log(`чергування: подивитись вхідні${plan.outbox?.toSend?.length ? ` і надіслати схвалене (${plan.outbox.toSend.length})` : ''}`);
+else if (plan.urgent) log(`позачергова сесія: лише надіслати схвалене (${plan.outbox?.toSend?.length ?? 0})`);
 if (!plan.window?.open && !ANYTIME && !plan.urgent) {
   log(`зараз поза вікном прогріву (${plan.window?.label ?? '?'}) — не запускаю`);
   return 0;

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { anty, today } from "./db.mjs";
-import { SESSION_WINDOW, insideWindow, windowLabel } from "./schedule.mjs";
+import { SESSION_WINDOW, dutyGapMinutes, insideWindow, onDutyBreak, windowLabel } from "./schedule.mjs";
 import { dailyQuota, dayOfRun, hasPlanOn, inWorkingMode, noteAllowedOnDay, pausedOn } from "./strategy.mjs";
 import { INVITES_HELD, LIVE_ACCOUNT_STATUSES, LIVE_RUN_STATES, logEvent, readHoldsFrom, settlePause } from "./store.mjs";
 import {
@@ -360,7 +360,7 @@ export function activeLease(nowMs = Date.now()) {
  * "Chloe Stewart is already running" is answered on every poll for twenty-five
  * minutes, and it should not cost a query each time.
  */
-export function grantLease(account, nowMs = Date.now(), { urgent = false } = {}) {
+export function grantLease(account, nowMs = Date.now(), { urgent = false, light = urgent } = {}) {
   const lease = {
     leaseId: randomUUID(),
     accountId: account.id,
@@ -372,7 +372,7 @@ export function grantLease(account, nowMs = Date.now(), { urgent = false } = {})
   leases.set(account.id, lease);
   // A send-only session is not the day's session: it neither counts as one
   // nor makes the account rest before the session that does the warming.
-  if (!urgent) noteSessionStarted(lease);
+  if (!light) noteSessionStarted(lease);
   return lease;
 }
 
@@ -419,6 +419,62 @@ export async function urgentCandidates(nowMs = Date.now()) {
     });
   }
   return found;
+}
+
+/**
+ * Чергування (16.10): inside the window, an account whose inbox was last read
+ * 12–20 minutes ago — and that is not on one of its breaks — is due a short
+ * look: read the inbox, send what is approved, nothing else. Asked after the
+ * approved messages and the day's own sessions, so it never takes their turn.
+ */
+export async function dutyCandidates(nowMs = Date.now()) {
+  if (process.env.WARMUP_INBOX_DUTY === "off" || !insideWindow(new Date(nowMs))) return [];
+  const accounts = await anty.from("wl_accounts").select("*")
+    .in("status", LIVE_ACCOUNT_STATUSES).eq("health", "ok").notNull("profile_remote_id").rows();
+  if (!accounts.length) return [];
+  const ids = accounts.map((account) => account.id);
+  const [runs, synced, profiles] = await Promise.all([
+    anty.from("wl_runs").select("*").in("account_id", ids).in("state", LIVE_RUN_STATES).rows(),
+    anty.from("wl_events").select("account_id,created_at").eq("type", "inbox.synced").in("account_id", ids)
+      .gte("created_at", new Date(nowMs - 86_400_000).toISOString()).rows(),
+    anty.from("anty_browser_profiles").select("id,status,is_deleted").in("id", accounts.map((account) => account.profile_remote_id)).rows()
+  ]);
+  // A profile somebody has open in Anty by hand is theirs right now.
+  const open = new Set(profiles.filter((profile) => profile.status === "running" && !profile.is_deleted).map((profile) => profile.id));
+  const lastRead = new Map();
+  for (const row of synced) {
+    const at = Date.parse(row.created_at);
+    if (at > (lastRead.get(row.account_id) ?? 0)) lastRead.set(row.account_id, at);
+  }
+  const todayIso = today();
+  const found = [];
+  for (const account of accounts) {
+    const run = runs.find((row) => row.account_id === account.id);
+    if (!run || pausedOn(run, todayIso)) continue;
+    if ((coolingOff.get(account.id) ?? 0) > nowMs) continue;
+    if ((leases.get(account.id)?.expiresAt ?? 0) > nowMs) continue;
+    if (onDutyBreak(account.id, new Date(nowMs))) continue;
+    if (open.has(account.profile_remote_id)) continue;
+    const last = lastRead.get(account.id) ?? 0;
+    if (last && nowMs - last < dutyGapMinutes(account.id, last) * 60_000) continue;
+    found.push({
+      account, run, day: dayOfRun(run, new Date(nowMs)), mode: "inbox", remaining: 0, kinds: [], invites: 0,
+      upkeep: { checks: 0, inbox: true, any: true }, lastRead: last
+    });
+  }
+  return found.sort((left, right) => left.lastRead - right.lastRead);
+}
+
+async function grantDuty(pick, nowMs) {
+  // Not the day's session either: a look into the inbox leaves the warming as it was.
+  const lease = grantLease(pick.account, nowMs, { light: true });
+  lease.duty = true;
+  await logEvent({
+    accountId: pick.account.id, runId: pick.run.id, type: "scheduler.started",
+    message: "Handed to a worker for a look into the inbox — read it, send what is approved, nothing else",
+    meta: { duty: true, leaseId: lease.leaseId }
+  });
+  return { ok: true, lease: { ...offer(pick), duty: true, leaseId: lease.leaseId, leaseExpiresAt: new Date(lease.expiresAt).toISOString() } };
 }
 
 async function grantUrgent(pick, nowMs) {
@@ -888,6 +944,11 @@ export async function decideNext({ now = new Date(), random = Math.random, campa
 
   const { ready, held, busy } = await candidates(today(), nowMs, campaigns);
   if (!ready.length) {
+    // Nothing of the day's own work: a look into some inbox, if one is due.
+    const duty = await dutyCandidates(nowMs).catch(() => []);
+    if (duty.length) {
+      return { success: true, window, next: { ...offer(duty[0]), duty: true, leaseId: null, leaseExpiresAt: null }, reason: null, retryAfterSeconds: URGENT_POLL_SECONDS };
+    }
     // The open profile is reported ahead of the cool-off: one says wait, the
     // other says something is running this account that did not ask us, and
     // that is the sentence somebody needs to see.
@@ -993,6 +1054,8 @@ export async function leaseAccount({ accountId, now = new Date(), random = Math.
   }
   const pick = ready.find((item) => item.account.id === accountId);
   if (!pick) {
+    const duty = (await dutyCandidates(nowMs).catch(() => [])).find((item) => item.account.id === accountId);
+    if (duty && !activeLease(nowMs)) return grantDuty(duty, nowMs);
     const mine = (list) => list.find((item) => item.account.id === accountId);
     // Not an error on the worker's part: it asked for what it was shown, and
     // the answer moved underneath it. It polls again like any other refusal.
@@ -1044,7 +1107,7 @@ export async function finishRun({ account, run, leaseId, ok, note, now = new Dat
   // nothing added to it. A report for a lease that has already run out is
   // still a session that ended now. One for somebody else's live lease is not:
   // that run's own report will say when it ended.
-  if (held?.urgent) urgentEnded.set(account.id, nowMs);
+  if (held?.urgent || held?.duty) urgentEnded.set(account.id, nowMs);
   else if (ok && (released || !held)) noteSessionFinished(account.id, nowMs);
   // A session handed the inbox read that finished has had its chance today,
   // read or not. Only a finished one: a failed session is cooled off and may

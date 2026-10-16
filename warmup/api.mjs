@@ -3397,19 +3397,22 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       // messages and nothing else — no plan, no invitations, no inbox read, no
       // contacts list — so an account opened at night does only what a person
       // asked it to.
-      if (leaseOf(account.id)?.urgent && run && !paused && account.status !== "excluded") {
+      const light = leaseOf(account.id);
+      if ((light?.urgent || light?.duty) && run && !paused && account.status !== "excluded") {
         sendJson(response, 200, {
           ...base,
           urgent: true,
+          // Чергування (16.10): the inbox is read on this look; an out-of-turn send does not read it.
+          duty: Boolean(light.duty),
           // Stays true when the last message has gone: the agent asks this
           // between steps and reads false as «stop the visit», which would
           // end a session that did everything it was for as a failure.
           runnable: true,
-          reason: base.outbox.toSend.length ? "Approved messages to send now" : "Nothing approved is waiting any more",
+          reason: light.duty ? "A look into the inbox" : base.outbox.toSend.length ? "Approved messages to send now" : "Nothing approved is waiting any more",
           runId: run.id,
           plan: [],
           invites: { ...base.invites, toSend: [], toCheck: [] },
-          inbox: { ...base.inbox, due: false },
+          inbox: { ...base.inbox, due: Boolean(light.duty) },
           network: { due: false }
         });
         return true;

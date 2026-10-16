@@ -766,7 +766,7 @@ export function renderWarmupInbox() {
   const sync = warmupInboxSync(openId);
   const openName = warmupInboxAccountName(openId);
   subtitle.textContent = sync.lastSyncedAt
-    ? `${openName}: листи оновлено ${warmupAgo(sync.lastSyncedAt)} · агент читає їх раз на добу${sync.window ? `, у вікні ${sync.window}` : ""}`
+    ? `${openName}: листи оновлено ${warmupAgo(sync.lastSyncedAt)} · агент заглядає кожні 12–20 хв${sync.window ? `, у вікні ${sync.window}` : ""}`
     : (sync.known ? `${openName}: листи ще не читали` : "");
   subtitle.title = sync.lastSyncedAt ? warmupStamp(sync.lastSyncedAt) : "";
   // A put-away account is not read any more, and saying «агент зупинився» about

@@ -100,6 +100,9 @@ test.after(async () => {
 });
 
 test.beforeEach(() => {
+  // The look into the inbox every 12–20 minutes (16.10) is its own feature, tested on its own:
+  // here it is off, so "nobody owes work" means what these tests say.
+  process.env.WARMUP_INBOX_DUTY = "off";
   resetScheduler();
   written.length = 0;
   delete process.env.WARMUP_SCHEDULER_DISABLED;
@@ -259,7 +262,9 @@ test("the poll answers 200 and the whole envelope even when nobody owes work", a
   assert.equal(answer.payload.next, null);
   assert.equal(answer.payload.reason, "the scheduler is switched off on this deployment");
   assert.equal(answer.payload.retryAfterSeconds, 900);
-  assert.equal(answer.payload.window.label, "09:00–13:00");
+  // In the team's clock (Kyiv), whatever zone the machine running this is in (16.10).
+  const { windowLabel } = await import("../warmup/schedule.mjs");
+  assert.equal(answer.payload.window.label, windowLabel());
 });
 
 test("a finished run gives the lease back and is told when to come again", async () => {
@@ -688,4 +693,79 @@ test("ліміт запрошень: акаунт не на паузі, у пл�
   rows.wl_events = [{ id: "h1", account_id: "acc-1", type: "invites.held", created_at: new Date(Date.now() - 86400000).toISOString(), meta: { until: "2000-01-01" } }];
   const next = await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" });
   assert.notEqual(next.payload.plan.find((row) => row.kind === "connect"), undefined, "наступного дня запити знову в плані");
+});
+
+// ── чергування у вхідних 8–20 (власник 16.10) ──
+
+test("чергування: акаунт заглядає у вхідні, коли востаннє дивився 12–20 хв тому; не під час перерви, не поза вікном, не з відкритим вручну профілем", async (t) => {
+  delete process.env.WARMUP_INBOX_DUTY;
+  const { dutyCandidates } = await import("../warmup/scheduler.mjs");
+  const { dutyBreaks } = await import("../warmup/schedule.mjs");
+  // A moment inside the window and outside every break of both accounts.
+  const day = insideTheWindow();
+  let at = null;
+  for (let minute = 0; minute < 240 && !at; minute += 5) {
+    const probe = new Date(day.getTime() + minute * 60_000);
+    const free = ["acc-1", "acc-2"].every((id) => !dutyBreaks(id, probe).some((pause) => probe.getTime() >= pause.from && probe.getTime() < pause.to));
+    if (free) at = probe;
+  }
+  assert.ok(at, "є момент без перерв");
+
+  const never = await dutyCandidates(at.getTime());
+  assert.deepEqual(never.map((row) => row.account.id).sort(), ["acc-1", "acc-2"], "ще не дивився — час подивитись");
+  assert.equal(never[0].upkeep.inbox, true);
+
+  rows.wl_events = ["acc-1", "acc-2"].map((id) => ({ account_id: id, type: "inbox.synced", created_at: new Date(at.getTime() - 5 * 60_000).toISOString(), meta: {} }));
+  assert.deepEqual(await dutyCandidates(at.getTime()), [], "5 хв тому — ще рано");
+  rows.wl_events = ["acc-1", "acc-2"].map((id) => ({ account_id: id, type: "inbox.synced", created_at: new Date(at.getTime() - 25 * 60_000).toISOString(), meta: {} }));
+  assert.equal((await dutyCandidates(at.getTime())).length, 2, "25 хв тому — пора");
+
+  const night = new Date(at); night.setHours(23, 30, 0, 0);
+  assert.deepEqual(await dutyCandidates(night.getTime()), [], "поза вікном — ні");
+
+  rows.anty_browser_profiles = [{ id: "profile-acc-1", status: "running", is_deleted: false }, { id: "profile-acc-2", status: "stopped", is_deleted: false }];
+  assert.deepEqual((await dutyCandidates(at.getTime())).map((row) => row.account.id), ["acc-2"], "профіль, відкритий вручну, — не чіпаємо");
+
+  process.env.WARMUP_INBOX_DUTY = "off";
+  assert.deepEqual(await dutyCandidates(at.getTime()), [], "вимикач");
+});
+
+test("перерви: 2–4 на день, по 25–60 хв, усередині вікна, ті самі після перезапуску", async () => {
+  const { dutyBreaks, dutyGapMinutes, SESSION_WINDOW } = await import("../warmup/schedule.mjs");
+  for (const id of ["acc-1", "acc-2", "acc-3", "acc-4", "acc-5"]) {
+    const day = new Date(2026, 9, 16, 12, 0, 0);
+    const breaks = dutyBreaks(id, day);
+    assert.ok(breaks.length >= 2 && breaks.length <= 4, `${id}: ${breaks.length}`);
+    for (const pause of breaks) {
+      const minutes = (pause.to - pause.from) / 60_000;
+      assert.ok(minutes >= 25 && minutes <= 60, `${id}: ${minutes} хв`);
+      assert.ok(new Date(pause.from).getHours() >= SESSION_WINDOW.startHour);
+    }
+    assert.deepEqual(dutyBreaks(id, day), breaks, "той самий день — ті самі перерви");
+    const gap = dutyGapMinutes(id, Date.now());
+    assert.ok(gap >= 12 && gap <= 20);
+  }
+});
+
+test("чергова сесія: план — лише вхідні й схвалене, без переглядів, лайків і запитів", async () => {
+  const { grantLease } = await import("../warmup/scheduler.mjs");
+  const lease = grantLease(rows.wl_accounts[0], Date.now(), { light: true });
+  lease.duty = true;
+  const plan = await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" });
+  assert.equal(plan.payload.duty, true);
+  assert.equal(plan.payload.inbox.due, true, "вхідні читає");
+  assert.deepEqual(plan.payload.plan, []);
+  assert.deepEqual(plan.payload.invites.toSend, []);
+});
+
+test("вікно на сторінках — за Києвом, хоч сервер живе за Варшавою", async () => {
+  const { windowLabel, SESSION_WINDOW } = await import("../warmup/schedule.mjs");
+  const previous = process.env.WARMUP_LABEL_ZONE;
+  try {
+    process.env.WARMUP_LABEL_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const pad = (hour) => String(hour).padStart(2, "0");
+    assert.equal(windowLabel(), `${pad(SESSION_WINDOW.startHour)}:00–${pad(SESSION_WINDOW.endHour)}:00`, "той самий пояс — ті самі години");
+  } finally {
+    if (previous === undefined) delete process.env.WARMUP_LABEL_ZONE; else process.env.WARMUP_LABEL_ZONE = previous;
+  }
 });

@@ -540,7 +540,7 @@ test("під заголовком — коли оновлювались лист
   view.get("renderWarmupInbox")();
   // Відкритий — той, у кого свіжіша відповідь.
   assert.equal(view.els.warmupInboxSubtitle.textContent,
-    "Mary Lindsay: листи оновлено 6 год тому · агент читає їх раз на добу, у вікні 09:00–13:00");
+    "Mary Lindsay: листи оновлено 6 год тому · агент заглядає кожні 12–20 хв, у вікні 09:00–13:00");
   assert.ok(view.els.warmupInboxSubtitle.title, "точний час — у підказці");
 
   // Інший акаунт — його час, а не загальний найсвіжіший.

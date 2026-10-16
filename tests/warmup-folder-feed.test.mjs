@@ -372,6 +372,9 @@ async function takeAndAsk(accountId = "acc-1") {
 }
 
 test.beforeEach((t) => {
+  // The look into the inbox every 12–20 minutes (16.10) is its own feature, tested on its own:
+  // here it is off, so "nobody owes work" means what these tests say.
+  process.env.WARMUP_INBOX_DUTY = "off";
   t.mock.timers.enable({ apis: ["Date"], now: MORNING.getTime() });
   resetScheduler();
   resetFeedHints();

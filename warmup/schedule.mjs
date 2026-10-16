@@ -44,9 +44,57 @@ export function insideWindow(date = new Date()) {
   return hour >= SESSION_WINDOW.startHour && hour < SESSION_WINDOW.endHour;
 }
 
+/**
+ * The window in the team's own clock (Kyiv, 16.10.2026), whatever zone the
+ * server runs in: the server keeps Warsaw time, an hour behind, and a page that
+ * said «07:00–19:00» for what is eight to eight in Kyiv would be read wrong.
+ * WARMUP_LABEL_ZONE moves it; the window itself is still the server's hours.
+ */
+function labelShiftHours(date = new Date()) {
+  const zone = process.env.WARMUP_LABEL_ZONE || "Europe/Kyiv";
+  try {
+    const there = new Date(date.toLocaleString("en-US", { timeZone: zone }));
+    const here = new Date(date.toLocaleString("en-US"));
+    return Math.round((there.getTime() - here.getTime()) / 3_600_000);
+  } catch { return 0; }
+}
+
 export function windowLabel() {
-  const pad = (hour) => String(hour).padStart(2, "0");
-  return `${pad(SESSION_WINDOW.startHour)}:00–${pad(SESSION_WINDOW.endHour)}:00`;
+  const pad = (hour) => String(((hour % 24) + 24) % 24).padStart(2, "0");
+  const shift = labelShiftHours();
+  return `${pad(SESSION_WINDOW.startHour + shift)}:00–${pad(SESSION_WINDOW.endHour + shift)}:00`;
+}
+
+// ── Чергування у вхідних (власник 16.10: «тримати відкритим акаунт з 8 до 8
+// з якимось перервами 2-4 рандомно, і сповіщення будуть одразу приходити») ──
+//
+// Inside the window an account looks into its inbox every 12–20 minutes, as
+// somebody with LinkedIn open in a tab would, with 2–4 breaks a day of 25–60
+// minutes each, placed at random between the first and the last hour. Drawn
+// from the account and the date, so a restart does not move them.
+export function dutyBreaks(accountId, date = new Date()) {
+  const key = `${accountId}:${localDateKey(date)}`;
+  const count = 2 + (seedHash(`${key}:breaks`) % 3);
+  const firstMinute = (SESSION_WINDOW.startHour + 1) * 60;
+  const span = Math.max(60, (SESSION_WINDOW.endHour - SESSION_WINDOW.startHour - 2) * 60);
+  const breaks = [];
+  for (let index = 0; index < count; index += 1) {
+    const start = firstMinute + (seedHash(`${key}:break:${index}:at`) % span);
+    const length = 25 + (seedHash(`${key}:break:${index}:len`) % 36);
+    const from = new Date(date); from.setHours(0, start, 0, 0);
+    breaks.push({ from: from.getTime(), to: from.getTime() + length * 60_000 });
+  }
+  return breaks.sort((left, right) => left.from - right.from);
+}
+
+export function onDutyBreak(accountId, date = new Date()) {
+  const at = date.getTime();
+  return dutyBreaks(accountId, date).find((pause) => at >= pause.from && at < pause.to) ?? null;
+}
+
+/** Minutes between two looks into the inbox, 12–20, drawn from the account and the last look. */
+export function dutyGapMinutes(accountId, lastMs) {
+  return 12 + (seedHash(`${accountId}:${Math.floor(lastMs / 60_000)}:gap`) % 9);
 }
 
 function seedHash(text) {
