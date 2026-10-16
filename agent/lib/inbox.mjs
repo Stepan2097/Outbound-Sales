@@ -187,17 +187,34 @@ async function openConversation(page, row, origin, pace = 1) {
  * stranger replied, which moves an outreach row to `connected` and writes an
  * activity into the CRM that a seller reads as a lead answering.
  */
-/** Down the conversation list, the way somebody scrolling back through their messages would. */
+/**
+ * Down the conversation list, the way somebody scrolling back through their
+ * messages would. The list is its own scrolling box (16.10.2026:
+ * `ul.msg-conversations-container__conversations-list`, the leftmost box on
+ * the page with rows in it) and loads more when that box reaches its end —
+ * the rows are not always links, so the box is found by its shape, not by a
+ * link inside it. A wheel over it first, then its end, which is what loads.
+ */
 async function scrollConversationList(page, pace) {
-  const last = page.locator('a[href*="/messaging/thread/"]').last();
-  await last.scrollIntoViewIfNeeded().catch(() => {});
-  const box = await last.boundingBox().catch(() => null);
+  const box = await page.evaluate(() => {
+    const boxes = [...document.querySelectorAll('*')].filter((el) => /(auto|scroll)/.test(getComputedStyle(el).overflowY)
+      && el.scrollHeight > el.clientHeight + 40 && el.querySelectorAll('li').length >= 3);
+    const list = boxes.sort((left, right) => left.getBoundingClientRect().x - right.getBoundingClientRect().x)[0];
+    if (!list) return null;
+    list.setAttribute('data-outbound-list', '1');
+    const rect = list.getBoundingClientRect();
+    return { x: rect.x + rect.width / 2, y: rect.y + Math.min(rect.height / 2, 300) };
+  }).catch(() => null);
   if (!box) return;
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 6 });
-  for (let step = 0; step < 4; step += 1) {
+  await page.mouse.move(box.x, box.y, { steps: 6 });
+  for (let step = 0; step < 3; step += 1) {
     await page.mouse.wheel(0, 700);
     await sleep(Math.max(20, 250 * pace));
   }
+  await page.evaluate(() => {
+    const list = document.querySelector('[data-outbound-list]');
+    if (list) list.scrollTop = list.scrollHeight;
+  }).catch(() => {});
 }
 
 export async function syncInbox(page, {
@@ -394,7 +411,10 @@ export async function syncInbox(page, {
     backfillReport = {
       from: new Date(backfill.from).toISOString(),
       before: oldestRead != null ? new Date(oldestRead).toISOString() : (backfill.before ? new Date(backfill.before).toISOString() : null),
-      complete, read: [...backlog].length
+      complete, read: [...backlog].length,
+      // 16.10: the first version's scroll did not reach the list's box and called
+      // a ten-row list the end of all conversations — the portal reads only these.
+      version: 2
     };
     log(`  минулий місяць: ${complete ? 'дочитано' : `прочитано до ${backfillReport.before ?? '—'}, решта — наступного разу`}`);
   }

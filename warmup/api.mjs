@@ -1093,8 +1093,10 @@ const BACKFILL_FRESH_MS = 48 * 3600_000;
 /** What is left of the month to read, or null when it was read to the end. */
 async function inboxBackfill(accountId) {
   const rows = await anty.from("wl_events").select("meta,created_at").eq("account_id", accountId).eq("type", BACKFILL_TYPE)
-    .order("created_at", { ascending: false }).limit(1).rows().catch(() => []);
-  const last = rows[0]?.meta || null;
+    .order("created_at", { ascending: false }).limit(20).rows().catch(() => []);
+  // Only reports from the agent whose scroll reaches the list (version 2): the
+  // first one called a ten-row list the end of everything (16.10).
+  const last = rows.map((row) => row.meta).find((meta) => meta?.version === 2) || null;
   if (last?.complete) return null;
   return {
     from: last?.from || new Date(Date.now() - BACKFILL_DAYS * 86_400_000).toISOString(),
@@ -3795,7 +3797,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           await logEvent({
             accountId: account.id, type: BACKFILL_TYPE,
             message: body.backfill.complete ? "Inbox read back over the past month — done" : `Inbox read back over the past month — up to ${until(body.backfill.before) ?? "?"}`,
-            meta: { from: until(body.backfill.from), before: until(body.backfill.before), complete: body.backfill.complete === true, read: Number(body.backfill.read) || 0 }
+            meta: { from: until(body.backfill.from), before: until(body.backfill.before), complete: body.backfill.complete === true, read: Number(body.backfill.read) || 0, version: Number(body.backfill.version) || 1 }
           });
         }
         const seen = Number(body.threadsSeen);

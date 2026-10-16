@@ -781,17 +781,20 @@ test("місяць у вхідних: план каже, з якої дати д
   assert.equal(backfill.before, null);
   assert.equal(backfill.maxThreads, 30);
 
-  const done = await call({ method: "POST", path: "/api/warmup/agent", body: { accountId: "acc-1", action: "inbox.done", threadsSeen: 12, backfill: { from: backfill.from, before: "2026-10-01T10:00:00Z", complete: false, read: 10 } } });
+  const done = await call({ method: "POST", path: "/api/warmup/agent", body: { accountId: "acc-1", action: "inbox.done", threadsSeen: 12, backfill: { from: backfill.from, before: "2026-10-01T10:00:00Z", complete: false, read: 10, version: 2 } } });
   assert.equal(done.status, 200);
   const event = written.find((row) => row.table === "wl_events" && row.body?.type === "inbox.backfill");
   assert.equal(event.body.meta.before, "2026-10-01T10:00:00.000Z");
   assert.equal(event.body.meta.complete, false);
 
-  rows.wl_events = [{ id: "b1", account_id: "acc-1", type: "inbox.backfill", created_at: new Date().toISOString(), meta: { from: backfill.from, before: "2026-10-01T10:00:00.000Z", complete: false } }];
+  rows.wl_events = [{ id: "b1", account_id: "acc-1", type: "inbox.backfill", created_at: new Date().toISOString(), meta: { from: backfill.from, before: "2026-10-01T10:00:00.000Z", complete: false, version: 2 } }];
   const next = await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" });
   assert.equal(next.payload.inbox.backfill.before, "2026-10-01T10:00:00.000Z", "наступна сесія — звідти, де зупинились");
-  rows.wl_events = [{ id: "b2", account_id: "acc-1", type: "inbox.backfill", created_at: new Date().toISOString(), meta: { from: backfill.from, complete: true } }];
+  rows.wl_events = [{ id: "b2", account_id: "acc-1", type: "inbox.backfill", created_at: new Date().toISOString(), meta: { from: backfill.from, complete: true, version: 2 } }];
   assert.equal((await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" })).payload.inbox.backfill, null, "дочитано — більше не просить");
+  // A «done» from the first version, whose scroll never reached the list, does not count.
+  rows.wl_events = [{ id: "b3", account_id: "acc-1", type: "inbox.backfill", created_at: new Date().toISOString(), meta: { from: backfill.from, complete: true } }];
+  assert.ok((await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" })).payload.inbox.backfill, "старе «дочитано» не рахується");
 });
 
 test("розмова знає, чи людина хоч раз відповіла — для вкладок «Відповіли» / «Не відповіли»", async () => {
