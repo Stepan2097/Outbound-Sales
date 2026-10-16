@@ -155,6 +155,11 @@ test("відкритий діалог: лід відповів після 01.08 
   const statusChanges = [{ contact_id: "b", new_status: "responded" }];
   const picked = pickOpenDialogs({ activities, statusChanges, contacts, openPingContacts: new Set(["d"]) });
   assert.deepEqual(picked.map((item) => item.contactId).sort(), ["a", "b"], "c закритий, d має пінг, e без дотику й переходу");
+  const onlyOurs = pickOpenDialogs({
+    activities: [{ contact_id: "f", created_at: "2026-09-06T10:00:00Z", direction: "outgoing", content: "LinkedIn · Ми написали…" }, { contact_id: "g", created_at: "2026-09-06T10:00:00Z", direction: "outgoing", content: "hi" }],
+    statusChanges: [], contacts: [{ id: "f", name: "F", lead_status: "qualification" }, { id: "g", name: "G", lead_status: "in_progress" }], openPingContacts: new Set()
+  });
+  assert.deepEqual(onlyOurs.map((item) => item.contactId), ["f"], "qualification з нашим дотиком — живий; in_progress лише з нашими — ні");
   assert.equal(picked.find((item) => item.contactId === "a").lastBy, "them");
   assert.equal(isTheirs({ direction: "outgoing", content: "LinkedIn · Відповідь на акаунт Y" }), true);
 });

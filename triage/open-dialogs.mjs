@@ -6,7 +6,8 @@
 // розкладаються по робочих днях із межею на день, адміністратор переглядає,
 // править і приймає пачкою. Пінги стають задачами CRM, як в етапі 1.
 //
-// «Відкритий діалог» (заміряно 16.10): лід відповів після 01.08 — вхідний дотик
+// «Відкритий діалог» (заміряно 16.10): статус responded / qualification / booked_call
+// з будь-яким дотиком після 01.08, або лід відповів після 01.08 — вхідний дотик
 // (direction=incoming або наш рядок «LinkedIn · Відповідь на акаунт…»: до 16.10
 // відповіді писались як outgoing) чи статус перейшов у responded / qualification
 // / booked_call — і статус зараз один із відкритих. Контакт, у якого вже є
@@ -45,7 +46,10 @@ export function pickOpenDialogs({ activities, statusChanges, contacts, openPingC
     if (!OPEN_STATUSES.includes(contact.lead_status) || openPingContacts.has(contact.id)) continue;
     const touches = (byContact.get(contact.id) || []).sort((left, right) => String(left.created_at).localeCompare(String(right.created_at)));
     const theirs = touches.filter(isTheirs);
-    if (!theirs.length && !advanced.has(contact.id)) continue;
+    // Статус уже каже, що лід відповідав (responded / qualification / booked_call), —
+    // живий діалог, навіть коли після 01.08 писали лише ми (вердикт судді, 16.10).
+    const advancedNow = ADVANCED.includes(contact.lead_status) && touches.length > 0;
+    if (!theirs.length && !advanced.has(contact.id) && !advancedNow) continue;
     // Нотатка — запис лідгена для себе, а не повідомлення: «хто написав останнім» — без неї.
     const messages = touches.filter((touch) => touch.type !== "note");
     const ours = messages.filter((touch) => !isTheirs(touch));
