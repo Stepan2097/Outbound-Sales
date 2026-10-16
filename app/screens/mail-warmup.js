@@ -11,7 +11,51 @@ const STATUS = {
   running: ["іде", "tone-live"], paused: ["на паузі", "tone-warn"], never: ["не запущено", "tone-muted"], blocked: ["не можна", "tone-bad"], removed: ["не гріється", "tone-muted"]
 };
 
-export const mailWarmupState = { data: null, error: "", notice: "", busy: "", tag: null };
+export const mailWarmupState = { data: null, error: "", notice: "", busy: "", tag: null, open: null, history: {} };
+
+// ── a mailbox's days, unfolded under its row (власник 16.10: «при натискані на
+// пошту хочу щоб розгорталася статистика за весь час по днях скільки
+// відправлено і скільки в спам») ──────────────────────────────────────────
+const dayLabel = (date) => new Date(`${date}T12:00:00Z`).toLocaleDateString("uk-UA", { day: "numeric", month: "short", weekday: "short", timeZone: "UTC" });
+
+function historyHtml(email) {
+  const history = mailWarmupState.history[email];
+  if (!history) return '<div class="empty-state">Завантажую…</div>';
+  if (history.error) return `<div class="empty-state">${escapeHtml(history.error)}</div>`;
+  if (!history.days.length) return '<div class="empty-state">Ця пошта ще нічого не надсилала.</div>';
+  const share = (spam, sent) => (sent ? `${Math.round((spam / sent) * 1000) / 10}%` : "—");
+  const line = (row, label, cls = "") => {
+    const warm = row.firsts + row.replies;
+    return `<tr class="${cls}">
+      <td>${label}</td>
+      <td class="is-number"><b>${row.sent}</b></td>
+      <td class="is-number">${warm}${row.replies ? `<small>${row.firsts} перших · ${row.replies} відповідей</small>` : ""}</td>
+      <td class="is-number">${row.cold || "—"}</td>
+      <td class="is-number"><span class="${row.inSpam ? "is-bad" : ""}"><b>${row.inSpam}</b></span><small>${share(row.inSpam, warm)}</small></td>
+      <td class="is-number">${row.rescued || "—"}</td>
+      <td class="is-number">${row.repliesReceived || "—"}</td>
+    </tr>`;
+  };
+  return `<div class="warmup-mail-history">
+    <table>
+      <thead><tr><th>День</th><th>Відправлено</th><th>Прогрів</th><th>Холодні</th><th title="Листи прогріву цього дня, що в інших наших пошт опинились у «Спамі»">У спам</th><th title="Скільки її листів прогрів вийняв зі спаму">Вийнято зі спаму</th><th title="Скільки відповідей прийшло на її листи">Відповідей їй</th></tr></thead>
+      <tbody>${line(history.total, "За весь час", "is-total")}${history.days.map((row) => line(row, escapeHtml(dayLabel(row.date)))).join("")}</tbody>
+    </table>
+  </div>`;
+}
+
+async function toggleHistory(email) {
+  mailWarmupState.open = mailWarmupState.open === email ? null : email;
+  renderMailWarmup();
+  if (!mailWarmupState.open) return;
+  try {
+    const data = await api(`/api/esp/warmup/history?email=${encodeURIComponent(email)}`);
+    mailWarmupState.history[email] = { days: data.days || [], total: data.total };
+  } catch (error) {
+    mailWarmupState.history[email] = { error: error?.message || "Статистика не прочиталась." };
+  }
+  if (mailWarmupState.open === email) renderMailWarmup();
+}
 
 // Mailbox tags: the page shows every mailbox by default — grouped by domain
 // (owner 14.10); the filter narrows it, «Запустити всі» starts what it shows.
@@ -114,7 +158,7 @@ function tableHtml(data) {
         // A new domain: just a gap above it, no label (owner 14.10).
         const heading = sectionStart ? section : groupStart ? '<tr class="warmup-mail-domain-gap" aria-hidden="true"><td colspan="8"></td></tr>' : "";
         return `${heading}<tr>
-          <td><strong>${escapeHtml(row.email)}</strong>${ownTags(row).length ? `<span class="warmup-mail-tags">${tagPills(ownTags(row))}</span>` : ""}${accountNotesHtml(row.email)}</td>
+          <td><button type="button" class="warmup-mail-email${mailWarmupState.open === row.email ? " is-open" : ""}" data-warmup-history="${escapeAttr(row.email)}" title="Статистика за весь час по днях" aria-expanded="${mailWarmupState.open === row.email}"><i data-lucide="${mailWarmupState.open === row.email ? "chevron-down" : "chevron-right"}"></i><strong>${escapeHtml(row.email)}</strong></button>${ownTags(row).length ? `<span class="warmup-mail-tags">${tagPills(ownTags(row))}</span>` : ""}${accountNotesHtml(row.email)}</td>
           <td>${roleHtml(row, canChange)}</td>
           <td class="warmup-mail-status"><span class="pill ${tone}">${word}</span>${row.day ? `<b class="warmup-mail-day">день ${escapeHtml(String(row.day))}</b>` : ""}${row.status === "paused" && row.pausedAt ? `<small>з ${escapeHtml(when(row.pausedAt))}</small>` : row.status === "running" && row.startedAt ? `<small>старт ${escapeHtml(when(row.startedAt))}</small>` : ""}</td>
           <td class="is-number">${row.status === "running" ? `<div class="warmup-mail-progress"><span style="width:${share}%"></span></div>` : ""}${row.firstsToday} / ${row.plannedToday}</td>
@@ -122,7 +166,7 @@ function tableHtml(data) {
           <td class="is-number warmup-mail-pair" title="Листи цієї пошти, що в інших наших пошт потрапили у «Спам». Прогрів виймає їх усі й позначає важливими."><span class="${spamShare(row) >= 10 ? "is-bad" : ""}"><b>${row.landedInSpam}</b> з ${row.sent}</span><small>${row.sent ? `${spamShare(row)}%` : "—"}</small></td>
           <td class="is-number">${row.coldToday} / ${row.limit}<small>сьогодні з ліміту</small></td>
           <td class="warmup-mail-action">${action(row)}${accountActionsHtml(row.email)}${canChange && row.status !== "removed" ? `<button type="button" class="icon-button warmup-mail-remove" data-warmup-remove="${escapeAttr(row.email)}" title="Прибрати з прогріву" aria-label="Прибрати ${escapeAttr(row.email)} з прогріву"${mailWarmupState.busy ? " disabled" : ""}><i data-lucide="trash-2"></i></button>` : ""}${row.lastError && row.status === "running" ? `<small class="is-bad" title="${escapeAttr(row.lastError.error)}">остання відмова ${escapeHtml(when(row.lastError.at))}</small>` : ""}</td>
-        </tr>${tagEditorHtml(row.email) ? `<tr class="warmup-mail-tag-row"><td colspan="8">${tagEditorHtml(row.email)}</td></tr>` : ""}`;
+        </tr>${mailWarmupState.open === row.email ? `<tr class="warmup-mail-history-row"><td colspan="8">${historyHtml(row.email)}</td></tr>` : ""}${tagEditorHtml(row.email) ? `<tr class="warmup-mail-tag-row"><td colspan="8">${tagEditorHtml(row.email)}</td></tr>` : ""}`;
       }).join("")}</tbody>
     </table></div>
     ${removedHtml(data)}`;
@@ -215,6 +259,8 @@ document.getElementById("mailWarmupRoot")?.addEventListener("submit", (event) =>
 });
 
 document.getElementById("mailWarmupRoot")?.addEventListener("click", (event) => {
+  const history = event.target.closest("[data-warmup-history]")?.dataset.warmupHistory;
+  if (history) return void toggleHistory(history);
   const start = event.target.closest("[data-warmup-start]")?.dataset.warmupStart;
   if (start) return void change("start", { mailbox: start }, () => `${start}: прогрів запущено.`);
   const remove = event.target.closest("[data-warmup-remove]")?.dataset.warmupRemove;

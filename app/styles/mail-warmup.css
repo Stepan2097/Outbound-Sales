@@ -434,3 +434,81 @@
   width: 15px;
   height: 15px;
 }
+
+/* Пошта в таблиці — кнопка: розгортає статистику за весь час по днях (16.10). */
+.warmup-mail-email {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  gap: 6px;
+  color: var(--ink);
+  text-align: left;
+}
+
+.warmup-mail-email:hover,
+.warmup-mail-email.is-open {
+  border: 0;
+  background: none;
+  color: var(--teal);
+}
+
+.warmup-mail-email svg {
+  width: 14px;
+  height: 14px;
+  color: var(--muted);
+}
+
+.warmup-mail-history-row > td {
+  padding: 0 0 14px 22px;
+}
+
+.warmup-mail-history {
+  max-height: 420px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-sunk);
+}
+
+.warmup-mail-history table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.warmup-mail-history th,
+.warmup-mail-history td {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.warmup-mail-history th {
+  position: sticky;
+  top: 0;
+  background: var(--surface-strong);
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.warmup-mail-history .is-number {
+  text-align: right;
+}
+
+.warmup-mail-history small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.warmup-mail-history tr.is-total td {
+  font-weight: 600;
+  background: var(--teal-weak);
+}
+
+.warmup-mail-history th:not(:first-child) {
+  text-align: right;
+}

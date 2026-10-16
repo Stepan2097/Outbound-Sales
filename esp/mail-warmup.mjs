@@ -189,6 +189,60 @@ export function warmupLedger(entries, { now = new Date(), plan = warmupPlan(entr
 }
 
 /** The page's table: every registered, non-retired sender, warm-up or not. */
+/**
+ * One mailbox, day by day, for all time (власник 16.10: «при натискані на
+ * пошту … статистика за весь час по днях скільки відправлено і скільки в
+ * спам»). Days are Kyiv days, newest first, only days with something in them.
+ * A letter that landed in Spam counts on the day it was SENT — «of what went
+ * out that day, how much ended in Spam» — when its Message-ID is known; else on
+ * the day it was found there.
+ */
+export function mailboxHistory(entries, email) {
+  const me = String(email || "").toLowerCase();
+  const failed = new Set(entries.filter((entry) => entry.type === "warmup.failed" || entry.type === "message.failed").map((entry) => entry.data?.sendingSeq));
+  const days = new Map();
+  const day = (date) => {
+    if (!days.has(date)) days.set(date, { date, firsts: 0, replies: 0, cold: 0, inSpam: 0, rescued: 0, received: 0, repliesReceived: 0, failed: 0 });
+    return days.get(date);
+  };
+  const sendingBySeq = new Map();
+  const sentDayById = new Map();
+  for (const entry of entries) {
+    const data = entry.data || {};
+    if (entry.type === "warmup.sending" || entry.type === "message.sending") {
+      sendingBySeq.set(entry.seq, entry);
+      if (String(data.from || "").toLowerCase() !== me) continue;
+      if (data.messageId) sentDayById.set(data.messageId, dayOf(entry.at));
+      if (failed.has(entry.seq)) { day(dayOf(entry.at)).failed += 1; continue; }
+      const row = day(dayOf(entry.at));
+      if (entry.type === "message.sending") row.cold += 1;
+      else if (data.kind === "reply") row.replies += 1;
+      else row.firsts += 1;
+    } else if ((entry.type === "warmup.sent" || entry.type === "warmup.sent_id") && data.messageId) {
+      const sending = sendingBySeq.get(data.sendingSeq);
+      if (sending && String(sending.data?.from || "").toLowerCase() === me) sentDayById.set(data.messageId, dayOf(sending.at));
+    } else if (entry.type === "warmup.received") {
+      if (String(data.mailbox || "").toLowerCase() === me) day(dayOf(entry.at)).received += 1;
+      if (data.inSpam && String(data.from || "").toLowerCase() === me) day(sentDayById.get(data.messageId) || dayOf(entry.at)).inSpam += 1;
+    } else if (entry.type === "warmup.rescued" && String(data.from || "").toLowerCase() === me && !data.other) {
+      day(dayOf(entry.at)).rescued += 1;
+    }
+  }
+  // A reply to one of this mailbox's letters, on the day the reply was written.
+  const mine = new Set(sentDayById.keys());
+  for (const entry of entries) {
+    if (entry.type !== "warmup.sending" || entry.data?.kind !== "reply" || failed.has(entry.seq)) continue;
+    if (mine.has(entry.data.inReplyTo) && String(entry.data.from || "").toLowerCase() !== me) day(dayOf(entry.at)).repliesReceived += 1;
+  }
+  const list = [...days.values()].map((row) => ({ ...row, sent: row.firsts + row.replies + row.cold }))
+    .sort((left, right) => right.date.localeCompare(left.date));
+  const total = list.reduce((sum, row) => {
+    for (const key of ["firsts", "replies", "cold", "sent", "inSpam", "rescued", "received", "repliesReceived", "failed"]) sum[key] += row[key];
+    return sum;
+  }, { firsts: 0, replies: 0, cold: 0, sent: 0, inSpam: 0, rescued: 0, received: 0, repliesReceived: 0, failed: 0 });
+  return { email: me, days: list, total };
+}
+
 export function warmupView(entries, { senders = [], domains = [], now = new Date(), mode = {} } = {}) {
   const { rows } = warmupLedger(entries, { now });
   const ledger = sendLedger(entries, { now });

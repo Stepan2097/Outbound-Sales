@@ -15,7 +15,7 @@ import { composeLetter } from "./compose.mjs";
 import { ReplyError, conversations, quickReply } from "./conversations.mjs";
 import { REPLY_LABELS } from "./replies.mjs";
 import { LeadError, decorateLeads, leadPage } from "./leads.mjs";
-import { PLAN_BOUNDS, cleanPlan, removedFromWarmup, warmupLog, warmupMode, warmupPlan, warmupView } from "./mail-warmup.mjs";
+import { PLAN_BOUNDS, cleanPlan, mailboxHistory, removedFromWarmup, warmupLog, warmupMode, warmupPlan, warmupView } from "./mail-warmup.mjs";
 import { UNIBOX_FOLDERS, uniboxList, uniboxProblems, uniboxThread } from "./unibox.mjs";
 import { recordAboutContact, recordFailed, recordSending, recordSent } from "./messages.mjs";
 import { allEntries, append, contactKey } from "./journal.mjs";
@@ -45,6 +45,7 @@ export function espRouteRight(method, path) {
   // Прогрів пошт: seeing it is the team's; starting or pausing a mailbox's
   // warm-up is its sending volume — a limit.
   if (path === "/warmup") return method === "GET" ? "replies.read" : "limits.change";
+  if (path === "/warmup/history") return "replies.read";
   if (path.startsWith("/warmup/")) return "limits.change";
   // ESP-UI 5, Leads: the lists are the team's to read; filling them and sending
   // people to a campaign is preparing a campaign; a note on a card is inbox work.
@@ -556,6 +557,13 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
   }
 
   // ── Прогрів пошт: the table, the log, «Старт» and «Пауза» ─────────────────
+  // One mailbox day by day, for all time — the row's fold-out on «Прогрів пошт».
+  if (method === "GET" && path === "/warmup/history") {
+    const email = String(url.searchParams.get("email") || "").trim().toLowerCase();
+    if (!email) return badRequest(sendJson, response, "Яка пошта?");
+    sendJson(response, 200, { success: true, ...mailboxHistory(await allEntries(), email) });
+    return true;
+  }
   if (method === "GET" && path === "/warmup") {
     const entries = await allEntries();
     const { senders, domains } = await registry();
