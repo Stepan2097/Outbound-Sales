@@ -21,6 +21,8 @@ onScreen("warmup", { open: () => loadWarmup() });
 
 // Where the account's card lives when no row holds it (see parkWarmupDetail).
 let detailHome = null;
+// The last card read for each account: shown at once when it is opened again.
+const warmupDetailCache = new Map();
 
 export const warmupState = {
   config: null,
@@ -399,6 +401,24 @@ function warmupTagTone(tag) {
   return "tone-muted";
 }
 
+/**
+ * The table's order (власник 16.10): accounts that are warming first, then the
+ * rest without tags, then those with tags, and those marked «Ban» last. Within
+ * a group — as the server sent them (by name).
+ */
+function warmupProfileRank(profile) {
+  const tags = profile.tags || [];
+  if (tags.some((tag) => /^ban$|бан/i.test(tag))) return 3;
+  if (profile.account && ["warming", "working", "paused", "limited", "needs_attention"].includes(profile.status)) return 0;
+  return tags.length ? 2 : 1;
+}
+
+function warmupSortedProfiles(profiles) {
+  return profiles.map((profile, index) => ({ profile, index }))
+    .sort((left, right) => warmupProfileRank(left.profile) - warmupProfileRank(right.profile) || left.index - right.index)
+    .map((item) => item.profile);
+}
+
 function warmupTagsCell(profile) {
   const tags = profile.tags || [];
   if (tagsEdit.profileId !== profile.id) {
@@ -485,7 +505,7 @@ export function renderWarmupProfiles() {
     ? `Вести «${campaign.name || "цю кампанію"}» з цього акаунта`
     : "Спочатку обери кампанію вгорі, потім познач акаунти, які її ведуть";
 
-  body.innerHTML = warmupState.profiles
+  body.innerHTML = warmupSortedProfiles(warmupState.profiles)
     .map((profile) => {
       const status = profile.status;
       const account = profile.account;
@@ -537,6 +557,13 @@ function renderWarmupDetail() {
   if (panel) panel.hidden = !detail;
   if (!detail) {
     body.innerHTML = "";
+    return;
+  }
+  // Opened, not read yet: the card stands under the row at once and fills in.
+  if (detail.loading) {
+    title.textContent = detail.label || "Акаунт";
+    subtitle.textContent = "";
+    body.innerHTML = '<div class="empty-state">Завантажую…</div>';
     return;
   }
 
@@ -723,17 +750,28 @@ async function loadWarmupAccountDetail(accountId) {
     renderWarmupDetail();
     return;
   }
+  // Власник 16.10: «додаткова інформація довго відкривається». The card opens
+  // at once — with what was read last time for this account, or «Завантажую…» —
+  // and the queue (the slow CRM read) no longer holds the rest back.
+  const label = warmupState.profiles.find((row) => row.account?.id === accountId)?.name || "";
+  warmupState.detail = warmupDetailCache.get(accountId) || { loading: true, label };
+  renderWarmupDetail();
+  void loadWarmupQueue(accountId).then(() => {
+    if (warmupState.selectedAccountId === accountId && !warmupState.detail?.loading) renderWarmupDetail();
+  });
   const [accountPayload, sessionsPayload, eventsPayload] = await Promise.all([
     warmupApi(`/accounts?id=${encodeURIComponent(accountId)}`),
     warmupApi(`/sessions?accountId=${encodeURIComponent(accountId)}`),
-    warmupApi(`/events?accountId=${encodeURIComponent(accountId)}&limit=30`),
-    loadWarmupQueue(accountId)
+    warmupApi(`/events?accountId=${encodeURIComponent(accountId)}&limit=30`)
   ]);
+  // Another account was opened (or this one closed) while these were on their way.
+  if (warmupState.selectedAccountId !== accountId) return;
   warmupState.detail = {
     account: accountPayload.account,
     sessions: sessionsPayload.sessions,
     events: eventsPayload.events
   };
+  warmupDetailCache.set(accountId, warmupState.detail);
   if (warmupPeople.accountId !== accountId) warmupPeople = { accountId, rows: null, error: "", search: "", filter: "friends" };
   renderWarmupDetail();
   void loadWarmupPeople(accountId);
