@@ -240,9 +240,16 @@ function contactLinkedInLink(value) {
 const CONTACT_PAGE_SIZE = 25;
 
 const CONTACT_FOLDER_SYSTEM_HINT = {
-  friends: "усі друзі LinkedIn-акаунтів, яких не було в базі",
+  "friends-all": "усі друзі наших LinkedIn-акаунтів, що є в базі — з будь-якої папки",
+  friends: "друзі, яких не було в базі, — додані автоматично",
   inbox: "ті, хто написав нашим LinkedIn-акаунтам"
 };
+
+function contactFolderHint(folder) {
+  const hint = CONTACT_FOLDER_SYSTEM_HINT[folder.system] || "";
+  const pending = Number(folder.pending) || 0;
+  return pending ? `${hint} · ще звіряю з базою ${pending}` : hint;
+}
 
 /**
  * Папки в тому порядку, в якому їх показує список: спершу ті, що наповнює сама
@@ -255,7 +262,7 @@ function contactFolderGroups() {
     const name = String(folder.name || "").toLowerCase();
     return terms.every((term) => name.includes(term));
   });
-  const order = { friends: 0, inbox: 1 };
+  const order = { "friends-all": 0, friends: 1, inbox: 2 };
   const system = shown.filter((folder) => folder.system).sort((left, right) => (order[left.system] ?? 9) - (order[right.system] ?? 9));
   const rest = shown.filter((folder) => !folder.system);
   return [
@@ -270,7 +277,7 @@ function contactFolderOptionHtml(folder, index) {
   return `<button type="button" class="folder-picker-option ${chosen ? "is-chosen" : ""} ${index === contactFolderActive ? "is-active" : ""}" role="option" aria-selected="${chosen}" data-folder="${escapeAttr(folder.id)}">
     <span class="folder-picker-option-main">
       <span class="folder-picker-option-name">${escapeHtml(folder.name || "Без назви")}</span>
-      ${folder.system ? `<span class="folder-picker-option-hint">${escapeHtml(CONTACT_FOLDER_SYSTEM_HINT[folder.system] || "")}</span>` : ""}
+      ${folder.system ? `<span class="folder-picker-option-hint">${escapeHtml(contactFolderHint(folder))}</span>` : ""}
     </span>
     <span class="folder-picker-option-count">${count.toLocaleString("uk-UA")}</span>
   </button>`;
