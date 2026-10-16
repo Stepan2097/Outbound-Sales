@@ -12,7 +12,11 @@
  *                           (без токенів: вони лишаються в запиті й нікуди
  *                           не потрапляють);
  *   STUB_APIFY_ITEMS      — JSON {"<actor-id>": [ ...items ]}, що віддає актор;
- *   STUB_OPENROUTER_JSON  — рядок, який модель «повертає» як content.
+ *   STUB_OPENROUTER_JSON  — рядок, який модель «повертає» як content;
+ *   STUB_ANTHROPIC_JSON   — те саме для api.anthropic.com/v1/messages
+ *                           (без нього — STUB_OPENROUTER_JSON);
+ *   STUB_ANTHROPIC_STATUS — код відповіді Anthropic (напр. 401), щоб
+ *                           перевірити запасний шлях.
  *
  * Будь-яка адреса, якої тут немає, кидає помилку: тест, що непомітно пішов у
  * справжній інтернет, — це тест, який одного дня спише гроші.
@@ -22,6 +26,8 @@ import fs from "node:fs";
 const LOG = process.env.STUB_NETWORK_LOG || "";
 const APIFY_ITEMS = JSON.parse(process.env.STUB_APIFY_ITEMS || "{}");
 const OPENROUTER_JSON = process.env.STUB_OPENROUTER_JSON || "";
+const ANTHROPIC_JSON = process.env.STUB_ANTHROPIC_JSON ?? OPENROUTER_JSON;
+const ANTHROPIC_STATUS = Number(process.env.STUB_ANTHROPIC_STATUS || 200);
 const OPENROUTER_BASE = (process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1").replace(/\/+$/, "");
 
 function note(line) {
@@ -47,6 +53,27 @@ globalThis.fetch = async (input, init = {}) => {
     // Стеля витрат — те, заради чого цей виклик і рахують; токен не пишемо.
     note(`apify ${actor} charge=${url.searchParams.get("maxTotalChargeUsd")}`);
     return json(APIFY_ITEMS[actor] ?? []);
+  }
+
+  if (url.hostname === "api.anthropic.com" && url.pathname === "/v1/messages") {
+    // Що саме пішло: модель, версія API, чи є ключ (сам ключ — ніколи).
+    const headers = new Headers(init.headers || {});
+    let body = {};
+    try { body = JSON.parse(init.body || "{}"); } catch { /* лишиться порожнім */ }
+    const roles = (body.messages || []).map((message) => message.role).join(",");
+    note(`anthropic messages model=${body.model} version=${headers.get("anthropic-version")} key=${headers.get("x-api-key") ? "present" : "absent"} system=${body.system ? "yes" : "no"} roles=${roles} temperature=${"temperature" in body ? "sent" : "none"}`);
+    if (ANTHROPIC_STATUS !== 200) {
+      return json({ type: "error", error: { type: "authentication_error", message: "invalid x-api-key" } }, ANTHROPIC_STATUS);
+    }
+    return json({
+      id: "msg_stub",
+      type: "message",
+      role: "assistant",
+      model: body.model,
+      content: [{ type: "thinking", thinking: "", signature: "stub" }, { type: "text", text: ANTHROPIC_JSON }],
+      stop_reason: "end_turn",
+      usage: { input_tokens: 120, output_tokens: 30 }
+    });
   }
 
   if (raw.startsWith(OPENROUTER_BASE)) {

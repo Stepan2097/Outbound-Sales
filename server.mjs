@@ -3595,7 +3595,7 @@ async function writeCompanyBrief(prospect) {
     apps: (prospect.appPortfolio?.apps || []).slice(0, 10).map((app) => ({ title: app.title, os: app.os, category: app.category })),
     news: (prospect.publicAccountSignals?.results || []).slice(0, 8).map((row) => ({ title: row.title, snippet: row.snippet, date: row.published_at }))
   };
-  if (!state.vault) return null;
+  if (!enrichmentModelReady("COMPANY_BRIEF", { needHealthy: false })) return null;
   const { data, run } = await callOpenRouterJson({
     model: resolveModelForProfile(null, "writing"),
     taskType: "COMPANY_BRIEF",
@@ -7846,7 +7846,7 @@ async function updateResearchJobStage(job, stageId, status, detail = "") {
 
 async function buildClientProfile(prospect, product, profileValue = "balanced") {
   const local = localClientProfile(prospect, product);
-  if (!state.vault || state.providerHealth.status !== "healthy") return local;
+  if (!enrichmentModelReady("CLIENT_PROFILE")) return local;
   try {
     const { data, run } = await callOpenRouterJson({
       model: resolveModelForActingUser("analysis"),
@@ -12259,7 +12259,7 @@ function buildLocalLeadIntelligenceSnapshot(prospect, product, profile, sources,
 }
 
 async function synthesizeLeadIntelligenceWithAi(localSnapshot, prospect, product, profile) {
-  if (!state.vault || state.providerHealth.status !== "healthy") return localSnapshot;
+  if (!enrichmentModelReady("ACCOUNT_QUALIFICATION")) return localSnapshot;
   const started = performance.now();
   const { data, run } = await callOpenRouterJson({
     model: resolveModelForActingUser("analysis"),
@@ -15874,7 +15874,132 @@ function openRouterHeaders(apiKey = decryptSecret(state.vault)) {
   };
 }
 
+/**
+ * Збагачення лідів — напряму через Anthropic API (власник 16.10 купив кредити).
+ *
+ * Лише ці задачі: досьє компанії, кваліфікація/скоринг і опис клієнта — етапи,
+ * що збирають і осмислюють факти про лід. Письмо (послідовності, чернетки,
+ * листи прогріву, ревʼю текстів) лишається на OpenRouter як було.
+ * Без ANTHROPIC_API_KEY усе йде через OpenRouter без змін.
+ */
+const ANTHROPIC_ENRICH_TASKS = new Set(["COMPANY_BRIEF", "ACCOUNT_QUALIFICATION", "CLIENT_PROFILE"]);
+// $ за мільйон токенів (вхід/вихід), щоб журнал витрат не показував нуль.
+const anthropicPrices = {
+  "claude-haiku-5-5": [0.1, 0.5],
+  "claude-sonnet-5-5": [2, 10],
+  "claude-opus-5-5": [4, 20]
+};
+
+function anthropicEnrichKey() {
+  return String(process.env.ANTHROPIC_API_KEY || "").trim();
+}
+
+function anthropicEnrichModel() {
+  return String(process.env.ANTHROPIC_ENRICH_MODEL || "").trim() || "claude-haiku-5-5";
+}
+
+function usesAnthropicForTask(taskType) {
+  return Boolean(anthropicEnrichKey()) && ANTHROPIC_ENRICH_TASKS.has(taskType);
+}
+
+/** Чи є чим збагачувати моделлю: ключ Anthropic або здоровий OpenRouter. */
+function enrichmentModelReady(taskType, { needHealthy = true } = {}) {
+  if (usesAnthropicForTask(taskType)) return true;
+  return Boolean(state.vault) && (!needHealthy || state.providerHealth.status === "healthy");
+}
+
+function anthropicText(content) {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content.map((part) => (part?.type === "text" ? part.text || "" : "")).filter(Boolean).join("\n");
+  }
+  return JSON.stringify(content ?? "");
+}
+
+async function postAnthropicMessages({ model, system, messages, maxTokens, timeoutMs }) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": anthropicEnrichKey(),
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: maxTokens,
+        // Витяг фактів у JSON — глибоке мислення тут лише гальмує й коштує.
+        output_config: { effort: "low" },
+        ...(system ? { system } : {}),
+        messages
+      }),
+      signal: controller.signal
+    });
+    const text = await response.text();
+    if (!response.ok) throw new Error(`Anthropic HTTP ${response.status}: ${text.slice(0, 220)}`);
+    return JSON.parse(text);
+  } catch (error) {
+    if (error?.name === "AbortError") throw new Error(`Anthropic timed out after ${Math.round(timeoutMs / 1000)}s`);
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function callAnthropicJson({ taskType, profile, messages, maxTokens }) {
+  const startedAt = performance.now();
+  const model = anthropicEnrichModel();
+  const system = messages.filter((message) => message.role === "system").map((message) => anthropicText(message.content)).join("\n\n");
+  const turns = messages
+    .filter((message) => message.role !== "system")
+    .map((message) => ({ role: message.role === "assistant" ? "assistant" : "user", content: anthropicText(message.content) }));
+  // Мислення в Haiku 5.5 увімкнене завжди і їсть той самий max_tokens.
+  const budget = Math.max(maxTokens * 2, 4000);
+  // Кваліфікація пише кілька тисяч токенів JSON — на це потрібна хвилина, а не 24 с.
+  const envTimeout = Number(process.env.ANTHROPIC_ENRICH_TIMEOUT_MS || 0);
+  const timeoutMs = Number.isFinite(envTimeout) && envTimeout >= 5000 ? envTimeout : Math.max(openRouterTimeoutFor(profile, taskType), 90000);
+  const payload = await postAnthropicMessages({ model, system, messages: turns, maxTokens: budget, timeoutMs });
+  if (payload.stop_reason === "refusal") throw new Error("Anthropic declined the request (refusal).");
+  const content = (payload.content || []).filter((block) => block.type === "text").map((block) => block.text).join("");
+  let data;
+  try {
+    data = parseJsonObject(content);
+  } catch {
+    const repaired = await postAnthropicMessages({
+      model,
+      system: "Repair malformed JSON. Return only valid strict JSON, no prose, no code fences. Preserve all useful content.",
+      messages: [{ role: "user", content: String(content || "").slice(0, 12000) }],
+      maxTokens: 4000,
+      timeoutMs: 20000
+    });
+    data = parseJsonObject((repaired.content || []).filter((block) => block.type === "text").map((block) => block.text).join(""));
+  }
+  const inputTokens = Number(payload.usage?.input_tokens || estimateTextTokens(system + turns.map((turn) => turn.content).join("\n")));
+  const outputTokens = Number(payload.usage?.output_tokens || estimateTextTokens(content));
+  const usage = recordOpenRouterUsage({
+    taskType, modelId: model, inputTokens, outputTokens,
+    latencyMs: Math.round(performance.now() - startedAt), schemaValidated: true
+  });
+  usage.provider = "anthropic";
+  const [inPrice, outPrice] = anthropicPrices[model] || [0, 0];
+  usage.costUsd = Number(((inputTokens * inPrice + outputTokens * outPrice) / 1000000).toFixed(6));
+  addEvent("request", `${taskType} used ${model} through Anthropic.`);
+  return { data, run: { ok: true, modelUsed: model, provider: "anthropic", fallback: false, attempts: [], usage } };
+}
+
 async function callOpenRouterJson({ model, taskType, profile, messages, maxTokens = 1200 }) {
+  if (usesAnthropicForTask(taskType)) {
+    try {
+      return await callAnthropicJson({ taskType, profile, messages, maxTokens });
+    } catch (error) {
+      // У логах — повністю (без ключа: він лише в заголовку запиту).
+      console.warn(`[anthropic] ${taskType}: ${error?.message || error}`);
+      if (!state.vault) throw error;
+      // Є OpenRouter — лід не лишається без збагачення через збій Anthropic.
+    }
+  }
   const startedAt = performance.now();
   const timeoutMs = openRouterTimeoutFor(profile, taskType);
   const effort = resolveReasoningForActingUser();
