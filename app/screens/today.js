@@ -29,6 +29,8 @@ const DRAFT_LABEL = { reply: "Чернетка відповіді", "follow-up":
 const today = {
   data: null, error: "", loading: false,
   scope: readScope(),
+  // Чіп блоку в шапці (аудит 16.10): показати лише «Прострочені», «На сьогодні»… — порожньо = усі.
+  blockFilter: "", statusSaving: false,
   selected: "", detail: null, detailError: "", detailLoading: false,
   draftLoading: false, draftNote: "", sending: false, notice: "", tone: "", text: "", textFor: "",
   // Етап 2/6: відкриті діалоги з 01.08 (адмін).
@@ -285,18 +287,23 @@ function queueHtml() {
   const data = today.data;
   const blocks = BLOCKS.map(([key, title, hint]) => {
     const items = data.blocks[key] || [];
-    if (!items.length) return "";
+    if (!items.length || (today.blockFilter && today.blockFilter !== key)) return "";
     return `<section class="today-block today-block-${key}">
       <h3 title="${escapeAttr(hint)}">${escapeHtml(title)} <span class="today-count">${items.length}</span></h3>
       ${items.map(queueItem).join("")}
     </section>`;
   }).join("");
-  const later = data.later?.length
+  const later = data.later?.length && !today.blockFilter
     ? `<details class="today-later"><summary>Далі за планом <span class="today-count">${data.later.length}</span></summary>
         ${data.later.map((item) => `<div class="today-later-row"><span>${escapeHtml(item.name)}</span><span>${escapeHtml(item.reasonTitle)} · ${escapeHtml(dayLabel(item.dueDay, data.today))}</span></div>`).join("")}
       </details>`
     : "";
-  return blocks || later ? `${blocks}${later}` : `<p class="today-empty">Сьогодні все розібрано.</p>`;
+  if (blocks || later) return `${blocks}${later}`;
+  // Адмін у «Мої» з порожнім списком — пінги команди лежать в «Усі» (аудит 16.10, P2).
+  if (data.canSeeAll && today.scope === "mine") {
+    return `<p class="today-empty">Ваших пінгів сьогодні немає. Пінги лідгенів — у «Усі». <button type="button" data-today="scope" data-scope="all">Показати пінги команди</button></p>`;
+  }
+  return `<p class="today-empty">Сьогодні все розібрано.</p>`;
 }
 
 function messagesHtml(messages) {
@@ -326,7 +333,7 @@ function workHtml() {
       <span class="pill today-reason today-reason-${escapeAttr(item.block)}">${escapeHtml(item.reasonTitle)} · ${escapeHtml(dayLabel(item.dueDay, today.data?.today))}</span>
     </header>
     <p class="today-work-meta">
-      ${item.accountName ? `Від акаунта <b>${escapeHtml(item.accountName)}</b> · LinkedIn` : "LinkedIn"}
+      ${item.campaign ? `Кампанія <b>${escapeHtml(item.campaign.name || "без назви")}</b> · ` : ""}${item.accountName ? `Від акаунта <b>${escapeHtml(item.accountName)}</b> · LinkedIn` : "LinkedIn"}
       ${item.crmUrl ? ` · <a href="${escapeAttr(item.crmUrl)}" target="_blank" rel="noopener noreferrer">Відкрити в CRM</a>` : ""}
       ${item.assignee && today.scope === "all" ? ` · ${escapeHtml(item.assignee)}` : ""}
     </p>
@@ -369,15 +376,16 @@ function statusHtml(item) {
   return `<div class="today-status">
     <label><span>Статус у CRM</span><select data-today-status="status">${data.statuses.map(([key, label]) => `<option value="${escapeAttr(key)}"${key === current.status ? " selected" : ""}>${escapeHtml(label)}</option>`).join("")}</select></label>
     ${closing ? `<label><span>Причина виходу</span><select data-today-status="exit"><option value="">— оберіть —</option>${data.exitReasons.map(([key, label]) => `<option value="${escapeAttr(key)}"${key === current.exitReason ? " selected" : ""}>${escapeHtml(label)}</option>`).join("")}</select></label>` : ""}
-    <button type="button" data-today="status-save" ${current.status === (item.status || "new") && (current.exitReason || "") === (item.exitReason || "") ? "disabled" : ""}>Зберегти статус</button>
-    ${closing ? `<span class="today-hint">Вихід із воронки — пінги цього контакту закриються.</span>` : current.status === "booked_call" ? `<span class="today-hint">«Дзвінок» — у CRM з'явиться угода, якщо її ще немає.</span>` : ""}
+    ${today.statusSaving ? `<span class="today-hint">Зберігаю в CRM…</span>` : closing && !current.exitReason ? `<span class="today-hint">Оберіть причину — статус збережеться одразу, пінги контакту закриються.</span>` : closing ? `<span class="today-hint">Вихід із воронки — пінги цього контакту закриються.</span>` : current.status === "booked_call" ? `<span class="today-hint">«Дзвінок» — у CRM з'явиться угода, якщо її ще немає.</span>` : `<span class="today-hint">Зберігається одразу при виборі.</span>`}
   </div>`;
 }
 
 async function saveStatus() {
   const item = today.detail?.item;
   const draft = today.statusDraft;
-  if (!item || !draft) return;
+  if (!item || !draft || today.statusSaving) return;
+  today.statusSaving = true;
+  render();
   try {
     const result = await api("/api/today/status", { method: "POST", body: JSON.stringify({ contactId: item.contactId, status: draft.status, exitReason: draft.exitReason }) });
     const label = today.data.statuses.find(([key]) => key === result.status)?.[1] || result.status;
@@ -387,6 +395,8 @@ async function saveStatus() {
     say(`${name}: статус «${label}» у CRM${result.closedPings ? `, пінгів закрито: ${result.closedPings}` : ""}${result.dealId ? ", угоду створено" : ""}.`);
   } catch (error) {
     if (error?.name !== "AbortError") say(error.message || "Не вдалося змінити статус.", "is-error");
+  } finally {
+    today.statusSaving = false;
   }
   render();
 }
@@ -407,13 +417,21 @@ function render() {
     host.innerHTML = "";
     return;
   }
-  const counts = BLOCKS.map(([key, title]) => [title, (data.blocks[key] || []).length]).filter(([, count]) => count);
+  const counts = BLOCKS.map(([key, title]) => [key, title, (data.blocks[key] || []).length]).filter(([, , count]) => count);
+  if (today.blockFilter && !counts.some(([key]) => key === today.blockFilter)) today.blockFilter = "";
+  // Лічильники — це й фільтри: клік показує лише цей блок (аудит 16.10, P2).
+  const chips = counts.length > 1
+    ? `<div class="today-chips" role="group" aria-label="Який блок показати">
+        <button type="button" data-today="block" data-block="" class="${today.blockFilter ? "" : "active"}">Усі ${counts.reduce((sum, [, , count]) => sum + count, 0)}</button>
+        ${counts.map(([key, title, count]) => `<button type="button" data-today="block" data-block="${escapeAttr(key)}" class="${today.blockFilter === key ? "active" : ""}">${escapeHtml(title)} ${count}</button>`).join("")}
+      </div>`
+    : "";
   host.innerHTML = `
     <section class="panel today">
       <header class="today-head">
         <div>
           <h2>Сьогодні</h2>
-          <p>${counts.length ? counts.map(([title, count]) => `${escapeHtml(title)}: ${count}`).join(" · ") : "Живих діалогів, що чекають, немає"}</p>
+          ${chips || `<p>${counts.length ? counts.map(([, title, count]) => `${escapeHtml(title)}: ${count}`).join(" · ") : "Живих діалогів, що чекають, немає"}</p>`}
         </div>
         <div class="today-head-actions">
           ${data.canSeeAll ? `<div class="today-scope" role="group" aria-label="Чиї пінги">
@@ -448,6 +466,10 @@ document.addEventListener("click", (event) => {
   if (!target) return;
   const act = target.dataset.today;
   if (act === "reload") return void openToday({ keepSelection: true });
+  if (act === "block") {
+    today.blockFilter = target.dataset.block || "";
+    return render();
+  }
   if (act === "scope") {
     today.scope = target.dataset.scope === "all" ? "all" : "mine";
     try { window.localStorage.setItem(SCOPE_KEY, today.scope); } catch {}
@@ -489,7 +511,6 @@ document.addEventListener("click", (event) => {
     return render();
   }
   if (act === "import-accept") return void acceptImports();
-  if (act === "status-save") return void saveStatus();
   if (act === "rewrite") return void writeDraft(true);
   if (act === "send") return void send();
   if (act === "move") return void movePing(target.dataset.when);
@@ -522,6 +543,14 @@ document.addEventListener("change", (event) => {
   const item = today.detail?.item;
   if (!field || !item) return;
   const base = today.statusDraft?.pingId === item.pingId ? today.statusDraft : { pingId: item.pingId, status: item.status || "new", exitReason: item.exitReason || "" };
-  today.statusDraft = { ...base, [field.dataset.todayStatus === "exit" ? "exitReason" : "status"]: field.value };
+  const draft = { ...base, [field.dataset.todayStatus === "exit" ? "exitReason" : "status"]: field.value };
+  // Закриваючий статус без причини бере причину за замовчуванням (Не ICP → не ICP, Без відповіді → не відповідає).
+  if (field.dataset.todayStatus === "status") draft.exitReason = (today.data?.closing || []).includes(draft.status) ? (today.data?.defaultExit?.[draft.status] || "") : "";
+  today.statusDraft = draft;
+  // Зберігається одразу при виборі (аудит 16.10, P2): окремої кнопки «Зберегти статус» більше немає.
+  // Закриваючий статус — коли є причина виходу.
+  const closing = (today.data?.closing || []).includes(draft.status);
+  const changed = draft.status !== (item.status || "new") || (draft.exitReason || "") !== (item.exitReason || "");
+  if (changed && (!closing || draft.exitReason)) return void saveStatus();
   render();
 });

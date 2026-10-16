@@ -25,6 +25,8 @@ let detailHome = null;
 const warmupDetailCache = new Map();
 
 export const warmupState = {
+  // Вимкнені, з тегами й Ban — згорнуті під робочими (аудит 16.10); розгортаються кнопкою.
+  showIdleProfiles: false,
   config: null,
   dashboard: null,
   profiles: [],
@@ -533,8 +535,19 @@ export function renderWarmupProfiles() {
     return;
   }
 
-  body.innerHTML = warmupSortedProfiles(warmupState.profiles)
-    .map((profile) => {
+  // Робочі акаунти — зверху; решта (вимкнені, з тегами, Ban) — згорнута групою під ними,
+  // якщо серед них не відкрито той, на який дивляться (аудит 16.10, P2).
+  const sorted = warmupSortedProfiles(warmupState.profiles);
+  const idle = sorted.filter((profile) => warmupProfileRank(profile) > 0);
+  const showIdle = warmupState.showIdleProfiles || idle.some((profile) => profile.id === warmupState.selectedProfileId);
+  const shown = showIdle ? sorted : sorted.filter((profile) => warmupProfileRank(profile) === 0);
+  const idleToggle = idle.length && idle.length < sorted.length
+    ? `<tr class="warmup-idle-toggle"><td colspan="7"><button class="text-button" type="button" data-warmup-idle-toggle aria-expanded="${showIdle}"><i data-lucide="${showIdle ? "chevron-up" : "chevron-down"}"></i><span>${showIdle ? "Сховати" : "Показати"} ще ${idle.length} — вимкнені, з тегами, Ban</span></button></td></tr>`
+    : "";
+  const firstIdle = idle[0]?.id;
+
+  body.innerHTML = shown
+    .map((profile) => (profile.id === firstIdle ? idleToggle : "") + (() => {
       const status = profile.status;
       const account = profile.account;
       // The person the browser is actually signed in as, which is not the same
@@ -562,10 +575,13 @@ export function renderWarmupProfiles() {
           <td>${warmupConnectionsCell(profile)}</td>
           <td>${account
             ? warmupNextSessionCell(profile)
-            : '<button class="primary-button" type="button" data-warmup-adopt>Прогріти</button>'}</td>
+            : warmupProfileRank(profile) === 3
+              // Тег Ban: основна зелена кнопка тут підштовхувала прогрівати забанений акаунт (аудит 16.10, P1).
+              ? '<button class="text-button" type="button" data-warmup-adopt title="Тег Ban — акаунт забанено в LinkedIn. Прогрівати, лише якщо його розбанили.">Прогріти</button>'
+              : '<button class="primary-button" type="button" data-warmup-adopt>Прогріти</button>'}</td>
         </tr>`;
-    })
-    .join("");
+    })())
+    .join("") + (!showIdle && idleToggle ? idleToggle : "");
 
   placeWarmupDetail(body);
   renderWarmupCampaignDetail();
@@ -1149,6 +1165,11 @@ document.getElementById("warmupProfileTableBody")?.addEventListener("change", (e
 
 document.getElementById("warmupProfileTableBody")?.addEventListener("click", (event) => {
   if (event.target.closest("#warmupDetailPanel")) return;
+  if (event.target.closest("[data-warmup-idle-toggle]")) {
+    warmupState.showIdleProfiles = !warmupState.showIdleProfiles;
+    renderWarmupProfiles();
+    return;
+  }
   // Ticking an account is not the same gesture as opening it.
   if (event.target.closest("[data-warmup-account-tick]")) return;
   // Nor is editing its tags.

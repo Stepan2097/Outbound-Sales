@@ -13,7 +13,7 @@ import { acceptedRows, firstMarks } from "../warmup/first-messages.mjs";
 import { INVITE_ACCEPTED } from "../warmup/invites.mjs";
 import { accountName } from "../warmup/activities.mjs";
 import { acceptOpenDialogs, openDialogs, suggestOpenDialogs } from "./open-dialogs.mjs";
-import { CLOSING, EXIT_REASONS, LEAD_STATUSES, ORIGIN, statusPatch } from "./statuses.mjs";
+import { CLOSING, DEFAULT_EXIT, EXIT_REASONS, LEAD_STATUSES, ORIGIN, statusPatch } from "./statuses.mjs";
 import {
   PING_QUEUE, REASONS, blockOf, compareItems, dayIn, desiredPing, manualDueDay,
   newContactsAllowed, planPingChanges, reasonOfKey, stripMarks, taskDescription, taskMarks, taskReason, zonedIso
@@ -381,8 +381,16 @@ function itemOf(task, { contact, state, today, now, emails, accounts = new Map()
     status: contact?.lead_status || null,
     exitReason: contact?.exit_reason || null,
     assignee: emails.get(task.assigned_to) || null,
+    // Кампанія, з якої людина (WorkSpace, 16.10) — рядок контексту в робочому місці.
+    campaign: campaignOf(state?.campaignId),
     crmUrl: contactId ? `${CRM_CONTACT_URL}/contacts/${contactId}` : null
   };
+}
+
+function campaignOf(campaignId) {
+  if (!campaignId) return null;
+  const campaign = (campaignsReader() || []).find((item) => item.id === campaignId);
+  return campaign ? { id: campaign.id, name: campaign.name || "" } : null;
 }
 
 /** Відкриті пінги лідгена (адмін — усіх), розкладені по блоках «Сьогодні». */
@@ -404,7 +412,7 @@ export async function todayList({ viewerId, scope = "mine", now = new Date() }) 
   return {
     configured: true, today, scope, blocks, later,
     newContactsAllowed: newContactsAllowed(blocks),
-    statuses: LEAD_STATUSES, exitReasons: EXIT_REASONS, closing: [...CLOSING],
+    statuses: LEAD_STATUSES, exitReasons: EXIT_REASONS, closing: [...CLOSING], defaultExit: DEFAULT_EXIT,
     reconciledAt: lastStats?.at || null
   };
 }

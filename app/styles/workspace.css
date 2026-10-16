@@ -123,3 +123,30 @@
   color: var(--ink);
   font-weight: 600;
 }
+
+/* Розклад прогріву — окрема панель «Прогріву» (16.10): без відступу й межі згори, як було під кампанією. */
+.warmup-strategy-panel .warmup-strategy-section {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.warmup-strategy-panel .warmup-strategy-head h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+/* Чекбокс акаунта — звичайного розміру, а не на всю ширину поля. */
+.campaign-account input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
+}
+
+.campaign-form-section textarea {
+  font: inherit;
+  min-height: 64px;
+}
