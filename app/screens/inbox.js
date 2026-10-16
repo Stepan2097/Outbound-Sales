@@ -219,7 +219,10 @@ function warmupCleanName(participant) {
   // reads these strings out of the DOM, where "LinkedIn Member" can arrive as
   // "LinkedIn\n      Member". Collapsing cannot swallow a real name — "Linda
   // Memberly" is still not in the set however it was spaced.
-  return String(participant?.name || "").replace(/\s+/g, " ").trim().replace(WARMUP_NAME_NOISE, "").trim();
+  const name = String(participant?.name || "").replace(/\s+/g, " ").trim().replace(WARMUP_NAME_NOISE, "").trim();
+  // LinkedIn's «Ким переглянуто: X о 23:25.» stored as a name before 16.10 — the person is X.
+  const seen = /^(?:ким\s+)?переглянуто:\s*(.+?)\s+о\s+\d{1,2}:\d{2}\.?$/i.exec(name) || /^(?:seen|viewed|read)\s+by\s+(.+?)\s+at\s+\d{1,2}:\d{2}(?:\s*[ap]\.?m\.?)?\.?$/i.exec(name);
+  return seen ? seen[1].trim() : name;
 }
 
 function warmupParticipantUnnamed(participant) {

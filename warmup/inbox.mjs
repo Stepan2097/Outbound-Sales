@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import { anty, CONTACT_ID_BATCH, leadsByLinkedin } from "./db.mjs";
 import { linkedinSlug } from "./outreach.mjs";
+import { nameFromSeenLine, withoutSeenLines } from "./receipts.mjs";
 import { REQUEST_EVENT_TYPES, moveStatus, requestLine } from "./invites.mjs";
 import {
   CRM_COPIED, CRM_FAILED, accountName, clampContent, copyToCrm, crmStamp, oneCopyAtATime, outstandingCopies, sourceEvents
@@ -215,7 +216,8 @@ export const UNNAMED = "Unknown";
  * still nobody's placeholder.
  */
 function cleanName(value, max = 200) {
-  return typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, max) : "";
+  // LinkedIn's «Ким переглянуто: X о 23:25.» read as a name is X (receipts.mjs).
+  return typeof value === "string" ? nameFromSeenLine(value).slice(0, max) : "";
 }
 
 /**
@@ -295,7 +297,8 @@ export function plausibleSentAt(parsedMs, receivedAt) {
  * mistakes a substitute for a reading.
  */
 export function normalizeMessage(raw, { threadKey, receivedAt }) {
-  const { body, truncated } = clampBody(raw?.body);
+  // LinkedIn's «seen» line is not part of what the person wrote (receipts.mjs).
+  const { body, truncated } = clampBody(typeof raw?.body === "string" ? withoutSeenLines(raw.body) : raw?.body);
   if (!body.trim()) return null;
 
   const direction = raw?.direction === "out" ? "out" : raw?.direction === "in" ? "in" : null;

@@ -1,5 +1,6 @@
 import { crm } from "./db.mjs";
 import { linkedinSlug } from "./outreach.mjs";
+import { nameFromSeenLine } from "./receipts.mjs";
 
 /**
  * People who wrote to a warm-up account and are in nobody's CRM yet.
@@ -68,7 +69,7 @@ export function hasProfileWords(name) {
 
 /** The person's name as it should stand in the CRM, or "" when there is none. */
 export function personName(participant) {
-  return String(participant?.name || "").replace(/\s+/g, " ").trim().replace(NAME_NOISE, "").trim();
+  return nameFromSeenLine(String(participant?.name || "").replace(/\s+/g, " ").trim().replace(NAME_NOISE, "").trim());
 }
 
 /** A member's profile slug, or "" for anything that is not one (a company page, a school, nothing). */
