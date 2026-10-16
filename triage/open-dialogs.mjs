@@ -46,8 +46,10 @@ export function pickOpenDialogs({ activities, statusChanges, contacts, openPingC
     const touches = (byContact.get(contact.id) || []).sort((left, right) => String(left.created_at).localeCompare(String(right.created_at)));
     const theirs = touches.filter(isTheirs);
     if (!theirs.length && !advanced.has(contact.id)) continue;
-    const ours = touches.filter((touch) => !isTheirs(touch));
-    const last = touches.at(-1) || null;
+    // Нотатка — запис лідгена для себе, а не повідомлення: «хто написав останнім» — без неї.
+    const messages = touches.filter((touch) => touch.type !== "note");
+    const ours = messages.filter((touch) => !isTheirs(touch));
+    const last = messages.at(-1) || null;
     out.push({
       contactId: contact.id,
       name: contact.name || "",
@@ -57,7 +59,7 @@ export function pickOpenDialogs({ activities, statusChanges, contacts, openPingC
       ownerId: contact.owner_id || null,
       lastTheirsAt: theirs.at(-1)?.created_at || null,
       lastOursAt: ours.at(-1)?.created_at || null,
-      lastAt: last?.created_at || null,
+      lastAt: last?.created_at || touches.at(-1)?.created_at || null,
       lastBy: last ? (isTheirs(last) ? "them" : "us") : null,
       timeline: touches.slice(-8).map((touch) => ({ at: touch.created_at, by: isTheirs(touch) ? "them" : "us", type: touch.type, text: String(touch.content || "").slice(0, 600) }))
     });
@@ -70,9 +72,13 @@ export function pickOpenDialogs({ activities, statusChanges, contacts, openPingC
  * лідом — відповісти; дзвінок у статусі — дзвінок; інакше — нагадати.
  */
 export function ruleVerdict(candidate) {
+  if (!candidate.timeline?.length && candidate.status !== "booked_call") {
+    return { reason: "silent", priority: "normal", why: `Дотиків з 01.08 у CRM немає, статус «${candidate.status}» — нагадати про себе.` };
+  }
   if (candidate.status === "booked_call") return { reason: "call", priority: "high", why: "У CRM статус «дзвінок призначено» — підтвердити дзвінок." };
   if (candidate.lastBy === "them") return { reason: "reply", priority: "high", why: "Останнє повідомлення — від ліда, відповіді немає." };
   if (candidate.status === "qualification") return { reason: "silent", priority: "high", why: "Лід на кваліфікації, ми написали останніми — нагадати." };
+  if (!candidate.lastBy) return { reason: "silent", priority: "normal", why: "У CRM лише нотатки, без повідомлень — нагадати про себе." };
   return { reason: "silent", priority: "normal", why: "Ми написали останніми — нагадати." };
 }
 
