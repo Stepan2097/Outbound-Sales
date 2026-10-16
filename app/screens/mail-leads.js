@@ -16,6 +16,14 @@ const PRIVACY = "privacy";
 // What the verifier said, in words — the CRM's address check writes valid / invalid / catch_all.
 const VERIFICATION_WORD = { valid: "адреса існує", invalid: "адреси немає", catch_all: "домен приймає все (catch-all)", risky: "ризикова", unknown: "невідомо" };
 const TONE_WORD = { valid: "перевірена", risky: "ризикова", invalid: "недійсна", unknown: "невідомо", none: "не перевірялась" };
+// What each dot means, on hover (власник 16.10: «що це за червона крапка додай розшифровку при наведені»).
+const TONE_HINT = {
+  valid: "Зелена — скринька існує: поштовий сервер підтвердив адресу. Тільки на такі йдуть листи кампаній.",
+  risky: "Жовта — ризикова: домен приймає будь-яку адресу (catch-all), тож чи є саме ця скринька, невідомо.",
+  invalid: "Червона — недійсна: такої адреси немає (домену не існує, домен не приймає пошту, опечатка або помилка в адресі). Листа на неї не буде.",
+  unknown: "Сіра з обідком — перевірити не вдалося: сервер не відповів. Можна перевірити пізніше.",
+  none: "Сіра — скриньку не перевіряли: відомо лише, що домен приймає пошту, або адресу ще не перевіряли зовсім."
+};
 const ENROLL_WORD = { active: "у ланцюжку", paused: "на паузі", stopped: "зупинено", done: "завершено", uncertain: "невідомо" };
 const ENROLL_TONE = { active: "tone-live", paused: "tone-warn", stopped: "tone-muted", done: "tone-done", uncertain: "tone-warn" };
 const LABEL_WORD = { positive: "позитивна", negative: "негативна", referral: "переадресація", neutral: "нейтральна" };
@@ -168,7 +176,7 @@ function sideHtml() {
 
 function chipsHtml(counts, scope = "") {
   if (!counts) return "";
-  return `${scope === "page" ? '<span class="leads-crm-note">перевірка адрес на цій сторінці:</span>' : ""}<div class="leads-chips" aria-label="Верифікація адрес">${["valid", "risky", "invalid", "unknown", "none"].filter((tone) => counts[tone]).map((tone) => `<span class="leads-chip" title="${TONE_WORD[tone]}"><i class="leads-dot is-${tone}"></i>${counts[tone]}</span>`).join("")}</div>`;
+  return `${scope === "page" ? '<span class="leads-crm-note">перевірка адрес на цій сторінці:</span>' : ""}<div class="leads-chips" aria-label="Верифікація адрес">${["valid", "risky", "invalid", "unknown", "none"].filter((tone) => counts[tone]).map((tone) => `<span class="leads-chip" data-tip="${escapeAttr(TONE_HINT[tone])}" aria-label="${escapeAttr(`${counts[tone]}: ${TONE_HINT[tone]}`)}" tabindex="0"><i class="leads-dot is-${tone}"></i>${counts[tone]}</span>`).join("")}</div>`;
 }
 
 function checkHtml(crmFolder) {
@@ -290,7 +298,7 @@ function listHtml() {
         <tr class="${leadsState.selected.has(row.id) ? "is-picked" : ""}">
           <td><input type="checkbox" data-leads-pick="${escapeAttr(row.id)}" aria-label="Вибрати ${escapeAttr(row.name || row.email)}"${leadsState.selected.has(row.id) ? " checked" : ""} /></td>
           <td class="leads-who"><button type="button" class="leads-name" data-leads-open="${escapeAttr(row.email)}">${escapeHtml(row.name || row.email.split("@")[0])}</button><small>${escapeHtml([row.company, row.position].filter(Boolean).join(" · "))}</small></td>
-          <td class="leads-email"><i class="leads-dot is-${row.tone}" title="${escapeAttr(TONE_WORD[row.tone])}${row.verifiedAt ? `, ${escapeAttr(row.verifiedAt)}` : ""}"></i>${escapeHtml(row.email)}${row.excluded ? ` <span class="pill tone-warn" title="${escapeAttr(row.excluded.note || "")}">виключено</span>` : ""}</td>
+          <td class="leads-email"><i class="leads-dot is-${row.tone}" title="${escapeAttr(TONE_HINT[row.tone])}${row.verifiedAt ? ` Перевірено ${escapeAttr(String(row.verifiedAt).slice(0, 10))}.` : ""}"></i>${escapeHtml(row.email)}${row.excluded ? ` <span class="pill tone-warn" title="${escapeAttr(row.excluded.note || "")}">виключено</span>` : ""}</td>
           <td class="leads-provider">${row.provider ? `<span class="pill tone-muted">${escapeHtml(providerWord(row.provider))}</span>` : "—"}${row.free ? '<small>особиста</small>' : ""}${row.role ? '<small>загальна</small>' : ""}${row.suggestion ? `<small title="Опечатка в домені">мабуть, ${escapeHtml(row.suggestion)}</small>` : ""}</td>
           <td>${escapeHtml(row.country || "—")}</td>
           <td>${escapeHtml(row.crmId ? "CRM" : row.source || "—")}${row.sourceDate ? `<small>${escapeHtml(row.sourceDate)}</small>` : ""}</td>

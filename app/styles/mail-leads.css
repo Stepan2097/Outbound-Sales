@@ -538,3 +538,40 @@
   width: auto;
   max-width: 220px;
 }
+
+/* Розшифровка крапок верифікації при наведенні (16.10): одразу, без затримки title. */
+.leads-chips {
+  overflow: visible;
+}
+
+.leads-chip[data-tip] {
+  position: relative;
+  cursor: help;
+}
+
+.leads-chip[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  width: 280px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-strong);
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.4;
+  white-space: normal;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s;
+}
+
+.leads-chip[data-tip]:hover::after,
+.leads-chip[data-tip]:focus-visible::after {
+  opacity: 1;
+}
