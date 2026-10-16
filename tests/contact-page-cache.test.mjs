@@ -28,7 +28,7 @@ test.before(async () => {
     const count = String(request.headers.prefer).includes("count=exact");
     const marker = calls.length + 1, snapshot = revision;
     calls.push({ count, params: url.searchParams });
-    const folder = url.searchParams.get("folder_id")?.slice(3);
+    const folder = (url.searchParams.get("fm.folder_id") ?? url.searchParams.get("folder_id"))?.slice(3);
     const term = /ilike\.\*([^*]+)\*/.exec(url.searchParams.get("or") || "")?.[1]?.toLowerCase() || "";
     let contacts = Array.from({ length: 8 }, (_, n) => ({
       id: `22222222-2222-4222-8222-${String(n + 1).padStart(12, "0")}`,
@@ -52,7 +52,7 @@ test.before(async () => {
     const ascending = url.searchParams.get("order")?.startsWith("created_at.asc");
     contacts.sort((a, b) => (ascending ? 1 : -1) * a.created_at.localeCompare(b.created_at));
     const offset = Number(url.searchParams.get("offset") || 0), limit = Number(url.searchParams.get("limit") || 25);
-    response.end(JSON.stringify(contacts.slice(offset, offset + limit)));
+    response.end(JSON.stringify(contacts.slice(offset, offset + limit).map((contact) => ({ ...contact, fm: [{ folder_id: folder }] }))));
   });
   await new Promise((resolve, reject) => { service.once("error", reject); service.listen(0, "127.0.0.1", resolve); });
   origin = `http://127.0.0.1:${service.address().port}`;
@@ -209,4 +209,14 @@ test("aborting one HTTP reader leaves the shared page available to another reade
     if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("папка читається через contact_folder_memberships, як її рахує CRM, — контакт може бути в кількох (власник 16.10); службове поле не доходить до сторінки", async () => {
+  const page = await listFolderContacts({ ...options, search: "" });
+  const rowsCall = calls.find((call) => !call.count);
+  assert.equal(rowsCall.params.get("fm.folder_id"), `eq.${FOLDER}`);
+  assert.equal(rowsCall.params.get("folder_id"), null, "не за contacts.folder_id — то лише перша папка контакту");
+  assert.match(rowsCall.params.get("select"), /fm:contact_folder_memberships!inner\(folder_id\)/);
+  assert.ok(page.contacts.length > 0);
+  assert.ok(page.contacts.every((contact) => !("fm" in contact)));
 });

@@ -147,11 +147,13 @@ test("a blank filter narrows nothing and a position filter is a contains", () =>
   // what a LinkedIn queue is made of — a contact with none is nowhere the agent
   // can click Connect.
   const profileLink = "linkedin=ilike.*linkedin.com%2Fin%2F*";
-  assert.equal(params({}), `select=id&folder_id=eq.folder-1&${profileLink}`, "an empty box must not become a filter for the empty string");
+  // In the folder by membership — a contact may be in several (16.10).
+  const inFolder = `${new URLSearchParams({ select: "id,fm:contact_folder_memberships!inner(folder_id)" })}&fm.folder_id=eq.folder-1`;
+  assert.equal(params({}), `${inFolder}&${profileLink}`, "an empty box must not become a filter for the empty string");
   // Values go through unquoted and a space arrives as `+`, which is what
   // PostgREST reads it as — quoting the value is what breaks the match.
   assert.equal(
     params({ country: "United States", position: "head of growth", leadStatus: "new", ownerId: "owner-1" }),
-    `select=id&folder_id=eq.folder-1&${profileLink}&lead_status=eq.new&owner_id=eq.owner-1&country=ilike.United+States&position=ilike.*head+of+growth*`
+    `${inFolder}&${profileLink}&lead_status=eq.new&owner_id=eq.owner-1&country=ilike.United+States&position=ilike.*head+of+growth*`
   );
 });

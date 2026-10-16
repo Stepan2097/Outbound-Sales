@@ -72,8 +72,24 @@ async function createFriend(person, accountLabel, folderId) {
  * them ({ slug, name, headline, connectedAt }). Returns the counts.
  * `lookup` and `create` are for tests.
  */
-export async function adoptNetwork({ account, people, lookup = contactBySlug, create = createFriend, folderId = networkFolderId, concurrency = 6, env = process.env }) {
-  const result = { checked: 0, inCrm: 0, added: 0, skipped: 0, failed: 0, lastError: null };
+/**
+ * A contact is in a folder through `contact_folder_memberships`, and may be in
+ * several (owner 16.10: «Контакт у CRM може бути лише в одній — не правда»):
+ * a friend already in the base joins this folder too, staying in their own.
+ */
+const MEMBERSHIP_BATCH = 500;
+
+async function joinFolder(contactIds, folderId) {
+  for (let at = 0; at < contactIds.length; at += MEMBERSHIP_BATCH) {
+    const insert = crm.from("contact_folder_memberships")
+      .insert(contactIds.slice(at, at + MEMBERSHIP_BATCH).map((contact_id) => ({ contact_id, folder_id: folderId })));
+    insert.headers = { ...insert.headers, Prefer: "resolution=ignore-duplicates,return=minimal" };
+    await insert.rows();
+  }
+}
+
+export async function adoptNetwork({ account, people, lookup = contactBySlug, create = createFriend, join = joinFolder, folderId = networkFolderId, concurrency = 6, env = process.env }) {
+  const result = { checked: 0, inCrm: 0, added: 0, joined: 0, skipped: 0, failed: 0, lastError: null };
   if (!adoptionEnabled(env)) return { ...result, off: true };
   const label = typeof account === "string" ? account : accountName(account);
   const list = (Array.isArray(people) ? people : []).filter((person) => {
@@ -83,17 +99,19 @@ export async function adoptNetwork({ account, people, lookup = contactBySlug, cr
   });
   if (!list.length) return result;
   const folder = await folderId();
+  const members = new Set();
   let next = 0;
   const worker = async () => {
     while (next < list.length) {
       const person = list[next++];
       try {
-        const made = await once(`profile:${person.slug}`, async () => {
-          if (await lookup(person.slug)) return false;
-          await create(person, label, folder);
-          return true;
+        const { id, made } = await once(`profile:${person.slug}`, async () => {
+          const existing = await lookup(person.slug);
+          if (existing) return { id: existing, made: false };
+          return { id: await create(person, label, folder), made: true };
         });
         made ? (result.added += 1) : (result.inCrm += 1);
+        if (id) members.add(String(id));
       } catch (error) {
         result.failed += 1;
         result.lastError = error.message;
@@ -102,5 +120,12 @@ export async function adoptNetwork({ account, people, lookup = contactBySlug, cr
     }
   };
   await Promise.all(Array.from({ length: Math.min(concurrency, list.length) }, worker));
+  try {
+    await join([...members], folder);
+    result.joined = members.size;
+  } catch (error) {
+    result.failed += 1;
+    result.lastError = `папка: ${error.message}`;
+  }
   return result;
 }

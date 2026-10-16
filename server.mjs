@@ -47,8 +47,7 @@ import { crmLeadSource } from "./esp/crm-leads.mjs";
 import { folderChecker } from "./esp/folder-check.mjs";
 import { anty as warmupAnty, crm as warmupCrm } from "./warmup/db.mjs";
 import { likeLiteral } from "./warmup/rest.mjs";
-import { contactBySlug, listThreads, messagesForContact } from "./warmup/inbox.mjs";
-import { FRIENDS_FOLDER, friendsFolder } from "./contacts/friends-folder.mjs";
+import { listThreads, messagesForContact } from "./warmup/inbox.mjs";
 import { postponedDue, runTick, startSequence } from "./esp/sequence.mjs";
 import { pollInboxes } from "./esp/inbound.mjs";
 import { runWarmupTick, warmupMode } from "./esp/mail-warmup.mjs";
@@ -67,12 +66,6 @@ useJournal(process.env.ESP_JOURNAL_PATH || join(dirname(stateFilePath), "esp-jou
 useWorkLog(process.env.WORK_LOG_PATH || join(dirname(stateFilePath), "work-log.jsonl"));
 // Усі друзі LinkedIn по акаунтах (14.10) — знімок, який агент читає раз на кілька днів.
 const linkedinNetwork = networkStore(process.env.LINKEDIN_NETWORK_PATH || join(dirname(stateFilePath), "linkedin-network.json"));
-// «Усі друзі LinkedIn-акаунтів» на «Контактах» (16.10): ці друзі, знайдені в CRM, — без переносу між папками.
-const linkedinFriends = friendsFolder({
-  network: linkedinNetwork,
-  path: process.env.LINKEDIN_FRIENDS_CRM_PATH || join(dirname(stateFilePath), "linkedin-friends-crm.json"),
-  lookup: (slug) => contactBySlug(slug)
-});
 // The administrators' log (ESP 10) is the ESP journal: what an admin changes in
 // the workspace — roles, people, models, keys — is a line there, with who did it.
 // Never the key itself. A log that cannot be written costs the change nothing.
@@ -1035,7 +1028,6 @@ async function handleApi(request, response, url) {
       onNetwork: async (account, people) => {
         const result = await adoptNetwork({ account, people });
         if (result.added || result.failed) console.log(`[warmup] friends → CRM (${account.login || account.label || account.id}): ${JSON.stringify(result)}`);
-        linkedinFriends.kick();
       },
       // Campaigns are workspace configuration, so the warm-up reads and writes
       // them through the state this app already persists rather than keeping a
@@ -1149,12 +1141,6 @@ async function handleApi(request, response, url) {
         const filled = new Map([[networkFolderName(), "friends"], [adoptionFolderName(), "inbox"]]);
         const folders = (await listContactFolders({ cacheScope }))
           .map((folder) => (filled.has(folder.name) ? { ...folder, system: filled.get(folder.name) } : folder));
-        // Every friend of every account, found in the CRM — not a CRM folder, so it never moves anybody.
-        const friends = await linkedinFriends.folder().catch((error) => {
-          console.warn(`[contacts] friends folder: ${error.message}`);
-          return null;
-        });
-        if (friends && (friends.contactCount || friends.pending)) folders.unshift(friends);
         // An empty CRM and a CRM read with the wrong key look identical from
         // here — both are 200 with no rows — so when the key is the anon one,
         // say which of the two this is.
@@ -1170,15 +1156,6 @@ async function handleApi(request, response, url) {
           cacheScope,
           folderId: cleanText(url.searchParams.get("folderId") || ""),
           search: cleanText(url.searchParams.get("search") || "").slice(0, 120)
-        }));
-        return;
-      }
-
-      if (request.method === "GET" && url.pathname === "/api/contacts" && url.searchParams.get("folderId") === FRIENDS_FOLDER) {
-        sendJson(response, 200, await linkedinFriends.page({
-          search: cleanText(url.searchParams.get("search") || ""),
-          limit: clampNumber(url.searchParams.get("limit"), 1, 100, 25),
-          offset: clampNumber(url.searchParams.get("offset"), 0, 100000, 0)
         }));
         return;
       }

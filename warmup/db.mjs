@@ -83,6 +83,27 @@ const LEAD_COLUMNS = "id,name,company,position,linkedin,country,email,phone,crea
 export const PROFILE_LINK_PATTERN = "*linkedin.com/in/*";
 
 /**
+ * A contact is in a folder through `contact_folder_memberships`, and may be in
+ * several; `contacts.folder_id` is only the first of them (owner 16.10: «Контакт
+ * у CRM може бути лише в одній — не правда»). The CRM counts its folders this
+ * way (`contact_folder_counts`), so every folder read here does too:
+ * `select(withFolder(columns)).eq(IN_FOLDER, folderId)`. Rows come back with an
+ * `fm` key beside their columns.
+ */
+export const FOLDER_JOIN = "fm:contact_folder_memberships!inner(folder_id)";
+export const IN_FOLDER = "fm.folder_id";
+export function withFolder(columns) {
+  return `${columns},${FOLDER_JOIN}`;
+}
+
+/** A row without the membership it was found through. */
+export function withoutFolder(row) {
+  if (!row || !("fm" in row)) return row;
+  const { fm, ...rest } = row;
+  return rest;
+}
+
+/**
  * The queue, defined in exactly one place. Every caller — the list, the total
  * under it, the forecast, the re-read before a request is sent — has to mean
  * the same set of people, or the total says one thing and the list another.
@@ -93,7 +114,7 @@ export const PROFILE_LINK_PATTERN = "*linkedin.com/in/*";
  */
 export function queueQuery(columns, targeting) {
   const { country, position, leadStatus, ownerId } = targeting.filters;
-  let query = crm.from("contacts").select(columns).eq("folder_id", targeting.folderId)
+  let query = crm.from("contacts").select(withFolder(columns)).eq(IN_FOLDER, targeting.folderId)
     .ilike("linkedin", PROFILE_LINK_PATTERN);
   if (leadStatus) query = query.eq("lead_status", leadStatus);
   if (ownerId) query = query.eq("owner_id", ownerId);
@@ -118,18 +139,18 @@ export async function queueTotal(targeting) {
  * profile, and the walk steps over the second by the profile.
  */
 export async function queuePage({ targeting, offset = 0, limit }) {
-  return queueQuery("id,linkedin", targeting)
+  return (await queueQuery("id,linkedin", targeting)
     .order("created_at", { ascending: false })
     .order("id", { ascending: false })
     .offset(offset)
     .limit(limit)
-    .rows();
+    .rows()).map(withoutFolder);
 }
 
 /** These contacts in full, in the order asked for, if they are still in the queue. */
 export async function queueLeads(targeting, ids) {
   if (!ids.length) return [];
-  const rows = await queueQuery(LEAD_COLUMNS, targeting).in("id", ids).rows();
+  const rows = (await queueQuery(LEAD_COLUMNS, targeting).in("id", ids).rows()).map(withoutFolder);
   const byId = new Map(rows.map((row) => [row.id, row]));
   return ids.map((id) => byId.get(id)).filter(Boolean);
 }

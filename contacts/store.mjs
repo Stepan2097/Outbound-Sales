@@ -1,4 +1,4 @@
-import { crm } from "../warmup/db.mjs";
+import { IN_FOLDER, crm, withFolder, withoutFolder } from "../warmup/db.mjs";
 import { listFolders } from "../warmup/targeting.mjs";
 import { createHash } from "node:crypto";
 import { createReadCache } from "./read-cache.mjs";
@@ -145,8 +145,9 @@ export async function listFolderContacts({ folderId = "", search = "", limit = 2
   const from = Math.max(Number(offset) || 0, 0);
   const term = String(search || "").trim().replace(/[(),*]/g, " ").trim();
 
+  // In the folder by membership, as the CRM counts it: one contact may be in several.
   const build = (columns) => {
-    let query = crm.from("contacts").select(columns).eq("folder_id", folderId);
+    let query = crm.from("contacts").select(withFolder(columns)).eq(IN_FOLDER, folderId);
     if (term) {
       query = query.or(`name.ilike.*${term}*,company.ilike.*${term}*,position.ilike.*${term}*,email.ilike.*${term}*`);
     }
@@ -156,7 +157,8 @@ export async function listFolderContacts({ folderId = "", search = "", limit = 2
   return reads.read(cacheKey(cacheScope, "page", folderId, term, size, from, Boolean(queueOrder)),
     { ttl: MINUTE, fresh, tags: ["pages", `folder:${folderId}`] }, async () => {
       const [contacts, total] = await Promise.all([
-        build(LIST_COLUMNS).order("created_at", { ascending: queueOrder }).order("id", { ascending: queueOrder }).limit(size).offset(from).rows(),
+        build(LIST_COLUMNS).order("created_at", { ascending: queueOrder }).order("id", { ascending: queueOrder }).limit(size).offset(from).rows()
+          .then((rows) => rows.map(withoutFolder)),
         // Rows and total share the page's lifetime. Reusing a nearly expired
         // standalone count here would keep that old total for another minute.
         build("id").count()
@@ -242,14 +244,16 @@ export async function folderContactAt({ folderId = "", index = 0, search = "", c
   if (!UUID.test(folderId)) throw badUuid("Папка", folderId);
   if (contactId) {
     const contact = await readContact(contactId, { cacheScope });
-    if (!contact || contact.folder_id !== folderId) {
+    const member = contact && (contact.folder_id === folderId
+      || (await crm.from("contact_folder_memberships").select("contact_id").eq("contact_id", contact.id).eq("folder_id", folderId).rows()).length > 0);
+    if (!member) {
       const error = new Error("Контакт більше не знаходиться в цій папці.");
       error.statusCode = 404;
       throw error;
     }
     const [total, position] = await Promise.all([
-      contactCount({ cacheScope, folderId }, () => crm.from("contacts").select("id").eq("folder_id", folderId).count()),
-      crm.from("contacts").select("id").eq("folder_id", folderId)
+      contactCount({ cacheScope, folderId }, () => crm.from("contacts").select(withFolder("id")).eq(IN_FOLDER, folderId).count()),
+      crm.from("contacts").select(withFolder("id")).eq(IN_FOLDER, folderId)
         .or(`created_at.lt.${contact.created_at},and(created_at.eq.${contact.created_at},id.lt.${contact.id})`).count()
     ]);
     return { contact, total, index: position };
@@ -257,7 +261,7 @@ export async function folderContactAt({ folderId = "", index = 0, search = "", c
   const position = Math.max(Math.trunc(Number(index) || 0), 0);
   const term = String(search || "").trim().replace(/[(),*]/g, " ").trim();
   const build = (columns) => {
-    const query = crm.from("contacts").select(columns).eq("folder_id", folderId);
+    const query = crm.from("contacts").select(withFolder(columns)).eq(IN_FOLDER, folderId);
     return term ? query.or(`name.ilike.*${term}*,company.ilike.*${term}*,position.ilike.*${term}*,email.ilike.*${term}*`) : query;
   };
   const [rows, total] = await Promise.all([
@@ -269,7 +273,7 @@ export async function folderContactAt({ folderId = "", index = 0, search = "", c
       .rows(),
     contactCount({ cacheScope, folderId, term }, () => build("id").count())
   ]);
-  return { contact: rows[0] || null, total, index: position };
+  return { contact: withoutFolder(rows[0]) || null, total, index: position };
 }
 
 const searchText = (value) => String(value || "").normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().trim();
@@ -277,8 +281,8 @@ async function legacyFolderSearchIndex(folderId, cacheScope, fresh) {
   return legacyIndexes.read(cacheKey(cacheScope, "legacy-index", folderId), { ttl: MINUTE, fresh, tags: ["search"] }, async () => {
     const rows = [];
     for (let offset = 0; ; offset += 1000) {
-      const page = await crm.from("contacts").select(LIST_COLUMNS).eq("folder_id", folderId).order("id").limit(1000).offset(offset).rows();
-      rows.push(...page);
+      const page = await crm.from("contacts").select(withFolder(LIST_COLUMNS)).eq(IN_FOLDER, folderId).order("id").limit(1000).offset(offset).rows();
+      rows.push(...page.map(withoutFolder));
       if (page.length < 1000) break;
     }
     return rows;

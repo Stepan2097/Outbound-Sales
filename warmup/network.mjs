@@ -86,20 +86,6 @@ export function networkStore(path, { now = () => new Date() } = {}) {
       if (!entry) return { syncedAt: null, requestedAt: null, complete: false, total: null, people: [], due: true };
       return { syncedAt: entry.syncedAt, requestedAt: entry.requestedAt, complete: entry.complete, total: entry.total, people: entry.people, due: networkDue(entry, now()) };
     },
-    /** Every account's friends together, each person once, with the accounts they are a friend of. */
-    async everyone() {
-      const bySlug = new Map();
-      for (const [accountId, entry] of Object.entries((await load()).accounts || {})) {
-        for (const person of entry.people || []) {
-          const held = bySlug.get(person.slug);
-          if (held) {
-            held.accountIds.push(accountId);
-            if (person.connectedAt && (!held.connectedAt || person.connectedAt > held.connectedAt)) held.connectedAt = person.connectedAt;
-          } else bySlug.set(person.slug, { ...person, accountIds: [accountId] });
-        }
-      }
-      return [...bySlug.values()];
-    },
     async due(accountId) {
       return networkDue((await load()).accounts[accountId], now());
     },

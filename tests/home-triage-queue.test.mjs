@@ -17,8 +17,10 @@ let stub;
 let previous;
 
 function matches(row, params) {
-  for (const [column, expression] of params.entries()) {
+  for (let [column, expression] of params.entries()) {
     if (["select", "limit", "offset", "order"].includes(column)) continue;
+    // In a folder by membership (contact_folder_memberships): here a row's folder_id is its one membership.
+    if (column === "fm.folder_id") column = "folder_id";
     const value = column.includes("->>") ? (row[column.split("->>")[0]] || {})[column.split("->>")[1]] : row[column];
     if (expression.startsWith("eq.") && String(value) !== expression.slice(3)) return false;
     if (expression.startsWith("in.(")) {

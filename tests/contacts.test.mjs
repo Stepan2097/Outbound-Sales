@@ -43,7 +43,7 @@ function startFakeCrm(contacts) {
       send([{ id: "11111111-1111-4111-8111-111111111111", name: "Mobile studios", color: "#fff", owner_id: null, is_archived: false }]);
       return;
     }
-    if (url.pathname === "/rest/v1/folder_stats") {
+    if (url.pathname === "/rest/v1/contact_folder_counts") {
       send([{ folder_id: "11111111-1111-4111-8111-111111111111", contact_count: contacts.length }]);
       return;
     }

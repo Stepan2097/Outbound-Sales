@@ -20,7 +20,7 @@ test.before(async () => {
     if (url.pathname === "/rest/v1/rpc/outbound_search_contacts") response.end(JSON.stringify([{ id: contactId, name: "Michaél" }]));
     else if (url.pathname === "/rest/v1/contacts") response.end(JSON.stringify([{ id: contactId, folder_id: folderId, name: "Michaél" }]));
     else if (url.pathname === "/rest/v1/contact_folders") response.end(JSON.stringify([{ id: folderId, name: "Team" }]));
-    else if (url.pathname === "/rest/v1/folder_stats") response.end(JSON.stringify([{ folder_id: folderId, contact_count: 27000 }]));
+    else if (url.pathname === "/rest/v1/contact_folder_counts") response.end(JSON.stringify([{ folder_id: folderId, contact_count: 27000 }]));
     else { response.statusCode = 404; response.end(JSON.stringify({ message: "unexpected path" })); }
   });
   await new Promise((resolve) => stub.listen(0, "127.0.0.1", resolve));
@@ -70,7 +70,7 @@ test("read caches invalidate after changes, errors retry, unscoped reads bypass 
 test("folder and contact reads share in-flight work but fresh reads and mutation invalidation refetch", async () => {
   const options = { cacheScope: "workspace:user" };
   await Promise.all([listContactFolders(options), listContactFolders(options)]);
-  assert.equal(calls.length, 2, "one folders query and one folder_stats query");
+  assert.equal(calls.length, 2, "one folders query and one contact_folder_counts query");
   await Promise.all([readContact(contactId, options), readContact(contactId, options)]);
   assert.equal(calls.length, 3);
   await readContact(contactId, { ...options, fresh: true });

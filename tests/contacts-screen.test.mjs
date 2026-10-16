@@ -23,7 +23,7 @@ const NAMES = [
   "escapeHtml", "escapeAttr", "uaPlural",
   "WARMUP_OUTREACH_LABEL", "WARMUP_OUTREACH_TONE", "CONTACTS_STALE_MS", "CONTACT_PAGE_SIZE",
   "contactReads", "contactSearchTimer", "resetContacts", "contactFolders", "contactFoldersLoaded", "contactFolderId",
-  "contactFolderMenuOpen", "contactFolderQuery", "contactFolderActive", "CONTACT_FOLDER_SYSTEM_HINT", "contactFolderHint", "contactFolderGroups",
+  "contactFolderMenuOpen", "contactFolderQuery", "contactFolderActive", "CONTACT_FOLDER_SYSTEM_HINT", "contactFolderGroups",
   "contactFolderOptionHtml", "renderContactFolderPicker", "contactFolderShown", "setContactFolderMenu", "chooseContactFolder", "crmContactRows", "contactTotal", "contactOffset",
   "contactSearch", "selectedContactId", "contactRecord", "contactHistory", "contactHistoryFor",
   "contactHistoryNotice", "contactOutreach", "contactsLoadedAt", "contactsLoading", "contactsError",
@@ -630,8 +630,7 @@ test("папка — власний випадаючий список: друз�
   const folders = [
     { id: "f-big", name: "Rewarded-CPE", contactCount: 27594 },
     { id: "f-inbox", name: "Вхідні розмови LinkedIn", contactCount: 246, system: "inbox" },
-    { id: "f-friends", name: "Друзі LinkedIn-акаунтів", contactCount: 349, system: "friends" },
-    { id: "linkedin-friends", name: "Усі друзі LinkedIn-акаунтів", contactCount: 1012, system: "friends-all", pending: 40 },
+    { id: "f-friends", name: "Друзі LinkedIn-акаунтів", contactCount: 1088, system: "friends" },
     { id: "f-test", name: "Тест агента — Андрій", contactCount: 1 }
   ];
   const s = screen({ api: async (path) => (path.startsWith("/api/contacts?") ? { contacts: [], total: 0 } : { folders }) });
@@ -644,14 +643,14 @@ test("папка — власний випадаючий список: друз�
   await s.handlers["contactFolderButton:click"]();
   assert.equal(s.ids.contactFolderMenu.hidden, false);
   const order = [...s.ids.contactFolderOptions.innerHTML.matchAll(/data-folder="([^"]+)"/g)].map((match) => match[1]);
-  assert.deepEqual(order, ["linkedin-friends", "f-friends", "f-inbox", "f-big", "f-test"]);
-  assert.match(s.ids.contactFolderOptions.innerHTML, /Наповнює система[\s\S]*Усі друзі LinkedIn-акаунтів[\s\S]*з будь-якої папки · ще звіряю з базою 40[\s\S]*1\s012[\s\S]*Друзі LinkedIn-акаунтів[\s\S]*яких не було в базі[\s\S]*Папки CRM/);
+  assert.deepEqual(order, ["f-friends", "f-inbox", "f-big", "f-test"]);
+  assert.match(s.ids.contactFolderOptions.innerHTML, /Наповнює система[\s\S]*Друзі LinkedIn-акаунтів[\s\S]*і ті, хто вже є в інших папках[\s\S]*1\s088[\s\S]*Папки CRM/);
   assert.match(s.ids.contactFolderOptions.innerHTML, /aria-selected="true" data-folder="f-test"/);
 
   s.handlers["contactFolderQuery:input"]({ target: { value: "друзі" } });
-  assert.deepEqual([...s.ids.contactFolderOptions.innerHTML.matchAll(/data-folder="([^"]+)"/g)].map((match) => match[1]), ["linkedin-friends", "f-friends"]);
+  assert.deepEqual([...s.ids.contactFolderOptions.innerHTML.matchAll(/data-folder="([^"]+)"/g)].map((match) => match[1]), ["f-friends"]);
   await s.handlers["contactFolderPicker:keydown"]({ key: "Enter", target: { id: "contactFolderQuery" }, preventDefault() {} });
-  assert.equal(s.get("contactFolderId"), "linkedin-friends", "Enter бере першу знайдену");
+  assert.equal(s.get("contactFolderId"), "f-friends", "Enter бере першу знайдену");
   assert.equal(s.ids.contactFolderMenu.hidden, true, "після вибору список закривається");
 
   await s.handlers["contactFolderButton:click"]();

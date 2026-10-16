@@ -86,7 +86,9 @@ export function describeTargeting(targeting, folderName = null) {
 export async function listFolders({ includeArchived = false } = {}) {
   const [folders, stats] = await Promise.all([
     crm.from("contact_folders").select("id,name,color,owner_id,is_archived").rows(),
-    crm.from("folder_stats").select("folder_id,contact_count").rows()
+    // Counted by membership, as the CRM counts them — not `folder_stats`, which
+    // counts `contacts.folder_id` and misses everyone added to a second folder.
+    crm.from("contact_folder_counts").select("folder_id,contact_count").rows()
   ]);
 
   const countByFolder = new Map(stats.map((row) => [row.folder_id, row.contact_count ?? 0]));

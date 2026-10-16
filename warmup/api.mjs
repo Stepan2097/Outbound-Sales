@@ -1,6 +1,6 @@
 import { LIVE_ACCOUNT_STATUSES, withAccountQuota } from "./store.mjs";
 import { connectCeiling, weeklyAllowance, weeklyConnectAllowance, weeklyConnectCounts } from "./weekly.mjs";
-import { anty, crm, CONTACT_ID_BATCH, antyTeamId, crmError, leadById, queueTotal, today } from "./db.mjs";
+import { anty, crm, CONTACT_ID_BATCH, IN_FOLDER, antyTeamId, crmError, leadById, queueTotal, today, withFolder } from "./db.mjs";
 import { RestError, likeLiteral } from "./rest.mjs";
 import {
   ACTION_KINDS, ACTION_LABEL, DEFAULT_STRATEGY, dayOfRun, hasPlanOn, inWorkingMode, noteRuleOn, noteUnderRule,
@@ -120,8 +120,8 @@ const CLAIM_COLUMNS =
 async function contactsInFolder(folderId, contactIds) {
   const found = new Set();
   for (let start = 0; start < contactIds.length; start += CONTACT_ID_BATCH) {
-    const rows = await crm.from("contacts").select("id")
-      .eq("folder_id", folderId).in("id", contactIds.slice(start, start + CONTACT_ID_BATCH)).rows();
+    const rows = await crm.from("contacts").select(withFolder("id"))
+      .eq(IN_FOLDER, folderId).in("id", contactIds.slice(start, start + CONTACT_ID_BATCH)).rows();
     for (const row of rows) found.add(row.id);
   }
   return found;

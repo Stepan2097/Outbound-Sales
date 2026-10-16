@@ -17,7 +17,7 @@
 
 import { contactEmails } from "../contacts/enrich-crm.mjs";
 import { ALL_CONTACTS, listAllContacts, listFolderContacts, readContact } from "../contacts/store.mjs";
-import { anty, crm } from "../warmup/db.mjs";
+import { IN_FOLDER, anty, crm, withFolder } from "../warmup/db.mjs";
 import { firstMarks, firstMessageBoard, talkingTo } from "../warmup/first-messages.mjs";
 import { linkedinSlug } from "../warmup/outreach.mjs";
 
@@ -94,7 +94,7 @@ export async function nextContact({ folderId, cursor = 0, skip = [], decisions =
   const everyone = folderId === ALL_CONTACTS;
   const inFolder = new Set(everyone ? friendIds : []);
   for (let at = 0; !everyone && at < friendIds.length; at += 100) {
-    const rows = await crm.from("contacts").select("id").eq("folder_id", folderId).in("id", friendIds.slice(at, at + 100)).rows();
+    const rows = await crm.from("contacts").select(withFolder("id")).eq(IN_FOLDER, folderId).in("id", friendIds.slice(at, at + 100)).rows();
     for (const row of rows) inFolder.add(String(row.id));
   }
   const friendsHere = friendIds.filter((id) => inFolder.has(id) && !decided(id));

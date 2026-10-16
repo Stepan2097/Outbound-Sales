@@ -147,8 +147,10 @@ function orTerm(row, term) {
 }
 
 function matches(row, params) {
-  for (const [column, expression] of params.entries()) {
+  for (let [column, expression] of params.entries()) {
     if (["select", "limit", "offset", "order"].includes(column)) continue;
+    // In a folder by membership (contact_folder_memberships): here a row's folder_id is its one membership.
+    if (column === "fm.folder_id") column = "folder_id";
     if (column === "or") {
       if (!expression.slice(1, -1).split(",").some((term) => orTerm(row, term))) return false;
       continue;
