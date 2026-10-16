@@ -1393,11 +1393,41 @@ export function byUnreadThenNewest(left, right) {
   return String(right.lastMessage?.sentAt || "").localeCompare(String(left.lastMessage?.sentAt || ""));
 }
 
+/**
+ * One read is paged: the database hands back at most a thousand rows whatever
+ * the limit says, so a single LISTING_LIMIT read was quietly a thousand-row read
+ * (16.10: a month of one busy account filled it, and the other accounts' older
+ * threads fell off the «Вхідні» list).
+ */
+export const EVENT_PAGE = 500;
+
+async function pagedMessageEvents({ accountId = null, threadKey = null } = {}) {
+  const found = [];
+  for (let offset = 0; offset < LISTING_LIMIT; offset += EVENT_PAGE) {
+    const size = Math.min(EVENT_PAGE, LISTING_LIMIT - offset);
+    let query = anty.from("wl_events").select("account_id,type,meta,created_at").in("type", MESSAGE_TYPES);
+    if (accountId) query = query.eq("account_id", accountId);
+    if (threadKey) query = query.eq("meta->>threadKey", threadKey);
+    const page = await query.order("created_at", { ascending: false }).order("id", { ascending: false })
+      .offset(offset).limit(size).rows();
+    found.push(...page);
+    // Short: the end. Longer than asked: a server that ignored the limit already sent everything.
+    if (page.length !== size) break;
+  }
+  return found;
+}
+
 async function messageEvents({ accountId = null, threadKey = null } = {}) {
-  let query = anty.from("wl_events").select("account_id,type,meta,created_at").in("type", MESSAGE_TYPES);
-  if (accountId) query = query.eq("account_id", accountId);
-  if (threadKey) query = query.eq("meta->>threadKey", threadKey);
-  return query.order("created_at", { ascending: false }).limit(LISTING_LIMIT).rows();
+  const events = await pagedMessageEvents({ accountId, threadKey });
+  if (accountId || threadKey || events.length < LISTING_LIMIT) return events;
+  // The cap was reached: the newest events all belong to the busy accounts. An
+  // account none of them came from reads its own, so a quiet login still shows.
+  const seen = new Set(events.map((event) => event.account_id));
+  const accounts = await anty.from("wl_accounts").select("id").rows();
+  for (const { id } of accounts) {
+    if (!seen.has(id)) events.push(...await pagedMessageEvents({ accountId: id }));
+  }
+  return events;
 }
 
 /** The newest read mark per thread, the newest sync per account, and the newest contact each thread was tied to. */

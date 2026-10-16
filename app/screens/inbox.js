@@ -474,6 +474,12 @@ function warmupInboxAccountOptions() {
     entry.newest = Math.max(entry.newest, sentAt(thread));
     found.set(thread.accountId, entry);
   }
+  // A working account with no conversation yet keeps its chip: the server lists it with nothing held.
+  for (const summary of warmupState.inbox.accounts) {
+    if (summary?.accountId && !found.has(summary.accountId)) {
+      found.set(summary.accountId, { accountId: summary.accountId, count: 0, unread: 0, newest: 0 });
+    }
+  }
   if (inboxAccountFilter && !found.has(inboxAccountFilter)) {
     found.set(inboxAccountFilter, { accountId: inboxAccountFilter, count: 0, unread: 0, newest: 0 });
   }

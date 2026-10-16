@@ -1,4 +1,4 @@
-import { withAccountQuota } from "./store.mjs";
+import { LIVE_ACCOUNT_STATUSES, withAccountQuota } from "./store.mjs";
 import { connectCeiling, weeklyAllowance, weeklyConnectAllowance, weeklyConnectCounts } from "./weekly.mjs";
 import { anty, crm, CONTACT_ID_BATCH, antyTeamId, crmError, leadById, queueTotal, today } from "./db.mjs";
 import { RestError, likeLiteral } from "./rest.mjs";
@@ -979,6 +979,15 @@ async function writeFirstDraft(row, choice, campaigns, writer) {
  * unread count, no «читали давно», no «потрібна увага» (12.10, the owner:
  * «він заблокований, то мені вже не треба всюди пихати жовтою плашкою»).
  */
+/** The summary plus a zero row for each working account it does not hold (unless a filter narrowed it). */
+export function withQuietAccounts(summary, accounts) {
+  const held = new Set(summary.map((account) => account.accountId));
+  const quiet = accounts
+    .filter((account) => LIVE_ACCOUNT_STATUSES.includes(account.status) && !retiredAccount(account) && !held.has(account.id))
+    .map((account) => ({ accountId: account.id, threads: 0, unread: 0, newestAt: null }));
+  return [...summary, ...quiet];
+}
+
 export function retiredAccount(account) {
   return account?.status === "excluded" || account?.health === "blocked";
 }
@@ -3206,7 +3215,9 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         unread: held.filter((thread) => thread.unread && !retired.has(thread.accountId)).length,
         // A reply belongs to the login it arrived on, and the screen groups by
         // exactly this: one heading per account, carrying its own unread count.
-        accounts: summarizeAccounts(held).map((account) => ({
+        // Every working login has its chip, conversations or not (owner 16.10:
+        // «тут має бути 4 акаунти») — an account with nothing yet says so.
+        accounts: (accountId ? summarizeAccounts(held) : withQuietAccounts(summarizeAccounts(held), accounts)).map((account) => ({
           ...account,
           label: labels.get(account.accountId) ?? null,
           identity: identities.get(account.accountId)?.name ?? null,

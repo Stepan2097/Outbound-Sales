@@ -679,3 +679,32 @@ test("картки, що вже лежать у базі, не йдуть у CRM
   const bodies = (history.payload.entries || []).filter((entry) => entry.kind === "message").map((entry) => entry.body);
   assert.deepEqual(bodies, ["Дякую!"]);
 });
+
+test("«Вхідні»: база віддає не більше тисячі рядків — список читається сторінками, і тиха розмова іншого акаунта не губиться (16.10)", async () => {
+  // Старіша розмова Chloe, а після неї — місяць переписки Mary, більше тисячі повідомлень.
+  stored({ threadKey: "t-quiet", body: "Добрий день!", participant: IVAN, accountId: "acc-1", minutesAgo: 5000 });
+  for (let at = 0; at < 1200; at += 1) {
+    stored({ threadKey: `t-busy-${at % 300}`, body: `Повідомлення ${at}`, participant: { name: `Person ${at % 300}`, slug: `person-${at % 300}` }, accountId: "acc-2", minutesAgo: 1000 - at / 10 });
+  }
+  const list = await call({ method: "GET", path: "/api/warmup/inbox" });
+  assert.equal(list.status, 200);
+  assert.equal(list.payload.threads.filter((row) => row.accountId === "acc-2").length, 300, "уся переписка Mary, не лише перша тисяча рядків");
+  assert.ok(list.payload.threads.some((row) => row.threadKey === "t-quiet"), "розмова Chloe на місці");
+  assert.deepEqual(list.payload.accounts.map((row) => row.accountId).sort(), ["acc-1", "acc-2"]);
+});
+
+test("«Вхідні»: робочий акаунт без жодної розмови теж має свій чип; заблокований і той, що стоїть, — ні (власник 16.10: «тут має бути 4 акаунти»)", async () => {
+  rows.wl_accounts.push(
+    { id: "acc-3", label: "Profile 48", status: "warming", health: "ok" },
+    { id: "acc-4", label: "Profile 47", status: "idle", health: "blocked" },
+    { id: "acc-5", label: "inbox1", status: "idle", health: "ok" }
+  );
+  stored({ threadKey: "t-ivan", body: "Привіт!", participant: IVAN, accountId: "acc-1", minutesAgo: 10 });
+  const list = await call({ method: "GET", path: "/api/warmup/inbox" });
+  const accounts = list.payload.accounts;
+  assert.deepEqual(accounts.map((row) => row.accountId), ["acc-1", "acc-2", "acc-3"]);
+  assert.deepEqual(accounts.find((row) => row.accountId === "acc-3"), { accountId: "acc-3", threads: 0, unread: 0, newestAt: null, label: "Profile 48", identity: null, retired: false });
+
+  const one = await call({ method: "GET", path: "/api/warmup/inbox?accountId=acc-1" });
+  assert.deepEqual(one.payload.accounts.map((row) => row.accountId), ["acc-1"], "відфільтрований список не домальовує нулі");
+});
