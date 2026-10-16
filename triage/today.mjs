@@ -15,7 +15,7 @@ import { accountName } from "../warmup/activities.mjs";
 import { acceptOpenDialogs, openDialogs, suggestOpenDialogs } from "./open-dialogs.mjs";
 import {
   PING_QUEUE, REASONS, blockOf, clearSuperseded, compareItems, dayIn, desiredPing, manualDueDay, markSuperseded,
-  newContactsAllowed, parseTaskMarks, planPingChanges, taskDescription, taskReason, zonedIso
+  newContactsAllowed, parseTaskMarks, planPingChanges, reasonOfKey, taskDescription, taskReason, zonedIso
 } from "./pings.mjs";
 
 const TASK_COLUMNS = "id,title,description,contact_id,owner_id,assigned_to,due_date,completed,status,task_type,queue,created_at,updated_at";
@@ -296,7 +296,8 @@ function itemOf(task, { contact, state, today, now, emails, accounts = new Map()
     position: contact?.position || state?.accepted?.position || "",
     company: contact?.company || state?.accepted?.company || "",
     reason,
-    reasonTitle: REASONS[reason]?.title || REASONS.manual.title,
+    // Ручний пінг лишає назву кроку, з якого почався («Перше повідомлення: …»).
+    reasonTitle: reason === "manual" && String(task.title || "").includes(":") ? task.title.split(":")[0] : REASONS[reason]?.title || REASONS.manual.title,
     title: task.title,
     dueDay,
     block: blockOf({ reason, dueDay, awaitingUs }, today),
@@ -420,7 +421,14 @@ export async function setManualPing({ pingId = "", contactId = "", when, call = 
   const contact = (await contactsOf([targetContact])).get(targetContact) || null;
   if (task) {
     if (!mayTouch(task, viewer)) throw refuse("Це пінг іншого лідгена.", 403);
-    const patch = { due_date: zonedIso(dueDay), updated_at: nowIso };
+    // Перенесений людиною — уже ручний пінг: його блок «Сьогодні» вирішує дата (завтра —
+    // «На сьогодні», після — «Прострочені»), а не крок, з якого він почався. Нова
+    // подія в діалозі його замінить, як будь-який ручний (planPingChanges).
+    const was = parseTaskMarks(task.description).key;
+    const patch = {
+      due_date: zonedIso(dueDay), updated_at: nowIso,
+      description: taskDescription(call ? "call" : "manual", `manual:${nowIso}`, was ? `Перенесено вручну (було: ${REASONS[reasonOfKey(was)]?.title || "пінг"})` : "Перенесено вручну")
+    };
     if (call) Object.assign(patch, { task_type: "Call", title: taskTitle("call", contact) });
     await crm.from("tasks").update(patch).eq("id", task.id).rows();
     return { pingId: task.id, dueDay };

@@ -236,8 +236,10 @@ export function planPingChanges(desired, tasks) {
 export function blockOf({ reason, dueDay, awaitingUs }, today) {
   if (dueDay && dueDay > today) return "later";
   if (awaitingUs || reason === "reply") return "replies";
-  if (reason === "first") return "first";
+  // Минула дата — прострочений, хоч би й перше повідомлення: інакше він не стримує
+  // нові контакти й губиться серед них (вердикт судді, 16.10).
   if (dueDay && dueDay < today) return "overdue";
+  if (reason === "first") return "first";
   return "today";
 }
 

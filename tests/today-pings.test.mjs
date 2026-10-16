@@ -233,3 +233,22 @@ test("відкриті діалоги з 01.08: пропозиції → при�
   const list = await todayList({ viewerId: "u-bohdan" });
   assert.ok(list.blocks.replies.some((item) => item.contactId === "c9"), "імпортована відповідь — у «Відповідях»");
 });
+
+test("перенесене «Перше повідомлення» стає ручним пінгом: на свій день — «На сьогодні», після — «Прострочені», і стримує нові контакти", async () => {
+  rows.wl_events = [];
+  rows.contacts.find((row) => row.id === "c2").owner_id = "u-bohdan";
+  rows.wl_outreach = [{ id: "o2", account_id: "acc-1", crm_contact_id: "c2", person_name: "Lead Two", status: "accepted", created_at: ago(3000) }];
+  rows.wl_events.push({ id: `a-${++nextId}`, account_id: "acc-1", type: "invite.accepted", created_at: ago(120), meta: { outreachId: "o2", crmContactId: "c2" } });
+  await reconcilePings();
+  const [first] = openOf("c2");
+  await setManualPing({ pingId: first.id, when: "+0", viewer: BOHDAN });
+  await reconcilePings();
+  assert.equal(openOf("c2").length, 1, "звірка не ставить другий пінг поряд з перенесеним");
+  let list = await todayList({ viewerId: "u-bohdan" });
+  assert.equal(list.blocks.today[0]?.contactId, "c2", "на свій день — «На сьогодні»");
+  assert.equal(list.blocks.today[0].reasonTitle, "Перше повідомлення");
+  rows.tasks.find((row) => row.id === first.id).due_date = ago(60 * 48);
+  list = await todayList({ viewerId: "u-bohdan" });
+  assert.equal(list.blocks.overdue[0]?.contactId, "c2", "після дати — «Прострочені»");
+  assert.equal(list.newContactsAllowed, false, "прострочений пінг стримує нові контакти");
+});
