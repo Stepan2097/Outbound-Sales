@@ -105,15 +105,13 @@ test("signing out (or a lapsed session) forgets every screen the tab remembered"
   assert.doesNotMatch(cache, /localStorage/);
 });
 
-// 16.10: кампанії переїхали у WorkSpace; «Прогрів» відкривається розкладом, далі акаунти й картка.
-test("the warm-up screen opens on the schedule, and the account card is not there until an account is picked", () => {
+// 16.10 (Марко): автозапити й «Як іде розсилка» — механіка прогріву, лишаються на «Прогріві»;
+// кампанії лідгенів — у WorkSpace. Порядок: автозапити, розсилка, розклад, акаунти, картка.
+test("the warm-up screen opens on auto-requests, then funnel, schedule, accounts; the card is not there until an account is picked", () => {
   const html = readFileSync(new URL("../app/index.html", import.meta.url), "utf8");
   const view = html.slice(html.indexOf('id="view-warmup"'), html.indexOf('id="view-contacts"'));
-  const strategy = view.indexOf('id="warmupStrategyPanel"');
-  const accounts = view.indexOf("warmup-list-panel");
-  const card = view.indexOf('id="warmupDetailPanel"');
-  assert.ok(strategy > 0 && strategy < accounts && accounts < card, "schedule, then accounts, then the card");
-  assert.equal(view.includes('id="warmupCampaignPanel"'), false, "campaigns live in WorkSpace");
+  const order = ['id="warmupCampaignPanel"', 'id="warmupFunnelPanel"', 'id="warmupStrategyPanel"', "warmup-list-panel", 'id="warmupDetailPanel"'].map((marker) => view.indexOf(marker));
+  assert.ok(order.every((index, i) => index > 0 && (i === 0 || index > order[i - 1])), "auto-requests, funnel, schedule, accounts, card");
   assert.match(view, /id="warmupDetailPanel" hidden/);
   assert.doesNotMatch(view, /Вибери акаунт у таблиці/);
 });

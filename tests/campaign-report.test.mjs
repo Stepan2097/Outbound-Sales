@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import test from "node:test";
 
+import { setLeadCampaignStore } from "../triage/lead-campaigns.mjs";
 import { buildReport, campaignReport, campaignReplies, handleCampaignReportApi, labelReplies, needsAiLabel, setLabel, setReportStores } from "../triage/campaign-report.mjs";
 
 // Звіт LinkedIn-кампаній (етап 6/6, таск 011c66da): кваліфіковані відповіді на 100
@@ -90,29 +91,28 @@ function message(direction, body, minutesAgo, contactId, threadKey = `t-${contac
     meta: { threadKey, crmContactId: contactId, body, sentAt: ago(minutesAgo + 1), participant: { name: contactId, slug: contactId } }
   };
 }
-const invited = (contactId, campaignId) => ({ id: `e-${++nextId}`, account_id: "acc-1", type: "invite.requested", created_at: ago(500), meta: { campaignId, crmContactId: contactId, outreachId: `o-${contactId}` } });
+// Кампанії лідгенів — за папкою CRM (WorkSpace, «варіант А», 16.10): людина в кампанії, якщо вона в її папці.
+const member = (contactId, folderId) => ({ contact_id: contactId, folder_id: folderId });
 
 test.beforeEach(() => {
   for (const table of Object.keys(rows)) delete rows[table];
   labels = {};
-  setReportStores({
-    labels: { read: () => labels, write: async (value) => { labels = value; } },
-    campaigns: () => [{ id: "camp-a", name: "Підхід А", state: "running" }, { id: "camp-b", name: "Підхід Б", state: "running" }]
-  });
+  setReportStores({ labels: { read: () => labels, write: async (value) => { labels = value; } } });
+  setLeadCampaignStore({ read: () => [{ id: "camp-a", name: "Підхід А", folderIds: ["f-a"], state: "active" }, { id: "camp-b", name: "Підхід Б", folderIds: ["f-b"], state: "active", order: 1 }], write: async () => {} });
   rows.wl_accounts = [{ id: "acc-1", label: "Chloe", login: "chloe@example.com", status: "warming", health: "ok" }];
   rows.wl_events = [
     // А: четверо в кампанії, трьом написали, двоє відповіли; один лише прийняв запит.
-    invited("a1", "camp-a"), invited("a2", "camp-a"), invited("a3", "camp-a"), invited("a4", "camp-a"),
     message("out", "Hi a1", 300, "a1"), message("in", "Interesting, we run FB teams — tell me more", 200, "a1"),
     message("out", "Hi a2", 300, "a2"), message("in", "Not interested", 200, "a2"),
     message("out", "Hi a3", 300, "a3"),
     // Б: двоє, одному написали, він відповів.
-    invited("b1", "camp-b"), invited("b2", "camp-b"),
     message("out", "Hi b1", 300, "b1"), message("in", "I only buy traffic on CPA", 100, "b1"),
     // Чужий тред без кампанії — у звіт не потрапляє.
     message("out", "Hi x", 300, "x1"), message("in", "hello", 100, "x1")
   ];
-  rows.wl_outreach = [{ crm_contact_id: "a4", status: "accepted" }, { crm_contact_id: "a1", status: "connected" }];
+  rows.wl_outreach = [{ crm_contact_id: "a4", status: "accepted" }, { crm_contact_id: "a1", status: "connected" }, { crm_contact_id: "b2", status: "pending" }];
+  // x1 — розмова є, але не в папці кампанії; z9 — у папці, але його не торкались: обидва не в звіті.
+  rows.contact_folder_memberships = [member("a1", "f-a"), member("a2", "f-a"), member("a3", "f-a"), member("a4", "f-a"), member("b1", "f-b"), member("b2", "f-b"), member("z9", "f-a")];
   rows.contacts = [
     { id: "a1", name: "Lead A1", company: "Casino", position: "Head of UA", lead_status: "booked_call" },
     { id: "a2", name: "Lead A2", company: "Shop", position: "CEO", lead_status: "not_interested" },

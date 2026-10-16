@@ -1,4 +1,5 @@
 import { SCENARIO_TEMPLATES } from "../warmup/scenarios.mjs";
+import { normalizeLeadCampaign } from "../triage/lead-campaigns.mjs";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import test from "node:test";
@@ -19,6 +20,8 @@ import { DEFAULT_STRATEGY } from "../warmup/strategy.mjs";
  */
 
 let campaignList = [];
+// Кампанія лідгена людини (за папкою CRM) — те, що сервер віддає через leadCampaignFor.
+let leadCampaign = null;
 let writer = null;
 const asked = [];
 
@@ -139,7 +142,7 @@ async function call({ method, path, body = null }) {
     url: new URL(`http://127.0.0.1${path}`),
     sendJson: (_response, status, payload) => { captured = { status, payload }; },
     readJson: async () => body,
-    campaigns: { read: () => campaignList, readTargeting: () => null, write: async () => {}, products: () => [] },
+    campaigns: { read: () => campaignList, readTargeting: () => null, write: async () => {}, products: () => [], leadCampaignFor: async () => leadCampaign },
     writer
   });
   return captured;
@@ -337,16 +340,17 @@ test("модель пише перше повідомлення з картки 
 // WorkSpace (16.10): перше повідомлення пишеться за сценарієм кампанії — опенер флоу — і хребтом.
 test("чернетка першого повідомлення отримує сценарій кампанії й хребет; без сценарію — лише хребет", async () => {
   const template = SCENARIO_TEMPLATES.find((item) => item.id === "meta-operators");
-  campaignList = [{ ...campaignList[0], plan: { ...template.plan, template: template.id } }];
+  leadCampaign = normalizeLeadCampaign({ name: "Meta operators", folderIds: ["f-1"], productId: "fb-training", plan: { ...template.plan, template: template.id } });
   await ask("first-messages/draft", { outreachId: "o-1", force: true });
   const scenario = asked.at(-1).choice.scenario;
-  assert.equal(scenario.campaign.name, "iGaming UK");
+  assert.equal(scenario.campaign.name, "Meta operators", "кампанія лідгена, а не автозапити прогріву");
+  assert.equal(asked.at(-1).choice.productId, "fb-training", "продукт — кампанії лідгена");
   assert.equal(scenario.campaign.flow[0].label, "Опенер — на конкретній деталі");
   assert.match(scenario.campaign.flow[0].text, /\{Name\}/, "шаблон зі змінними, які модель заповнює лише фактами");
   assert.match(scenario.spine.rules, /Ціну лідген не називає/);
   assert.equal(asked.at(-1).choice.instruction, "", "вказівка лідгена не змішується зі сценарієм");
 
-  campaignList = [{ ...campaignList[0], plan: {} }];
+  leadCampaign = null;
   await ask("first-messages/draft", { outreachId: "o-1", force: true });
   assert.equal(asked.at(-1).choice.scenario.campaign, null);
   assert.match(asked.at(-1).choice.scenario.spine.qualificationLadder, /Вертикаль/);

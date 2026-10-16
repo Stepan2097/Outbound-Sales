@@ -13,6 +13,7 @@
     <link rel="stylesheet" href="/styles/today.css" />
     <link rel="stylesheet" href="/styles/campaign-report.css" />
     <link rel="stylesheet" href="/styles/workspace.css" />
+    <link rel="stylesheet" href="/styles/lead-campaigns.css" />
     <link rel="stylesheet" href="/styles/campaign-plan.css" />
     <link rel="stylesheet" href="/styles/work.css" />
     <link rel="stylesheet" href="/styles/inbox.css" />
@@ -73,7 +74,7 @@
             <button class="nav-group-toggle" type="button" aria-expanded="true"><i data-lucide="folder-open"></i><span>LinkedIn</span><i data-lucide="chevron-down" class="nav-group-chevron"></i></button>
             <div class="nav-group-items">
               <!-- Від щоденного до технічного (аудит 16.10): кампанії → відповіді → смисли → прогрів акаунтів. -->
-              <button class="nav-item" data-view="workspace" aria-label="WorkSpace LinkedIn" title="WorkSpace: кампанії, сценарії, звіт"><i data-lucide="layout-dashboard"></i><span>WorkSpace</span></button>
+              <button class="nav-item" data-view="workspace" aria-label="WorkSpace LinkedIn" title="WorkSpace: кампанії лідгенів, сценарії, порівняння"><i data-lucide="layout-dashboard"></i><span>WorkSpace</span></button>
               <button class="nav-item" data-view="inbox" aria-label="Вхідні LinkedIn" title="Вхідні LinkedIn: непрочитані розмови акаунтів"><i data-lucide="inbox"></i><span>Вхідні</span><span class="nav-badge" id="warmupNavBadge" hidden></span></button>
               <button class="nav-item" data-view="pitch" aria-label="Смисли продуктів" title="Смисли продуктів: що продаємо і як про це говорити"><i data-lucide="book-open-text"></i><span>Смисли</span></button>
               <button class="nav-item" data-view="warmup" aria-label="Прогрів LinkedIn" title="Прогрів LinkedIn: акаунти, розклад і ліміти"><i data-lucide="flame"></i><span>Прогрів</span></button>
@@ -333,14 +334,11 @@
           </div>
         </section>
 
-        <!-- WorkSpace (16.10): кампанії окремо від прогріву — список, форма зі сценарієм і
-             акаунтами, як іде розсилка, порівняння кампаній і спільний хребет. -->
+        <!-- WorkSpace (16.10): кампанії лідгенів — стратегія аутріч, з прогрівом не пов'язана. -->
         <section class="view" id="view-workspace">
           <div class="warmup-layout">
-            <!-- Розмітку панелі кампанії малює app/screens/warmup-campaign.js. -->
-            <section class="panel warmup-campaigns-panel span-2" id="warmupCampaignPanel"></section>
-            <!-- «Як іде розсилка» — конвеєр LinkedIn-кампаній; малює app/screens/warmup-funnel.js. -->
-            <section class="panel warmup-funnel-panel home-panel span-2" id="warmupFunnelPanel"></section>
+            <!-- Кампанії лідгенів: папки CRM, продукт, сценарій — app/screens/lead-campaigns.js. -->
+            <section class="panel span-2" id="leadCampaignPanel"></section>
             <!-- Порівняння кампаній: кваліфіковані на 100 написаних — app/screens/campaign-report.js. -->
             <div class="span-2" id="campaignReportRoot"></div>
             <!-- Хребет: драбина кваліфікації, маршрути, правила — app/screens/workspace.js. -->
@@ -350,7 +348,11 @@
 
         <section class="view" id="view-warmup">
           <div class="warmup-layout">
-            <!-- Розклад прогріву — свій блок зі своєю кнопкою «Зберегти»; малює app/screens/warmup-campaign.js. -->
+            <!-- Автозапити в друзі (у коді — «кампанії» прогріву): app/screens/warmup-campaign.js. -->
+            <section class="panel warmup-campaigns-panel span-2" id="warmupCampaignPanel"></section>
+            <!-- «Як іде розсилка» — конвеєр автозапитів; малює app/screens/warmup-funnel.js. -->
+            <section class="panel warmup-funnel-panel home-panel span-2" id="warmupFunnelPanel"></section>
+            <!-- Розклад прогріву — свій блок зі своєю кнопкою «Зберегти розклад». -->
             <section class="panel warmup-strategy-panel span-2" id="warmupStrategyPanel"></section>
             <section class="panel warmup-list-panel span-2">
               <div class="panel-heading">
@@ -365,7 +367,7 @@
                 <table>
                   <thead>
                     <tr>
-                      <th class="warmup-tick-head" title="Яку кампанію веде акаунт; змінюється у WorkSpace">Кампанія</th>
+                      <th class="warmup-tick-head" title="Які автозапити веде акаунт; змінюється в блоці «Автозапити в друзі»">Автозапити</th>
                       <th>Акаунт</th>
                       <th>Статус</th>
                       <th>Теги</th>

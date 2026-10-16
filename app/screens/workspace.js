@@ -1,16 +1,16 @@
-// WorkSpace LinkedIn (таск f78ffd9a, 16.10.2026): кампанії окремо від прогріву.
+// WorkSpace LinkedIn (таск f78ffd9a, 16.10.2026): кампанії лідгенів — стратегія аутріч.
 //
-// На вкладці: кампанії (форма зі сценарієм і акаунтами — warmup-campaign.js), «Як іде
-// розсилка» (warmup-funnel.js), порівняння кампаній (campaign-report.js) і хребет,
-// спільний для всіх кампаній: драбина кваліфікації, куди веде кожен лід, правила.
-// Хребет читають усі, змінює адміністратор; за ним пишуть AI-чернетки.
+// На вкладці: кампанії лідгенів (lead-campaigns.js), порівняння кампаній
+// (campaign-report.js) і хребет, спільний для всіх кампаній: драбина кваліфікації,
+// куди веде кожен лід, правила. Прогріву (автозапити, розсилка, акаунти) тут немає —
+// він на своїй вкладці й з кампаніями не пов'язаний (Марко, 16.10).
 
 import { api, escapeHtml, onScreen, refreshIcons } from "../core.js";
-import { loadWarmup } from "./warmup-accounts.js";
+import { loadLeadCampaigns } from "./lead-campaigns.js";
 import { loadScenarios, scenarioBook } from "./campaign-plan.js";
 import "./campaign-report.js";
 
-onScreen("workspace", { open: () => { void loadWarmup(); void openSpine(); } });
+onScreen("workspace", { open: () => { void loadLeadCampaigns(); void openSpine(); } });
 
 const SPINE_PARTS = [
   ["ladder", "Драбина кваліфікації", "2–3 питання до пропозиції дзвінка, по рядку на крок"],

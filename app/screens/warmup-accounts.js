@@ -341,18 +341,17 @@ function warmupQueueState(accountId) {
  * account is looked at, and whether it works the campaign is the first thing
  * to see or change there. The same tick, the same save.
  */
-/** Колонка «Кампанія» в таблиці прогріву: що веде акаунт; змінюється у WorkSpace. */
+/** Колонка «Автозапити» в таблиці прогріву: що веде акаунт; змінюється в блоці вище. */
 function warmupCampaignCellHtml(accountId) {
   const campaign = warmupAccountCampaign(accountId);
-  if (!campaign) return '<span class="warmup-subtle" title="Акаунти кампанії обирають у WorkSpace">—</span>';
-  return `<span class="warmup-campaign-chip ${campaign.state === "running" ? "is-running" : ""}" title="${escapeAttr(`Веде «${campaign.name || "без назви"}»${campaign.state === "running" ? "" : " — не запущена"}. Змінюється у WorkSpace.`)}">${escapeHtml(campaign.name || "без назви")}</span>`;
+  if (!campaign) return '<span class="warmup-subtle" title="Акаунти автозапитів обирають у блоці «Автозапити в друзі» вище">—</span>';
+  return `<span class="warmup-campaign-chip ${campaign.state === "running" ? "is-running" : ""}" title="${escapeAttr(`Веде «${campaign.name || "без назви"}»${campaign.state === "running" ? "" : " — не запущена"}. Змінюється в блоці «Автозапити в друзі».`)}">${escapeHtml(campaign.name || "без назви")}</span>`;
 }
 
 function warmupCardCampaignHtml(accountId) {
-  // Кампанії — у WorkSpace (16.10): тут лише видно, яку веде акаунт.
   const campaign = warmupAccountCampaign(accountId);
-  if (!campaign) return `<p class="warmup-card-campaign">Кампанії не веде — акаунти кампанії обирають у WorkSpace.</p>`;
-  return `<p class="warmup-card-campaign">Веде кампанію «${escapeHtml(campaign.name || "без назви")}»${campaign.state === "running" ? "" : " · не запущена"}</p>`;
+  if (!campaign) return `<p class="warmup-card-campaign">Автозапитів не веде.</p>`;
+  return `<p class="warmup-card-campaign">Автозапити «${escapeHtml(campaign.name || "без назви")}»${campaign.state === "running" ? "" : " · не запущені"}</p>`;
 }
 
 /**

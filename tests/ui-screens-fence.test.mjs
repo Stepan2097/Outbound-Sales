@@ -98,8 +98,8 @@ const SCREEN_FILES = {
   // «Сьогодні» (пінги, 16.10) реєструє Головну й відкриває нові контакти з home-triage.js.
   home: ["screens/today.js", "screens/home-triage.js"],
   work: ["screens/work.js"],
-  // WorkSpace (16.10): кампанії зі сценарієм, розсилка, порівняння й хребет — окремо від прогріву.
-  workspace: ["screens/workspace.js", "screens/warmup-campaign.js", "screens/campaign-plan.js", "screens/campaign-report.js"],
+  // WorkSpace (16.10): кампанії лідгенів, порівняння й хребет — окремо від прогріву.
+  workspace: ["screens/workspace.js", "screens/lead-campaigns.js", "screens/campaign-plan.js", "screens/campaign-report.js"],
   warmup: ["screens/warmup-accounts.js", "screens/warmup-campaign.js"],
   inbox: ["screens/inbox.js"],
   pitch: ["screens/pitch.js"],

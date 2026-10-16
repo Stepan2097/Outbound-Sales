@@ -10,7 +10,8 @@ import { CHANNEL_RULES, LANGUAGES, buildFallbackDrafts, draftsPromptPayload, nor
 import { invalidateContactCaches, contactAsProspect, contactsConfigured, contactsMissingConfig, crmKeyKind, folderContactAt, listContactFolders, listFolderContacts, searchFolderContacts, readContact, supabaseKeyKind } from "./contacts/store.mjs";
 import { handleKnowledgeLibraryApi } from "./knowledge/api.mjs";
 import { handlePitchApi } from "./knowledge/pitch-api.mjs";
-import { handleTodayApi, reconcileSoon, setCampaignsReader, setLeadgenStore, startPingReconciler } from "./triage/today.mjs";
+import { handleTodayApi, reconcileSoon, setLeadgenStore, startPingReconciler } from "./triage/today.mjs";
+import { campaignsByContact, handleLeadCampaignApi, leadCampaigns, setLeadCampaignStore } from "./triage/lead-campaigns.mjs";
 import { handleCampaignReportApi, setReportStores, startReplyLabeler } from "./triage/campaign-report.mjs";
 import { handleScenarioApi, scenarioForPrompt } from "./warmup/scenarios.mjs";
 import { loadPitchBook, pitchCardForPrompt, pitchCatalogForPrompt, pitchFallbackBrief, pitchProductList } from "./knowledge/pitch.mjs";
@@ -295,6 +296,8 @@ const state = {
   accountLeadgens: {},
   // Мітки відповідей у звіті кампаній (етап 6/6): { contactId: { label, by: ai|human, basis, at } }.
   replyLabels: {},
+  // Кампанії лідгенів (WorkSpace, 16.10): папки CRM, продукт, сценарій, кроки — triage/lead-campaigns.mjs.
+  leadCampaigns: [],
   // Хребет LinkedIn-кампаній (WorkSpace, 16.10): драбина кваліфікації, маршрути, правила. null — як в артефакті.
   campaignSpine: null,
   // ESP 1: sending mailboxes Google stopped letting us act as, by address —
@@ -752,7 +755,14 @@ server.listen(port, listenHost, () => {
       await writePersistentWorkspaceState();
     }
   });
-  setCampaignsReader(() => (Array.isArray(state.warmupCampaigns) ? state.warmupCampaigns : []));
+  // Кампанії лідгенів (WorkSpace, 16.10) — окремо від автозапитів прогріву.
+  setLeadCampaignStore({
+    read: () => state.leadCampaigns || [],
+    async write(value) {
+      state.leadCampaigns = value;
+      await writePersistentWorkspaceState();
+    }
+  });
   // Звіт кампаній (етап 6/6): мітки відповідей — у стані робочого простору.
   setReportStores({
     labels: {
@@ -761,8 +771,7 @@ server.listen(port, listenHost, () => {
         state.replyLabels = value;
         await writePersistentWorkspaceState();
       }
-    },
-    campaigns: () => (Array.isArray(state.warmupCampaigns) ? state.warmupCampaigns : [])
+    }
   });
   startReplyLabeler({ classify: classifyReply });
   startPingReconciler();
@@ -1069,7 +1078,8 @@ async function handleApi(request, response, url) {
         // all it says about the message — the wording is not this phase's.
         // Продукти кампаній — картки «Смислів» (WorkSpace, 16.10): одне джерело для лідгенів і AI.
         products: () => pitchProductList(),
-        // Спільний хребет кампаній — для чернетки першого повідомлення.
+        // Кампанія лідгена людини (за папкою CRM) і спільний хребет — для чернетки першого повідомлення.
+        leadCampaignFor: async (contactId) => (contactId ? (await campaignsByContact([contactId])).get(String(contactId)) || null : null),
         spine: () => state.campaignSpine
       },
       // The first message to somebody who accepted, written the way the contact
@@ -1142,6 +1152,12 @@ async function handleApi(request, response, url) {
   // мітки відповідей (AI, лідген змінює одним кліком). triage/campaign-report.mjs.
   if (url.pathname === "/api/campaign-report" || url.pathname.startsWith("/api/campaign-report/")) {
     const handled = await handleCampaignReportApi({ request, response, url, sendJson, readJson, classify: classifyReply });
+    if (handled) return;
+  }
+
+  // WorkSpace: кампанії лідгенів — папки CRM, продукт зі «Смислів», сценарій.
+  if (url.pathname === "/api/lead-campaigns") {
+    const handled = await handleLeadCampaignApi({ request, response, url, sendJson, readJson, products: () => pitchProductList() });
     if (handled) return;
   }
 
@@ -5094,6 +5110,9 @@ function applyPersistentWorkspaceState(saved = {}) {
   if (saved.replyLabels && typeof saved.replyLabels === "object" && !Array.isArray(saved.replyLabels)) {
     state.replyLabels = saved.replyLabels;
   }
+  if (Array.isArray(saved.leadCampaigns)) {
+    state.leadCampaigns = saved.leadCampaigns;
+  }
   if (saved.campaignSpine && typeof saved.campaignSpine === "object" && !Array.isArray(saved.campaignSpine)) {
     state.campaignSpine = saved.campaignSpine;
   }
@@ -5354,6 +5373,7 @@ async function writeWorkspaceStateNow() {
       accountLeadgens: state.accountLeadgens,
       replyLabels: state.replyLabels,
       campaignSpine: state.campaignSpine,
+      leadCampaigns: state.leadCampaigns,
       warmupTargeting: state.warmupTargeting,
       espSenderPauses: state.espSenderPauses,
       espTemplates: state.espTemplates,
@@ -15188,8 +15208,8 @@ async function classifyReply({ person, messages = [] }) {
 // Оголошена функція, а не const: маршрут /api/today може прийти раніше, ніж модуль дочитано до цього рядка.
 async function writeTodayDraft({ contact, messages = [], kind = "reply", accountId = "" }) {
   if (!state.vault || state.providerHealth.status !== "healthy") return { text: "", model: null };
-  const campaigns = Array.isArray(state.warmupCampaigns) ? state.warmupCampaigns : state.warmupCampaigns?.campaigns || [];
-  const campaign = campaigns.find((item) => item.state === "running" && (item.accountIds || []).includes(accountId)) || null;
+  // Кампанія лідгена — за папкою CRM людини (WorkSpace, 16.10), а не за акаунтом прогріву.
+  const campaign = contact?.id ? (await campaignsByContact([contact.id]).catch(() => new Map())).get(String(contact.id)) || null : null;
   const product = draftProduct(campaign?.productId || "");
   const conversation = messages.slice(-20).map((message) => ({ from: message.direction === "in" ? "them" : "us", text: String(message.body || "").slice(0, 1500), at: message.sentAt || null }));
   const { data, run } = await callOpenRouterJson({

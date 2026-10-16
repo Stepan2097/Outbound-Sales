@@ -13,6 +13,7 @@
 // знову (якщо мітку ставив AI). Мітки — у стані робочого простору (server.mjs).
 
 import { anty, crm } from "../warmup/db.mjs";
+import { campaignsByContact, leadCampaigns } from "./lead-campaigns.mjs";
 import { listThreads, readThread } from "../warmup/inbox.mjs";
 
 export const LABELS = [
@@ -27,10 +28,8 @@ const CHUNK = 100;
 const chunks = (items, size = CHUNK) => Array.from({ length: Math.ceil(items.length / size) }, (_, index) => items.slice(index * size, (index + 1) * size));
 
 let labelStore = { read: () => ({}), write: async () => {} };
-let campaignsReader = () => [];
-export function setReportStores({ labels, campaigns }) {
+export function setReportStores({ labels }) {
   if (labels?.read && labels?.write) labelStore = labels;
-  if (typeof campaigns === "function") campaignsReader = campaigns;
 }
 
 export function isLabel(value) {
@@ -69,26 +68,27 @@ export function buildReport(campaigns, people) {
 
 /* ── збір фактів ─────────────────────────────────────────────────────────── */
 
-async function members(campaignIds) {
-  const found = new Map();
-  if (!campaignIds.length) return found;
+/** Усі, кого ми торкнулися в LinkedIn: рядок запиту в друзі або розмова. */
+async function touchedContacts(threads) {
+  const ids = new Set(threads.map((thread) => thread.crmContactId).filter(Boolean).map(String));
   for (let offset = 0; ; offset += 1000) {
-    const rows = await anty.from("wl_events").select("id,meta").eq("type", "invite.requested")
-      .in("meta->>campaignId", campaignIds).order("id").limit(1000).offset(offset).rows();
-    for (const row of rows) {
-      const contactId = row.meta?.crmContactId ? String(row.meta.crmContactId) : null;
-      if (contactId && !found.has(contactId)) found.set(contactId, { campaignId: String(row.meta.campaignId), outreachId: row.meta.outreachId ? String(row.meta.outreachId) : null });
-    }
-    if (rows.length < 1000) return found;
+    const rows = await anty.from("wl_outreach").select("id,crm_contact_id").order("id").limit(1000).offset(offset).rows();
+    for (const row of rows) if (row.crm_contact_id) ids.add(String(row.crm_contact_id));
+    if (rows.length < 1000) break;
   }
+  return [...ids];
 }
 
-/** Усе про людей кампаній: треди, статус запиту, статус і угоди в CRM, мітка. */
+/**
+ * Люди кампаній лідгенів (WorkSpace, «варіант А», 16.10): ті, кого ми торкнулися в
+ * LinkedIn і хто лежить у папці кампанії. Автозапити прогріву тут ні до чого.
+ */
 export async function gatherPeople() {
-  const campaigns = (campaignsReader() || []).filter((campaign) => campaign?.id);
-  const byContact = await members(campaigns.map((campaign) => campaign.id));
-  const ids = [...byContact.keys()];
+  const campaigns = leadCampaigns();
   const threads = await listThreads();
+  const byCampaign = campaigns.length ? await campaignsByContact(await touchedContacts(threads)) : new Map();
+  const byContact = new Map([...byCampaign].map(([contactId, campaign]) => [contactId, { campaignId: campaign.id }]));
+  const ids = [...byContact.keys()];
   const threadsOf = new Map();
   for (const thread of threads) {
     if (!thread.crmContactId || !byContact.has(thread.crmContactId)) continue;

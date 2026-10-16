@@ -280,14 +280,15 @@ test("перенесене «Перше повідомлення» стає ру
   assert.equal(list.newContactsAllowed, false, "прострочений пінг стримує нові контакти");
 });
 
-import { setCampaignsReader } from "../triage/today.mjs";
+import { setLeadCampaignStore } from "../triage/lead-campaigns.mjs";
 
+// Кампанія лідгена — за папкою CRM (WorkSpace, «варіант А», 16.10), не за автозапитами прогріву.
 test("кампанія: нагадування за її кроками; після останнього кроку й тиші — статус CRM «Не відповідає»; лід відповів — гілка зупиняється", async () => {
-  setCampaignsReader(() => [{ id: "camp-1", name: "SiGMA", state: "running", accountIds: ["acc-1"], silentSteps: [1], maxPeople: 200 }]);
+  setLeadCampaignStore({ read: () => [{ id: "camp-1", name: "SiGMA", folderIds: ["f-1"], state: "active", silentSteps: [1] }], write: async () => {} });
   try {
+    rows.contact_folder_memberships = [{ contact_id: "c1", folder_id: "f-1" }];
     rows.contacts.find((row) => row.id === "c1").lead_status = "in_progress";
     rows.wl_events = [
-      { id: `r-${++nextId}`, account_id: "acc-1", type: "invite.requested", created_at: ago(9000), meta: { campaignId: "camp-1", crmContactId: "c1", outreachId: "o1" } },
       message("out", "first", 60 * 24 * 6)
     ];
     await reconcilePings();
@@ -305,8 +306,10 @@ test("кампанія: нагадування за її кроками; піс�
     await reconcilePings();
     assert.equal(openOf("c1")[0]?.title, "Відповісти: Lead One", "відповів — «Відповісти», нагадувань більше немає");
     assert.equal(rows.contacts.find((row) => row.id === "c1").lead_status, "in_progress");
+    const list = await todayList({ viewerId: "u-bohdan" });
+    assert.equal(list.blocks.replies[0]?.campaign?.name, "SiGMA", "у «Сьогодні» видно кампанію людини");
   } finally {
-    setCampaignsReader(() => []);
+    setLeadCampaignStore({ read: () => [], write: async () => {} });
   }
 });
 

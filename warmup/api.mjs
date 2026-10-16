@@ -950,7 +950,7 @@ function campaignProductFor(accountId, campaigns) {
  * when there is not. Ukrainian for somebody in Ukraine, English otherwise, as on
  * the contact card.
  */
-async function writeFirstDraft(row, choice, campaigns, writer, spine = null) {
+async function writeFirstDraft(row, choice, campaigns, writer, { campaign = null, spine = null } = {}) {
   let record = null;
   if (row.crm_contact_id) {
     try { record = await leadById(row.crm_contact_id); } catch { record = null; }
@@ -967,9 +967,8 @@ async function writeFirstDraft(row, choice, campaigns, writer, spine = null) {
     || (/^(ua|ukr|україн|украин)/i.test(String(contact.country || "").trim()) ? "uk" : "en");
   // Сценарій кампанії (WorkSpace, 16.10) і спільний хребет — те, з чим ми йдемо до
   // людини: перше повідомлення після прийнятого запиту — це опенер флоу.
-  const campaign = campaigns.find((item) => item.state === "running" && item.accountIds.includes(row.account_id)) || null;
   const written = await writer.write(contact, {
-    productId: choice.productId || campaignProductFor(row.account_id, campaigns),
+    productId: choice.productId || campaign?.productId || campaignProductFor(row.account_id, campaigns),
     language,
     instruction: choice.instruction || "",
     scenario: scenarioForPrompt(campaign, spine)
@@ -1499,11 +1498,15 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           return true;
         }
       }
-      const draft = await draftOnce(String(row.id), () => writeFirstDraft(row, {
+      const draft = await draftOnce(String(row.id), async () => writeFirstDraft(row, {
         productId: typeof body.productId === "string" ? body.productId : "",
         language: typeof body.language === "string" ? body.language : "",
         instruction: typeof body.instruction === "string" ? body.instruction.slice(0, 600) : ""
-      }, readCampaigns(), writer, campaignStore.spine?.() || null));
+      }, readCampaigns(), writer, {
+        // Кампанія лідгена людини — за її папкою CRM (WorkSpace, 16.10); прогрів лише додав її в друзі.
+        campaign: campaignStore.leadCampaignFor ? await campaignStore.leadCampaignFor(row.crm_contact_id).catch(() => null) : null,
+        spine: campaignStore.spine?.() || null
+      }));
       if (!draft?.text) return fail(response, sendJson, 502, "Модель не написала повідомлення — спробуйте ще раз.");
       sendJson(response, 200, { success: true, draft });
       return true;

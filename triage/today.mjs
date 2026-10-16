@@ -6,6 +6,7 @@
 // Звірка йде сама кожні дві хвилини, одразу після відповіді ліда і після
 // відправки з «Сьогодні». Звірка лише з'ясовує й вирівнює — нічого не надсилає.
 
+import { campaignsByContact, leadCampaignById } from "./lead-campaigns.mjs";
 import { anty, crm } from "../warmup/db.mjs";
 import { listThreads, readThread } from "../warmup/inbox.mjs";
 import { repliesOf, sameText } from "../warmup/outbox.mjs";
@@ -38,12 +39,6 @@ export function setLeadgenStore(store) {
 }
 const leadgenOf = (accountId) => (accountId && leadgenStore.read()[accountId]) || null;
 
-// Кампанії «Прогріву» (етап 3/6): їхні кроки «мовчить» ведуть людей, яких кампанія
-// дала з папки. server.mjs кладе сюди читання state.warmupCampaigns.
-let campaignsReader = () => [];
-export function setCampaignsReader(read) {
-  if (typeof read === "function") campaignsReader = read;
-}
 
 let lastGather = null;
 let lastRunAt = 0;
@@ -140,22 +135,14 @@ export async function gatherDialogs() {
     state.threads = state.threads.map((thread) => (thread.accountId === state.reassigned.fromAccountId ? { ...thread, moved: true } : thread));
   }
 
-  // Хто з людей прийшов з папки якої кампанії — з `invite.requested`, де це записано.
-  const campaigns = new Map((campaignsReader() || []).map((campaign) => [campaign.id, campaign]));
-  if (campaigns.size) {
-    for (let offset = 0; ; offset += 1000) {
-      const rows = await anty.from("wl_events").select("id,meta").eq("type", "invite.requested")
-        .in("meta->>campaignId", [...campaigns.keys()]).order("id").limit(1000).offset(offset).rows();
-      for (const row of rows) {
-        const contactId = row.meta?.crmContactId ? String(row.meta.crmContactId) : null;
-        const campaign = campaigns.get(String(row.meta?.campaignId || ""));
-        if (!contactId || !campaign || !states.has(contactId)) continue;
-        const state = states.get(contactId);
-        state.campaignId = campaign.id;
-        state.steps = campaign.silentSteps;
-      }
-      if (rows.length < 1000) break;
-    }
+  // Кампанія лідгена кожної людини — за папкою CRM (WorkSpace, «варіант А», 16.10):
+  // прогрів лише додає людей у друзі, а як із ними говорити й коли нагадувати,
+  // вирішує кампанія тієї папки, в якій людина лежить.
+  const byContact = await campaignsByContact([...states.keys()]);
+  for (const [contactId, campaign] of byContact) {
+    const state = states.get(contactId);
+    state.campaignId = campaign.id;
+    state.steps = campaign.silentSteps;
   }
   return { states, accounts, at: new Date() };
 }
@@ -389,7 +376,7 @@ function itemOf(task, { contact, state, today, now, emails, accounts = new Map()
 
 function campaignOf(campaignId) {
   if (!campaignId) return null;
-  const campaign = (campaignsReader() || []).find((item) => item.id === campaignId);
+  const campaign = leadCampaignById(campaignId);
   return campaign ? { id: campaign.id, name: campaign.name || "" } : null;
 }
 

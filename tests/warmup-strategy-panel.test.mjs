@@ -30,7 +30,7 @@ const STYLES = readdirSync(STYLES_DIR).filter((name) => name.endsWith(".css"))
 
 // 16.10 (аудит, WorkSpace): розклад прогріву — окрема панель «Прогріву» зі своєю кнопкою;
 // кампанії — у WorkSpace зі своєю. До того обидва жили в одній панелі під одним «Зберегти».
-test("розклад — окрема панель «Прогріву» зі своїм «Зберегти розклад»; кампанія зберігається у своїй формі у WorkSpace", () => {
+test("розклад — окрема панель «Прогріву» зі своїм «Зберегти розклад»; автозапити зберігаються у своїй формі", () => {
   assert.ok(PANEL.length > 0, "шаблону панелі розкладу в warmup-campaign.js немає");
   for (const id of ["warmupStrategyPill", "warmupStrategySubtitle", "warmupStrategyToggleBtn", "warmupStrategyBody", "warmupStrategySaveBtn"]) {
     assert.equal(PANEL.split(`id="${id}"`).length - 1, 1, `у панелі розкладу має бути рівно один #${id}`);
@@ -39,11 +39,14 @@ test("розклад — окрема панель «Прогріву» зі с�
   }
   const warmupView = INDEX.slice(INDEX.indexOf('id="view-warmup"'), INDEX.indexOf("</section>", INDEX.indexOf('id="warmupStrategyPanel"')));
   assert.ok(warmupView.includes('id="warmupStrategyPanel"'), "розклад — на вкладці «Прогрів»");
+  const warmupAll = INDEX.slice(INDEX.indexOf('id="view-warmup"'), INDEX.indexOf('id="view-pitch"'));
+  assert.ok(warmupAll.includes('id="warmupCampaignPanel"'), "автозапити — механіка прогріву, на «Прогріві» (Марко, 16.10)");
   const workspaceView = INDEX.slice(INDEX.indexOf('id="view-workspace"'), INDEX.indexOf('id="view-warmup"'));
-  assert.ok(workspaceView.includes('id="warmupCampaignPanel"'), "кампанії — на вкладці WorkSpace");
-  assert.equal(warmupView.includes('id="warmupCampaignPanel"'), false, "кампаній на «Прогріві» більше немає");
+  assert.equal(workspaceView.includes('id="warmupCampaignPanel"'), false, "у WorkSpace — лише кампанії лідгенів");
+  assert.ok(workspaceView.includes('id="leadCampaignPanel"'));
   assert.equal((PANEL.match(/Зберегти/g) || []).length, 1, "у панелі розкладу одна кнопка «Зберегти»");
-  assert.match(CAMPAIGN_PANEL, /id="warmupCampaignSaveBtn" type="submit"/, "кампанія зберігається кнопкою у своїй формі");
+  assert.match(CAMPAIGN_PANEL, /id="warmupCampaignSaveBtn" type="submit"/, "автозапити зберігаються кнопкою у своїй формі");
+  assert.doesNotMatch(CAMPAIGN_PANEL, /warmupCampaignProduct|campaignPlanEditor|warmupCampaignApproach/, "у прогріві немає продукту й сценарію");
   assert.match(PANEL, /<h2>Стратегія прогріву<\/h2>/);
 });
 
