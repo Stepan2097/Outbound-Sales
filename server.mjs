@@ -10,6 +10,7 @@ import { CHANNEL_RULES, LANGUAGES, buildFallbackDrafts, draftsPromptPayload, nor
 import { invalidateContactCaches, contactAsProspect, contactsConfigured, contactsMissingConfig, crmKeyKind, folderContactAt, listContactFolders, listFolderContacts, searchFolderContacts, readContact, supabaseKeyKind } from "./contacts/store.mjs";
 import { handleKnowledgeLibraryApi } from "./knowledge/api.mjs";
 import { handlePitchApi } from "./knowledge/pitch-api.mjs";
+import { handleTodayApi, reconcileSoon, startPingReconciler } from "./triage/today.mjs";
 import { loadPitchBook } from "./knowledge/pitch.mjs";
 import { allEntries, append as espAppend, useJournal } from "./esp/journal.mjs";
 import { channelsFor as triageChannels, nextContact as nextTriageContact } from "./triage/queue.mjs";
@@ -722,6 +723,9 @@ server.listen(port, () => {
   // process what to do — but the leases and cool-offs it keeps are in memory,
   // so they begin and end with the process that serves /agent/due.
   startScheduler();
+  // Пінги (етап 1/6): задачі CRM вирівнюються з діалогами кожні дві хвилини. Без
+  // CRM і бази прогріву в оточенні (тести, локальний запуск) — не стартує.
+  startPingReconciler();
   // ESP 15: the daily DNS and blocklist watch. Asked hourly, runs once a day
   // (the journal remembers); the first look is a few minutes after start, so a
   // restart is not a burst of DNS queries. ESP_MONITOR=off turns it off.
@@ -1066,6 +1070,18 @@ async function handleApi(request, response, url) {
       sendJson,
       readJson,
       actingUser: request.auth?.profile?.email || request.auth?.profile?.name || ""
+    });
+    if (handled) return;
+  }
+
+  // «Сьогодні» (етап 1/6 плану кампаній і пінгів): пінги — задачі CRM у черзі
+  // Outbound; лідген бачить свої, адміністратор — усі. triage/today.mjs.
+  if (url.pathname === "/api/today" || url.pathname.startsWith("/api/today/")) {
+    const profile = request.auth?.profile;
+    const handled = await handleTodayApi({
+      request, response, url, sendJson, readJson,
+      viewer: { id: profile?.id || "", role: profile?.role || "seller" },
+      writer: { write: writeTodayDraft }
     });
     if (handled) return;
   }
@@ -3282,6 +3298,8 @@ const appUrl = () => String(process.env.PUBLIC_URL || process.env.COOLIFY_URL ||
 
 /** A lead answered in LinkedIn: one Telegram message per thread, with where to answer. */
 async function announceReply({ account, participant, inbound }) {
+  // Пінг «Відповісти» в CRM — за кілька секунд, і без Telegram теж (triage/today.mjs, етап 1/6).
+  reconcileSoon();
   if (!leadgenBot.configured || process.env.LEADGEN_TELEGRAM === "off") return;
   const messages = freshReplies(inbound);
   if (!messages.length) return;
@@ -14987,6 +15005,39 @@ async function generateContactDrafts(contact, product, { language = "en", instru
       ]
     };
   }
+}
+
+/**
+ * Чернетка наступного повідомлення в розмові для «Сьогодні» (triage/today.mjs):
+ * відповідь, коли останнє слово за лідом, або коротке нагадування, коли ми
+ * написали, а він мовчить. Продукт — кампанії акаунта, як у першого
+ * повідомлення, інакше робочий. Без моделі — порожньо: лідген пише сам.
+ * Надсилає не це: кожне повідомлення погоджує людина (Марко, 16.10).
+ */
+// Оголошена функція, а не const: маршрут /api/today може прийти раніше, ніж модуль дочитано до цього рядка.
+async function writeTodayDraft({ contact, messages = [], kind = "reply", accountId = "" }) {
+  if (!state.vault || state.providerHealth.status !== "healthy") return { text: "", model: null };
+  const campaigns = Array.isArray(state.warmupCampaigns) ? state.warmupCampaigns : state.warmupCampaigns?.campaigns || [];
+  const productId = campaigns.find((campaign) => campaign.state === "running" && (campaign.accountIds || []).includes(accountId) && campaign.productId)?.productId || "";
+  const product = state.products.find((item) => item.id === productId) || currentProduct();
+  const conversation = messages.slice(-20).map((message) => ({ from: message.direction === "in" ? "them" : "us", text: String(message.body || "").slice(0, 1500), at: message.sentAt || null }));
+  const { data, run } = await callOpenRouterJson({
+    model: outreachModelForProfile("balanced"),
+    taskType: "SEQUENCE_GENERATION",
+    profile: "balanced",
+    maxTokens: 700,
+    messages: [
+      {
+        role: "system",
+        content: "You write the next LinkedIn message in an ongoing conversation for a lead-gen person at a team that runs and teaches iGaming media buying. Return only strict JSON {\"text\": \"...\"}. Write in the language of their last message (English if unclear). Plain, calm, one professional to another; no compliments, no 'hope you are well', no lists of adjectives. Never invent facts, prices, numbers or promises that are not in product.brief or product.knowledgeLibrary. kind=reply: answer what they actually said first, then at most one qualifying question; when they show interest, offer a short 15-minute call. 30–90 words. kind=follow-up: they have not answered our last message — 15–45 words, refer to what we said, ask one easy question or offer an easy way out; no guilt, no 'just following up'."
+      },
+      {
+        role: "user",
+        content: JSON.stringify({ kind, contact: { name: contact?.name || "", position: contact?.position || "", company: contact?.company || "", country: contact?.country || "" }, product: productForPrompt(product, contact?.company || ""), conversation })
+      }
+    ]
+  });
+  return { text: String(data?.text || "").trim(), model: run?.modelUsed || null };
 }
 
 /** The workspace lead that came from this CRM contact, if somebody took it. */

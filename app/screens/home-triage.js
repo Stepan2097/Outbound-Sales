@@ -8,9 +8,10 @@
 // його наступній сесії (/api/warmup/first-messages/send), лист проходить шлюз
 // ESP з усіма перевірками (/api/esp/send-one). Сервер: /api/triage/*.
 
-import { api, escapeAttr, escapeHtml, onScreen, refreshIcons, state } from "../core.js";
+import { api, escapeAttr, escapeHtml, refreshIcons, state } from "../core.js";
 
-onScreen("home", { open: () => void openTriage() });
+// Відкриває її «Сьогодні» (app/screens/today.js) — лише коли відповіді й
+// прострочені пінги розібрано (етап 1/6, 16.10): нові контакти не йдуть поперед живих діалогів.
 
 const FOLDER_KEY = "outbound.triage.folder";
 const TACTIC_KEY = "outbound.triage.tactic";
@@ -58,7 +59,7 @@ function readSavedFolder() {
   try { return window.localStorage.getItem(FOLDER_KEY) || ""; } catch { return ""; }
 }
 
-async function openTriage() {
+export async function openTriage() {
   if (!triage.folders) {
     try {
       const payload = await api("/api/contacts/folders");

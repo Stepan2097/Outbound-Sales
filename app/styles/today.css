@@ -1,0 +1,209 @@
+/* «Сьогодні» на Головній (app/screens/today.js): черга пінгів блоками ліворуч,
+   робоче місце одного ліда праворуч. Вужче за 900 px — одна колонка. */
+
+.today-page { margin-bottom: 14px; }
+.today-page:empty { display: none; }
+
+.today { display: grid; gap: 12px; }
+
+.today-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.today-head h2 { margin: 0; font-size: 17px; }
+.today-head p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+.today-head-actions { display: flex; align-items: center; gap: 8px; }
+
+.today-scope { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.today-scope button { border: 0; border-radius: 0; background: transparent; min-height: 30px; }
+.today-scope button.active { background: var(--teal-weak); color: var(--ink); }
+
+.today-layout {
+  display: grid;
+  grid-template-columns: minmax(250px, 320px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+/* ── черга ── */
+
+.today-queue {
+  display: grid;
+  gap: 12px;
+  max-height: 72vh;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.today-queue-solo { max-height: none; }
+
+.today-block { display: grid; gap: 4px; }
+
+.today-block h3 {
+  margin: 0 0 2px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.today-block-replies h3 { color: var(--teal); }
+.today-block-overdue h3 { color: var(--amber); }
+
+.today-count {
+  display: inline-block;
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface-strong);
+  color: var(--ink);
+  font-size: 11px;
+  text-align: center;
+}
+
+.today-item {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  min-height: 0;
+  padding: 8px 10px;
+  text-align: left;
+  white-space: normal;
+  justify-content: stretch;
+  justify-items: start;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+}
+
+.today-item:hover { background: var(--surface-strong); border-color: var(--line); }
+.today-item.active { background: var(--teal-weak); border-color: rgba(52, 214, 189, 0.34); }
+
+.today-item-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+}
+
+.today-item-top strong { overflow-wrap: anywhere; }
+.today-due { flex: none; color: var(--muted); font-size: 12px; }
+.today-block-overdue .today-due { color: var(--amber); }
+.today-item-sub,
+.today-item-who { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+
+.today-item-preview {
+  color: var(--ink);
+  font-size: 12.5px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.today-later summary { cursor: pointer; color: var(--muted); font-size: 12.5px; }
+.today-later-row { display: flex; justify-content: space-between; gap: 8px; padding: 4px 2px; font-size: 12.5px; color: var(--muted); }
+.today-later-row span:first-child { color: var(--ink); overflow-wrap: anywhere; }
+
+.today-empty { margin: 0; color: var(--muted); }
+.today-empty.is-error { color: var(--red); }
+
+/* ── робоче місце ── */
+
+.today-work {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-sunk);
+}
+
+.today-work-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.today-work-head h3 { margin: 0; font-size: 16px; overflow-wrap: anywhere; }
+.today-work-head p { margin: 2px 0 0; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.today-reason { white-space: nowrap; }
+.today-reason-overdue { background: rgba(224, 178, 94, 0.16); color: var(--amber); }
+
+.today-work-meta { margin: 0; color: var(--muted); font-size: 12.5px; }
+.today-work-meta b { color: var(--ink); font-weight: 600; }
+.today-work-meta a { color: var(--blue); }
+
+.today-thread {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  max-height: 340px;
+  overflow-y: auto;
+}
+
+.today-msg {
+  display: grid;
+  gap: 2px;
+  max-width: 82%;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--surface-strong);
+}
+
+.today-msg.is-us { justify-self: end; background: var(--teal-weak); }
+.today-msg-body { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.45; }
+.today-msg-at { color: var(--muted); font-size: 11px; }
+
+.today-note { margin: 0; color: var(--muted); font-size: 12.5px; }
+
+.today-notice { margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--teal-weak); font-size: 13px; }
+.today-notice.is-error { background: rgba(239, 124, 114, 0.12); color: var(--red); }
+.today-notice.is-warn { background: rgba(224, 178, 94, 0.14); color: var(--amber); }
+
+.today-draft { display: grid; gap: 6px; }
+.today-draft-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-weight: 600; }
+.today-draft textarea { font: inherit; min-height: 130px; }
+.today-draft-note { margin: 0; color: var(--amber); font-size: 12.5px; }
+
+.today-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.today-hint { color: var(--muted); font-size: 12px; }
+
+.today-move {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.today-move input[type="date"] { min-height: 32px; width: auto; }
+
+.today-gate {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+@media (max-width: 900px) {
+  .today-layout { grid-template-columns: minmax(0, 1fr); }
+  .today-queue { max-height: none; }
+  .today-msg { max-width: 92%; }
+}

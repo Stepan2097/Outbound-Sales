@@ -1,0 +1,135 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import {
+  SILENT_LIMIT, addWorkingDays, blockOf, dayIn, desiredPing, manualDueDay, markSuperseded, newContactsAllowed,
+  parseTaskMarks, planPingChanges, taskDescription, zonedIso
+} from "../triage/pings.mjs";
+
+// Пінги (етап 1/6, таск 5f5343cb): правила без баз — що є наступним кроком
+// діалогу і як задачі CRM до нього вирівнюються.
+
+const NOW = new Date("2026-10-16T12:00:00Z"); // п'ятниця
+
+const thread = (over = {}) => ({
+  accountId: "acc-1", threadKey: "t1", trailingOut: 0, trailingOutBodies: [],
+  lastStoredAt: "2026-10-16T08:00:00Z", lastInboundStoredAt: "2026-10-16T08:00:00Z",
+  lastMessage: { direction: "in", at: "2026-10-16T07:59:00Z" }, ...over
+});
+
+const task = (over = {}) => ({ id: over.id || "task-1", completed: false, created_at: "2026-10-16T08:01:00Z", description: "", ...over });
+
+test("дні — у поясі команди, робочі дні пропускають вихідні, задача — на 09:00 за Києвом", () => {
+  assert.equal(dayIn("2026-10-16T22:30:00Z"), "2026-10-17", "о 01:30 за Києвом уже наступний день");
+  assert.equal(addWorkingDays("2026-10-16", 3), "2026-10-21", "з п'ятниці +3 робочі — середа");
+  assert.equal(addWorkingDays("2026-10-13", 3), "2026-10-16");
+  assert.equal(zonedIso("2026-10-21"), "2026-10-21T06:00:00.000Z", "жовтень — літній час, UTC+3");
+  assert.equal(zonedIso("2026-11-03"), "2026-11-03T07:00:00.000Z", "листопад — зимовий, UTC+2");
+});
+
+test("лід відповів, ми ні → «Відповісти» на день його відповіді", () => {
+  const next = desiredPing("c1", { threads: [thread()] }, { now: NOW });
+  assert.equal(next.reason, "reply");
+  assert.equal(next.key, "reply:c1:2026-10-16T08:00:00Z");
+  assert.equal(next.due, "2026-10-16");
+});
+
+test("ми відповіли (у черзі) → «Нагадати» через 3 робочі дні, і ключ той самий, коли повідомлення з'явиться в треді", () => {
+  const queued = desiredPing("c1", { threads: [thread()], pending: [{ threadKey: "t1", queuedAt: "2026-10-16T09:00:00Z" }] }, { now: NOW });
+  assert.equal(queued.reason, "silent");
+  assert.equal(queued.due, "2026-10-21");
+  const synced = desiredPing("c1", {
+    threads: [thread({ trailingOut: 1, lastStoredAt: "2026-10-16T09:20:00Z", lastMessage: { direction: "out", at: "2026-10-16T09:05:00Z" } })]
+  }, { now: NOW });
+  assert.equal(synced.key, queued.key, "черга → тред не плодить нову задачу");
+});
+
+test("три наших повідомлення поспіль без відповіді → пінгу більше немає", () => {
+  const next = desiredPing("c1", {
+    threads: [thread({ trailingOut: SILENT_LIMIT, lastStoredAt: "2026-10-15T09:00:00Z", lastMessage: { direction: "out", at: "2026-10-15T09:00:00Z" } })]
+  }, { now: NOW });
+  assert.equal(next.key, null);
+});
+
+test("прийняв запит і мовчимо → «Перше повідомлення»; «Пропустити» → нічого; перше в черзі → «Нагадати»", () => {
+  const accepted = { outreachId: "o1", accountId: "acc-1", acceptedAt: "2026-10-15T10:00:00Z", dismissed: false };
+  const first = desiredPing("c1", { accepted }, { now: NOW });
+  assert.equal(first.reason, "first");
+  assert.equal(first.due, "2026-10-15");
+  assert.equal(desiredPing("c1", { accepted: { ...accepted, dismissed: true } }, { now: NOW }), null);
+  const queued = desiredPing("c1", { accepted, pending: [{ threadKey: "first:o1", queuedAt: "2026-10-16T09:00:00Z" }] }, { now: NOW });
+  assert.equal(queued.reason, "silent");
+  assert.equal(queued.key, "silent:c1:none:1");
+});
+
+test("давніше за 14 днів — не цей етап (імпорт етапу 2), задачі не чіпаємо", () => {
+  const old = desiredPing("c1", { threads: [thread({ lastStoredAt: "2026-09-20T08:00:00Z", lastInboundStoredAt: "2026-09-20T08:00:00Z" })] }, { now: NOW });
+  assert.equal(old, null);
+  assert.deepEqual(planPingChanges(old, [task()]), []);
+});
+
+test("план: немає задачі → створити; є відкрита з тим самим ключем → нічого", () => {
+  const next = desiredPing("c1", { threads: [thread()] }, { now: NOW });
+  assert.deepEqual(planPingChanges(next, []).map((action) => action.op), ["create"]);
+  assert.deepEqual(planPingChanges(next, [task({ description: taskDescription("reply", next.key) })]), [], "дата, перенесена людиною, лишається");
+});
+
+test("план: нова подія закриває стару системну задачу як «замінену» і ставить нову", () => {
+  const replyKey = "reply:c1:2026-10-16T08:00:00Z";
+  const silent = desiredPing("c1", { threads: [thread()], pending: [{ threadKey: "t1", queuedAt: "2026-10-16T09:00:00Z" }] }, { now: NOW });
+  const actions = planPingChanges(silent, [task({ description: taskDescription("reply", replyKey) })]);
+  assert.deepEqual(actions.map((action) => action.op), ["supersede", "create"]);
+});
+
+test("план: скасоване повідомлення повертає попередній крок — його «замінена» задача відкривається, а не губиться", () => {
+  const replyKey = "reply:c1:2026-10-16T08:00:00Z";
+  const reply = desiredPing("c1", { threads: [thread()] }, { now: NOW });
+  const tasks = [
+    task({ id: "old", completed: true, description: markSuperseded(taskDescription("reply", replyKey)) }),
+    task({ id: "silent", created_at: "2026-10-16T09:01:00Z", description: taskDescription("silent", "silent:c1:2026-10-16T08:00:00Z:1") })
+  ];
+  assert.deepEqual(planPingChanges(reply, tasks).map((action) => [action.op, action.task?.id]), [["supersede", "silent"], ["reopen", "old"]]);
+});
+
+test("план: задачу, яку людина закрила сама, система не відкриває", () => {
+  const reply = desiredPing("c1", { threads: [thread()] }, { now: NOW });
+  assert.deepEqual(planPingChanges(reply, [task({ completed: true, description: taskDescription("reply", reply.key) })]), []);
+});
+
+test("план: ручний пінг після події — і є наступний крок; новіша подія його замінює", () => {
+  const reply = desiredPing("c1", { threads: [thread()] }, { now: NOW });
+  const manual = task({ id: "m", created_at: "2026-10-16T10:00:00Z", description: taskDescription("manual", "manual:2026-10-16T10:00:00Z") });
+  assert.deepEqual(planPingChanges(reply, [manual]), [], "поставлений після відповіді — лишається, нової задачі немає");
+  const later = desiredPing("c1", { threads: [thread({ lastStoredAt: "2026-10-16T11:00:00Z", lastInboundStoredAt: "2026-10-16T11:00:00Z" })] }, { now: NOW });
+  assert.deepEqual(planPingChanges(later, [manual]).map((action) => action.op), ["supersede", "create"]);
+});
+
+test("план: пінгу бути не повинно → системні задачі закриваються", () => {
+  const stop = { key: null, basisAt: "2026-10-16T09:00:00Z" };
+  assert.deepEqual(planPingChanges(stop, [task({ description: taskDescription("silent", "silent:c1:none:2") })]).map((action) => action.op), ["supersede"]);
+});
+
+test("опис задачі несе ключ і позначку «замінено»", () => {
+  const description = markSuperseded(taskDescription("reply", "reply:c1:x"));
+  assert.deepEqual(parseTaskMarks(description), { key: "reply:c1:x", superseded: true });
+  assert.deepEqual(parseTaskMarks("задача з CRM"), { key: null, superseded: false });
+});
+
+test("блоки «Сьогодні»: відповіді вище за прострочені, нові контакти — лише коли обидва порожні", () => {
+  const today = "2026-10-16";
+  assert.equal(blockOf({ reason: "reply", dueDay: "2026-10-14", awaitingUs: true }, today), "replies");
+  assert.equal(blockOf({ reason: "silent", dueDay: "2026-10-15" }, today), "overdue");
+  assert.equal(blockOf({ reason: "silent", dueDay: today }, today), "today");
+  assert.equal(blockOf({ reason: "first", dueDay: "2026-10-15" }, today), "first");
+  assert.equal(blockOf({ reason: "reply", dueDay: "2026-10-17", awaitingUs: true }, today), "later", "перенесена людиною відповідь — на свій день");
+  assert.equal(newContactsAllowed({ replies: [], overdue: [], today: [1], first: [1] }), true);
+  assert.equal(newContactsAllowed({ replies: [1], overdue: [] }), false);
+  assert.equal(newContactsAllowed({ replies: [], overdue: [1] }), false);
+});
+
+test("ручний пінг: +1, +3, тиждень або день", () => {
+  assert.equal(manualDueDay("+1", "2026-10-16"), "2026-10-17");
+  assert.equal(manualDueDay("+7", "2026-10-16"), "2026-10-23");
+  assert.equal(manualDueDay("2026-11-04", "2026-10-16"), "2026-11-04");
+  assert.equal(manualDueDay("завтра", "2026-10-16"), "");
+});

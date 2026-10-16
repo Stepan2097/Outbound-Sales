@@ -298,6 +298,8 @@ test("both sides of a conversation reach the contact, each message once however 
   assert.ok(rows.activities.every((row) => row.contact_id === "c-1" && row.type === "linkedin"));
   assert.match(rows.activities[0].content, /Ми написали з акаунта chloe@example\.com · 2026-09-20 09:00 UTC\nДякую, що прийняли запит!/);
   assert.match(rows.activities[1].content, /Відповідь на акаунт chloe@example\.com · 2026-09-20 11:30 UTC\nПривіт! Розкажіть більше\./);
+  // Їхня відповідь у CRM — вхідна, наше — вихідне (до 16.10 обидва ставали outgoing).
+  assert.deepEqual(rows.activities.map((row) => row.direction), ["outgoing", "incoming"]);
 
   // Tomorrow the agent reads the same thread again, with one new message in it.
   const second = await thread([THEIRS_AGAIN, THEIRS, OURS]);

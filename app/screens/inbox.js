@@ -511,7 +511,7 @@ function warmupMessageHtml(message, participantName, accountName) {
  * відправляти») — за кілька хвилин окремою короткою сесією акаунта; пізніше,
  * лише коли денний ліміт повідомлень вичерпано або акаунт зараз не відкрити.
  */
-function warmupGoesOutText(reply) {
+export function warmupGoesOutText(reply) {
   if (reply?.goesOutNow) return "за кілька хвилин";
   if (!reply?.goesOutAt) return "у наступну сесію акаунта";
   if (reply.limitReached) {

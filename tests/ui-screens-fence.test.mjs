@@ -95,7 +95,8 @@ test("the workspace opens on «Головна»", () => {
  * and `main.js` does nothing but load them and start.
  */
 const SCREEN_FILES = {
-  home: ["screens/home-triage.js"],
+  // «Сьогодні» (пінги, 16.10) реєструє Головну й відкриває нові контакти з home-triage.js.
+  home: ["screens/today.js", "screens/home-triage.js"],
   work: ["screens/work.js"],
   warmup: ["screens/warmup-accounts.js", "screens/warmup-campaign.js"],
   inbox: ["screens/inbox.js"],

@@ -3130,7 +3130,11 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
 
       const found = await readThread({ accountId, threadKey });
       if (!found) return fail(response, sendJson, 404, "Тред не знайдено");
-      if (!found.messages.some((message) => message.direction === "in")) {
+      // Нагадування з «Сьогодні» (пінг «Нагадати», 16.10): лід ще не відповідав, але
+      // розмова вже є — наше повідомлення в ній. Без жодного повідомлення це досі
+      // перше, і воно йде через «Прогрів».
+      const isFollowUp = body.followUp === true && found.messages.some((message) => message.direction === "out");
+      if (!isFollowUp && !found.messages.some((message) => message.direction === "in")) {
         return fail(response, sendJson, 409, "Тут ще ніхто не відповів — це не відповідь, а перше повідомлення, і воно йде через «Прогрів».");
       }
 

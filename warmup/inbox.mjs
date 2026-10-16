@@ -753,7 +753,10 @@ function activityLineOf(row, name) {
 function lineEntry(row, name, since = undefined) {
   const content = row ? activityLineOf(row, name) : null;
   if (!content) return null;
-  return { eventId: String(row.id), content, since, storedAt: row.created_at, position: Number(row.meta?.position) || 0 };
+  return {
+    eventId: String(row.id), content, since, storedAt: row.created_at, position: Number(row.meta?.position) || 0,
+    direction: row.type === MESSAGE_IN ? "incoming" : "outgoing"
+  };
 }
 
 /**
@@ -1338,6 +1341,12 @@ export function deriveThreads(events, { readMarks = new Map(), syncedAt = new Ma
     // the next follow-up from this (14.10).
     let trailingOut = 0;
     for (let at = ordered.length - 1; at >= 0 && ordered[at].direction === "out"; at -= 1) trailingOut += 1;
+    // Для пінгів (triage/pings.mjs): коли ми дізналися про останнє повідомлення і
+    // про їхню останню відповідь — моменти, що не рухаються, на відміну від часу
+    // LinkedIn, — і які наші повідомлення стоять у кінці, щоб відправку з черги,
+    // яка вже тут, не порахувати вдруге.
+    const lastStoredAt = thread.messages.reduce((latest, message) => (!latest || message.storedAt > latest ? message.storedAt : latest), null);
+    const trailingOutBodies = ordered.slice(ordered.length - trailingOut).map((message) => message.body);
     // Who the thread is with: the newest of what a message was stored knowing
     // and a later tie (`CONTACT_TYPE`). An approach of this account's, which
     // the caller knows about and this does not, comes before both.
@@ -1357,6 +1366,9 @@ export function deriveThreads(events, { readMarks = new Map(), syncedAt = new Ma
         at: lastMessage.sentAtIso ? lastMessage.sentAt : lastMessage.storedAt
       },
       trailingOut,
+      trailingOutBodies,
+      lastStoredAt,
+      lastInboundStoredAt: thread.newestInboundStoredAt,
       messageCount: thread.messages.length,
       unread: Boolean(thread.newestInboundStoredAt) && (!readAt || thread.newestInboundStoredAt > readAt),
       readAt,

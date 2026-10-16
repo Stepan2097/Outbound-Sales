@@ -1,0 +1,361 @@
+// «Сьогодні» — Головна лідгена (етап 1/6 плану кампаній і пінгів, 16.10.2026).
+//
+// Кожен живий діалог має пінг — задачу CRM з датою наступного дотику. Тут вони в
+// тому порядку, в якому їх робити: відповіді → прострочені → на сьогодні →
+// перші повідомлення. Нові контакти з папки (home-triage.js) — лише коли
+// відповідей і прострочених немає.
+//
+// Робоче місце — один лід за раз: хто це, уся переписка, чернетка, «Погодити й
+// надіслати» → наступний. Пінг можна перенести (+1 день, +3, тиждень, дата) чи
+// зробити дзвінком. Надсилає не ця сторінка: повідомлення стає в чергу акаунта
+// тими самими маршрутами, що й «Вхідні» та Головна, а сервер звіряє пінги —
+// закриває цей і ставить наступний (через 3 робочі дні).
+
+import { api, escapeAttr, escapeHtml, onScreen, refreshIcons } from "../core.js";
+import { openTriage } from "./home-triage.js";
+import { warmupGoesOutText } from "./inbox.js";
+
+onScreen("home", { open: () => void openToday() });
+
+const SCOPE_KEY = "outbound.today.scope";
+const BLOCKS = [
+  ["replies", "Відповіді", "Лід написав — відповісти"],
+  ["overdue", "Прострочені", "Дата пінгу минула"],
+  ["today", "На сьогодні", "Пінги на сьогодні"],
+  ["first", "Перші повідомлення", "Прийняли запит — написати першими"]
+];
+const DRAFT_LABEL = { reply: "Чернетка відповіді", "follow-up": "Нагадування", first: "Перше повідомлення" };
+
+const today = {
+  data: null, error: "", loading: false,
+  scope: readScope(),
+  selected: "", detail: null, detailError: "", detailLoading: false,
+  draftLoading: false, draftNote: "", sending: false, notice: "", tone: "", text: "", textFor: ""
+};
+
+function readScope() {
+  try { return window.localStorage.getItem(SCOPE_KEY) === "all" ? "all" : "mine"; } catch { return "mine"; }
+}
+
+const root = () => document.getElementById("todayRoot");
+const triageRoot = () => document.getElementById("triageRoot");
+
+function dayLabel(day, todayDay) {
+  if (!day) return "";
+  if (day === todayDay) return "сьогодні";
+  const [y, m, d] = day.split("-");
+  return day < todayDay ? `з ${d}.${m}` : `${d}.${m}.${y.slice(2)}`;
+}
+
+function allItems() {
+  const blocks = today.data?.blocks || {};
+  return BLOCKS.flatMap(([key]) => blocks[key] || []);
+}
+
+async function openToday({ keepSelection = false } = {}) {
+  today.loading = true;
+  render();
+  try {
+    today.data = await api(`/api/today?scope=${today.scope}`);
+    today.error = "";
+  } catch (error) {
+    if (error?.name === "AbortError") return;
+    today.error = error.message || "Не вдалося завантажити пінги.";
+  } finally {
+    today.loading = false;
+  }
+  const items = allItems();
+  if (!keepSelection || !items.some((item) => item.pingId === today.selected)) today.selected = items[0]?.pingId || "";
+  render();
+  if (today.selected) void loadDetail(today.selected);
+  else today.detail = null;
+  // Нові контакти — лише коли живі діалоги розібрано (або пінги ще не налаштовані).
+  const allowed = !today.data || today.data.newContactsAllowed !== false;
+  triageRoot().hidden = !allowed;
+  if (allowed) void openTriage();
+}
+
+async function loadDetail(pingId) {
+  today.detailLoading = true;
+  today.detailError = "";
+  render();
+  try {
+    const detail = await api(`/api/today/item?pingId=${encodeURIComponent(pingId)}`);
+    if (today.selected !== pingId) return;
+    today.detail = detail;
+    if (today.textFor !== pingId) {
+      today.text = detail.draft?.text || "";
+      today.textFor = pingId;
+    }
+    // Відповідь, яку відкрили тут, прочитана — як у «Вхідних».
+    const item = detail.item;
+    if (item.channel === "thread" && item.block === "replies") {
+      void api("/api/warmup/inbox/read", { method: "POST", body: JSON.stringify({ accountId: item.accountId, threadKey: item.threadKey }) }).catch(() => {});
+    }
+    if (!today.text && (item.channel === "thread" || item.channel === "first")) void writeDraft(false);
+  } catch (error) {
+    if (error?.name === "AbortError") return;
+    today.detailError = error.message || "Не вдалося відкрити пінг.";
+  } finally {
+    today.detailLoading = false;
+    render();
+  }
+}
+
+async function writeDraft(force) {
+  const item = today.detail?.item;
+  if (!item) return;
+  today.draftLoading = true;
+  render();
+  try {
+    let text = "";
+    if (item.channel === "first") {
+      const payload = await api("/api/warmup/first-messages/draft", { method: "POST", body: JSON.stringify({ outreachId: item.outreachId, force }) });
+      text = payload.draft?.text || "";
+    } else {
+      const payload = await api("/api/today/draft", { method: "POST", body: JSON.stringify({ pingId: item.pingId, force }) });
+      text = payload.draft?.text || "";
+    }
+    if (today.selected === item.pingId && (force || !today.text)) {
+      today.text = text;
+      // Біля поля, а не в загальному рядку: там може стояти «погоджено, піде…» про попереднього ліда.
+      today.draftNote = text ? "" : "Модель зараз не написала чернетку — напишіть самі.";
+    }
+  } catch (error) {
+    if (error?.name !== "AbortError") today.draftNote = error.message || "Чернетка не вийшла — напишіть самі.";
+  } finally {
+    today.draftLoading = false;
+    render();
+  }
+}
+
+function say(text, tone = "is-ok") {
+  today.notice = text;
+  today.tone = tone;
+}
+
+async function send() {
+  const item = today.detail?.item;
+  const text = today.text.trim();
+  if (!item || !text || today.sending) return;
+  today.sending = true;
+  say("");
+  render();
+  try {
+    let reply;
+    if (item.channel === "first") {
+      reply = await api("/api/warmup/first-messages/send", { method: "POST", body: JSON.stringify({ outreachId: item.outreachId, text }) });
+    } else {
+      const followUp = today.detail.messages.at(-1)?.direction !== "in";
+      reply = await api("/api/warmup/inbox/reply", { method: "POST", body: JSON.stringify({ accountId: item.accountId, threadKey: item.threadKey, text, followUp }) });
+    }
+    // Пінг закривається, наступний ставиться — звірка на сервері.
+    await api("/api/today/refresh", { method: "POST", body: "{}" }).catch(() => {});
+    const goes = warmupGoesOutText(reply);
+    const name = item.name;
+    today.text = "";
+    today.textFor = "";
+    today.draftNote = "";
+    await openToday();
+    say(`${name}: погоджено, піде ${goes}. Наступний пінг — через 3 робочі дні.`);
+    render();
+  } catch (error) {
+    if (error?.name !== "AbortError") say(error.message || "Не вдалося поставити в чергу.", "is-error");
+    render();
+  } finally {
+    today.sending = false;
+    render();
+  }
+}
+
+async function movePing(when, call = false) {
+  const item = today.detail?.item;
+  if (!item) return;
+  try {
+    const result = await api("/api/today/ping", { method: "POST", body: JSON.stringify({ pingId: item.pingId, when, call }) });
+    const name = item.name;
+    await openToday({ keepSelection: true });
+    say(`${name}: ${call ? "дзвінок" : "пінг"} на ${dayLabel(result.dueDay, today.data?.today)}.`);
+    render();
+  } catch (error) {
+    if (error?.name !== "AbortError") say(error.message || "Не вдалося перенести.", "is-error");
+    render();
+  }
+}
+
+/* ── малювання ──────────────────────────────────────────────────────────── */
+
+function queueItem(item) {
+  const preview = item.preview?.body ? `${item.preview.direction === "in" ? "" : "Ви: "}${item.preview.body}` : item.reasonTitle;
+  return `<button type="button" class="today-item${item.pingId === today.selected ? " active" : ""}" data-today="select" data-id="${escapeAttr(item.pingId)}">
+    <span class="today-item-top"><strong>${escapeHtml(item.name)}</strong><span class="today-due">${escapeHtml(dayLabel(item.dueDay, today.data.today))}</span></span>
+    <span class="today-item-sub">${escapeHtml([item.position, item.company].filter(Boolean).join(" · "))}</span>
+    <span class="today-item-preview">${escapeHtml(preview)}</span>
+    ${today.scope === "all" && item.assignee ? `<span class="today-item-who">${escapeHtml(item.assignee)}</span>` : ""}
+  </button>`;
+}
+
+function queueHtml() {
+  const data = today.data;
+  const blocks = BLOCKS.map(([key, title, hint]) => {
+    const items = data.blocks[key] || [];
+    if (!items.length) return "";
+    return `<section class="today-block today-block-${key}">
+      <h3 title="${escapeAttr(hint)}">${escapeHtml(title)} <span class="today-count">${items.length}</span></h3>
+      ${items.map(queueItem).join("")}
+    </section>`;
+  }).join("");
+  const later = data.later?.length
+    ? `<details class="today-later"><summary>Далі за планом <span class="today-count">${data.later.length}</span></summary>
+        ${data.later.map((item) => `<div class="today-later-row"><span>${escapeHtml(item.name)}</span><span>${escapeHtml(item.reasonTitle)} · ${escapeHtml(dayLabel(item.dueDay, data.today))}</span></div>`).join("")}
+      </details>`
+    : "";
+  return blocks || later ? `${blocks}${later}` : `<p class="today-empty">Сьогодні все розібрано.</p>`;
+}
+
+function messagesHtml(messages) {
+  if (!messages.length) return "";
+  return `<ol class="today-thread">${messages.slice(-15).map((message) => `
+    <li class="today-msg ${message.direction === "in" ? "is-them" : "is-us"}">
+      <span class="today-msg-body">${escapeHtml(message.body)}</span>
+      <span class="today-msg-at">${escapeHtml(message.sentAt ? new Date(message.sentAt).toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "")}</span>
+    </li>`).join("")}</ol>`;
+}
+
+function workHtml() {
+  if (today.detailLoading && !today.detail) return `<p class="today-empty">Відкриваю…</p>`;
+  if (today.detailError) return `<p class="today-empty is-error">${escapeHtml(today.detailError)}</p>`;
+  const detail = today.detail;
+  if (!detail) return `<p class="today-empty">Оберіть пінг ліворуч.</p>`;
+  const item = detail.item;
+  const kind = item.channel === "first" ? "first" : detail.messages.at(-1)?.direction === "in" ? "reply" : "follow-up";
+  const canWrite = item.channel === "thread" || item.channel === "first";
+  const waiting = (detail.pending || []).filter((entry) => entry.state === "waiting");
+  return `
+    <header class="today-work-head">
+      <div>
+        <h3>${escapeHtml(item.name)}</h3>
+        <p>${escapeHtml([item.position, item.company].filter(Boolean).join(" · "))}</p>
+      </div>
+      <span class="pill today-reason today-reason-${escapeAttr(item.block)}">${escapeHtml(item.reasonTitle)} · ${escapeHtml(dayLabel(item.dueDay, today.data?.today))}</span>
+    </header>
+    <p class="today-work-meta">
+      ${item.accountName ? `Від акаунта <b>${escapeHtml(item.accountName)}</b> · LinkedIn` : "LinkedIn"}
+      ${item.crmUrl ? ` · <a href="${escapeAttr(item.crmUrl)}" target="_blank" rel="noopener noreferrer">Відкрити в CRM</a>` : ""}
+      ${item.assignee && today.scope === "all" ? ` · ${escapeHtml(item.assignee)}` : ""}
+    </p>
+    ${item.channel === "first" ? `<p class="today-note">Прийняв запит${detail.acceptedAt ? ` ${escapeHtml(new Date(detail.acceptedAt).toLocaleDateString("uk-UA"))}` : ""} — розмови ще немає, це перше повідомлення.</p>` : ""}
+    ${messagesHtml(detail.messages)}
+    ${waiting.length ? `<p class="today-note">У черзі · ще не надіслано: ${waiting.map((entry) => `«${escapeHtml(entry.body.slice(0, 80))}${entry.body.length > 80 ? "…" : ""}»`).join(", ")}</p>` : ""}
+    ${today.notice ? `<p class="today-notice ${today.tone}" role="status">${escapeHtml(today.notice)}</p>` : ""}
+    ${canWrite ? `
+      <div class="today-draft">
+        <div class="today-draft-head">
+          <span>${DRAFT_LABEL[kind]}</span>
+          <button type="button" data-today="rewrite" ${today.draftLoading ? "disabled" : ""}><i data-lucide="refresh-cw"></i><span>${today.draftLoading ? "Пишу…" : "Переписати"}</span></button>
+        </div>
+        ${today.draftNote ? `<p class="today-draft-note">${escapeHtml(today.draftNote)}</p>` : ""}
+        <textarea id="todayText" rows="6" placeholder="${today.draftLoading ? "Модель пише чернетку…" : "Текст повідомлення"}">${escapeHtml(today.text)}</textarea>
+        <div class="today-actions">
+          <button type="button" class="primary-button" data-today="send" ${today.sending || !today.text.trim() ? "disabled" : ""}><i data-lucide="send"></i><span>${today.sending ? "Ставлю в чергу…" : "Погодити й надіслати"}</span></button>
+          <span class="today-hint">Піде з цього акаунта в найближчу сесію. Наступний пінг — через 3 робочі дні.</span>
+        </div>
+      </div>` : `<p class="today-note">Переписки з цим контактом тут немає — відкрийте його в CRM або перенесіть пінг.</p>`}
+    <div class="today-move">
+      <span>Перенести:</span>
+      <button type="button" data-today="move" data-when="+1">+1 день</button>
+      <button type="button" data-today="move" data-when="+3">+3 дні</button>
+      <button type="button" data-today="move" data-when="+7">Тиждень</button>
+      <input type="date" id="todayMoveDate" aria-label="Інша дата" min="${escapeAttr(today.data?.today || "")}" />
+      <button type="button" data-today="move-date">На дату</button>
+      <button type="button" data-today="call"><i data-lucide="phone"></i><span>Дзвінок на дату</span></button>
+    </div>`;
+}
+
+function render() {
+  const host = root();
+  if (!host) return;
+  if (today.loading && !today.data) {
+    host.innerHTML = `<section class="panel today"><p class="today-empty">Збираю пінги…</p></section>`;
+    return;
+  }
+  if (today.error && !today.data) {
+    host.innerHTML = `<section class="panel today"><p class="today-empty is-error">${escapeHtml(today.error)} <button type="button" data-today="reload">Спробувати ще раз</button></p></section>`;
+    return;
+  }
+  const data = today.data;
+  if (!data || data.configured === false) {
+    host.innerHTML = "";
+    return;
+  }
+  const counts = BLOCKS.map(([key, title]) => [title, (data.blocks[key] || []).length]).filter(([, count]) => count);
+  host.innerHTML = `
+    <section class="panel today">
+      <header class="today-head">
+        <div>
+          <h2>Сьогодні</h2>
+          <p>${counts.length ? counts.map(([title, count]) => `${escapeHtml(title)}: ${count}`).join(" · ") : "Живих діалогів, що чекають, немає"}</p>
+        </div>
+        <div class="today-head-actions">
+          ${data.canSeeAll ? `<div class="today-scope" role="group" aria-label="Чиї пінги">
+            <button type="button" data-today="scope" data-scope="mine" class="${today.scope === "mine" ? "active" : ""}">Мої</button>
+            <button type="button" data-today="scope" data-scope="all" class="${today.scope === "all" ? "active" : ""}">Усі</button>
+          </div>` : ""}
+          <button type="button" class="icon-button" data-today="reload" title="Оновити" aria-label="Оновити"><i data-lucide="refresh-cw"></i></button>
+        </div>
+      </header>
+      ${allItems().length ? `<div class="today-layout">
+        <aside class="today-queue">${queueHtml()}</aside>
+        <article class="today-work">${workHtml()}</article>
+      </div>` : `${today.notice ? `<p class="today-notice ${today.tone}" role="status">${escapeHtml(today.notice)}</p>` : ""}<div class="today-queue today-queue-solo">${queueHtml()}</div>`}
+      ${data.newContactsAllowed ? "" : `<p class="today-gate">Нові контакти з папки — коли розберете відповіді й прострочені.</p>`}
+    </section>`;
+  refreshIcons(host);
+}
+
+/* ── дії ─────────────────────────────────────────────────────────────────── */
+
+document.addEventListener("input", (event) => {
+  if (event.target?.id === "todayText") {
+    today.text = event.target.value;
+    const sendButton = document.querySelector('#todayRoot [data-today="send"]');
+    if (sendButton) sendButton.disabled = today.sending || !today.text.trim();
+  }
+});
+
+document.addEventListener("click", (event) => {
+  const target = event.target.closest?.("#todayRoot [data-today]");
+  if (!target) return;
+  const act = target.dataset.today;
+  if (act === "reload") return void openToday({ keepSelection: true });
+  if (act === "scope") {
+    today.scope = target.dataset.scope === "all" ? "all" : "mine";
+    try { window.localStorage.setItem(SCOPE_KEY, today.scope); } catch {}
+    return void openToday();
+  }
+  if (act === "select") {
+    if (today.text.trim() && today.textFor && today.textFor !== target.dataset.id && today.text !== (today.detail?.draft?.text || "")
+      && !window.confirm("Текст ще не надіслано. Перейти до іншого ліда?")) return;
+    today.selected = target.dataset.id;
+    today.detail = null;
+    today.text = "";
+    today.textFor = "";
+    today.draftNote = "";
+    say("");
+    render();
+    // На вузькому екрані робоче місце під чергою — показуємо його, а не лишаємо внизу.
+    if (window.matchMedia("(max-width: 900px)").matches) document.querySelector("#todayRoot .today-work")?.scrollIntoView({ block: "start" });
+    return void loadDetail(today.selected);
+  }
+  if (act === "rewrite") return void writeDraft(true);
+  if (act === "send") return void send();
+  if (act === "move") return void movePing(target.dataset.when);
+  if (act === "move-date" || act === "call") {
+    const day = document.getElementById("todayMoveDate")?.value || "";
+    if (!day) {
+      say("Оберіть дату в полі поруч.", "is-warn");
+      return render();
+    }
+    return void movePing(day, act === "call");
+  }
+});
