@@ -12,7 +12,7 @@ import { handleKnowledgeLibraryApi } from "./knowledge/api.mjs";
 import { handlePitchApi } from "./knowledge/pitch-api.mjs";
 import { handleTodayApi, reconcileSoon, setCampaignsReader, setLeadgenStore, startPingReconciler } from "./triage/today.mjs";
 import { handleCampaignReportApi, setReportStores, startReplyLabeler } from "./triage/campaign-report.mjs";
-import { loadPitchBook } from "./knowledge/pitch.mjs";
+import { loadPitchBook, pitchCardForPrompt, pitchCatalogForPrompt, pitchFallbackBrief, pitchProductList } from "./knowledge/pitch.mjs";
 import { allEntries, append as espAppend, useJournal } from "./esp/journal.mjs";
 import { channelsFor as triageChannels, nextContact as nextTriageContact } from "./triage/queue.mjs";
 import { AUTO_TACTIC, tacticData, tacticForPrompt, tacticLabel, tacticOptions } from "./triage/tactics.mjs";
@@ -1058,7 +1058,8 @@ async function handleApi(request, response, url) {
         readTargeting: () => state.warmupTargeting,
         // A campaign points at one of the workspace's own products, which is
         // all it says about the message — the wording is not this phase's.
-        products: () => state.products.map((product) => ({ id: product.id, name: product.name }))
+        // Продукти кампаній — картки «Смислів» (WorkSpace, 16.10): одне джерело для лідгенів і AI.
+        products: () => pitchProductList()
       },
       // The first message to somebody who accepted, written the way the contact
       // card writes it — the same model, product brief and rules — and only its
@@ -1067,7 +1068,7 @@ async function handleApi(request, response, url) {
       writer: {
         status: () => ({ ready: Boolean(state.vault) && state.providerHealth.status === "healthy" }),
         async write(contact, { productId = "", language = "en", instruction = "" } = {}) {
-          const product = state.products.find((item) => item.id === productId) || currentProduct();
+          const product = draftProduct(productId);
           const drafts = await generateContactDrafts(contact, product, { language, instruction });
           addEvent("outreach", `First message written for ${contact.name || "a contact"} (${product?.name || "no product"}).`);
           return {
@@ -1283,7 +1284,7 @@ async function handleApi(request, response, url) {
 
         if (request.method === "POST" && contactMatch[2] === "/messages") {
           const body = await readJson(request);
-          const product = state.products.find((item) => item.id === (body.productId || state.selectedProductId)) || currentProduct();
+          const product = draftProduct(body.productId);
           const drafts = await generateContactDrafts(contact, product, {
             language: body.language,
             instruction: cleanLongText(body.instruction || "")
@@ -14971,7 +14972,32 @@ function chooseBestChannel(prospect) {
   return "manual_research";
 }
 
+/**
+ * Продукт для LinkedIn-чернетки — картка «Смислів» (WorkSpace, таск f78ffd9a, 16.10).
+ * Немає картки з таким id (кампанія без продукту, старий продукт AI) — каталог
+ * поточних продуктів: модель обирає один, що пасує до слів ліда, або не пітчить.
+ * Форма — та, яку чекають generateContactDrafts і buildFallbackDrafts.
+ */
+function draftProduct(productId = "") {
+  const card = productId ? pitchCardForPrompt(productId) : null;
+  const base = { category: "", positioning: "", targetPersonas: [], useCases: [], proofPoints: [], differentiators: [], objections: [], source: "pitch" };
+  if (card) {
+    return { ...base, id: productId, name: card.name, positioning: card.pitch, brief: pitchFallbackBrief(productId) || {}, prompt: { ...card, rule: "This product card is the team's own words: pitch, sections, proof, objections, what not to promise and what to send in DM. Never claim anything that is not in it." } };
+  }
+  return {
+    ...base,
+    id: "",
+    name: "ADvantage",
+    brief: {},
+    prompt: {
+      catalog: pitchCatalogForPrompt(),
+      rule: "No single product was chosen for this conversation. Pick at most one product from the catalog that fits what the lead actually said; if none clearly fits, do not pitch any — ask one qualifying question instead. Never invent offers outside the catalog."
+    }
+  };
+}
+
 function productForPrompt(product, context = "") {
+  if (product?.source === "pitch") return { id: product.id, name: product.name, ...product.prompt };
   return {
     id: product.id,
     name: product.name,
@@ -15130,8 +15156,7 @@ async function writeTodayDraft({ contact, messages = [], kind = "reply", account
   if (!state.vault || state.providerHealth.status !== "healthy") return { text: "", model: null };
   const campaigns = Array.isArray(state.warmupCampaigns) ? state.warmupCampaigns : state.warmupCampaigns?.campaigns || [];
   const campaign = campaigns.find((item) => item.state === "running" && (item.accountIds || []).includes(accountId)) || null;
-  const productId = campaign?.productId || "";
-  const product = state.products.find((item) => item.id === productId) || currentProduct();
+  const product = draftProduct(campaign?.productId || "");
   const conversation = messages.slice(-20).map((message) => ({ from: message.direction === "in" ? "them" : "us", text: String(message.body || "").slice(0, 1500), at: message.sentAt || null }));
   const { data, run } = await callOpenRouterJson({
     model: outreachModelForProfile("balanced"),
@@ -15141,7 +15166,7 @@ async function writeTodayDraft({ contact, messages = [], kind = "reply", account
     messages: [
       {
         role: "system",
-        content: "You write the next LinkedIn message in an ongoing conversation for a lead-gen person at a team that runs and teaches iGaming media buying. Return only strict JSON {\"text\": \"...\"}. Write in the language of their last message (English if unclear). Plain, calm, one professional to another; no compliments, no 'hope you are well', no lists of adjectives. Never invent facts, prices, numbers or promises that are not in product.brief or product.knowledgeLibrary. When campaignApproach is given, write within that approach. kind=reply: answer what they actually said first, then at most one qualifying question; when they show interest, offer a short 15-minute call. 30–90 words. kind=follow-up: they have not answered our last message — 15–45 words, refer to what we said, ask one easy question or offer an easy way out; no guilt, no 'just following up'."
+        content: "You write the next LinkedIn message in an ongoing conversation for a lead-gen person at a team that runs and teaches iGaming media buying. Return only strict JSON {\"text\": \"...\"}. Write in the language of their last message (English if unclear). Plain, calm, one professional to another; no compliments, no 'hope you are well', no lists of adjectives. Never invent facts, prices, numbers or promises that are not in the product card (or, without one, the product catalog). When campaignApproach is given, write within that approach. kind=reply: answer what they actually said first, then at most one qualifying question; when they show interest, offer a short 15-minute call. 30–90 words. kind=follow-up: they have not answered our last message — 15–45 words, refer to what we said, ask one easy question or offer an easy way out; no guilt, no 'just following up'."
       },
       {
         role: "user",

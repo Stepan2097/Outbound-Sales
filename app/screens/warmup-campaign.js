@@ -6,11 +6,13 @@ import {
   autoFeedLine, campaignFeedStart, campaignStateNote
 } from "../warmup-view.js";
 import {
-  escapeAttr, escapeHtml, refreshIcons, state, uaPlural
+  escapeAttr, escapeHtml, refreshIcons, uaPlural
 } from "../core.js";
 import {
   WARMUP_CAMPAIGN_STATE_LABEL, WARMUP_CAMPAIGN_TONE, WARMUP_DEFAULT_FROM_DAY, WARMUP_EDITABLE_KINDS, WARMUP_EMPTY_FILTERS, WARMUP_KIND_LABEL, refreshWarmupAccountQueue, renderWarmupProfiles, warmupApi, warmupCount, warmupDuration, warmupState
 } from "./warmup-accounts.js";
+import { loadPitchProducts, pitchProductName, pitchProducts } from "../pitch-products.js";
+import { pitchProductOptions } from "../pitch-options.js";
 // «Як іде розсилка» — панель цієї ж сторінки, під кампанією.
 import "./warmup-funnel.js";
 
@@ -224,28 +226,17 @@ export function warmupFolderName(folderId) {
 
 function warmupProductName(productId) {
   if (!productId) return null;
-  return (state?.products || []).find((product) => product.id === productId)?.name || null;
+  return pitchProductName(productId) || productId;
 }
 
-/** Products are the workspace's own — one list, not a second copy of it. */
+/** Продукти кампанії — картки «Смислів» (16.10): той самий список, що читають лідгени. */
 function renderWarmupProductOptions(selectedId) {
   const select = document.getElementById("warmupCampaignProduct");
   if (!select) return;
-  const products = state?.products || [];
-  const signature = `${products.length}|${selectedId || ""}`;
+  const signature = `${pitchProducts().length}|${selectedId || ""}`;
   if (select.dataset.signature === signature) return;
   select.dataset.signature = signature;
-
-  const options = [`<option value="" ${selectedId ? "" : "selected"}>Без продукту</option>`];
-  const known = new Set();
-  for (const product of products) {
-    known.add(product.id);
-    options.push(`<option value="${escapeAttr(product.id)}" ${product.id === selectedId ? "selected" : ""}>${escapeHtml(product.name)}</option>`);
-  }
-  if (selectedId && !known.has(selectedId)) {
-    options.push(`<option value="${escapeAttr(selectedId)}" selected>${escapeHtml(selectedId)} · немає в цьому робочому просторі</option>`);
-  }
-  select.innerHTML = options.join("");
+  select.innerHTML = pitchProductOptions(pitchProducts(), selectedId, escapeAttr, escapeHtml);
 }
 
 function renderWarmupFolderOptions(selectedId) {
@@ -551,8 +542,7 @@ function renderWarmupCampaignForm({ resetForm = false } = {}) {
       const input = document.getElementById(id);
       if (input) input.value = value;
     }
-    // A new campaign starts on the product this workspace is already working.
-    renderWarmupProductOptions(editing ? saved.productId : (state?.selectedProductId || ""));
+    renderWarmupProductOptions(saved.productId);
     renderWarmupFolderOptions(saved.folderId);
   } else {
     renderWarmupProductOptions(document.getElementById("warmupCampaignProduct")?.value || saved.productId);
@@ -638,7 +628,8 @@ export function warmupAutoFeedHtml(feed) {
 export async function loadWarmupCampaigns({ resetForm = true } = {}) {
   const [folders, campaigns] = await Promise.allSettled([
     warmupApi("/folders"),
-    warmupApi("/campaigns")
+    warmupApi("/campaigns"),
+    loadPitchProducts()
   ]);
 
   const problems = [];

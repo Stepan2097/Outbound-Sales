@@ -5,9 +5,11 @@
 // Telegram.
 
 import {
-  HISTORY_EVENT_LABEL, api, escapeAttr, escapeHtml, linkIfUrl, onScreen, refreshIcons, relativeTime, setHtml, setText, state, uaPlural
+  HISTORY_EVENT_LABEL, api, escapeAttr, escapeHtml, linkIfUrl, onScreen, refreshIcons, relativeTime, setHtml, setText, uaPlural
 } from "../core.js";
 import { cachedRead, onCacheReset, onReadsInvalidated, recallScreen, rememberScreen } from "../cache.js";
+import { loadPitchProducts, pitchProducts } from "../pitch-products.js";
+import { pitchProductOptions } from "../pitch-options.js";
 import {
   WARMUP_OUTREACH_LABEL, WARMUP_OUTREACH_TONE, warmupApi
 } from "../screens/warmup-accounts.js";
@@ -15,7 +17,8 @@ import {
 // CRM опитується, коли на неї дивляться, але не частіше за раз на хвилину: кнопки
 // «Оновити» тут нема, тож нова папка чи нова людина з'являється, коли повертаєшся
 // на екран, а не коли пам'ятаєш, що її треба шукати.
-onScreen("contacts", { open: () => void openContactsScreen() });
+// Продукт чернеток — картки «Смислів» (16.10), той самий список, що в кампаніях.
+onScreen("contacts", { open: () => { void loadPitchProducts(); void openContactsScreen(); } });
 
 const CONTACTS_STALE_MS = 60_000;
 
@@ -596,13 +599,12 @@ function rememberContactProduct(productId) {
  * і мова за країною людини.
  */
 function contactDraftChoice(contact) {
-  const products = state?.products || [];
+  const products = pitchProducts();
   const has = (id) => products.some((product) => product.id === id);
+  // Не вибрано — продукт, який людина вибирала тут востаннє, інакше без продукту: AI підбере з каталогу.
   const productId = has(contactDraftForm.productId)
     ? contactDraftForm.productId
-    : has(rememberedContactProduct())
-      ? rememberedContactProduct()
-      : has(state?.selectedProductId) ? state.selectedProductId : (products[0]?.id || "");
+    : has(rememberedContactProduct()) ? rememberedContactProduct() : "";
   const language = CONTACT_DRAFT_LANGUAGES.some(([code]) => code === contactDraftForm.language)
     ? contactDraftForm.language
     : contactDraftLanguage(contact);
@@ -635,10 +637,8 @@ function contactDraftHtml({ title, hint, text, copyText, count, label }) {
 function contactMessagesHtml() {
   const drafts = contactDrafts;
   const choice = contactDraftChoice(contactRecord);
-  const products = state?.products || [];
-  const productOptions = products.length
-    ? products.map((product) => `<option value="${escapeAttr(product.id)}"${product.id === choice.productId ? " selected" : ""}>${escapeHtml(product.name)}</option>`).join("")
-    : `<option value="">Продукт за замовчуванням</option>`;
+  const products = pitchProducts();
+  const productOptions = pitchProductOptions(products, choice.productId, escapeAttr, escapeHtml);
   const languageOptions = CONTACT_DRAFT_LANGUAGES
     .map(([code, label]) => `<option value="${code}"${code === choice.language ? " selected" : ""}>${escapeHtml(label)}</option>`)
     .join("");
@@ -648,7 +648,7 @@ function contactMessagesHtml() {
       <div class="split-fields">
         <label>
           <span>Продукт</span>
-          <select id="contactProductSelect" data-draft-field="productId"${products.length ? "" : " disabled"}>${productOptions}</select>
+          <select id="contactProductSelect" data-draft-field="productId">${productOptions}</select>
         </label>
         <label>
           <span>Мова</span>

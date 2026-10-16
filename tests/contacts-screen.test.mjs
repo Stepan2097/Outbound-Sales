@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { loadMain } from "./app-main-excerpt.mjs";
+import { pitchProductOptions } from "../app/pitch-options.js";
 
 /**
  * «Контакти» після спрощення (985e5a7b): папка → список → картка з історією
@@ -65,7 +66,12 @@ function screen({ api, warmupApi, screens = new Map() } = {}) {
   // Сховище браузера: пам'ять останнього вибраного продукту.
   const stored = new Map();
   const localStorage = { getItem: (key) => (stored.has(key) ? stored.get(key) : null), setItem: (key, value) => { stored.set(key, String(value)); } };
+  // Продукти — картки «Смислів» (16.10): список, який екран бере з app/pitch-products.js.
+  let pitchList = [];
   const globals = {
+    pitchProducts: () => pitchList,
+    pitchProductOptions,
+    loadPitchProducts: async () => pitchList,
     document: { getElementById: byId },
     // Як у core.js: робочий простір, поки його не прочитано, — null.
     state: null,
@@ -93,7 +99,7 @@ function screen({ api, warmupApi, screens = new Map() } = {}) {
     rememberScreen: (key, value) => { screens.set(key, JSON.parse(JSON.stringify(value))); }
   };
   const main = loadMain(NAMES.filter((name) => !["WARMUP_OUTREACH_LABEL", "WARMUP_OUTREACH_TONE"].includes(name)), globals, LISTENERS);
-  return { ids, byId, handlers, calls, stored, screens, main, get: main.get, set: (name, value) => main.context && vm_set(main, name, value) };
+  return { ids, byId, handlers, calls, stored, screens, main, get: main.get, set: (name, value) => main.context && vm_set(main, name, value), setProducts: (list) => { pitchList = list; } };
 }
 
 /** Картка людини з готовими полями; решта стану — як у тесті. */
@@ -304,7 +310,7 @@ const DRAFTS = {
   provider: "openrouter",
   modelUsed: "anthropic/claude-sonnet-5",
   productId: "p-course",
-  productName: "advantage-course",
+  productName: "FB навчання",
   instruction: "",
   generatedAt: "2026-10-08T10:00:00Z",
   email: { subject: "Quick question about Northwind", body: "Hi Taras, saw your launch. Worth a short call?" },
@@ -314,11 +320,11 @@ const DRAFTS = {
   verifyBeforeSending: ["Перевір, що запуск справді був минулого тижня"]
 };
 
-const PRODUCTS = [{ id: "p-ad", name: "AdAction" }, { id: "p-course", name: "advantage-course" }];
+const PRODUCTS = [{ id: "p-ad", name: "FB аудит" }, { id: "p-course", name: "FB навчання" }];
 
-/** Картка з продуктами робочого простору: обрано другий. */
+/** Картка з продуктами «Смислів». */
 function openCardWithProducts(s, contact) {
-  s.set("state", { products: PRODUCTS, selectedProductId: "p-course" });
+  s.setProducts(PRODUCTS);
   openCard(s, contact);
 }
 
@@ -334,7 +340,7 @@ test("на картці є форма: продукт, мова, «що врах
   s.get("renderContactCard")();
   const body = s.ids.contactCardBody.innerHTML;
   assert.match(body, /<form class="contact-draft-form" id="contactDraftForm" data-contact-draft-form>/);
-  assert.match(body, /<select id="contactProductSelect"[^>]*>.*<option value="p-ad">AdAction<\/option><option value="p-course" selected>advantage-course<\/option>/s, "продукт, обраний у просторі, вибраний і тут");
+  assert.match(body, /<select id="contactProductSelect"[^>]*>.*<option value="" selected>Без продукту — AI підбере з каталогу<\/option><option value="p-ad">FB аудит<\/option><option value="p-course">FB навчання<\/option>/s, "продукти — картки «Смислів»; не вибрано — AI підбере з каталогу");
   assert.match(body, /<select id="contactLanguageSelect"[^>]*>.*<option value="en">English<\/option><option value="uk" selected>Українською<\/option><option value="ru">Русский<\/option>/s, "для контакту з України мова за замовчуванням українська");
   assert.match(body, /<input id="contactInstructionInput" type="text" data-draft-field="instruction" value=""/);
   assert.match(body, /Що врахувати \(необов'язково\)/);
@@ -358,7 +364,7 @@ test("мова за замовчуванням: українська для ко
     const sent = [];
     s.main.context.api = async (path, options) => { sent.push({ path, body: JSON.parse(options.body) }); return { drafts: { ...DRAFTS, language } }; };
     await s.get("generateContactMessages")();
-    assert.deepEqual(sent, [{ path: "/api/contacts/7/messages", body: { productId: "p-course", language, instruction: "" } }], `країна «${country}»`);
+    assert.deepEqual(sent, [{ path: "/api/contacts/7/messages", body: { productId: "", language, instruction: "" } }], `країна «${country}»`);
   }
 });
 
@@ -382,14 +388,14 @@ test("вибране у формі переживає перемальовува
   await edit(s, "input", "instruction", `з "лапками" та <тегами>`);
   s.get("renderContactCard")();
   const body = s.ids.contactCardBody.innerHTML;
-  assert.match(body, /<option value="p-ad" selected>AdAction</);
+  assert.match(body, /<option value="p-ad" selected>FB аудит</);
   assert.match(body, /<option value="ru" selected>Русский</);
   assert.match(body, /value="з &quot;лапками&quot; та &lt;тегами&gt;"/, "значення поля екрановане");
   assert.doesNotMatch(body, /<option value="uk" selected>/);
 
-  // Продукт, якого вже нема в просторі, не лишається вибраним: береться обраний у просторі.
-  s.set("state", { products: [PRODUCTS[1]], selectedProductId: "p-course" });
-  assert.equal(s.get("contactDraftChoice")({ country: "Poland" }).productId, "p-course");
+  // Продукт, якого вже нема в «Смислах», не лишається вибраним: без продукту — AI підбере з каталогу.
+  s.setProducts([PRODUCTS[1]]);
+  assert.equal(s.get("contactDraftChoice")({ country: "Poland" }).productId, "");
 });
 
 test("перемальовування не відбирає фокус у поля «що врахувати»: курсор лишається там, де був", () => {
@@ -448,7 +454,7 @@ test("поки модель пише, кнопка каже «Пишемо...» 
   assert.match(after, /@taras/, "юзернейм Telegram стоїть у підписі блоку");
   assert.match(after, /Перевір перед відправкою/);
   assert.match(after, /На чому тримається/);
-  assert.match(after, /advantage-course · English · anthropic\/claude-sonnet-5/);
+  assert.match(after, /FB навчання · English · anthropic\/claude-sonnet-5/);
   assert.match(after, /id="contactDraftsPill">AI</);
   assert.doesNotMatch(after, /id="contactGenerateBtn" disabled/);
   assert.match(after, /Згенерувати три чернетки/, "після відповіді кнопка знову пропонує згенерувати");
@@ -466,16 +472,16 @@ test("текст, складений без моделі, так і підпис
 });
 
 test("тексти, що вже є на людині, чекають на картці одразу, і форма стоїть так, як їх писали", async () => {
-  const saved = { ...DRAFTS, productId: "p-ad", productName: "AdAction", language: "ru", instruction: "без згадки ціни" };
+  const saved = { ...DRAFTS, productId: "p-ad", productName: "FB аудит", language: "ru", instruction: "без згадки ціни" };
   const s = screen({
     api: async () => ({ contact: { id: 7, name: "Taras Bondar", country: "Poland" }, drafts: saved }),
     warmupApi: async () => ({ entries: [], outreach: null })
   });
-  s.set("state", { products: PRODUCTS, selectedProductId: "p-course" });
+  s.setProducts(PRODUCTS);
   await s.get("openContact")("7");
   const body = s.ids.contactCardBody.innerHTML;
   assert.equal((body.match(/class="contact-draft"/g) || []).length, 4);
-  assert.match(body, /<option value="p-ad" selected>AdAction</, "продукт — той, для якого писали, а не обраний у просторі");
+  assert.match(body, /<option value="p-ad" selected>FB аудит</, "продукт — той, для якого писали, а не обраний у просторі");
   assert.match(body, /<option value="ru" selected>Русский</);
   assert.match(body, /value="без згадки ціни"/);
 
@@ -484,13 +490,13 @@ test("тексти, що вже є на людині, чекають на кар
     api: async () => ({ contact: { id: 8, name: "Iryna", country: "Ukraine" }, drafts: null }),
     warmupApi: async () => ({ entries: [], outreach: null })
   });
-  other.set("state", { products: PRODUCTS, selectedProductId: "p-course" });
+  other.setProducts(PRODUCTS);
   other.set("contactDrafts", saved);
   other.set("contactDraftForm", { productId: "p-ad", language: "ru", instruction: "чуже" });
   await other.get("openContact")("8");
   const fresh = other.ids.contactCardBody.innerHTML;
   assert.doesNotMatch(fresh, /class="contact-draft"/);
-  assert.match(fresh, /<option value="p-course" selected>/);
+  assert.match(fresh, /<option value="" selected>/, "інша людина — без чужого продукту");
   assert.match(fresh, /<option value="uk" selected>/);
   assert.doesNotMatch(fresh, /чуже/);
 });
@@ -559,15 +565,15 @@ test("клік повз «Копіювати» нічого не копіює і
 
 test("продукт за замовчуванням — той, що людина вибирала востаннє в цьому браузері, а не застиглий у просторі", () => {
   const s = screen();
-  openCardWithProducts(s); // у просторі обрано p-course
+  openCardWithProducts(s);
   s.stored.set("outbound.contact.product", "p-ad");
   assert.equal(s.get("contactDraftChoice")({ country: "Poland" }).productId, "p-ad");
   s.get("renderContactCard")();
-  assert.match(s.ids.contactCardBody.innerHTML, /<option value="p-ad" selected>AdAction</);
+  assert.match(s.ids.contactCardBody.innerHTML, /<option value="p-ad" selected>FB аудит</);
 
   // Запам'ятований продукт, якого вже нема в списку, не лишається вибраним.
   s.stored.set("outbound.contact.product", "p-gone");
-  assert.equal(s.get("contactDraftChoice")({ country: "Poland" }).productId, "p-course");
+  assert.equal(s.get("contactDraftChoice")({ country: "Poland" }).productId, "");
   // А вибір, який уже зроблено у формі цієї картки, сильніший за пам'ять.
   s.stored.set("outbound.contact.product", "p-ad");
   s.set("contactDraftForm", { productId: "p-course", language: "", instruction: "" });
@@ -590,7 +596,7 @@ test("сховище браузера закрите — картка працю
   openCardWithProducts(s);
   const closed = { getItem: () => { throw new Error("SecurityError"); }, setItem: () => { throw new Error("SecurityError"); } };
   s.main.context.window.localStorage = closed;
-  assert.equal(s.get("contactDraftChoice")({ country: "Poland" }).productId, "p-course");
+  assert.equal(s.get("contactDraftChoice")({ country: "Poland" }).productId, "");
   await edit(s, "change", "productId", "p-ad");
   assert.equal(s.get("contactDraftChoice")({ country: "Poland" }).productId, "p-ad", "вибір у формі діє й без сховища");
 });
@@ -602,7 +608,7 @@ test("під чернетками названо продукт — і для с
   const { productName, ...old } = DRAFTS;
   s.set("contactDrafts", { ...old, productId: "p-ad" });
   s.get("renderContactCard")();
-  assert.match(s.ids.contactCardBody.innerHTML, /<span>AdAction · English · anthropic\/claude-sonnet-5/);
+  assert.match(s.ids.contactCardBody.innerHTML, /<span>FB аудит · English · anthropic\/claude-sonnet-5/);
 
   // Продукт, якого вже нема в списку, лишає назву, з якою чернетки писали.
   s.set("contactDrafts", { ...DRAFTS, productId: "p-gone", productName: "Старий продукт" });
@@ -610,9 +616,9 @@ test("під чернетками названо продукт — і для с
   assert.match(s.ids.contactCardBody.innerHTML, /<span>Старий продукт · English/);
 
   // Назва зі списку сильніша за збережену: продукт могли перейменувати.
-  s.set("contactDrafts", { ...DRAFTS, productId: "p-ad", productName: "AdAction (стара назва)" });
+  s.set("contactDrafts", { ...DRAFTS, productId: "p-ad", productName: "FB аудит (стара назва)" });
   s.get("renderContactCard")();
-  assert.match(s.ids.contactCardBody.innerHTML, /<span>AdAction · English/);
+  assert.match(s.ids.contactCardBody.innerHTML, /<span>FB аудит · English/);
 });
 
 test("запит несе вибраний productId, і без нього тест червоніє", async () => {

@@ -8,7 +8,10 @@
 // його наступній сесії (/api/warmup/first-messages/send), лист проходить шлюз
 // ESP з усіма перевірками (/api/esp/send-one). Сервер: /api/triage/*.
 
-import { api, escapeAttr, escapeHtml, refreshIcons, state } from "../core.js";
+import { api, escapeAttr, escapeHtml, refreshIcons } from "../core.js";
+// Продукт для текстів — картки «Смислів» (16.10), як і в кампаніях.
+import { loadPitchProducts, pitchProducts } from "../pitch-products.js";
+import { pitchProductOptions } from "../pitch-options.js";
 
 // Відкриває її «Сьогодні» (app/screens/today.js) — лише коли відповіді й
 // прострочені пінги розібрано (етап 1/6, 16.10): нові контакти не йдуть поперед живих діалогів.
@@ -60,6 +63,7 @@ function readSavedFolder() {
 }
 
 export async function openTriage() {
+  await loadPitchProducts();
   if (!triage.folders) {
     try {
       const payload = await api("/api/contacts/folders");
@@ -141,7 +145,7 @@ async function loadNext() {
   try {
     const params = new URLSearchParams({
       folderId: triage.folderId, cursor: String(triage.cursor), skip: triage.skip.slice(-300).join(","),
-      product: triage.productId || state?.selectedProductId || "", language: triage.language, tactic: triage.tactic, event: triage.event
+      product: triage.productId || "", language: triage.language, tactic: triage.tactic, event: triage.event
     });
     const item = await api(`/api/triage/next?${params}`);
     triage.item = item;
@@ -183,7 +187,7 @@ function watchPrep(id) {
 }
 
 function prepOptions(contactId, extra = {}) {
-  return { contactId, productId: triage.productId || state?.selectedProductId || "", language: triage.language, tactic: triage.tactic, event: triage.event, ...extra };
+  return { contactId, productId: triage.productId || "", language: triage.language, tactic: triage.tactic, event: triage.event, ...extra };
 }
 
 function applyPrep(prep) {
@@ -319,7 +323,7 @@ function foldersHtml() {
       </select>
     </label>
     <label class="triage-field"><span>Продукт для текстів</span>
-      <select data-triage="product">${(state?.products || []).map((product) => `<option value="${escapeAttr(product.id)}" ${product.id === (triage.productId || state?.selectedProductId) ? "selected" : ""}>${escapeHtml(product.name)}</option>`).join("") || '<option value="">Продукт за замовчуванням</option>'}</select>
+      <select data-triage="product">${pitchProductOptions(pitchProducts(), triage.productId, escapeAttr, escapeHtml)}</select>
     </label>
     <label class="triage-field is-narrow"><span>Мова</span>
       <select data-triage="language">${LANGUAGES.map(([code, label]) => `<option value="${code}" ${code === triage.language ? "selected" : ""}>${label}</option>`).join("")}</select>

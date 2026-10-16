@@ -324,3 +324,51 @@ export async function readPitchFile(fileId) {
   }
   throw httpError("Файл не знайдено.", 404);
 }
+
+/* ── Продукти для кампаній і AI-чернеток (WorkSpace, таск f78ffd9a, 16.10.2026) ──
+ * Єдине джерело продуктів для LinkedIn: «Смисли». Кампанія зберігає id картки, а
+ * чернетка бере з неї те, що лідгени й так читають: пітч, розділи, що слати.
+ * Старі продукти AI-чернеток (advantage-course, AdAction) лишаються в стані, але
+ * сюди не потрапляють. */
+
+const sectionText = (product, title) => product.sections.find((section) => section.title.toLowerCase() === title.toLowerCase())?.text || "";
+
+/** Поточні (не архівні) продукти — для вибору в кампанії. */
+export function pitchProductList() {
+  return book.products.filter((product) => !product.archived)
+    .map((product) => ({ id: product.id, name: product.name, badgeLabel: product.badgeLabel, badgeTone: product.badgeTone }));
+}
+
+/** Картка «Смислів» так, як її читає модель: без файлів і службових полів. */
+export function pitchCardForPrompt(id) {
+  const product = book.products.find((item) => item.id === id && !item.archived);
+  if (!product) return null;
+  return {
+    name: product.name,
+    status: product.badgeLabel || "",
+    price: product.price,
+    pitch: product.pitch,
+    sections: product.sections.map((section) => ({ title: section.title, text: section.text })),
+    sendInDm: product.links.map((link) => ({ label: link.label, url: link.url })),
+    dmOneLiner: product.oneLiner,
+    recentUpdates: [...product.updates].sort((left, right) => String(right.at).localeCompare(String(left.at))).slice(0, 5).map((update) => update.text || "")
+  };
+}
+
+/** Коротко про всі поточні продукти — коли кампанія продукту не має. */
+export function pitchCatalogForPrompt() {
+  return book.products.filter((product) => !product.archived).map((product) => ({
+    name: product.name,
+    status: product.badgeLabel || "",
+    pitch: product.pitch,
+    whom: sectionText(product, "Кому"),
+    when: sectionText(product, "Коли")
+  }));
+}
+
+/** Перші рядки розділу — для чернетки без моделі. */
+export function pitchFallbackBrief(id) {
+  const product = book.products.find((item) => item.id === id && !item.archived);
+  if (!product) return null;
+  return { offer: product.oneLiner || product.pitch, pain: sectionText(product, "Коли"), proof: sectionText(product, "Пруф") };
+}

@@ -153,7 +153,8 @@ test("contacts are read from the CRM, and three drafts are written for one of th
     // No OpenRouter key in a test, so this is the fallback path: it still has
     // to answer with three usable drafts rather than an error.
     // The card's form sends the product, the language and the seller's note.
-    const asked = { language: "uk", productId: "adaction-value-exchange-ua", instruction: "коротше, без згадки ціни" };
+    // Продукт — картка «Смислів» (16.10): той самий список, що в кампаніях.
+    const asked = { language: "uk", productId: "fb-training", instruction: "коротше, без згадки ціни" };
     const { drafts } = await postJson("/api/contacts/22222222-2222-4222-8222-222222222221/messages", asked);
     assert.equal(drafts.provider, "local");
     assert.ok(drafts.email.subject, "an email needs a subject");
