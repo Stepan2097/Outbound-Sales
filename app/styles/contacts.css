@@ -134,8 +134,12 @@
   z-index: 30;
   top: calc(100% + 6px);
   left: 0;
-  right: 0;
+  /* Wider than the narrow column the button sits in: folder names and their
+     notes are read here, not guessed from an ellipsis. */
+  width: max(100%, 440px);
+  max-width: calc(100vw - 32px);
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 6px;
   padding: 8px;
   border: 1px solid var(--line);
@@ -179,8 +183,10 @@
 
 .folder-picker-options {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-auto-rows: max-content;
   gap: 2px;
-  max-height: min(360px, 55vh);
+  max-height: min(480px, 60vh);
   overflow-y: auto;
 }
 
@@ -201,13 +207,14 @@
   height: auto;
   min-height: 40px;
   padding: 8px 10px;
-  line-height: 1.3;
   border: 0;
   border-radius: 8px;
   background: transparent;
   color: var(--ink);
   font: inherit;
   font-size: 14px;
+  line-height: 1.3;
+  white-space: normal;
   text-align: left;
   cursor: pointer;
 }
@@ -240,11 +247,9 @@
 }
 
 .folder-picker-option-hint {
-  overflow: hidden;
   color: var(--muted);
   font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .folder-picker-option-count {

@@ -23,7 +23,7 @@ const NAMES = [
   "escapeHtml", "escapeAttr", "uaPlural",
   "WARMUP_OUTREACH_LABEL", "WARMUP_OUTREACH_TONE", "CONTACTS_STALE_MS", "CONTACT_PAGE_SIZE",
   "contactReads", "contactSearchTimer", "resetContacts", "contactFolders", "contactFoldersLoaded", "contactFolderId",
-  "contactFolderMenuOpen", "contactFolderQuery", "contactFolderActive", "CONTACT_FOLDER_SYSTEM_HINT", "contactFolderGroups",
+  "contactFolderMenuOpen", "contactFolderQuery", "contactFolderActive", "contactFolderButtonHtml", "CONTACT_FOLDER_SYSTEM_HINT", "contactFolderGroups",
   "contactFolderOptionHtml", "renderContactFolderPicker", "contactFolderShown", "setContactFolderMenu", "chooseContactFolder", "crmContactRows", "contactTotal", "contactOffset",
   "contactSearch", "selectedContactId", "contactRecord", "contactHistory", "contactHistoryFor",
   "contactHistoryNotice", "contactOutreach", "contactsLoadedAt", "contactsLoading", "contactsError",

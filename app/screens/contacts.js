@@ -50,6 +50,10 @@ let contactFolderQuery = "";
 
 let contactFolderActive = 0;
 
+// What the folder button shows: redrawn only when it changes, so a click on its
+// text does not lose the element it landed on.
+let contactFolderButtonHtml = "";
+
 let crmContactRows = [];
 
 let contactTotal = 0;
@@ -286,9 +290,14 @@ function renderContactFolderPicker() {
   const count = Number(folder?.contactCount) || 0;
   button.disabled = !contactFolders.length;
   button.setAttribute?.("aria-expanded", String(contactFolderMenuOpen && contactFolders.length > 0));
-  button.innerHTML = folder
+  const buttonHtml = folder
     ? `<span class="folder-picker-name">${escapeHtml(folder.name || "Без назви")}</span><span class="folder-picker-count">${count.toLocaleString("uk-UA")} ${uaPlural(count, "контакт", "контакти", "контактів")}</span><i data-lucide="chevron-down"></i>`
     : `<span class="folder-picker-name is-placeholder">${contactFolders.length ? "Вибери папку" : contactsLoading ? "Читаємо CRM..." : "Папок не знайдено"}</span><i data-lucide="chevron-down"></i>`;
+  if (buttonHtml !== contactFolderButtonHtml || !button.innerHTML) {
+    contactFolderButtonHtml = buttonHtml;
+    button.innerHTML = buttonHtml;
+    refreshIcons(button);
+  }
   menu.hidden = !(contactFolderMenuOpen && contactFolders.length);
   if (menu.hidden) return;
   const groups = contactFolderGroups();
@@ -298,7 +307,6 @@ function renderContactFolderPicker() {
   options.innerHTML = total
     ? groups.map((group) => `${group.label ? `<div class="folder-picker-group">${escapeHtml(group.label)}</div>` : ""}${group.folders.map((item) => contactFolderOptionHtml(item, index++)).join("")}`).join("")
     : `<div class="folder-picker-empty">Немає папки «${escapeHtml(contactFolderQuery.trim())}»</div>`;
-  refreshIcons();
 }
 
 function contactFolderShown() {
@@ -313,7 +321,12 @@ function setContactFolderMenu(open) {
   // Відкритий — підсвічено вибрану папку, щоб Enter нічого не міняв.
   contactFolderActive = Math.max(0, contactFolderShown().findIndex((folder) => folder.id === contactFolderId));
   renderContactFolderPicker();
-  if (contactFolderMenuOpen) query?.focus?.();
+  if (contactFolderMenuOpen) {
+    refreshIcons(document.getElementById("contactFolderMenu"));
+    query?.focus?.();
+    // The chosen folder in view, however far down the list it is.
+    document.querySelector?.("#contactFolderOptions .is-chosen")?.scrollIntoView?.({ block: "nearest" });
+  }
 }
 
 async function chooseContactFolder(folderId) {
@@ -957,9 +970,14 @@ document.getElementById("contactFolderPicker").addEventListener("keydown", async
   }
 });
 
-// Клік поза списком закриває його.
+// Клік поза списком закриває його. Шлях події, а не closest: елемент, на який
+// клікнули, міг уже бути перемальований і вийти зі сторінки, і тоді closest не
+// знаходить список, хоча клік був у ньому (власник 16.10: «погано відкривається»).
 document.addEventListener("click", (event) => {
-  if (contactFolderMenuOpen && !event.target.closest?.("#contactFolderPicker")) setContactFolderMenu(false);
+  if (!contactFolderMenuOpen) return;
+  const path = event.composedPath?.() || [];
+  const inside = path.length ? path.some((node) => node?.id === "contactFolderPicker") : event.target.closest?.("#contactFolderPicker");
+  if (!inside) setContactFolderMenu(false);
 });
 
 document.getElementById("crmContactList").addEventListener("click", async (event) => {
