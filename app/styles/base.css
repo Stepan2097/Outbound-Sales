@@ -1345,3 +1345,32 @@ tr:hover .warmup-tags-edit,
 .warmup-tags-error {
   color: var(--danger, #b42318);
 }
+
+/* Картка акаунта LinkedIn розгортається під його рядком у таблиці. */
+.warmup-detail-row > td {
+  padding: 0 0 12px;
+  background: var(--surface-soft, transparent);
+}
+
+.warmup-detail-row .warmup-detail-panel {
+  margin: 0;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.warmup-account-replies .inbox-list {
+  max-height: 360px;
+  overflow: auto;
+}
+
+.warmup-tags .warmup-tags-edit {
+  width: 26px;
+  height: 26px;
+  min-height: 26px;
+  padding: 0;
+}
+
+.warmup-tags .warmup-tags-edit svg {
+  width: 14px;
+  height: 14px;
+}

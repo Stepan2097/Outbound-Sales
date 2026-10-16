@@ -11,13 +11,16 @@ import {
 import { onCacheReset, recallScreen, rememberScreen } from "../cache.js";
 import { accountLeadgenSlot, fillAccountLeadgen } from "../account-leadgen.js";
 import {
-  loadWarmupInbox, setWarmupUnread, showWarmupInboxAccount, warmupInboxUnreadFor
+  loadWarmupInbox, setWarmupUnread, showWarmupInboxThread, warmupAccountRepliesHtml, warmupInboxUnreadFor
 } from "./inbox.js";
 import {
   loadWarmupCampaigns, loadWarmupStrategy, renderWarmupCampaignDetail, renderWarmupCampaigns, renderWarmupStrategy, toggleWarmupAccount, warmupAutoFeedHtml, warmupCampaignAccountIds, warmupEditsInProgress, warmupSelectedCampaign
 } from "./warmup-campaign.js";
 
 onScreen("warmup", { open: () => loadWarmup() });
+
+// Where the account's card lives when no row holds it (see parkWarmupDetail).
+let detailHome = null;
 
 export const warmupState = {
   config: null,
@@ -99,6 +102,8 @@ function resetWarmupScreen() {
   // once by warmup-campaign.js: only the parts that carry another person's data
   // are cleared. Clearing the whole panel left an empty frame for the rest of
   // the session (12.10, the owner: «тут немає блоку»).
+  // The card may sit under a row of the table about to be emptied: home first.
+  parkWarmupDetail();
   for (const id of ["warmupCampaignList", "warmupCampaignDetail", "warmupCampaignFormNote", "warmupProfileTableBody", "warmupDetailBody", "warmupDetailSubtitle", "warmupSummary", "warmupConfigNote"]) {
     const element = document.getElementById(id);
     if (element) element.textContent = "";
@@ -434,9 +439,35 @@ async function saveWarmupTags(profileId, typed) {
   renderWarmupProfiles();
 }
 
+// The account's card opens under its own row (власник 16.10: «воно має
+// розгортатися під аккаунтом при відкритті»), not at the foot of the page. The
+// card is one element with its listeners; it is moved, never rebuilt — taken
+// back to its place before the table is redrawn, then put under the row.
+function parkWarmupDetail() {
+  const panel = document.getElementById("warmupDetailPanel");
+  if (!panel) return null;
+  detailHome ||= { parent: panel.parentElement, next: panel.nextSibling };
+  if (panel.parentElement !== detailHome.parent) detailHome.parent.insertBefore(panel, detailHome.next);
+  return panel;
+}
+
+function placeWarmupDetail(body) {
+  const panel = document.getElementById("warmupDetailPanel");
+  const row = warmupState.selectedProfileId ? body.querySelector(`tr[data-warmup-profile="${CSS.escape(warmupState.selectedProfileId)}"]`) : null;
+  if (!panel || !row || !warmupState.selectedAccountId) return;
+  const holder = document.createElement("tr");
+  holder.className = "warmup-detail-row";
+  const cell = document.createElement("td");
+  cell.colSpan = 7;
+  cell.appendChild(panel);
+  holder.appendChild(cell);
+  row.after(holder);
+}
+
 export function renderWarmupProfiles() {
   const body = document.getElementById("warmupProfileTableBody");
   if (!body) return;
+  parkWarmupDetail();
 
   if (!warmupState.profiles.length) {
     body.innerHTML = '<tr><td colspan="7"><div class="empty-state">Акаунтів LinkedIn в Anty немає.</div></td></tr>';
@@ -488,6 +519,7 @@ export function renderWarmupProfiles() {
     })
     .join("");
 
+  placeWarmupDetail(body);
   renderWarmupCampaignDetail();
   refreshIcons();
 }
@@ -594,6 +626,7 @@ function renderWarmupDetail() {
 
   body.innerHTML = `
     <div class="warmup-detail-controls wa-controls">${controls.join("")}</div>
+    ${warmupAccountRepliesHtml(account.id)}
     ${warmup?.state === "paused" && warmup.pausedUntil
       ? warmup.pauseCause === "invite_limit"
         ? `<p class="warmup-paused">Ліміт LinkedIn: з цього акаунта LinkedIn тиждень не приймає нових запитів у друзі («${escapeHtml(warmup.pauseNote || "запрошення не надіслано")}»). Ліміт рахує всі запити за останні 7 днів, зокрема надіслані поза цією системою. До ${escapeHtml(warmup.pausedUntil)} включно акаунт нічого не робить, далі прогрів продовжиться сам, а ці дні в нього не рахуються.</p>`
@@ -1002,9 +1035,18 @@ async function warmupControl(action, extra = {}) {
   }
 }
 
-async function selectWarmupProfile(profileId) {
+async function selectWarmupProfile(profileId, { keepOpen = false } = {}) {
   const profile = warmupState.profiles.find((item) => item.id === profileId);
   if (!profile) return;
+  // A second click on the open account folds its card away.
+  if (!keepOpen && warmupState.selectedProfileId === profileId && warmupState.detail) {
+    warmupState.selectedProfileId = null;
+    warmupState.selectedAccountId = null;
+    warmupState.detail = null;
+    renderWarmupDetail();
+    renderWarmupProfiles();
+    return;
+  }
   warmupState.selectedProfileId = profileId;
   warmupState.selectedAccountId = profile.account?.id || null;
   renderWarmupProfiles();
@@ -1032,12 +1074,15 @@ async function adoptWarmupProfile(profileId) {
 document.getElementById("warmupRefreshBtn")?.addEventListener("click", () => loadWarmup());
 
 document.getElementById("warmupProfileTableBody")?.addEventListener("change", (event) => {
+  // The account's card sits inside the table now; its own listeners answer for it.
+  if (event.target.closest("#warmupDetailPanel")) return;
   const tick = event.target.closest("[data-warmup-account-tick]");
   if (!tick) return;
   toggleWarmupAccount(tick.dataset.warmupAccountTick, tick.checked);
 });
 
 document.getElementById("warmupProfileTableBody")?.addEventListener("click", (event) => {
+  if (event.target.closest("#warmupDetailPanel")) return;
   // Ticking an account is not the same gesture as opening it.
   if (event.target.closest("[data-warmup-account-tick]")) return;
   // Nor is editing its tags.
@@ -1065,7 +1110,15 @@ document.getElementById("warmupProfileTableBody")?.addEventListener("click", (ev
   const jump = event.target.closest("[data-warmup-inbox-jump]");
   if (jump) {
     event.stopPropagation();
-    showWarmupInboxAccount(jump.dataset.warmupInboxJump);
+    // The replies open here, under the account, in its card — not on «Вхідні».
+    const accountId = jump.dataset.warmupInboxJump;
+    const profile = warmupState.profiles.find((item) => item.account?.id === accountId);
+    if (profile) {
+      void loadWarmupInbox().then(() => { if (warmupState.selectedAccountId === accountId) renderWarmupDetail(); });
+      void selectWarmupProfile(profile.id, { keepOpen: true }).then(() => {
+        document.querySelector(`tr[data-warmup-profile="${CSS.escape(profile.id)}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" });
+      });
+    }
     return;
   }
   const row = event.target.closest("[data-warmup-profile]");
@@ -1086,6 +1139,12 @@ document.getElementById("warmupDetailBody")?.addEventListener("change", (event) 
 });
 
 document.getElementById("warmupDetailBody")?.addEventListener("click", (event) => {
+  // A new reply in the card: its conversation, on «Вхідні», where it is answered.
+  const thread = event.target.closest("[data-warmup-thread]");
+  if (thread) {
+    showWarmupInboxThread(thread.dataset.warmupThreadAccount, thread.dataset.warmupThread);
+    return;
+  }
   const control = event.target.closest("[data-warmup-control]");
   if (control) {
     warmupControl(control.dataset.warmupControl);
@@ -1198,6 +1257,7 @@ document.getElementById("warmupDetailBody")?.addEventListener("input", (event) =
 
 // Enter in the tag field, or «Зберегти»: what is typed is added, then all is saved into Anty.
 document.getElementById("warmupProfileTableBody")?.addEventListener("submit", (event) => {
+  if (event.target.closest("#warmupDetailPanel")) return;
   const form = event.target.closest("[data-warmup-tags-form]");
   if (!form || !tagsEdit.profileId) return;
   event.preventDefault();

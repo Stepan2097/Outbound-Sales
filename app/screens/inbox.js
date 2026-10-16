@@ -400,6 +400,21 @@ function warmupThreadRowHtml(thread) {
     </button>`;
 }
 
+/**
+ * The account's new replies, for its card under its row in «Прогрів» (власник
+ * 16.10: «воно має розгортатися під аккаунтом при відкритті»). Each opens its
+ * conversation in «Вхідні», where it is answered. Empty when nothing is unread.
+ */
+export function warmupAccountRepliesHtml(accountId) {
+  const unread = warmupState.inbox.threads.filter((thread) => thread.accountId === accountId && thread.unread)
+    .sort((left, right) => String(right.lastMessage?.sentAt || "").localeCompare(String(left.lastMessage?.sentAt || "")));
+  if (!unread.length) return "";
+  return `<section class="wa-section warmup-account-replies">
+    <h3>Нові відповіді (${unread.length})</h3>
+    <div class="inbox-list">${unread.map((thread) => warmupThreadRowHtml(thread)).join("")}</div>
+  </section>`;
+}
+
 /** Blocked by LinkedIn or excluded from the warm-up — put away by a person (12.10). */
 function warmupInboxRetired(accountId) {
   return Boolean(warmupState.inbox.accounts.find((account) => account.accountId === accountId)?.retired);

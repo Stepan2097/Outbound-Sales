@@ -19,7 +19,7 @@ test("auth reset erases Warmup rendered content synchronously, before new screen
   };
   const resets = [];
   const main = loadMain([
-    "warmupState", "WARMUP_INITIAL", "warmupRecalled", "warmupInboxRecalled", "resetWarmupScreen"
+    "warmupState", "WARMUP_INITIAL", "warmupRecalled", "warmupInboxRecalled", "detailHome", "parkWarmupDetail", "resetWarmupScreen"
   ], { document: { getElementById }, onCacheReset: (reset) => { resets.push(reset); } }, [
     "onCacheReset(resetWarmupScreen);"
   ]);
