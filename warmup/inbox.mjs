@@ -1,15 +1,16 @@
 import { createHash } from "node:crypto";
 
-import { anty, CONTACT_ID_BATCH, leadsByLinkedin } from "./db.mjs";
+import { anty, crm, CONTACT_ID_BATCH, leadsByLinkedin } from "./db.mjs";
 import { withLinkedinTimes } from "./linkedin-time.mjs";
-import { linkedinSlug } from "./outreach.mjs";
+import { isMemberId, linkedinSlug, memberId } from "./outreach.mjs";
 import { nameFromSeenLine, withoutSeenLines } from "./receipts.mjs";
 import { REQUEST_EVENT_TYPES, moveStatus, requestLine } from "./invites.mjs";
 import {
   CRM_COPIED, CRM_FAILED, accountName, clampContent, copyToCrm, crmStamp, oneCopyAtATime, outstandingCopies, sourceEvents
 } from "./activities.mjs";
 import { OUTBOX_AUDIT_HIDDEN } from "./outbox.mjs";
-import { adoptable, adoptionEnabled, createContact, hasProfileWords, once } from "./people.mjs";
+import { adoptable, adoptionEnabled, createContact, hasProfileWords, once, personName } from "./people.mjs";
+import { likeLiteral } from "./rest.mjs";
 
 /**
  * The inbox: threads, messages, what has been read, and when an account was
@@ -238,7 +239,8 @@ function cleanName(value, max = 200) {
  */
 export function normalizeParticipant(raw) {
   const name = cleanName(raw?.name);
-  const slug = linkedinSlug(raw?.slug) || null;
+  // A member id keeps its case — the link is dead without it (`memberId`).
+  const slug = memberId(raw?.slug) || linkedinSlug(raw?.slug) || null;
   return {
     name: !name || NON_NAMES.has(name.toLowerCase()) ? UNNAMED : name,
     slug,
@@ -644,6 +646,31 @@ export async function contactBySlug(slug, { folderIds = [] } = {}) {
 }
 
 /**
+ * The CRM contact for a participant: by their profile, and — when all the
+ * conversation gave is LinkedIn's member id, which no CRM row holds — by their
+ * full name, but only when every contact of that name with a real profile link
+ * is one profile (owner 16.10: Miloš Marković was two rows of one vanity link
+ * and a third, made here, under his member id). Two people of one name, or a
+ * name without a surname, match nobody: a wrong guess files a private message
+ * against a stranger.
+ */
+export async function contactForParticipant(participant, { folderIds = [] } = {}) {
+  if (!isMemberId(linkedinSlug(participant?.slug))) return contactBySlug(participant?.slug, { folderIds });
+  // The name first: a contact made earlier under the member id is the copy, not the person.
+  const name = personName(participant);
+  if (name.split(" ").length >= 2) {
+    const rows = await crm.from("contacts").select("id,linkedin").ilike("name", likeLiteral(name)).limit(50).rows();
+    const slugs = new Set(rows.map((row) => linkedinSlug(row.linkedin))
+      .filter((slug) => slug && !slug.includes(":") && !isMemberId(slug)));
+    if (slugs.size === 1) {
+      const found = await contactBySlug([...slugs][0], { folderIds });
+      if (found) return found;
+    }
+  }
+  return contactBySlug(participant?.slug, { folderIds });
+}
+
+/**
  * The CRM contact for somebody nobody has put there: the one carrying their
  * profile link if somebody did in the meantime, else a new one in the folder
  * made for people who wrote in. `created` says which of the two it was.
@@ -653,7 +680,7 @@ export async function contactBySlug(slug, { folderIds = [] } = {}) {
  */
 async function tieToContact(participant, { folderIds = [], account = null } = {}) {
   return once(`profile:${linkedinSlug(participant.slug)}`, async () => {
-    const existing = await contactBySlug(participant.slug, { folderIds });
+    const existing = await contactForParticipant(participant, { folderIds });
     if (existing) return { contactId: existing, created: false };
     const contactId = await createContact({ participant, accountName: account ? accountName(account) : "" });
     return { contactId, created: true };
@@ -975,7 +1002,7 @@ export async function storeThread({ account, input, folderIds = [], now = new Da
   let lookupError = null;
   if (fresh.length && !contactId && participant.slug) {
     try {
-      contactId = await contactBySlug(participant.slug, { folderIds });
+      contactId = await contactForParticipant(participant, { folderIds });
     } catch (error) {
       lookupError = error;
     }
@@ -1081,7 +1108,7 @@ export async function retryCrmCopies(account, { now = new Date(), folderIds = []
         let error = null;
         if (!contactId && row.meta?.participant?.slug) {
           try {
-            contactId = await contactBySlug(row.meta.participant.slug, { folderIds });
+            contactId = await contactForParticipant(row.meta.participant, { folderIds });
           } catch (caught) {
             error = caught;
           }

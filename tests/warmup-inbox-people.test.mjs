@@ -4,7 +4,7 @@ import test from "node:test";
 
 import { handleWarmupApi } from "../warmup/api.mjs";
 import { ADOPT_FOLDER_DEFAULT, adoptable, forgetAdoptionFolder, hasProfileWords, personName, profileLink } from "../warmup/people.mjs";
-import { ADOPT_PER_SYNC, CONTACT_TYPE, SERVICE_CARD_BODY, isServiceCard, normalizeThreadInput } from "../warmup/inbox.mjs";
+import { ADOPT_PER_SYNC, CONTACT_TYPE, SERVICE_CARD_BODY, isServiceCard, normalizeParticipant, normalizeThreadInput } from "../warmup/inbox.mjs";
 import { DEFAULT_STRATEGY } from "../warmup/strategy.mjs";
 
 /**
@@ -707,4 +707,32 @@ test("«Вхідні»: робочий акаунт без жодної розм
 
   const one = await call({ method: "GET", path: "/api/warmup/inbox?accountId=acc-1" });
   assert.deepEqual(one.payload.accounts.map((row) => row.accountId), ["acc-1"], "відфільтрований список не домальовує нулі");
+});
+
+// ── Внутрішній id LinkedIn замість профілю (власник 16.10: «Miloš Marković є 3 копії») ──
+
+const MILOS_ID = "ACoAAC3a0tSbSMXZnrsyp1eAo9VTYVkSqPA44m8";
+const MILOS = { name: "Miloš Marković", slug: `https://www.linkedin.com/in/${MILOS_ID}`, headline: "" };
+
+test("у розмові лише id LinkedIn: людина з таким повним ім'ям і одним профілем у CRM — це вона, нової копії немає", async () => {
+  rows.contacts.push(
+    { id: "c-milos-1", name: "Miloš Marković", linkedin: "https://www.linkedin.com/in/milo%C5%A1-markovi%C4%87-1990/", created_at: "2026-08-16T13:02:13.000Z" },
+    { id: "c-milos-2", name: "Miloš Marković", linkedin: "https://www.linkedin.com/in/milo%C5%A1-markovi%C4%87-1990", created_at: "2026-09-18T13:39:31.000Z" }
+  );
+  const result = await thread([{ ...THEIRS, body: "Hi Mary!" }], MILOS, "t-milos");
+  assert.equal(result.status, 200);
+  assert.equal(result.payload.crmContactId, "c-milos-1", "дві копії одного профілю — найстаріша");
+  assert.equal(added().length, 0, "третьої копії немає");
+});
+
+test("id LinkedIn і двоє різних людей з одним ім'ям (або нікого): новий контакт, і посилання з id у його власному написанні — робоче", async () => {
+  rows.contacts.push(
+    { id: "c-a", name: "Miloš Marković", linkedin: "https://www.linkedin.com/in/milos-markovic-a", created_at: "2026-08-01T00:00:00.000Z" },
+    { id: "c-b", name: "Miloš Marković", linkedin: "https://www.linkedin.com/in/milos-markovic-b", created_at: "2026-08-02T00:00:00.000Z" }
+  );
+  const result = await thread([{ ...THEIRS, body: "Hi Mary!" }], MILOS, "t-milos-2");
+  assert.equal(result.payload.added, true);
+  const [person] = added();
+  assert.equal(person.linkedin, `https://www.linkedin.com/in/${MILOS_ID}`, "не малими літерами — інакше посилання нікуди не веде");
+  assert.equal(normalizeParticipant(MILOS).slug, MILOS_ID);
 });

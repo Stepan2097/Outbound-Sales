@@ -94,6 +94,24 @@ export function describeClaim(row, campaign = null) {
   };
 }
 
+/**
+ * LinkedIn's member id — `/in/ACoAAB…`, what messaging links to instead of the
+ * vanity slug. Case matters in it: lowercased, the link opens nothing (16.10:
+ * 243 contacts were made with such links), so `memberId` hands it back as written.
+ */
+const MEMBER_ID = /^ac[ow]aa[a-z0-9_-]{10,}$/i;
+
+export function isMemberId(slug) {
+  return MEMBER_ID.test(String(slug || ""));
+}
+
+/** The member id in a link or a bare slug, in its own case; "" when it is not one. */
+export function memberId(value) {
+  const raw = typeof value === "string" ? value.trim() : "";
+  const part = (/\/in\/([^/?#]+)/i.exec(raw)?.[1] ?? (raw.includes("/") ? "" : raw)).trim();
+  return isMemberId(part) ? part : "";
+}
+
 function segment(value) {
   try {
     return decodeURIComponent(value).trim().toLowerCase();

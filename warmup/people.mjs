@@ -1,5 +1,5 @@
 import { crm } from "./db.mjs";
-import { linkedinSlug } from "./outreach.mjs";
+import { linkedinSlug, memberId } from "./outreach.mjs";
 import { nameFromSeenLine } from "./receipts.mjs";
 
 /**
@@ -75,6 +75,8 @@ export function personName(participant) {
 /** A member's profile slug, or "" for anything that is not one (a company page, a school, nothing). */
 function memberSlug(participant) {
   if (participant?.memberProfile === false) return "";
+  const id = memberId(participant?.slug);
+  if (id) return id;
   const slug = linkedinSlug(participant?.slug);
   return slug && !slug.includes(":") ? slug : "";
 }
