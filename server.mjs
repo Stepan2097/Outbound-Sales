@@ -727,7 +727,13 @@ const server = createServer(async (request, response) => {
   }
 });
 
-server.listen(port, () => {
+// Адреса, на якій слухати (таск d1d127d3, 16.10). LISTEN_HOST — явно; без нього PORT=0 —
+// це запуск із тестів, і сервер слухає лише 127.0.0.1: на всіх інтерфейсах кожен
+// такий запуск на macOS — вікно брандмауера «node приймає вхідні з'єднання» (60–80
+// за прогін). Справжній порт (прод, локальний запуск) — усі інтерфейси, як і було.
+const listenHost = process.env.LISTEN_HOST || (port === 0 ? "127.0.0.1" : undefined);
+
+server.listen(port, listenHost, () => {
   // The port the OS actually gave. With PORT=0 — which is how the tests start a
   // server, so that two test runs at once cannot fight over a number — the
   // configured port means nothing; whoever started this process reads the real
