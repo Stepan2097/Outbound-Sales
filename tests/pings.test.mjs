@@ -158,9 +158,11 @@ test("відкритий діалог: лід відповів після 01.08 
 });
 
 test("крок за правилом і дати: важливіші раніше, не більше межі на робочий день, із суботи — з понеділка", () => {
-  assert.equal(ruleVerdict({ status: "responded", lastBy: "them" }).reason, "reply");
-  assert.equal(ruleVerdict({ status: "booked_call", lastBy: "us" }).reason, "call");
-  assert.equal(ruleVerdict({ status: "responded", lastBy: "us" }).reason, "silent");
+  const timeline = [{ by: "us", type: "linkedin", text: "…" }];
+  assert.equal(ruleVerdict({ status: "responded", lastBy: "them", timeline }).reason, "reply");
+  assert.equal(ruleVerdict({ status: "booked_call", lastBy: "us", timeline }).reason, "call");
+  assert.equal(ruleVerdict({ status: "responded", lastBy: "us", timeline }).reason, "silent");
+  assert.match(ruleVerdict({ status: "responded", lastBy: null, timeline: [] }).why, /Дотиків з 01\.08 у CRM немає/);
   const items = Array.from({ length: 5 }, (_, index) => ({ contactId: `c${index}`, priority: index === 4 ? "high" : "normal", reason: "silent", lastAt: `2026-09-0${index + 1}` }));
   const spread = spreadDates(items, { today: "2026-10-16", perDay: 2 });
   assert.equal(spread[0].contactId, "c4", "високий пріоритет першим");
