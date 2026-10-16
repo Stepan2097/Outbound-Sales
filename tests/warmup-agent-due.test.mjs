@@ -660,3 +660,32 @@ test("у вікні схвалене йде перед звичайною сес
   await finishRun({ account: { id: answer.next.accountId }, run: null, leaseId: taken.lease.leaseId, ok: true, now });
   assert.equal(restingUntil(answer.next.accountId), 0, "позачергова сесія не робить звичайну пізнішою");
 });
+
+// ── ліміт запрошень LinkedIn — лише запрошення, до завтра (власник 16.10) ──
+
+test("ліміт запрошень: акаунт не на паузі, у плані немає запитів, перегляди й лайки лишаються", async () => {
+  const { today } = await import("../warmup/db.mjs");
+  const reported = await call({ method: "POST", path: "/api/warmup/agent", body: { accountId: "acc-1", action: "invites.held", note: "запрошення не було надіслано" } });
+  assert.equal(reported.status, 200);
+  assert.equal(reported.payload.invitesHeld, true);
+  assert.equal(reported.payload.until, today());
+  assert.ok(!written.some((row) => row.table === "wl_runs"), "пауза не пишеться");
+  assert.ok(written.some((row) => row.table === "wl_events" && row.body?.type === "invites.held"));
+
+  rows.wl_runs = [run("acc-1", 12), run("acc-2", 2)];
+  rows.wl_events = [];
+  const before = await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" });
+  assert.notEqual(before.payload.plan.find((row) => row.kind === "connect"), undefined, "на 12-й день запити в плані є");
+
+  rows.wl_events = [{ id: "h1", account_id: "acc-1", type: "invites.held", created_at: new Date().toISOString(), meta: { until: today() } }];
+  const plan = await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" });
+  assert.equal(plan.payload.runnable, true);
+  assert.equal(plan.payload.plan.find((row) => row.kind === "connect"), undefined, "запитів у друзі сьогодні немає");
+  assert.ok(plan.payload.plan.some((row) => row.kind === "profile_view"), "перегляди лишаються");
+  assert.deepEqual(plan.payload.invites.toSend, []);
+
+  // Tomorrow it is tried again.
+  rows.wl_events = [{ id: "h1", account_id: "acc-1", type: "invites.held", created_at: new Date(Date.now() - 86400000).toISOString(), meta: { until: "2000-01-01" } }];
+  const next = await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" });
+  assert.notEqual(next.payload.plan.find((row) => row.kind === "connect"), undefined, "наступного дня запити знову в плані");
+});

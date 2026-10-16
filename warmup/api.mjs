@@ -21,7 +21,7 @@ import { antyTimestampToIso, describeSession, durationMin } from "./sessions.mjs
 import { encryptSecret, secretsConfigured } from "./secretbox.mjs";
 import { RECHECK_DONE, RECHECK_REQUESTED, issueLoginCheck, readLoginCheck } from "./login-check.mjs";
 import {
-  activeRun, checkQuota, commitAction, connectQuotaToday, describeAccount, ensureDefaultStrategy, heldUntil,
+  activeRun, checkQuota, commitAction, connectQuotaToday, describeAccount, ensureDefaultStrategy, heldUntil, holdInvites, invitesHeldOn,
   latestWarnings, logEvent, loadAccount, loginIdentities, newestRun, openSession, pauseForWarning, probeEventWriteAccess, recordAction,
   toStrategy
 } from "./store.mjs";
@@ -176,6 +176,8 @@ async function connectAllowance(account) {
   // `paused` so a caller can tell "stop everything" from "no requests today":
   // the first one also holds back the checks, which cost no allowance.
   if (pausedOn(run, today())) return { blocked: `Paused until ${run.paused_until}`, paused: true };
+  // LinkedIn's invitation limit: no requests today, nothing else held (16.10).
+  if (await invitesHeldOn(account.id)) return { run, day: dayOfRun(run), blocked: "LinkedIn обмежив запрошення — нові підуть завтра", held: true, quota: 0, spent: 0 };
 
   const allowance = await checkQuota(account, run, "connect", 1);
   const day = dayOfRun(run);
@@ -3453,6 +3455,8 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       const doneByKind = await doneToday(run);
       const weekly = await weeklyConnectAllowance(account.id);
       dayPlan.quotas.connect = connectCeiling(dayPlan.quotas.connect, doneByKind.get("connect") ?? 0, weekly.done);
+      // LinkedIn's invitation limit hit today: no requests in the plan, the rest stays.
+      if (await invitesHeldOn(account.id)) dayPlan.quotas.connect = 0;
 
       // On a day with more requests than one run carries, and people for
       // them, the first session leaves two views for the session that sends
@@ -3696,6 +3700,16 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       // before anything can run, and says nothing about how long to leave the
       // account alone; a warning needs nobody, and says exactly that. Health
       // keeps meaning what it meant.
+      // LinkedIn's limit on invitations, seen by the agent: invitations stop
+      // for today and nothing else does (owner 16.10).
+      if (action === "invites.held") {
+        const run = await activeRun(account.id);
+        const note = typeof body.note === "string" ? body.note.slice(0, 300) : null;
+        const held = await holdInvites({ account, run, source: "agent", note });
+        sendJson(response, 200, { success: true, invitesHeld: true, until: held.until });
+        return true;
+      }
+
       if (action === "warning") {
         const run = await activeRun(account.id);
         if (!run) return fail(response, sendJson, 409, "No warm-up in progress");

@@ -292,6 +292,32 @@ export async function activeRun(accountId) {
  * after the run: a failure on the account row below it still leaves the
  * pause saying whose it is.
  */
+/**
+ * LinkedIn's limit on invitations (власник 16.10: «обмеження на додавання людей
+ * робить обмеження на додавання тільки до наступного дня… на повідомлення чи
+ * гортання стрічки це ніяк не повинно впливати»). Not a pause: no invitations
+ * for the rest of the day, tried again the next one, and everything else —
+ * views, likes, the inbox, replies — goes on.
+ */
+export const INVITES_HELD = "invites.held";
+
+export async function holdInvites({ account, run = null, source, note = null, todayIso = today() }) {
+  await logEvent({
+    accountId: account.id, runId: run?.id ?? null, level: "warn", type: INVITES_HELD,
+    message: `LinkedIn limited invitations — none more today, tried again tomorrow; everything else goes on`,
+    meta: { until: todayIso, source, note }
+  });
+  return { until: todayIso };
+}
+
+/** The day invitations are held to, when that is today — else null. */
+export async function invitesHeldOn(accountId, todayIso = today()) {
+  const rows = await anty.from("wl_events").select("meta,created_at").eq("account_id", accountId).eq("type", INVITES_HELD)
+    .order("created_at", { ascending: false }).limit(1).rows();
+  const until = rows[0]?.meta?.until;
+  return until && until >= todayIso ? until : null;
+}
+
 export async function pauseForWarning({ account, run, source, note = null, report = null, todayIso = today() }) {
   const pauseDays = run.strategy_snapshot?.pauseDays ?? DEFAULT_STRATEGY.pauseDays;
   const pause = warningPause(run, todayIso, pauseDays);
@@ -423,6 +449,9 @@ export async function checkQuota(account, run, kind, step = 1) {
   // twentieth is refused here as "quota reached" whatever the snapshot says.
   const daily = dailyQuota(snapshot, account.id, day, kind);
   let quota = daily;
+  if (kind === "connect" && await invitesHeldOn(account.id)) {
+    return { ok: false, status: 409, error: "LinkedIn limited invitations today — tried again tomorrow", quota: 0, done: 0, held: true };
+  }
   // No quota in this phase means forbidden, not unlimited.
   if (quota === 0) return { ok: false, status: 409, error: `${ACTION_LABEL[kind]} are not allowed on day ${day}` };
 

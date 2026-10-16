@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { anty, today } from "./db.mjs";
 import { SESSION_WINDOW, insideWindow, windowLabel } from "./schedule.mjs";
 import { dailyQuota, dayOfRun, hasPlanOn, inWorkingMode, noteAllowedOnDay, pausedOn } from "./strategy.mjs";
-import { LIVE_ACCOUNT_STATUSES, LIVE_RUN_STATES, logEvent, readHoldsFrom, settlePause } from "./store.mjs";
+import { INVITES_HELD, LIVE_ACCOUNT_STATUSES, LIVE_RUN_STATES, logEvent, readHoldsFrom, settlePause } from "./store.mjs";
 import {
   MAX_INVITES_PER_RUN, MAX_INVITE_CHECKS_PER_RUN, checkedTodayAccounts, folderAddedToday, heldCounts,
   openConversationCounts, pendingCounts
@@ -544,7 +544,7 @@ export function upkeepFor({ accountId, inPlan, pendingInvites, openConversations
 export function dueFrom({
   accounts, runs, dayActions, openProfiles, invitesWaiting, invitesClaimed, folderFeeds: feedsByAccount,
   folderAdded, pendingInvites, openConversations, checkedToday, inboxSyncedToday, weeklyConnects,
-  todayIso, nowMs = Date.now()
+  invitesHeld = new Set(), todayIso, nowMs = Date.now()
 }) {
   const runByAccount = new Map((runs ?? []).map((row) => [row.account_id, row]));
 
@@ -596,7 +596,8 @@ export function dueFrom({
 
     const done = doneByAccount.get(account.id);
     const connectsDone = done?.get("connect") ?? 0;
-    const connectQuota = inPlan ? connectCeiling(
+    // LinkedIn's invitation limit today holds the requests, nothing else (16.10).
+    const connectQuota = inPlan && !invitesHeld.has(account.id) ? connectCeiling(
       dailyQuota(run.strategy_snapshot, account.id, day, "connect"), connectsDone,
       weeklyConnects?.get(account.id) ?? connectsDone
     ) : 0;
@@ -770,9 +771,16 @@ async function candidates(todayIso, nowMs, campaigns = []) {
     syncedTodayAccounts(ids, todayIso)
   ]);
 
+  // LinkedIn's invitation limit hit today, by account (store.mjs `holdInvites`).
+  const invitesHeld = new Set();
+  try {
+    const since = new Date(nowMs - 2 * 86_400_000).toISOString();
+    const held = await anty.from("wl_events").select("account_id,meta").eq("type", INVITES_HELD).in("account_id", ids).gte("created_at", since).rows();
+    for (const row of held) if ((row.meta?.until ?? "") >= todayIso) invitesHeld.add(row.account_id);
+  } catch { /* unread: nothing is held back for it */ }
   return dueFrom({
     accounts, runs, dayActions, openProfiles, invitesWaiting, invitesClaimed, folderFeeds: feeds, folderAdded,
-    pendingInvites, openConversations, checkedToday, inboxSyncedToday, weeklyConnects, todayIso, nowMs
+    pendingInvites, openConversations, checkedToday, inboxSyncedToday, weeklyConnects, invitesHeld, todayIso, nowMs
   });
 }
 

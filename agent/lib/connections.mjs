@@ -88,9 +88,36 @@ export async function linkedinWarning(page) {
 
 export class VisitStopped extends Error {}
 
+/**
+ * LinkedIn's limit on invitations — the weekly limit, «запрошення не було
+ * надіслано» — is not a restriction of the account (owner 16.10: «обмеження
+ * на додавання людей робить обмеження на додавання тільки до наступного дня…
+ * на повідомлення чи гортання стрічки це ніяк не повинно впливати»). It stops
+ * the invitations of this visit and of today; a checkpoint, a verification or
+ * a restricted account still stops everything.
+ */
+const INVITE_LIMIT = /(?:invitation limit|too many invitations|ліміт запрошень|ліміт\S* на запрошення|тижнев\S* ліміт\S*|запрошення не було надіслано|лимит приглашений)/i;
+export const isInviteLimit = (warning) => INVITE_LIMIT.test(String(warning || ''));
+
+/** Thrown out of the invitation step only: the visit goes on to the inbox and the replies. */
+export class InvitesStopped extends Error {}
+
+// Once per visit (one run-account process is one visit): the limit is said to
+// the portal once, and its toast still on the page afterwards stops nothing.
+let invitesHeldThisVisit = false;
+/** For tests, which run many visits in one process. */
+export function resetVisitState() { invitesHeldThisVisit = false; }
+
 export async function stopOnWarning(page, portal) {
   const warning = await linkedinWarning(page);
   if (!warning) return;
+  if (isInviteLimit(warning)) {
+    if (invitesHeldThisVisit) return;
+    invitesHeldThisVisit = true;
+    const held = await reportWithRetry(() => portal.invitesHeld(warning));
+    if (!held.success) throw new VisitStopped(`Could not report LinkedIn invitation limit: ${held.error}`);
+    throw new InvitesStopped(`LinkedIn limited invitations — none more today: ${warning}`);
+  }
   const result = await reportWithRetry(() => portal.warning(warning));
   if (!result.success) throw new VisitStopped(`Could not report LinkedIn warning: ${result.error}`);
   throw new VisitStopped(`LinkedIn warning — account paused: ${warning}`);
@@ -423,6 +450,10 @@ export async function sendQueuedInvitations(page, portal, invites, {
     if (!answer.success) throw new VisitStopped(`Invitation report refused: ${answer.error}`);
     if (outcome === 'sent') onSent(invite);
     if (answer.duringPause || outcome === 'blocked') throw new VisitStopped('Account paused during invitation');
+    if (answer.invitesHeld) {
+      invitesHeldThisVisit = true;
+      throw new InvitesStopped('LinkedIn limited invitations — none more today');
+    }
     if (answer.stopSending || answer.overQuota) break;
     await sleep(2000);
   }

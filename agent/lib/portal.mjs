@@ -73,6 +73,8 @@ export class Portal {
     return this.#post({ action: 'login.recheck', nonce, signedIn, reason });
   }
   warning(note) { return this.#post({ action: 'warning', note }); }
+  /** LinkedIn's limit on invitations: none more today, everything else goes on. */
+  invitesHeld(note) { return this.#post({ action: 'invites.held', note }); }
   prepareInvite(outreachId) { return this.#post({ action: 'invite.prepare', outreachId }); }
   inviteSent(outreachId, outcome, leaseId = this.leaseId) { return this.#post({ action: 'invite.sent', outreachId, outcome, leaseId }); }
   invitesChecked(results) { return this.#post({ action: 'invites.checked', results }); }

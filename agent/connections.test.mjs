@@ -3,7 +3,7 @@ import { test, before, after } from 'node:test';
 import { chromium } from 'playwright-core';
 import { CHROME_PATH } from './lib/env.mjs';
 import {
-  sendInvitation, sendQueuedInvitations, checkInvitations, stopOnWarning, VisitStopped, reportWithRetry
+  sendInvitation, sendQueuedInvitations, checkInvitations, stopOnWarning, VisitStopped, reportWithRetry, InvitesStopped, resetVisitState
 } from './lib/connections.mjs';
 import { buildThread } from './lib/inbox-dom.mjs';
 
@@ -309,14 +309,30 @@ test('a redirected profile is not treated as the queued recipient', async (t) =>
   assert.deepEqual(await page.evaluate(() => window.sent), []);
 });
 
-test('an invitation limit warning pauses the server before any request is sent', async (t) => {
+// 16.10, the owner: the invitation limit holds the invitations until tomorrow
+// and nothing else — no pause of the account.
+test('an invitation limit warning holds the invitations, not the account, before any request is sent', async (t) => {
+  resetVisitState();
   const page = await profile(t, { warning: '<div role="alert">You have reached your weekly invitation limit</div>' });
   let paused = 0;
-  await assert.rejects(sendInvitation(page, queued, { sleep, guard: () => stopOnWarning(page, {
-    warning: async () => { paused++; return { success: true }; }
-  }) }), VisitStopped);
-  assert.equal(paused, 1);
+  let held = 0;
+  const portal = { warning: async () => { paused++; return { success: true }; }, invitesHeld: async () => { held++; return { success: true }; } };
+  await assert.rejects(sendInvitation(page, queued, { sleep, guard: () => stopOnWarning(page, portal) }), InvitesStopped);
+  assert.equal(held, 1);
+  assert.equal(paused, 0, 'the account is not paused');
   assert.deepEqual(await page.evaluate(() => window.sent), []);
+  // The toast still on the page later in the visit stops nothing more.
+  await stopOnWarning(page, portal);
+  assert.equal(held, 1);
+});
+
+test('a real restriction still pauses the whole account', async (t) => {
+  resetVisitState();
+  const page = await profile(t, { warning: '<div role="alert">Your account has been restricted</div>' });
+  await page.goto(queued.linkedin, { waitUntil: 'domcontentloaded' });
+  let paused = 0;
+  await assert.rejects(stopOnWarning(page, { warning: async () => { paused++; return { success: true }; }, invitesHeld: async () => ({ success: true }) }), VisitStopped);
+  assert.equal(paused, 1);
 });
 
 /**
@@ -324,13 +340,16 @@ test('an invitation limit warning pauses the server before any request is sent',
  * pending and hit LinkedIn's weekly limit; the Ukrainian toast was not
  * recognised, so every session clicked Connect into the same refusal.
  */
-test('український тижневий ліміт LinkedIn теж зупиняє і ставить акаунт на паузу', async (t) => {
+test('український тижневий ліміт LinkedIn зупиняє лише запрошення — акаунт не на паузі', async (t) => {
+  resetVisitState();
   const page = await profile(t, { warning: '<div role="alert">Ваше запрошення не було надіслано Bruno, оскільки ви досягли тижневого ліміту на запрошення контактів. Повторіть спробу наступного тижня</div>' });
   let paused = 0;
+  let held = 0;
   await assert.rejects(sendInvitation(page, queued, { sleep, guard: () => stopOnWarning(page, {
-    warning: async () => { paused++; return { success: true }; }
-  }) }), VisitStopped);
-  assert.equal(paused, 1, 'акаунт не поставлено на паузу');
+    warning: async () => { paused++; return { success: true }; }, invitesHeld: async () => { held++; return { success: true }; }
+  }) }), InvitesStopped);
+  assert.equal(held, 1, 'запрошення не відкладено');
+  assert.equal(paused, 0, 'акаунт не має ставати на паузу');
   assert.deepEqual(await page.evaluate(() => window.sent), []);
 });
 

@@ -16,7 +16,7 @@
  */
 import { chromium } from 'playwright-core';
 import { DEFAULT_PORTAL, CHROME_PATH } from './lib/env.mjs';
-import { checkInvitations, sendQueuedInvitations, stopOnWarning, VisitStopped, reportWithRetry } from './lib/connections.mjs';
+import { checkInvitations, InvitesStopped, sendQueuedInvitations, stopOnWarning, VisitStopped, reportWithRetry } from './lib/connections.mjs';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -403,6 +403,9 @@ log(`сесію відкрито (${session.sessionId}${session.resumed ? ', п�
   }
 
   if (plan.invites?.toSend?.length || plan.invites?.toCheck?.length) await recycle('запрошення');
+  // LinkedIn's invitation limit ends this step, not the visit (16.10): the
+  // inbox and the replies below still happen.
+  try {
   await sendQueuedInvitations(page, portal, plan.invites?.toSend, {
     guard, leaseId: portal.leaseId,
     onSent: (invite) => report.actions.push({ kind: 'connect', detail: `Запит до ${invite.name}` }),
@@ -414,6 +417,11 @@ log(`сесію відкрито (${session.sessionId}${session.resumed ? ', п�
     }
   });
   if (plan.invites?.toCheck?.length) await checkInvitations(page, portal, plan.invites.toCheck, { guard });
+  } catch (e) {
+    if (!(e instanceof InvitesStopped)) throw e;
+    report.errors.push(`запрошення: ${e.message}`);
+    log(`  ⏸ ${e.message} — далі вхідні й відповіді`);
+  }
 
   for (const kind of ['post_comment', 'follow']) {
     if (remaining[kind] > 0) {
