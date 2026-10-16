@@ -15,16 +15,9 @@ import { adoptable, adoptionEnabled, once, personName, profileLink } from "./peo
  * One person at a time (`once`, shared with people.mjs), so a friend of two
  * accounts, or one who also wrote in, is one contact.
  *
- * Off by default since 16.10 (власник: «видали цю папку Друзі LinkedIn-акаунті»):
- * the folder was deleted, and left on this would make it again at the next
- * read. NETWORK_CONTACTS_ADOPT=on brings it back; INBOX_ADOPT_CONTACTS=0 turns
- * it off with the inbox's adoption. The folder is NETWORK_CONTACTS_FOLDER, else
- * «Друзі LinkedIn-акаунтів».
+ * Off with the same switch as the inbox's adoption, INBOX_ADOPT_CONTACTS=0;
+ * the folder is NETWORK_CONTACTS_FOLDER, else «Друзі LinkedIn-акаунтів».
  */
-
-export function networkAdoptionEnabled(env = process.env) {
-  return /^(1|true|on|yes)$/i.test(String(env.NETWORK_CONTACTS_ADOPT ?? "").trim()) && adoptionEnabled(env);
-}
 
 export const NETWORK_FOLDER_DEFAULT = "Друзі LinkedIn-акаунтів";
 export const NETWORK_SOURCE = "linkedin_network";
@@ -97,7 +90,7 @@ async function joinFolder(contactIds, folderId) {
 
 export async function adoptNetwork({ account, people, lookup = contactBySlug, create = createFriend, join = joinFolder, folderId = networkFolderId, concurrency = 6, env = process.env }) {
   const result = { checked: 0, inCrm: 0, added: 0, joined: 0, skipped: 0, failed: 0, lastError: null };
-  if (!networkAdoptionEnabled(env)) return { ...result, off: true };
+  if (!adoptionEnabled(env)) return { ...result, off: true };
   const label = typeof account === "string" ? account : accountName(account);
   const list = (Array.isArray(people) ? people : []).filter((person) => {
     const ok = adoptable({ name: person?.name, slug: person?.slug });

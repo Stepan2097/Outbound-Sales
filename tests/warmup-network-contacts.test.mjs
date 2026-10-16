@@ -28,22 +28,20 @@ test("друзі не з CRM стають контактами в папці; х
     create: async (person, label, folder) => { made.push({ slug: person.slug, label, folder }); inCrm.add(person.slug); return "contact-2"; },
     join: async (ids, folder) => joined.push({ ids: ids.sort(), folder }),
     folderId: async () => "folder-1",
-    env: { NETWORK_CONTACTS_ADOPT: "on" }
+    env: {}
   });
   assert.deepEqual(made, [{ slug: "new-person", label: "Chloe Stewart", folder: "folder-1" }]);
   assert.deepEqual(joined, [{ ids: ["contact-1", "contact-2"], folder: "folder-1" }], "і той, хто вже був у базі, — у папці");
   assert.deepEqual({ ...result, lastError: undefined }, { checked: 2, inCrm: 1, added: 1, joined: 2, skipped: 2, failed: 0, lastError: undefined });
 
   // The same friend read on another account: one contact, not two.
-  const again = await adoptNetwork({ account: "Clara", people: [people[1]], lookup: async (slug) => (inCrm.has(slug) ? "c" : null), create: async () => made.push("twice"), join: async () => {}, folderId: async () => "folder-1", env: { NETWORK_CONTACTS_ADOPT: "on" } });
+  const again = await adoptNetwork({ account: "Clara", people: [people[1]], lookup: async (slug) => (inCrm.has(slug) ? "c" : null), create: async () => made.push("twice"), join: async () => {}, folderId: async () => "folder-1", env: {} });
   assert.equal(again.added, 0);
   assert.equal(made.length, 1);
 });
 
-test("вимкнено, поки NETWORK_CONTACTS_ADOPT не on (власник 16.10 видалив папку); INBOX_ADOPT_CONTACTS=0 вимикає й це; назва папки — NETWORK_CONTACTS_FOLDER", async () => {
-  const off = { account: "x", people, lookup: async () => null, create: async () => { throw new Error("must not"); }, join: async () => { throw new Error("must not"); }, folderId: async () => { throw new Error("must not make the folder"); } };
-  assert.equal((await adoptNetwork({ ...off, env: {} })).off, true, "за замовчуванням — нічого, і папка не створюється знову");
-  const result = await adoptNetwork({ ...off, env: { NETWORK_CONTACTS_ADOPT: "on", INBOX_ADOPT_CONTACTS: "0" } });
+test("вимикач INBOX_ADOPT_CONTACTS=0 вимикає й це; назва папки — NETWORK_CONTACTS_FOLDER", async () => {
+  const result = await adoptNetwork({ account: "x", people, lookup: async () => null, create: async () => { throw new Error("must not"); }, folderId: async () => "f", env: { INBOX_ADOPT_CONTACTS: "0" } });
   assert.equal(result.off, true);
   assert.equal(networkFolderName({}), "Друзі LinkedIn-акаунтів");
   assert.equal(networkFolderName({ NETWORK_CONTACTS_FOLDER: "Друзі" }), "Друзі");
@@ -57,7 +55,7 @@ test("CRM не прийняла контакт — рахується як зб�
     create: async (person) => { if (person.slug === "third") throw new Error("CRM down"); return "c-new"; },
     join: async () => {},
     folderId: async () => "f",
-    env: { NETWORK_CONTACTS_ADOPT: "on" }
+    env: {}
   });
   assert.deepEqual([result.added, result.failed, result.lastError], [1, 1, "CRM down"]);
 });
