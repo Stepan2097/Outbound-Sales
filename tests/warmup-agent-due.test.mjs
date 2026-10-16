@@ -622,7 +622,11 @@ test("a failed run is handed out again when its cool-off ends, and its log line 
 // ── позачергова сесія для схваленого (власник 15.10: «треба одразу відправляти») ──
 
 test("схвалене повідомлення вночі: акаунт видається одразу, план — лише відправити, після сесії він не «відпочиває»", async () => {
-  const night = new Date(); night.setHours(22, 0, 0, 0);
+  // «Ніч» — поза вікном 08:00–20:00. Якщо зараз і так поза вікном, беремо зараз: план нижче
+  // читається за справжнім часом, і оренда, видана о 22:00, о 22:30 уже минула б (тест падав
+  // увечері за місцевим часом, 16.10).
+  const night = new Date();
+  if (night.getHours() >= 8 && night.getHours() < 20) night.setHours(22, 0, 0, 0);
   rows.wl_events = [{ id: "q1", account_id: "acc-1", type: "outbox.queued", created_at: new Date().toISOString(), meta: { threadKey: "t1", body: "Hi Ana", participantName: "Ana" } }];
 
   const answer = await decideNext({ now: night });
