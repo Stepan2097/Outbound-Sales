@@ -43,6 +43,7 @@ import { URGENT_POLL_SECONDS, activeLease, decideNext, finishRun, leaseAccount, 
 import {
   DEFAULT_FROM_DAY, allowanceReason, claimCapacity, claimCutoff, defaultFilters, describeCampaign, feedingFor,
   folderRoom, fromDayLookup, isCampaignState, migrateCampaigns, moveTo, nextOrder, normalizeCampaign, parseFromDay,
+  DEFAULT_MAX_PEOPLE, accountClash, parseScenario, shareLeft,
   progressApproximate, progressFrom, renumber, runningFor, targetingOf
 } from "./campaigns.mjs";
 import { nextCandidates, takeFromCampaigns } from "./feed.mjs";
@@ -374,6 +375,54 @@ function topUpFromFolder(account, campaigns) {
   return current;
 }
 
+/**
+ * Скільки людей кампанія вже дала з папки, разом і по акаунтах — за подіями
+ * `invite.requested`, де `requestInvite` записав кампанію.
+ */
+async function campaignFed(campaignIds) {
+  const fed = new Map(campaignIds.map((id) => [id, { total: 0, byAccount: new Map() }]));
+  if (!campaignIds.length) return fed;
+  for (let offset = 0; ; offset += 1000) {
+    const rows = await anty.from("wl_events").select("id,account_id,meta").eq("type", "invite.requested")
+      .in("meta->>campaignId", campaignIds).order("id").limit(1000).offset(offset).rows();
+    for (const row of rows) {
+      const entry = fed.get(String(row.meta?.campaignId || ""));
+      if (!entry) continue;
+      entry.total += 1;
+      entry.byAccount.set(row.account_id, (entry.byAccount.get(row.account_id) || 0) + 1);
+    }
+    if (rows.length < 1000) return fed;
+  }
+}
+
+/**
+ * Кампанії з межею людей (етап 3/6) годують акаунт лише до його частки — межа
+ * порівну між акаунтами кампанії — і не більше межі разом. Кампанія без межі
+ * (збережена до неї) — як і була.
+ */
+async function campaignRoom(feeding, accountId) {
+  const capped = feeding.filter((campaign) => campaign.maxPeople);
+  if (!capped.length) return { campaigns: feeding, limit: Infinity };
+  const fed = await campaignFed(capped.map((campaign) => campaign.id));
+  let limit = 0;
+  let unlimited = false;
+  const kept = [];
+  for (const campaign of feeding) {
+    if (!campaign.maxPeople) {
+      kept.push(campaign);
+      unlimited = true;
+      continue;
+    }
+    const entry = fed.get(campaign.id);
+    const left = shareLeft(campaign, { total: entry.total, mine: entry.byAccount.get(accountId) || 0 });
+    if (left > 0) {
+      kept.push(campaign);
+      limit += left;
+    }
+  }
+  return { campaigns: kept, limit: unlimited ? Infinity : limit };
+}
+
 async function fillFromFolder(account, campaigns) {
   const nothing = { added: 0, collided: 0 };
   // Asked before anything is read: most accounts on most calls are on no
@@ -381,7 +430,8 @@ async function fillFromFolder(account, campaigns) {
   if (!crm.configured() || !runningFor(campaigns, account.id).length) return nothing;
   const allowance = await connectAllowance(account);
   if (allowance.blocked || !allowance.run) return nothing;
-  const feeding = feedingFor(campaigns, account.id, allowance.day);
+  const room = await campaignRoom(feedingFor(campaigns, account.id, allowance.day), account.id);
+  const feeding = room.campaigns;
   if (!feeding.length) return nothing;
 
   const left = Math.max(0, (allowance.quota || 0) - (allowance.spent || 0));
@@ -394,7 +444,7 @@ async function fillFromFolder(account, campaigns) {
   // The day's cap: what the folder already added to this account today, let
   // go or not, comes off twice the day's quota — see `FOLDER_DAILY_FACTOR`.
   const fedToday = (await folderAddedToday([account.id], todayIso)).get(account.id) ?? 0;
-  const need = folderRoom({ left, ...held, quota: allowance.quota || 0, fedToday });
+  const need = Math.min(folderRoom({ left, ...held, quota: allowance.quota || 0, fedToday }), room.limit);
   if (need <= 0) return nothing;
 
   const outcome = await takeFromCampaigns({
@@ -794,8 +844,30 @@ async function enrichCampaign(campaign, campaigns, context) {
     forecastError = crmError(error);
   }
 
+  // Розподіл і темп (етап 3/6): скільки людей кампанія дала кожному акаунту і
+  // скільки на день вони зараз можуть узяти — звідси, за скільки днів набереться межа.
+  let distribution = null;
+  if (campaign.maxPeople) {
+    const fed = (await campaignFed([campaign.id])).get(campaign.id);
+    let perDay = 0;
+    for (const accountId of campaign.accountIds) {
+      const account = await loadAccount(accountId).catch(() => null);
+      const allowance = account ? await connectAllowance(account).catch(() => ({ blocked: true })) : { blocked: true };
+      if (!allowance.blocked && allowance.run && allowance.day >= (campaign.fromDay ?? DEFAULT_FROM_DAY)) perDay += allowance.quota || 0;
+    }
+    const left = Math.max(0, campaign.maxPeople - fed.total);
+    distribution = {
+      total: fed.total,
+      share: Math.ceil(campaign.maxPeople / Math.max(1, campaign.accountIds.length)),
+      byAccount: Object.fromEntries(campaign.accountIds.map((id) => [id, fed.byAccount.get(id) || 0])),
+      perDay,
+      daysLeft: left && perDay ? Math.ceil(left / perDay) : left ? null : 0
+    };
+  }
+
   return {
     ...describeCampaign(campaign, context.folderNames.get(campaign.folderId) ?? null),
+    distribution,
     forecast,
     forecastError,
     progress,
@@ -889,10 +961,12 @@ async function writeFirstDraft(row, choice, campaigns, writer) {
   };
   const language = choice.language
     || (/^(ua|ukr|україн|украин)/i.test(String(contact.country || "").trim()) ? "uk" : "en");
+  // Підхід кампанії (етап 3/6) — те, з чим ми йдемо до людини, коли окремої вказівки немає.
+  const approach = campaigns.find((campaign) => campaign.state === "running" && campaign.accountIds.includes(row.account_id) && campaign.approach)?.approach || "";
   const written = await writer.write(contact, {
     productId: choice.productId || campaignProductFor(row.account_id, campaigns),
     language,
-    instruction: choice.instruction
+    instruction: choice.instruction || (approach ? `Campaign approach: ${approach}` : "")
   });
   if (!written?.text?.trim()) return null;
   return saveDraft(row, written);
@@ -2278,12 +2352,16 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       const productId = body.productId === undefined || body.productId === null ? null : String(body.productId).trim() || null;
       const fromDay = body.fromDay === undefined || body.fromDay === null ? { value: DEFAULT_FROM_DAY } : parseFromDay(body.fromDay);
       if (fromDay.error) return fail(response, sendJson, 400, fromDay.error);
+      // Сценарій (етап 3/6): нова кампанія — з межею 200 людей, якщо не сказано інше.
+      const scenario = parseScenario({ maxPeople: DEFAULT_MAX_PEOPLE, ...body });
+      if (scenario.error) return fail(response, sendJson, 400, scenario.error);
 
       const checked = await checkCampaignInput({ folderId, accountIds, productId, products: campaignStore.products() });
       if (checked.error) return fail(response, sendJson, checked.status, checked.error);
 
       const campaigns = await loadCampaigns();
       const created = normalizeCampaign({
+        ...scenario.value,
         name,
         folderId,
         folderName: checked.folderName,
@@ -2340,12 +2418,20 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       const state = body.state === undefined ? current.state : body.state;
       const fromDay = body.fromDay === undefined ? { value: current.fromDay } : parseFromDay(body.fromDay);
       if (fromDay.error) return fail(response, sendJson, 400, fromDay.error);
+      const scenario = parseScenario(body);
+      if (scenario.error) return fail(response, sendJson, 400, scenario.error);
+      // Акаунт — в одній живій кампанії: чий сценарій веде його людей, має бути однозначно.
+      const clash = accountClash(campaigns, { id: current.id, state, accountIds });
+      if (clash) {
+        return fail(response, sendJson, 409, `Акаунт уже веде живу кампанію «${clash.campaign.name}» — спершу приберіть його звідти або поставте її на паузу.`);
+      }
 
       const checked = await checkCampaignInput({ folderId, accountIds, productId, products: campaignStore.products() });
       if (checked.error) return fail(response, sendJson, checked.status, checked.error);
 
       const updated = normalizeCampaign({
         ...current,
+        ...scenario.value,
         name: body.name === undefined ? current.name : String(body.name).trim() || current.name,
         folderId,
         folderName: checked.folderName,

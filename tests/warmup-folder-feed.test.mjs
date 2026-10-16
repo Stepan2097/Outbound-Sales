@@ -1747,3 +1747,29 @@ test('two concurrent reports cannot both spend the last request of the week', as
   const plan = await call({ method: 'GET', path: '/api/warmup/agent?accountId=acc-1' });
   assert.equal(plan.payload.weeklyConnections.done, 60);
 });
+
+// Етап 3/6 (таск 9a01a9f9): межа людей кампанії — порівну між її акаунтами.
+test("кампанія з межею 2 на два акаунти дає цьому акаунту лише його частку — одного, хоч квота дня більша", async () => {
+  const quota = onDay(8);
+  assert.ok(quota >= 2);
+  campaigns = [normalizeCampaign({
+    id: "camp-1", name: "SiGMA", folderId: "folder-1", folderName: "ліди з linkedin2",
+    filters: {}, accountIds: ["acc-1", "acc-2"], state: "running", order: 0, maxPeople: 2, silentSteps: [3, 4]
+  })];
+  await call({ method: "POST", path: "/api/warmup/agent/lease", body: { accountId: "acc-1" } });
+  await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" });
+  assert.equal(events("invite.requested").length, 1, "частка акаунта — 2 / 2 = 1");
+  await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" });
+  assert.equal(events("invite.requested").length, 1, "частку набрано — більше не бере");
+});
+
+test("кампанію не запустити з акаунтом, який уже веде іншу живу кампанію", async () => {
+  campaigns = [
+    ...campaigns,
+    normalizeCampaign({ id: "camp-2", name: "Друга", folderId: "folder-1", folderName: "ліди з linkedin2", filters: {}, accountIds: ["acc-1"], state: "draft", order: 1 })
+  ];
+  const refused = await call({ method: "PATCH", path: "/api/warmup/campaigns", body: { id: "camp-2", state: "running" } });
+  assert.equal(refused.status, 409);
+  assert.match(refused.payload.error, /LinkedIn2/);
+  assert.equal(campaigns.find((campaign) => campaign.id === "camp-2").state, "draft");
+});

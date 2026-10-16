@@ -85,6 +85,64 @@ export function parseFromDay(value) {
   return isFromDay(day) ? { value: day } : { error: `«З якого дня» — ціле число від 1 до ${MAX_FROM_DAY}` };
 }
 
+/**
+ * Сценарій кампанії (етап 3/6 плану кампаній і пінгів, 16.10.2026).
+ *
+ * `approach` — з чим ми йдемо до цих людей: AI пише за ним перше повідомлення й
+ * нагадування. `silentSteps` — гілка «мовчить»: через скільки робочих днів після
+ * нашого повідомлення наступний дотик; [3, 4] — нагадати через 3, потім через 4, а
+ * після останнього нагадування і ще стількох днів тиші — статус CRM «Не
+ * відповідає». `maxPeople` — скільки людей кампанія бере з папки (за
+ * замовчуванням 200), порівну між своїми акаунтами; кампанія, збережена до цього
+ * поля, межі не має — її робота не змінюється.
+ */
+export const DEFAULT_SILENT_STEPS = [3, 3];
+export const DEFAULT_MAX_PEOPLE = 200;
+export const MAX_SILENT_STEPS = 6;
+
+function isSilentSteps(value) {
+  return Array.isArray(value) && value.length >= 1 && value.length <= MAX_SILENT_STEPS
+    && value.every((days) => Number.isInteger(days) && days >= 1 && days <= 30);
+}
+
+export function parseScenario(body) {
+  const out = {};
+  if (body.approach !== undefined) out.approach = typeof body.approach === "string" ? body.approach.trim().slice(0, 2000) : "";
+  if (body.silentSteps !== undefined) {
+    const steps = Array.isArray(body.silentSteps) ? body.silentSteps.map((value) => Number(value)) : null;
+    if (!isSilentSteps(steps)) return { error: `Кроки «мовчить» — від 1 до ${MAX_SILENT_STEPS} чисел, кожне 1–30 робочих днів` };
+    out.silentSteps = steps;
+  }
+  if (body.maxPeople !== undefined) {
+    const people = body.maxPeople === null || body.maxPeople === "" ? null : Number(body.maxPeople);
+    if (people !== null && !(Number.isInteger(people) && people >= 1 && people <= 5000)) return { error: "Людей у кампанії — ціле число від 1 до 5000" };
+    out.maxPeople = people;
+  }
+  return { value: out };
+}
+
+/**
+ * Скільки ще людей кампанія з межею може дати цьому акаунту: його частка (межа
+ * порівну між акаунтами кампанії) мінус уже дані, і не більше, ніж лишилось до межі.
+ * Кампанія без межі — Infinity.
+ */
+export function shareLeft(campaign, { total = 0, mine = 0 } = {}) {
+  if (!campaign.maxPeople) return Infinity;
+  const share = Math.ceil(campaign.maxPeople / Math.max(1, campaign.accountIds.length));
+  return Math.max(0, Math.min(share - mine, campaign.maxPeople - total));
+}
+
+/** Акаунт — у одній живій кампанії: інакше незрозуміло, чий сценарій веде його людей. */
+export function accountClash(campaigns, { id, state, accountIds }) {
+  if (state !== "running") return null;
+  for (const other of campaigns) {
+    if (other.id === id || other.state !== "running") continue;
+    const shared = accountIds.find((accountId) => other.accountIds.includes(accountId));
+    if (shared) return { accountId: shared, campaign: other };
+  }
+  return null;
+}
+
 export function normalizeCampaign(raw, index = 0) {
   const now = new Date().toISOString();
   return {
@@ -97,6 +155,9 @@ export function normalizeCampaign(raw, index = 0) {
     productId: text(raw?.productId, 80) || null,
     // A campaign saved before this setting existed feeds from the default day.
     fromDay: isFromDay(raw?.fromDay) ? raw.fromDay : DEFAULT_FROM_DAY,
+    approach: typeof raw?.approach === "string" ? raw.approach.trim().slice(0, 2000) : "",
+    silentSteps: isSilentSteps(raw?.silentSteps) ? [...raw.silentSteps] : [...DEFAULT_SILENT_STEPS],
+    maxPeople: Number.isInteger(raw?.maxPeople) && raw.maxPeople >= 1 ? raw.maxPeople : null,
     state: isCampaignState(raw?.state) ? raw.state : "draft",
     order: Number.isFinite(raw?.order) ? Number(raw.order) : index,
     createdAt: typeof raw?.createdAt === "string" ? raw.createdAt : now,
@@ -216,6 +277,9 @@ export function describeCampaign(campaign, folderName = null) {
     accountIds: [...campaign.accountIds],
     productId: campaign.productId,
     fromDay: campaign.fromDay ?? DEFAULT_FROM_DAY,
+    approach: campaign.approach || "",
+    silentSteps: [...(campaign.silentSteps || DEFAULT_SILENT_STEPS)],
+    maxPeople: campaign.maxPeople ?? null,
     state: campaign.state,
     order: campaign.order,
     createdAt: campaign.createdAt,

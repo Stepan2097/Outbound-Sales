@@ -19,7 +19,10 @@ import {
 } from "./pings.mjs";
 
 const TASK_COLUMNS = "id,title,description,contact_id,owner_id,assigned_to,due_date,completed,status,task_type,queue,created_at,updated_at";
-const CONTACT_COLUMNS = "id,name,position,company,owner_id,linkedin,country";
+const CONTACT_COLUMNS = "id,name,position,company,owner_id,linkedin,country,lead_status";
+/** Статус CRM «Не відповідає» — після останнього кроку кампанії й тиші (етап 3/6). */
+export const NO_REPLY_STATUS = "no_response";
+const STILL_TRYING = ["new", "in_progress"];
 const CHUNK = 100;
 /** Свіжий стан для списку: старіший за це — спершу звірка. */
 const FRESH_MS = 60_000;
@@ -33,6 +36,13 @@ export function setLeadgenStore(store) {
   if (store?.read && store?.write) leadgenStore = store;
 }
 const leadgenOf = (accountId) => (accountId && leadgenStore.read()[accountId]) || null;
+
+// Кампанії «Прогріву» (етап 3/6): їхні кроки «мовчить» ведуть людей, яких кампанія
+// дала з папки. server.mjs кладе сюди читання state.warmupCampaigns.
+let campaignsReader = () => [];
+export function setCampaignsReader(read) {
+  if (typeof read === "function") campaignsReader = read;
+}
 
 let lastGather = null;
 let lastRunAt = 0;
@@ -109,6 +119,23 @@ export async function gatherDialogs() {
       // Надіслане, що вже видно в треді, — це повідомлення треду, а не черга.
       if (reply.state === "sent" && state.threads.some((thread) => (thread.trailingOutBodies || []).some((body) => sameText(body, reply.body)))) continue;
       state.pending.push({ id: reply.id, accountId: reply.accountId, threadKey: reply.threadKey, queuedAt: reply.queuedAt, state: reply.state, body: reply.body });
+    }
+  }
+  // Хто з людей прийшов з папки якої кампанії — з `invite.requested`, де це записано.
+  const campaigns = new Map((campaignsReader() || []).map((campaign) => [campaign.id, campaign]));
+  if (campaigns.size) {
+    for (let offset = 0; ; offset += 1000) {
+      const rows = await anty.from("wl_events").select("id,meta").eq("type", "invite.requested")
+        .in("meta->>campaignId", [...campaigns.keys()]).order("id").limit(1000).offset(offset).rows();
+      for (const row of rows) {
+        const contactId = row.meta?.crmContactId ? String(row.meta.crmContactId) : null;
+        const campaign = campaigns.get(String(row.meta?.campaignId || ""));
+        if (!contactId || !campaign || !states.has(contactId)) continue;
+        const state = states.get(contactId);
+        state.campaignId = campaign.id;
+        state.steps = campaign.silentSteps;
+      }
+      if (rows.length < 1000) break;
     }
   }
   return { states, accounts, at: new Date() };
@@ -210,7 +237,8 @@ export async function reconcilePings({ now = new Date() } = {}) {
     const ids = [...desired.keys()];
     const [tasks, contacts] = await Promise.all([tasksOf(ids), contactsOf(ids)]);
     const owner = await fallbackOwner(contacts);
-    const stats = { contacts: ids.length, created: 0, superseded: 0, reopened: 0, reassigned: 0, failed: 0 };
+    const stats = { contacts: ids.length, created: 0, superseded: 0, reopened: 0, reassigned: 0, noReply: 0, failed: 0 };
+    const todayDay = dayIn(now);
     const nowIso = now.toISOString();
     for (const contactId of ids) {
       const next = desired.get(contactId);
@@ -222,6 +250,18 @@ export async function reconcilePings({ now = new Date() } = {}) {
         const closing = new Set(actions.filter((action) => action.op === "supersede").map((action) => action.task.id));
         for (const task of tasks.get(contactId) || []) {
           if (!task.completed && !closing.has(task.id) && task.assigned_to !== leadgen) actions.push({ op: "reassign", task, to: leadgen });
+        }
+      }
+      // Кампанія: кроки скінчились і тиша дотягла до дня — статус «Не відповідає».
+      const state = gathered.states.get(contactId);
+      const contact = contacts.get(contactId);
+      if (!next.key && next.noReplyDue && state?.campaignId && next.noReplyDue <= todayDay && STILL_TRYING.includes(contact?.lead_status || "new")) {
+        try {
+          await crm.from("contacts").update({ lead_status: NO_REPLY_STATUS }).eq("id", contactId).rows();
+          stats.noReply += 1;
+        } catch (error) {
+          stats.failed += 1;
+          console.error(`[pings] no_response for ${contactId}: ${error.message}`);
         }
       }
       for (const action of actions) {
@@ -236,7 +276,7 @@ export async function reconcilePings({ now = new Date() } = {}) {
     }
     lastRunAt = Date.now();
     lastStats = { ...stats, at: nowIso };
-    if (stats.created || stats.superseded || stats.reopened || stats.reassigned || stats.failed) console.log(`[pings] ${JSON.stringify(lastStats)}`);
+    if (stats.created || stats.superseded || stats.reopened || stats.reassigned || stats.noReply || stats.failed) console.log(`[pings] ${JSON.stringify(lastStats)}`);
     return lastStats;
   })().finally(() => { running = null; });
   return running;

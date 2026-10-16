@@ -10,7 +10,7 @@ import { CHANNEL_RULES, LANGUAGES, buildFallbackDrafts, draftsPromptPayload, nor
 import { invalidateContactCaches, contactAsProspect, contactsConfigured, contactsMissingConfig, crmKeyKind, folderContactAt, listContactFolders, listFolderContacts, searchFolderContacts, readContact, supabaseKeyKind } from "./contacts/store.mjs";
 import { handleKnowledgeLibraryApi } from "./knowledge/api.mjs";
 import { handlePitchApi } from "./knowledge/pitch-api.mjs";
-import { handleTodayApi, reconcileSoon, setLeadgenStore, startPingReconciler } from "./triage/today.mjs";
+import { handleTodayApi, reconcileSoon, setCampaignsReader, setLeadgenStore, startPingReconciler } from "./triage/today.mjs";
 import { loadPitchBook } from "./knowledge/pitch.mjs";
 import { allEntries, append as espAppend, useJournal } from "./esp/journal.mjs";
 import { channelsFor as triageChannels, nextContact as nextTriageContact } from "./triage/queue.mjs";
@@ -739,6 +739,7 @@ server.listen(port, () => {
       await writePersistentWorkspaceState();
     }
   });
+  setCampaignsReader(() => (Array.isArray(state.warmupCampaigns) ? state.warmupCampaigns : []));
   startPingReconciler();
   // ESP 15: the daily DNS and blocklist watch. Asked hourly, runs once a day
   // (the journal remembers); the first look is a few minutes after start, so a
@@ -15074,7 +15075,8 @@ async function classifyOpenDialog(candidate) {
 async function writeTodayDraft({ contact, messages = [], kind = "reply", accountId = "" }) {
   if (!state.vault || state.providerHealth.status !== "healthy") return { text: "", model: null };
   const campaigns = Array.isArray(state.warmupCampaigns) ? state.warmupCampaigns : state.warmupCampaigns?.campaigns || [];
-  const productId = campaigns.find((campaign) => campaign.state === "running" && (campaign.accountIds || []).includes(accountId) && campaign.productId)?.productId || "";
+  const campaign = campaigns.find((item) => item.state === "running" && (item.accountIds || []).includes(accountId)) || null;
+  const productId = campaign?.productId || "";
   const product = state.products.find((item) => item.id === productId) || currentProduct();
   const conversation = messages.slice(-20).map((message) => ({ from: message.direction === "in" ? "them" : "us", text: String(message.body || "").slice(0, 1500), at: message.sentAt || null }));
   const { data, run } = await callOpenRouterJson({
@@ -15085,11 +15087,12 @@ async function writeTodayDraft({ contact, messages = [], kind = "reply", account
     messages: [
       {
         role: "system",
-        content: "You write the next LinkedIn message in an ongoing conversation for a lead-gen person at a team that runs and teaches iGaming media buying. Return only strict JSON {\"text\": \"...\"}. Write in the language of their last message (English if unclear). Plain, calm, one professional to another; no compliments, no 'hope you are well', no lists of adjectives. Never invent facts, prices, numbers or promises that are not in product.brief or product.knowledgeLibrary. kind=reply: answer what they actually said first, then at most one qualifying question; when they show interest, offer a short 15-minute call. 30–90 words. kind=follow-up: they have not answered our last message — 15–45 words, refer to what we said, ask one easy question or offer an easy way out; no guilt, no 'just following up'."
+        content: "You write the next LinkedIn message in an ongoing conversation for a lead-gen person at a team that runs and teaches iGaming media buying. Return only strict JSON {\"text\": \"...\"}. Write in the language of their last message (English if unclear). Plain, calm, one professional to another; no compliments, no 'hope you are well', no lists of adjectives. Never invent facts, prices, numbers or promises that are not in product.brief or product.knowledgeLibrary. When campaignApproach is given, write within that approach. kind=reply: answer what they actually said first, then at most one qualifying question; when they show interest, offer a short 15-minute call. 30–90 words. kind=follow-up: they have not answered our last message — 15–45 words, refer to what we said, ask one easy question or offer an easy way out; no guilt, no 'just following up'."
       },
       {
         role: "user",
-        content: JSON.stringify({ kind, contact: { name: contact?.name || "", position: contact?.position || "", company: contact?.company || "", country: contact?.country || "" }, product: productForPrompt(product, contact?.company || ""), conversation })
+        // Підхід кампанії й номер нагадування (етап 3/6): з чим ми йдемо і котрий це дотик.
+        content: JSON.stringify({ kind, campaignApproach: campaign?.approach || null, followUpNumber: kind === "follow-up" ? conversation.reduce((count, message) => (message.from === "us" ? count + 1 : 0), 0) : null, contact: { name: contact?.name || "", position: contact?.position || "", company: contact?.company || "", country: contact?.country || "" }, product: productForPrompt(product, contact?.company || ""), conversation })
       }
     ]
   });

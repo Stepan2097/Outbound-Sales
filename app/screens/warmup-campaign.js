@@ -57,6 +57,24 @@ const WARMUP_CAMPAIGN_PANEL_HTML = `
         <input id="warmupCampaignFromDay" type="number" min="1" max="365" step="1" value="7" inputmode="numeric" aria-label="З якого дня прогріву кампанія сама бере людей із папки" />
       </label>
     </div>
+    <!-- Сценарій (етап 3/6, 16.10): з чим ідемо, коли нагадувати, скільки людей. -->
+    <div class="warmup-campaign-scenario">
+      <label class="warmup-field warmup-field-approach">
+        <span>Підхід — з чим ми йдемо до цих людей (за ним AI пише перше повідомлення й нагадування)</span>
+        <textarea id="warmupCampaignApproach" rows="3" maxlength="2000" placeholder="Напр.: SiGMA World у Римі — 15 хвилин зі Степаном 2–5.11; хто не їде — дзвінок 10–12.11."></textarea>
+      </label>
+      <div class="warmup-campaign-grid">
+        <label class="warmup-field warmup-field-filter" title="Через скільки робочих днів після нашого повідомлення — нагадування; через кому — кілька">
+          <span>Лід мовчить — нагадати через (робочих днів)</span>
+          <input id="warmupCampaignSteps" type="text" value="3, 3" placeholder="3, 4, 7" autocomplete="off" />
+        </label>
+        <label class="warmup-field warmup-field-filter" title="Скільки людей кампанія бере з папки — порівну між своїми акаунтами">
+          <span>Людей у кампанії</span>
+          <input id="warmupCampaignMaxPeople" type="number" min="1" max="5000" step="1" value="200" inputmode="numeric" />
+        </label>
+      </div>
+      <p class="warmup-campaign-scenario-hint">Лід відповів — нагадування для нього зупиняються, а в «Сьогодні» з'являється «Відповісти». Після останнього нагадування і ще стількох днів тиші — статус CRM «Не відповідає».</p>
+    </div>
     <details class="warmup-campaign-filters" id="warmupCampaignFilters">
       <summary id="warmupCampaignFiltersSummary">Звузити папку</summary>
       <div class="warmup-campaign-grid">
@@ -143,6 +161,9 @@ function warmupFormValues() {
     folderId: document.getElementById("warmupFolderSelect")?.value || "",
     productId: document.getElementById("warmupCampaignProduct")?.value || "",
     fromDay: warmupFromDayValue(),
+    approach: (document.getElementById("warmupCampaignApproach")?.value || "").trim(),
+    silentSteps: (document.getElementById("warmupCampaignSteps")?.value || "").split(/[,;\s]+/).filter(Boolean).join(", "),
+    maxPeople: (document.getElementById("warmupCampaignMaxPeople")?.value || "").trim(),
     filters
   };
 }
@@ -166,6 +187,10 @@ function warmupCampaignSaved(campaign) {
     folderId: campaign?.folderId || "",
     productId: campaign?.productId || "",
     fromDay: String(campaign?.fromDay || WARMUP_DEFAULT_FROM_DAY),
+    approach: campaign?.approach || "",
+    silentSteps: (campaign?.silentSteps || [3, 3]).join(", "),
+    // Кампанія, збережена до межі, межі не має — поле порожнє; нова — 200.
+    maxPeople: campaign ? (campaign.maxPeople ? String(campaign.maxPeople) : "") : "200",
     filters: { ...WARMUP_EMPTY_FILTERS, ...(campaign?.filters || {}) }
   };
 }
@@ -179,6 +204,7 @@ function warmupFormDirty() {
   const saved = warmupCampaignSaved(editing);
   if (form.name !== saved.name || form.folderId !== saved.folderId || form.productId !== saved.productId) return true;
   if (form.fromDay !== saved.fromDay) return true;
+  if (form.approach !== saved.approach || form.silentSteps !== saved.silentSteps || form.maxPeople !== saved.maxPeople) return true;
   return Object.keys(WARMUP_EMPTY_FILTERS).some((key) => form.filters[key] !== saved.filters[key]);
 }
 
@@ -479,8 +505,25 @@ export function renderWarmupCampaignDetail() {
         ? `<em class="warmup-campaign-problem">${escapeHtml(warmupState.campaignNotice)}</em>`
         : warmupTickedAccountsLine(campaign)}</p>
       ${note ? `<p class="warmup-campaign-state-note">${escapeHtml(note)}</p>` : ""}
+      ${warmupScenarioLine(campaign)}
     </div>`;
   refreshIcons();
+}
+
+/** Сценарій і розподіл кампанії (етап 3/6): кроки, скільки людей у кого, коли наберуться. */
+function warmupScenarioLine(campaign) {
+  const steps = (campaign.silentSteps || [3, 3]).join(" → ");
+  const parts = [`Мовчить — нагадати через ${steps} роб. дн.`];
+  const spread = campaign.distribution;
+  if (campaign.maxPeople && spread) {
+    const label = (id) => { const profile = warmupState.profiles.find((item) => item.account?.id === id); return profile?.account?.label || profile?.name || "акаунт"; };
+    const byAccount = Object.entries(spread.byAccount).map(([id, count]) => `${escapeHtml(label(id))} ${count}/${spread.share}`).join(" · ");
+    parts.push(`Людей: ${spread.total} з ${campaign.maxPeople}${byAccount ? ` (${byAccount})` : ""}`);
+    parts.push(spread.daysLeft === 0 ? "набрано" : spread.perDay ? `≈${spread.perDay} на день, ще ${spread.daysLeft} дн.` : "зараз жоден акаунт не бере людей");
+  } else if (!campaign.maxPeople) {
+    parts.push("без межі людей");
+  }
+  return `<p class="warmup-campaign-scenario-line">${parts.join(" · ")}</p>`;
 }
 
 function renderWarmupCampaignForm({ resetForm = false } = {}) {
@@ -504,6 +547,10 @@ function renderWarmupCampaignForm({ resetForm = false } = {}) {
     }
     const fromDayInput = document.getElementById("warmupCampaignFromDay");
     if (fromDayInput) fromDayInput.value = saved.fromDay;
+    for (const [id, value] of [["warmupCampaignApproach", saved.approach], ["warmupCampaignSteps", saved.silentSteps], ["warmupCampaignMaxPeople", saved.maxPeople]]) {
+      const input = document.getElementById(id);
+      if (input) input.value = value;
+    }
     // A new campaign starts on the product this workspace is already working.
     renderWarmupProductOptions(editing ? saved.productId : (state?.selectedProductId || ""));
     renderWarmupFolderOptions(saved.folderId);
@@ -694,7 +741,10 @@ async function saveWarmupCampaignForm() {
       productId: form.productId || null,
       // Порожнє поле — це «як було» для збереженої кампанії і сім для нової;
       // решту перевіряє сервер і відповідає реченням, яке видно у формі.
-      ...(form.fromDay === "" ? {} : { fromDay: form.fromDay })
+      ...(form.fromDay === "" ? {} : { fromDay: form.fromDay }),
+      approach: form.approach,
+      silentSteps: form.silentSteps.split(", ").filter(Boolean).map(Number),
+      maxPeople: form.maxPeople === "" ? null : Number(form.maxPeople)
     };
     const payload = editing
       ? await warmupApi("/campaigns", { method: "PATCH", body: JSON.stringify({ id: editing.id, ...body }) })

@@ -122,6 +122,30 @@ export function taskReason(task) {
   return reasonOfKey(parseTaskMarks(task.description).key);
 }
 
+/* ── гілка «мовчить» ─────────────────────────────────────────────────────── */
+
+/**
+ * Кроки «мовчить»: через скільки робочих днів після нашого n-го повідомлення —
+ * наступний дотик. Кампанія задає свої (етап 3/6); поза кампанією — 3 дні й не
+ * більше трьох наших поспіль, як з етапу 1 ([3, 3]).
+ */
+export function stepsOf(steps) {
+  return Array.isArray(steps) && steps.length ? steps : Array(SILENT_LIMIT - 1).fill(SILENT_WORKING_DAYS);
+}
+
+/** День наступного дотику після нашого `count`-го повідомлення поспіль, або null — кроки скінчились. */
+export function silentNext(steps, count, lastOutAt) {
+  const list = stepsOf(steps);
+  if (count > list.length) return null;
+  return addWorkingDays(dayIn(lastOutAt), list[Math.max(0, count - 1)]);
+}
+
+/** Коли після останнього кроку тиша стає «Не відповідає»: ще стільки ж днів, як останній крок. */
+export function noReplyDay(steps, lastOutAt) {
+  const list = stepsOf(steps);
+  return addWorkingDays(dayIn(lastOutAt), list.at(-1));
+}
+
 /* ── що має бути наступним кроком ───────────────────────────────────────── */
 
 const ms = (iso) => {
@@ -136,6 +160,7 @@ const ms = (iso) => {
  *   threads:  [{ accountId, threadKey, lastStoredAt, lastInboundStoredAt, lastMessage: { direction, at }, trailingOut }]
  *   pending:  наші повідомлення, ще не видимі в треді: [{ queuedAt, threadKey }] (чекають або щойно пішли)
  *   accepted: { outreachId, accountId, acceptedAt, dismissed } | null — прийняв запит
+ *   steps:    кроки «мовчить» кампанії людини (етап 3/6) або нічого — за замовчуванням
  *
  * Повертає `{ key, reason, basisAt, due, accountId, threadKey, outreachId }`;
  * `{ key: null, basisAt }` — пінгу бути не повинно (три наших без відповіді);
@@ -161,10 +186,11 @@ export function desiredPing(contactId, state, { now = new Date() } = {}) {
     const lastOutAt = [thread.lastMessage.direction === "out" ? thread.lastStoredAt : null, ...pending.map((item) => item.queuedAt)]
       .filter(Boolean).sort((left, right) => ms(right) - ms(left))[0];
     if (!lastOutAt || ms(lastOutAt) < windowStart) return null;
-    if (count >= SILENT_LIMIT) return { key: null, basisAt: lastOutAt };
+    const next = silentNext(state.steps, count, lastOutAt);
+    if (!next) return { key: null, basisAt: lastOutAt, noReplyDue: noReplyDay(state.steps, lastOutAt) };
     return {
       key: `silent:${contactId}:${lastIn || "none"}:${count}`, reason: "silent", basisAt: lastOutAt,
-      due: addWorkingDays(dayIn(lastOutAt), SILENT_WORKING_DAYS), accountId: thread.accountId, threadKey: thread.threadKey, outreachId: state.accepted?.outreachId || null
+      due: next, accountId: thread.accountId, threadKey: thread.threadKey, outreachId: state.accepted?.outreachId || null
     };
   }
 
@@ -176,7 +202,7 @@ export function desiredPing(contactId, state, { now = new Date() } = {}) {
     if (ms(queuedAt) < windowStart) return null;
     return {
       key: `silent:${contactId}:none:${firstPending.length}`, reason: "silent", basisAt: queuedAt,
-      due: addWorkingDays(dayIn(queuedAt), SILENT_WORKING_DAYS), accountId: accepted.accountId, threadKey: null, outreachId: accepted.outreachId
+      due: silentNext(state.steps, firstPending.length, queuedAt) || addWorkingDays(dayIn(queuedAt), SILENT_WORKING_DAYS), accountId: accepted.accountId, threadKey: null, outreachId: accepted.outreachId
     };
   }
   if (accepted.dismissed || !accepted.acceptedAt || ms(accepted.acceptedAt) < windowStart) return null;

@@ -143,7 +143,7 @@ test("the campaign detail shows the state note only when there is one to say", (
   const render = (campaign) => {
     const host = { innerHTML: "" };
     const warmupState = { campaigns: [campaign], campaignsReady: true, selectedCampaignId: campaign.id, formOpen: false, campaignNotice: "" };
-    const detail = loadMain(["escapeHtml", "WARMUP_DEFAULT_FROM_DAY", "renderWarmupCampaignDetail"], {
+    const detail = loadMain(["escapeHtml", "WARMUP_DEFAULT_FROM_DAY", "warmupScenarioLine", "renderWarmupCampaignDetail"], {
       warmupState,
       campaignStateNote,
       document: { getElementById: (id) => (id === "warmupCampaignDetail" ? host : null) },

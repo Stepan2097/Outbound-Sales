@@ -687,3 +687,9 @@
   color: var(--muted);
   font-size: 13px;
 }
+
+/* Сценарій кампанії (етап 3/6). */
+.warmup-campaign-scenario { display: grid; gap: 8px; margin: 10px 0; }
+.warmup-field-approach textarea { font: inherit; min-height: 70px; }
+.warmup-campaign-scenario-hint,
+.warmup-campaign-scenario-line { margin: 0; color: var(--muted); font-size: 12.5px; }
