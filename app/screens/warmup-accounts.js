@@ -11,7 +11,7 @@ import {
 import { onCacheReset, recallScreen, rememberScreen } from "../cache.js";
 import { accountLeadgenSlot, fillAccountLeadgen } from "../account-leadgen.js";
 import {
-  loadWarmupInbox, setWarmupUnread, showWarmupInboxThread, warmupAccountRepliesHtml, warmupInboxUnreadFor
+  loadWarmupInbox, setWarmupUnread, showWarmupInboxAccount, showWarmupInboxThread, warmupAccountRepliesHtml, warmupInboxUnreadFor
 } from "./inbox.js";
 import {
   loadWarmupCampaigns, loadWarmupStrategy, renderWarmupCampaignDetail, renderWarmupCampaigns, renderWarmupStrategy, toggleWarmupAccount, warmupAutoFeedHtml, warmupCampaignAccountIds, warmupEditsInProgress, warmupSelectedCampaign
@@ -1110,15 +1110,9 @@ document.getElementById("warmupProfileTableBody")?.addEventListener("click", (ev
   const jump = event.target.closest("[data-warmup-inbox-jump]");
   if (jump) {
     event.stopPropagation();
-    // The replies open here, under the account, in its card — not on «Вхідні».
-    const accountId = jump.dataset.warmupInboxJump;
-    const profile = warmupState.profiles.find((item) => item.account?.id === accountId);
-    if (profile) {
-      void loadWarmupInbox().then(() => { if (warmupState.selectedAccountId === accountId) renderWarmupDetail(); });
-      void selectWarmupProfile(profile.id, { keepOpen: true }).then(() => {
-        document.querySelector(`tr[data-warmup-profile="${CSS.escape(profile.id)}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" });
-      });
-    }
+    // To «Вхідні» (власник 16.10: «має вести на повідомлення»), at the top, with
+    // this account's newest unread conversation open.
+    showWarmupInboxAccount(jump.dataset.warmupInboxJump);
     return;
   }
   const row = event.target.closest("[data-warmup-profile]");
