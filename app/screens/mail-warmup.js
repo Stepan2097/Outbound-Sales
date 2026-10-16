@@ -92,7 +92,7 @@ function tableHtml(data) {
   const perRank = new Map();
   for (const row of rows) perRank.set(rank(row), (perRank.get(rank(row)) || 0) + 1);
   const SECTION = ["Для розсилки", "Призначення не вказано", "Лише прогрів"];
-  if (data.rows.length && !rows.length) return `<div class="empty-state">З тегом «${escapeHtml(tagFilter(data))}» пошт немає — виберіть інший тег у фільтрі або позначте пошти кнопкою з міткою в рядку.</div>${removedHtml(data)}`;
+  if (data.rows.length && !rows.length) return `<div class="empty-state">З тегом «${escapeHtml(tagFilter(data))}» пошт немає — виберіть інший тег у фільтрі.</div>${removedHtml(data)}`;
   if (!rows.length) return `<div class="empty-state">Пошт ще немає — «Додати пошту» вгорі сторінки.</div>${removedHtml(data)}`;
   const action = (row) => {
     if (!canChange) return "";
@@ -103,27 +103,26 @@ function tableHtml(data) {
   };
   return `
     <div class="table-wrap"><table class="warmup-mail-table">
-      <thead><tr><th>Пошта</th><th>Призначення</th><th>Статус</th><th>День</th><th>Листів сьогодні</th><th>Відповідей</th><th>Потрапили в спам</th><th>Холодних листів</th><th></th></tr></thead>
+      <thead><tr><th>Пошта</th><th>Призначення</th><th>Статус</th><th>Листів сьогодні</th><th>Відповідей</th><th>Потрапили в спам</th><th>Холодних листів</th><th></th></tr></thead>
       <tbody>${rows.map((row, index, list) => {
         const [word, tone] = STATUS[row.status];
         const share = row.plannedToday ? Math.min(100, Math.round((row.firstsToday / row.plannedToday) * 100)) : 0;
         // A new domain starts a group: its name on a row of its own, with a gap above.
         const sectionStart = index === 0 || rank(list[index - 1]) !== rank(row);
         const groupStart = sectionStart || list[index - 1].domain !== row.domain;
-        const section = sectionStart ? `<tr class="warmup-mail-section-row${index ? " is-gap" : ""}"><td colspan="9">${SECTION[rank(row)]}<span>${perRank.get(rank(row))}</span></td></tr>` : "";
+        const section = sectionStart ? `<tr class="warmup-mail-section-row${index ? " is-gap" : ""}"><td colspan="8">${SECTION[rank(row)]}<span>${perRank.get(rank(row))}</span></td></tr>` : "";
         // A new domain: just a gap above it, no label (owner 14.10).
-        const heading = sectionStart ? section : groupStart ? '<tr class="warmup-mail-domain-gap" aria-hidden="true"><td colspan="9"></td></tr>' : "";
+        const heading = sectionStart ? section : groupStart ? '<tr class="warmup-mail-domain-gap" aria-hidden="true"><td colspan="8"></td></tr>' : "";
         return `${heading}<tr>
           <td><strong>${escapeHtml(row.email)}</strong>${ownTags(row).length ? `<span class="warmup-mail-tags">${tagPills(ownTags(row))}</span>` : ""}${accountNotesHtml(row.email)}</td>
           <td>${roleHtml(row, canChange)}</td>
-          <td><span class="pill ${tone}">${word}</span>${row.status === "paused" && row.pausedAt ? `<small>з ${escapeHtml(when(row.pausedAt))}</small>` : row.status === "running" && row.startedAt ? `<small>старт ${escapeHtml(when(row.startedAt))}</small>` : ""}</td>
-          <td class="is-number">${row.day || "—"}</td>
+          <td class="warmup-mail-status"><span class="pill ${tone}">${word}</span>${row.day ? `<b class="warmup-mail-day">день ${escapeHtml(String(row.day))}</b>` : ""}${row.status === "paused" && row.pausedAt ? `<small>з ${escapeHtml(when(row.pausedAt))}</small>` : row.status === "running" && row.startedAt ? `<small>старт ${escapeHtml(when(row.startedAt))}</small>` : ""}</td>
           <td class="is-number">${row.status === "running" ? `<div class="warmup-mail-progress"><span style="width:${share}%"></span></div>` : ""}${row.firstsToday} / ${row.plannedToday}</td>
           <td class="is-number warmup-mail-pair"><span title="Скільки відповідей прийшло на листи цієї пошти"><b>${row.repliesReceived}</b> отримала</span><small title="На скільки чужих листів прогріву відповіла вона сама">відповіла сама: ${row.repliesSent}</small></td>
           <td class="is-number warmup-mail-pair" title="Листи цієї пошти, що в інших наших пошт потрапили у «Спам». Прогрів виймає їх усі й позначає важливими."><span class="${spamShare(row) >= 10 ? "is-bad" : ""}"><b>${row.landedInSpam}</b> з ${row.sent}</span><small>${row.sent ? `${spamShare(row)}%` : "—"}</small></td>
           <td class="is-number">${row.coldToday} / ${row.limit}<small>сьогодні з ліміту</small></td>
           <td class="warmup-mail-action">${action(row)}${accountActionsHtml(row.email)}${canChange && row.status !== "removed" ? `<button type="button" class="icon-button warmup-mail-remove" data-warmup-remove="${escapeAttr(row.email)}" title="Прибрати з прогріву" aria-label="Прибрати ${escapeAttr(row.email)} з прогріву"${mailWarmupState.busy ? " disabled" : ""}><i data-lucide="trash-2"></i></button>` : ""}${row.lastError && row.status === "running" ? `<small class="is-bad" title="${escapeAttr(row.lastError.error)}">остання відмова ${escapeHtml(when(row.lastError.at))}</small>` : ""}</td>
-        </tr>${tagEditorHtml(row.email) ? `<tr class="warmup-mail-tag-row"><td colspan="9">${tagEditorHtml(row.email)}</td></tr>` : ""}`;
+        </tr>${tagEditorHtml(row.email) ? `<tr class="warmup-mail-tag-row"><td colspan="8">${tagEditorHtml(row.email)}</td></tr>` : ""}`;
       }).join("")}</tbody>
     </table></div>
     ${removedHtml(data)}`;

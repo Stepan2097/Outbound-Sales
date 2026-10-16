@@ -1374,3 +1374,33 @@ tr:hover .warmup-tags-edit,
   width: 14px;
   height: 14px;
 }
+
+/* Стрілка випадних списків — одна на весь сайт (власник 16.10: «всі стрілочки
+ * на сайті мають неправильний відступ»). Браузерна стрілка стояла впритул до
+ * краю, а в широких полях — далеко від тексту; тепер своя, завжди за 10px від
+ * правого краю, і текст до неї не доходить. Фон — лише кольором (longhand), тож
+ * сторінкові правила, що міняють колір фону, стрілку не стирають. */
+select:not([multiple]) {
+  -webkit-appearance: none;
+  appearance: none;
+  padding-right: 30px !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2390a5a1' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 12px 12px;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+select:not([multiple]):disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* Статус і день прогріву пошти — в одній клітинці (власник 16.10). */
+.warmup-mail-status .warmup-mail-day {
+  display: block;
+  margin-top: 4px;
+  font-weight: 600;
+  font-size: 12px;
+}

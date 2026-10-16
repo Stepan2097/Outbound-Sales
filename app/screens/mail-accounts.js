@@ -75,8 +75,8 @@ export function accountActionsHtml(email) {
   } else if (row.via === "google") {
     buttons.push(`<button type="button" class="icon-button acc-icon" data-acc-check="${escapeAttr(email)}" title="Перевірити доступ" aria-label="Перевірити ${escapeAttr(email)}" ${accounts.busy === email ? "disabled" : ""}><i data-lucide="${accounts.busy === email ? "loader" : "mail-check"}"></i></button>`);
   }
-  if (row.sender && data.canTag) buttons.push(`<button type="button" class="icon-button acc-icon" data-acc-tags="${escapeAttr(email)}" title="Теги" aria-label="Теги ${escapeAttr(email)}"><i data-lucide="tag"></i></button>`);
-  if (row.via === "google" && (row.connectedBy === data.me || data.canManage)) buttons.push(`<button type="button" class="icon-button acc-icon is-danger" data-acc-drop="${escapeAttr(email)}" title="Відключити пошту" aria-label="Відключити ${escapeAttr(email)}"><i data-lucide="unplug"></i></button>`);
+  // «Теги» and «Відключити» are gone from the row (власник 16.10: «повидаляй
+  // зайве»): the tag follows «Призначення», and the bin takes a mailbox out.
   return buttons.join("");
 }
 
