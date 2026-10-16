@@ -206,3 +206,8 @@
   width: auto;
   text-align: left;
 }
+
+/* Розвантаження (аудит 16.10, D12): списки доменів і відправників згорнуті. */
+.esp-fold { border-top: 1px solid var(--line); padding-top: 8px; }
+.esp-fold summary { cursor: pointer; list-style-position: inside; }
+.esp-fold summary .esp-title { display: inline; }

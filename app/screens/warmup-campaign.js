@@ -27,8 +27,7 @@ import "./workspace.js";
 const WARMUP_CAMPAIGN_PANEL_HTML = `
   <div class="panel-heading">
     <div>
-      <h2>Автозапити в друзі</h2>
-      <p>З якої папки CRM акаунти самі шлють запити в друзі. Повідомлень не пишуть — це роблять лідгени.</p>
+      <h2 title="З якої папки CRM акаунти самі шлють запити в друзі. Повідомлень не пишуть — це роблять лідгени.">Автозапити в друзі</h2>
     </div>
     <div class="warmup-campaigns-controls">
       <span class="pill tone-muted" id="warmupCampaignsPill">завантаження</span>

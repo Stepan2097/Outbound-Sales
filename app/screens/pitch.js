@@ -212,8 +212,9 @@ function drawLinks(product) {
             <span class="pitch-item-actions">${copyButton(link.url, "Копіювати посилання")}${edit ? `<button type="button" class="icon-button" data-act="delete-link" data-id="${escapeAttr(link.id)}" title="Прибрати посилання" aria-label="Прибрати посилання"><i data-lucide="x"></i></button>` : ""}</span>
           </li>`).join("")}
         </ul>
-        ${!product.links.length ? `<p class="pitch-empty">Посилань ще немає.</p>` : ""}
-        ${edit ? `<form class="pitch-inline-form" data-form="link">
+        ${!product.links.length && !edit ? `<p class="pitch-empty">Посилань ще немає.</p>` : ""}
+        ${edit ? `<button type="button" class="pitch-reveal" data-act="reveal"><i data-lucide="plus"></i><span>Посилання</span></button>
+        <form class="pitch-inline-form" data-form="link" hidden>
           <input name="label" maxlength="200" placeholder="Підпис: що це і коли слати" />
           <input name="url" type="url" required placeholder="https://…" />
           <button type="submit"><i data-lucide="link"></i><span>Додати посилання</span></button>
@@ -235,8 +236,8 @@ function drawFiles(product) {
             ${edit ? `<button type="button" class="icon-button" data-act="delete-file" data-id="${escapeAttr(file.id)}" title="Прибрати файл" aria-label="Прибрати файл"><i data-lucide="x"></i></button>` : ""}
           </li>`).join("")}
         </ul>
-        ${!product.files.length ? `<p class="pitch-empty">Файлів ще немає.</p>` : ""}
-        ${edit ? `<label class="pitch-upload"><input type="file" data-act="upload" hidden /><span class="pitch-upload-btn"><i data-lucide="upload"></i><span>Прикріпити файл</span></span><span class="pitch-hint">до 20 МБ</span></label>` : ""}
+        ${!product.files.length && !edit ? `<p class="pitch-empty">Файлів ще немає.</p>` : ""}
+        ${edit ? `<label class="pitch-upload" title="До 20 МБ"><input type="file" data-act="upload" hidden /><span class="pitch-reveal"><i data-lucide="plus"></i><span>Файл</span></span></label>` : ""}
       </div>
     </div>`;
 }
@@ -247,7 +248,8 @@ function drawUpdates(product) {
   return `
     <div class="pitch-row"><span class="pitch-key">Апдейти</span>
       <div class="pitch-val">
-        ${edit ? `<form class="pitch-update-form" data-form="update">
+        ${edit ? `<button type="button" class="pitch-reveal" data-act="reveal"><i data-lucide="plus"></i><span>Апдейт</span></button>
+        <form class="pitch-update-form" data-form="update" hidden>
           <textarea name="text" rows="2" maxlength="4000" required placeholder="Що змінилось: нова ціна, свіжий кейс, нове заперечення… Дата поставиться сама."></textarea>
           <button type="submit" class="primary-button"><i data-lucide="plus"></i><span>Додати апдейт</span></button>
         </form>` : ""}
@@ -258,7 +260,7 @@ function drawUpdates(product) {
             ${edit ? `<button type="button" class="icon-button" data-act="delete-update" data-id="${escapeAttr(update.id)}" title="Прибрати апдейт" aria-label="Прибрати апдейт"><i data-lucide="x"></i></button>` : ""}
           </li>`).join("")}
         </ol>
-        ${!product.updates.length ? `<p class="pitch-empty">Апдейтів ще немає.</p>` : ""}
+        ${!product.updates.length && !edit ? `<p class="pitch-empty">Апдейтів ще немає.</p>` : ""}
       </div>
     </div>`;
 }
@@ -443,6 +445,16 @@ document.addEventListener("click", (event) => {
     if (form) {
       form.hidden = false;
       form.querySelector("input")?.focus();
+    }
+    return;
+  }
+  // Розвантаження (аудит 16.10, D9): форми додавання відкриваються кнопкою «+ …», а не стоять відкритими.
+  if (act === "reveal") {
+    const form = target.nextElementSibling;
+    if (form) {
+      form.hidden = false;
+      target.hidden = true;
+      form.querySelector("input, textarea")?.focus();
     }
     return;
   }

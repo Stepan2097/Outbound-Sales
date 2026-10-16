@@ -533,3 +533,7 @@
 .warmup-mail-history th:not(:first-child) {
   text-align: right;
 }
+
+/* Розвантаження (аудит 16.10, D11): пояснення прогріву пошт — згорнуте. */
+.warmup-mail-about summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.warmup-mail-about p { margin: 6px 0 0; max-width: 90ch; color: var(--muted); font-size: 13px; }

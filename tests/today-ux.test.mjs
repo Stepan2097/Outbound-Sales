@@ -29,5 +29,5 @@ test("адмін у «Мої» з порожнім списком бачить �
 
 test("робоче місце називає кампанію ліда", () => {
   assert.match(API, /campaign: campaignOf\(state\?\.campaignId\)/);
-  assert.match(TODAY, /Кампанія <b>\$\{escapeHtml\(item\.campaign\.name/);
+  assert.match(TODAY, /item\.campaign \? `<b>\$\{escapeHtml\(item\.campaign\.name/);
 });

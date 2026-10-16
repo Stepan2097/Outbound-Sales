@@ -810,6 +810,9 @@ export function renderWarmupInbox() {
       pill.className = "pill tone-muted";
       pill.textContent = inbox.threads.length ? "усе прочитано" : "поки нічого";
     }
+    // Розвантаження (аудит 16.10, D7): кількість непрочитаних уже на бейджі меню —
+    // пігулка лишається лише для проблем і завантаження.
+    pill.hidden = Boolean(inbox.ready && !inbox.error && inbox.available !== false);
   }
 
   // Nothing to pick from: one message across the whole panel, no accounts, no panes.
@@ -858,6 +861,9 @@ export function renderWarmupInbox() {
     ? `${openName}: листи оновлено ${warmupAgo(sync.lastSyncedAt)} · агент заглядає кожні 12–20 хв${sync.window ? `, у вікні ${sync.window}` : ""}`
     : (sync.known ? `${openName}: листи ще не читали` : "");
   subtitle.title = sync.lastSyncedAt ? warmupStamp(sync.lastSyncedAt) : "";
+  // Рядок стану оновлення — у підказці кнопки «Оновити» (аудит 16.10, D7).
+  const refresh = document.getElementById("warmupInboxRefreshBtn");
+  if (refresh) refresh.title = subtitle.textContent || "Оновити розмови";
   // A put-away account is not read any more, and saying «агент зупинився» about
   // it is a yellow alarm about something nobody needs to fix.
   const note = warmupInboxRetired(openId)
@@ -962,8 +968,8 @@ function renderWarmupReply() {
     if (inboxReplyError) text = inboxReplyError;
     else if (!can) text = reply?.reason || "Відповісти звідси не можна.";
     else {
-      text = `Надішле акаунт ${account.name} — не одразу, а ${warmupGoesOutText(reply)}, разом зі щоденним заходом`
-        + `${reply.window ? ` (вікно ${reply.window})` : ""}. До того часу відповідь можна скасувати.`;
+      // Коротко (аудит 16.10, D8): коли піде і що до того можна скасувати.
+      text = `Піде ${warmupGoesOutText(reply)} з ${account.name}${reply.window ? ` (вікно ${reply.window})` : ""}; до того — можна скасувати.`;
     }
     hint.textContent = text;
     hint.className = `inbox-reply-hint${inboxReplyError ? " is-bad" : (can ? "" : " is-muted")}`;

@@ -37,8 +37,7 @@ function renderSpine() {
   const head = `
     <div class="panel-heading">
       <div>
-        <h2>Хребет кампаній</h2>
-        <p>Спільне для всіх кампаній: як кваліфікуємо, куди веде кожен лід, правила. За ним пишуть AI-чернетки.</p>
+        <h2 title="Спільне для всіх кампаній: як кваліфікуємо, куди веде кожен лід, правила. За ним пишуть AI-чернетки.">Хребет кампаній</h2>
       </div>
       <div class="workspace-spine-controls">
         ${canEditSpine && spine.open && !spine.editing ? '<button class="text-button" type="button" data-spine-edit><i data-lucide="pencil"></i><span>Редагувати</span></button>' : ""}

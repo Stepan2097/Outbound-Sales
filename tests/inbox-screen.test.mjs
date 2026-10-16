@@ -632,7 +632,8 @@ test("поле відповіді з'являється лише в розмов
   assert.equal(view.els.warmupInboxReply.hidden, false);
   assert.equal(view.els.warmupInboxReplyText.disabled, false);
   assert.match(view.els.warmupInboxReplyText.placeholder, /Oleh Petrenko/);
-  assert.match(view.els.warmupInboxReplyHint.textContent, /Надішле акаунт Anna Kovalenko — не одразу/);
+  // Коротше з 16.10 (аудит, D8): «Піде <коли> з <акаунта> (вікно …); до того — можна скасувати».
+  assert.match(view.els.warmupInboxReplyHint.textContent, /^Піде .* з Anna Kovalenko/);
   assert.match(view.els.warmupInboxReplyHint.textContent, /сьогодні близько \d\d:\d\d/);
   assert.match(view.els.warmupInboxReplyHint.textContent, /вікно 09:00–13:00/);
   assert.match(view.els.warmupInboxReplyHint.textContent, /можна скасувати/);

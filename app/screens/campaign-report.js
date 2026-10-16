@@ -81,7 +81,7 @@ function renderCampaignReport() {
   const jobLine = job?.running ? `AI ставить мітки: ${job.done} з ${job.total}…` : job && job.total ? `AI розмітив ${job.done - job.failed} з ${job.total}${job.failed ? `, не вдалось ${job.failed}` : ""}.` : "";
   const head = `
     <div class="campaign-report-head">
-      <div><h2>Порівняння кампаній</h2><p>Головне число — кваліфіковані відповіді на 100 написаних; дзвінки — як підтвердження.</p></div>
+      <div><h2 title="Головне число — кваліфіковані відповіді на 100 написаних; дзвінки — як підтвердження.">Порівняння кампаній</h2></div>
       <button type="button" class="text-button" data-campaign-report-ai ${job?.running ? "disabled" : ""}><i data-lucide="sparkles"></i><span>Розмітити нові відповіді</span></button>
     </div>
     ${jobLine ? `<p class="campaign-report-job">${escapeHtml(jobLine)}</p>` : ""}`;

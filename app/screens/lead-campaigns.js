@@ -113,8 +113,7 @@ export function renderLeadCampaigns() {
   const head = `
     <div class="panel-heading">
       <div>
-        <h2>Кампанії лідгенів</h2>
-        <p>Як говоримо з людьми з папки: продукт, сценарій, нагадування.</p>
+        <h2 title="Як говоримо з людьми з папки: продукт, сценарій, нагадування.">Кампанії лідгенів</h2>
       </div>
       ${lead.formOpen ? "" : '<button class="primary-button" type="button" data-lead-new><i data-lucide="plus"></i><span>Нова кампанія</span></button>'}
     </div>`;

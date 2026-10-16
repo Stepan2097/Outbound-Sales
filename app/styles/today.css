@@ -235,3 +235,4 @@
 .today-chips button { min-height: 28px; padding: 2px 10px; border: 1px solid var(--line); border-radius: 999px; background: transparent; font-size: 12px; }
 .today-chips button.active { background: var(--teal-weak); border-color: var(--teal); color: var(--ink); }
 .today-empty button { margin-left: 8px; }
+.today-move button.active { background: var(--teal-weak); border-color: var(--teal); color: var(--ink); }

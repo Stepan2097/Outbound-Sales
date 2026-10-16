@@ -450,3 +450,8 @@
   .pitch-updates li { grid-template-columns: minmax(0, 1fr) auto; }
   .pitch-update-when { grid-column: 1 / -1; }
 }
+
+/* Розвантаження (аудит 16.10, D9): «+ Посилання / + Файл / + Апдейт» замість відкритих форм. */
+.pitch-reveal { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; min-height: 26px; border: 1px dashed var(--line); border-radius: 6px; background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; }
+.pitch-reveal:hover { color: var(--ink); border-color: var(--teal); }
+.pitch-reveal svg { width: 14px; height: 14px; }

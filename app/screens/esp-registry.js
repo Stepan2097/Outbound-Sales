@@ -9,6 +9,9 @@
 
 import { api, escapeAttr, escapeHtml, onScreen, refreshIcons } from "../core.js";
 
+// Які згорнуті списки відкрито — щоб перемальовування після дії їх не закривало.
+const espFoldOpen = new Set();
+
 onScreen("account", { open: () => void loadEspRegistry() });
 
 export const espRegistryState = { data: null, error: "", busy: false, notice: "", verify: null, monitor: null };
@@ -182,15 +185,27 @@ export function renderEspRegistry() {
 
   root.innerHTML = `
     ${state.notice ? `<p class="esp-notice ${state.error ? "is-bad" : ""}">${escapeHtml(state.notice)}</p>` : ""}
-    <h3 class="esp-title">Домени</h3>
-    <div class="esp-list">${domainRows}</div>
-    <h3 class="esp-title">Відправники</h3>
-    <div class="esp-list">${senderRows}</div>
+    <!-- Розвантаження (аудит 16.10, D12): довгі списки згорнуті, у заголовку — скільки й чи все гаразд. -->
+    <details class="esp-fold" data-esp-fold="domains"${espFoldOpen.has("domains") ? " open" : ""}>
+      <summary><h3 class="esp-title">Домени · ${domains.length}</h3></summary>
+      <div class="esp-list">${domainRows}</div>
+    </details>
+    <details class="esp-fold" data-esp-fold="senders"${espFoldOpen.has("senders") ? " open" : ""}>
+      <summary><h3 class="esp-title">Відправники · ${senders.length}</h3></summary>
+      <div class="esp-list">${senderRows}</div>
+    </details>
     ${forms}
     ${watch}
     ${canEdit ? `<div class="esp-foot"><button class="text-button" type="button" data-esp-verify><i data-lucide="shield-check"></i><span>Перевірити цілість журналу</span></button>${verify}</div>` : ""}`;
   refreshIcons();
 }
+
+document.addEventListener("toggle", (event) => {
+  const fold = event.target?.closest?.("[data-esp-fold]");
+  if (!fold) return;
+  if (fold.open) espFoldOpen.add(fold.dataset.espFold);
+  else espFoldOpen.delete(fold.dataset.espFold);
+}, true);
 
 async function espWrite(path, body, done) {
   espRegistryState.busy = true;

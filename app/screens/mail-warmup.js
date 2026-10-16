@@ -188,7 +188,7 @@ function planHtml(data) {
     ${field("step", "Щодня більше на", "")}
     ${field("max", "До", "на день")}
     ${canChange ? `<button type="submit" class="text-button"${mailWarmupState.busy ? " disabled" : ""}><i data-lucide="save"></i><span>Зберегти</span></button>` : ""}
-    <small>${plan.savedAt ? `змінено ${escapeHtml(when(plan.savedAt))}${plan.by ? ` · ${escapeHtml(plan.by)}` : ""}` : "за замовчуванням"} · для свіжого домену — менший старт і приріст. Діє на всі пошти з наступного проходу; ліміт дня пошти (ESP 4) однаково головніший.</small>
+    <small title="Для свіжого домену — менший старт і приріст. Діє на всі пошти з наступного проходу; ліміт дня пошти (ESP 4) однаково головніший.">${plan.savedAt ? `змінено ${escapeHtml(when(plan.savedAt))}${plan.by ? ` · ${escapeHtml(plan.by)}` : ""}` : "за замовчуванням"}</small>
   </form>`;
 }
 
@@ -210,7 +210,8 @@ export function renderMailWarmup() {
   const plan = data.plan;
   root.innerHTML = `
     <div class="warmup-mail-head">
-      <p>Наші пошти пишуть одна одній живі листи за розкладом: перший робочий день — ${plan.start}, далі +${plan.step} щодня до ${plan.max}. Приблизно третина отримує відповідь у тому ж треді. Лист, що впав у спам, виймається у «Вхідні» й позначається важливим. Ліміт дня пошти — лише для холодних листів; прогрів іде за своїм планом. У кампанії, звіти й «Вхідні» прогрів не потрапляє.</p>
+      <!-- Розвантаження (аудит 16.10, D11): пояснення згорнуто. -->
+      <details class="warmup-mail-about"><summary>Як працює прогрів пошт</summary><p>Наші пошти пишуть одна одній живі листи за розкладом: перший робочий день — ${plan.start}, далі +${plan.step} щодня до ${plan.max}. Приблизно третина отримує відповідь у тому ж треді. Лист, що впав у спам, виймається у «Вхідні» й позначається важливим. Ліміт дня пошти — лише для холодних листів; прогрів іде за своїм планом. У кампанії, звіти й «Вхідні» прогрів не потрапляє.</p></details>
       <div class="warmup-mail-head-actions">${addButtonHtml()}
       ${data.canChange && startable ? `<button type="button" class="primary-button" data-warmup-start-all${mailWarmupState.busy ? " disabled" : ""}><i data-lucide="play"></i><span>Запустити всі (${startable})</span></button>` : ""}</div>
     </div>
@@ -219,7 +220,7 @@ export function renderMailWarmup() {
     ${planHtml(data)}
     ${notice ? `<p class="esp-notice ${error ? "is-bad" : ""}">${escapeHtml(notice)}</p>` : ""}
     ${summaryHtml(data.rows)}
-    <section class="panel"><div class="panel-heading"><div><h2>Пошти</h2><p>Коли почався прогрів, листи сьогодні проти плану, відповіді й листи, що потрапили в спам. Клік по пошті — її статистика по днях.</p></div>
+    <section class="panel"><div class="panel-heading"><div><h2 title="Коли почався прогрів, листи сьогодні проти плану, відповіді й листи, що потрапили в спам. Клік по пошті — її статистика по днях.">Пошти</h2></div>
       <div class="warmup-mail-tools">${filter}<button type="button" class="text-button" data-warmup-refresh><i data-lucide="refresh-cw"></i><span>Оновити</span></button></div></div>
       ${tableHtml(data)}
     </section>

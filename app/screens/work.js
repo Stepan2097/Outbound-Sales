@@ -112,19 +112,27 @@ function statsHtml(total) {
     ["ban", "Не валідні", total.invalid, ""],
     ["skip-forward", "Пропущено", total.skipped, ""]
   ];
-  return `<div class="work-stats">${cards.map(([icon, label, value, note]) => `<div class="work-stat ${icon === "message-circle-reply" && total.fresh ? "is-fresh" : ""}">
+  // Розвантаження (аудит 16.10, D10): плитка з нулем не показується — крім двох головних.
+  const core = new Set(["users", "message-circle-reply"]);
+  return `<div class="work-stats">${cards.filter(([icon, , value]) => core.has(icon) || Number(value) > 0).map(([icon, label, value, note]) => `<div class="work-stat ${icon === "message-circle-reply" && total.fresh ? "is-fresh" : ""}">
     <i data-lucide="${icon}"></i><b>${value || 0}</b><span>${label}</span>${note ? `<em>${escapeHtml(note)}</em>` : ""}</div>`).join("")}</div>`;
 }
 
 function teamHtml(data) {
   if (!data.admin || data.user !== "all" || !data.byUser?.length) return "";
   const rate = (counts) => (counts.contacts ? `${Math.round((counts.answered / counts.contacts) * 100)}%` : "—");
+  // Розвантаження (аудит 16.10, D10): колонка, де в усіх нуль, не показується; люди, відповіли й % — завжди.
+  const columns = [
+    ["contacts", "Людей", true, "Унікальних людей, яким написали або надіслали запит"], ["answered", "Відповіли", true], ["rate", "% відповідей", true],
+    ["wroteLinkedin", "LinkedIn"], ["wroteEmail", "Листів"], ["invited", "Запитів"], ["replied", "Відп. у розмовах"],
+    ["viewed", "Переглянуто"], ["enriched", "Збагачено"], ["invalid", "Не валідні"], ["skipped", "Пропущено"]
+  ].filter(([key, , always]) => always || data.byUser.some((row) => Number(row.counts[key]) > 0));
+  const cell = (row, key) => (key === "rate" ? rate(row.counts) : row.counts[key]);
   return `<div class="work-team"><table>
-    <thead><tr><th>Хто</th><th title="Унікальних людей, яким написали або надіслали запит">Людей</th><th>Відповіли</th><th>% відповідей</th><th>LinkedIn</th><th>Листів</th><th>Запитів</th><th>Відп. у розмовах</th><th>Переглянуто</th><th>Збагачено</th><th>Не валідні</th><th>Пропущено</th></tr></thead>
+    <thead><tr><th>Хто</th>${columns.map(([, label, , title]) => `<th${title ? ` title="${escapeAttr(title)}"` : ""}>${escapeHtml(label)}</th>`).join("")}</tr></thead>
     <tbody>${data.byUser.map((row) => `<tr data-work-user="${escapeAttr(row.user)}">
       <td><b>${escapeHtml(row.name || row.user)}</b>${row.name ? `<small>${escapeHtml(row.user)}</small>` : ""}</td>
-      <td>${row.counts.contacts}</td><td>${row.counts.answered}</td><td>${rate(row.counts)}</td><td>${row.counts.wroteLinkedin}</td><td>${row.counts.wroteEmail}</td>
-      <td>${row.counts.invited}</td><td>${row.counts.replied}</td><td>${row.counts.viewed}</td><td>${row.counts.enriched}</td><td>${row.counts.invalid}</td><td>${row.counts.skipped}</td>
+      ${columns.map(([key]) => `<td>${cell(row, key)}</td>`).join("")}
     </tr>`).join("")}</tbody></table></div>`;
 }
 

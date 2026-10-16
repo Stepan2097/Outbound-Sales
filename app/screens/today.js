@@ -273,13 +273,19 @@ async function acceptImports() {
 
 /* ── малювання ──────────────────────────────────────────────────────────── */
 
+// Розвантаження (аудит 16.10, D1): лідген під кожним пінгом — лише коли в списку їх кілька, і коротко.
+const shortName = (email) => String(email || "").split("@")[0];
+function mixedAssignees() {
+  return new Set(allItems().map((item) => item.assignee).filter(Boolean)).size > 1;
+}
+
 function queueItem(item) {
   const preview = item.preview?.body ? `${item.preview.direction === "in" ? "" : "Ви: "}${item.preview.body}` : item.reasonTitle;
   return `<button type="button" class="today-item${item.pingId === today.selected ? " active" : ""}" data-today="select" data-id="${escapeAttr(item.pingId)}">
     <span class="today-item-top"><strong>${escapeHtml(item.name)}</strong><span class="today-due">${escapeHtml(dayLabel(item.dueDay, today.data.today))}</span></span>
     <span class="today-item-sub">${escapeHtml([item.position, item.company].filter(Boolean).join(" · "))}</span>
     <span class="today-item-preview">${escapeHtml(preview)}</span>
-    ${today.scope === "all" && item.assignee ? `<span class="today-item-who">${escapeHtml(item.assignee)}</span>` : ""}
+    ${today.scope === "all" && item.assignee && mixedAssignees() ? `<span class="today-item-who">${escapeHtml(shortName(item.assignee))}</span>` : ""}
   </button>`;
 }
 
@@ -289,7 +295,7 @@ function queueHtml() {
     const items = data.blocks[key] || [];
     if (!items.length || (today.blockFilter && today.blockFilter !== key)) return "";
     return `<section class="today-block today-block-${key}">
-      <h3 title="${escapeAttr(hint)}">${escapeHtml(title)} <span class="today-count">${items.length}</span></h3>
+      <h3 title="${escapeAttr(hint)}">${escapeHtml(title)}${data.blocks && Object.values(data.blocks).filter((list) => list.length).length > 1 ? "" : ` <span class="today-count">${items.length}</span>`}</h3>
       ${items.map(queueItem).join("")}
     </section>`;
   }).join("");
@@ -333,9 +339,9 @@ function workHtml() {
       <span class="pill today-reason today-reason-${escapeAttr(item.block)}">${escapeHtml(item.reasonTitle)} · ${escapeHtml(dayLabel(item.dueDay, today.data?.today))}</span>
     </header>
     <p class="today-work-meta">
-      ${item.campaign ? `Кампанія <b>${escapeHtml(item.campaign.name || "без назви")}</b> · ` : ""}${item.accountName ? `Від акаунта <b>${escapeHtml(item.accountName)}</b> · LinkedIn` : "LinkedIn"}
+      ${item.campaign ? `<b>${escapeHtml(item.campaign.name || "без назви")}</b> · ` : ""}${item.accountName ? `<span title="Акаунт LinkedIn, з якого йде розмова">${escapeHtml(item.accountName)}</span>` : "LinkedIn"}
       ${item.crmUrl ? ` · <a href="${escapeAttr(item.crmUrl)}" target="_blank" rel="noopener noreferrer">Відкрити в CRM</a>` : ""}
-      ${item.assignee && today.scope === "all" ? ` · ${escapeHtml(item.assignee)}` : ""}
+      ${item.assignee && today.scope === "all" && mixedAssignees() ? ` · ${escapeHtml(shortName(item.assignee))}` : ""}
     </p>
     ${item.reassigned ? `<p class="today-note today-note-moved">Перепризначено з ${escapeHtml(item.reassigned.from)} на ${escapeHtml(item.reassigned.to)} (${escapeHtml(new Date(item.reassigned.at).toLocaleDateString("uk-UA"))}): старий акаунт заблоковано${item.channel === "moved" ? `; запит у друзі піде з ${escapeHtml(item.reassigned.to)}, і коли прийме — тут буде «Перше повідомлення»` : ""}.</p>` : ""}
     ${item.channel === "first" ? `<p class="today-note">Прийняв запит${detail.acceptedAt ? ` ${escapeHtml(new Date(detail.acceptedAt).toLocaleDateString("uk-UA"))}` : ""} — розмови ще немає, це перше повідомлення.</p>` : ""}
@@ -351,19 +357,17 @@ function workHtml() {
         ${today.draftNote ? `<p class="today-draft-note">${escapeHtml(today.draftNote)}</p>` : ""}
         <textarea id="todayText" rows="6" placeholder="${today.draftLoading ? "Модель пише чернетку…" : "Текст повідомлення"}">${escapeHtml(today.text)}</textarea>
         <div class="today-actions">
-          <button type="button" class="primary-button" data-today="send" ${today.sending || !today.text.trim() ? "disabled" : ""}><i data-lucide="send"></i><span>${today.sending ? "Ставлю в чергу…" : "Погодити й надіслати"}</span></button>
-          <span class="today-hint">Піде з цього акаунта в найближчу сесію. Наступний пінг — через 3 робочі дні.</span>
+          <button type="button" class="primary-button" data-today="send" title="Піде з цього акаунта в найближчу сесію. Наступний пінг — через 3 робочі дні." ${today.sending || !today.text.trim() ? "disabled" : ""}><i data-lucide="send"></i><span>${today.sending ? "Ставлю в чергу…" : "Погодити й надіслати"}</span></button>
         </div>
       </div>` : item.channel === "moved" ? "" : `<p class="today-note">Переписки з цим контактом тут немає — відкрийте його в CRM або перенесіть пінг.</p>`}
     ${statusHtml(item)}
     <div class="today-move">
       <span>Перенести:</span>
-      <button type="button" data-today="move" data-when="+1">+1 день</button>
-      <button type="button" data-today="move" data-when="+3">+3 дні</button>
-      <button type="button" data-today="move" data-when="+7">Тиждень</button>
-      <input type="date" id="todayMoveDate" aria-label="Інша дата" min="${escapeAttr(today.data?.today || "")}" />
-      <button type="button" data-today="move-date">На дату</button>
-      <button type="button" data-today="call"><i data-lucide="phone"></i><span>Дзвінок на дату</span></button>
+      <button type="button" data-today="move" data-when="+1" title="На завтра (робочий день)">+1</button>
+      <button type="button" data-today="move" data-when="+3" title="Через 3 робочі дні">+3</button>
+      <button type="button" data-today="move" data-when="+7" title="Через тиждень">+7</button>
+      <input type="date" id="todayMoveDate" aria-label="Перенести на дату" title="Вибір дати одразу переносить пінг" min="${escapeAttr(today.data?.today || "")}" />
+      <button type="button" data-today="call" class="${today.callMode ? "active" : ""}" aria-pressed="${Boolean(today.callMode)}" title="Дзвінок: натисніть і оберіть дату"><i data-lucide="phone"></i><span>${today.callMode ? "Дзвінок — оберіть дату" : "Дзвінок"}</span></button>
     </div>`;
 }
 
@@ -374,9 +378,9 @@ function statusHtml(item) {
   const current = today.statusDraft?.pingId === item.pingId ? today.statusDraft : { status: item.status || "new", exitReason: item.exitReason || "" };
   const closing = (data.closing || []).includes(current.status);
   return `<div class="today-status">
-    <label><span>Статус у CRM</span><select data-today-status="status">${data.statuses.map(([key, label]) => `<option value="${escapeAttr(key)}"${key === current.status ? " selected" : ""}>${escapeHtml(label)}</option>`).join("")}</select></label>
+    <label title="Зберігається в CRM одразу при виборі"><span>Статус у CRM</span><select data-today-status="status">${data.statuses.map(([key, label]) => `<option value="${escapeAttr(key)}"${key === current.status ? " selected" : ""}>${escapeHtml(label)}</option>`).join("")}</select></label>
     ${closing ? `<label><span>Причина виходу</span><select data-today-status="exit"><option value="">— оберіть —</option>${data.exitReasons.map(([key, label]) => `<option value="${escapeAttr(key)}"${key === current.exitReason ? " selected" : ""}>${escapeHtml(label)}</option>`).join("")}</select></label>` : ""}
-    ${today.statusSaving ? `<span class="today-hint">Зберігаю в CRM…</span>` : closing && !current.exitReason ? `<span class="today-hint">Оберіть причину — статус збережеться одразу, пінги контакту закриються.</span>` : closing ? `<span class="today-hint">Вихід із воронки — пінги цього контакту закриються.</span>` : current.status === "booked_call" ? `<span class="today-hint">«Дзвінок» — у CRM з'явиться угода, якщо її ще немає.</span>` : `<span class="today-hint">Зберігається одразу при виборі.</span>`}
+    ${today.statusSaving ? `<span class="today-hint">Зберігаю в CRM…</span>` : closing && !current.exitReason ? `<span class="today-hint">Оберіть причину — статус збережеться одразу, пінги контакту закриються.</span>` : closing ? `<span class="today-hint">Вихід із воронки — пінги цього контакту закриються.</span>` : current.status === "booked_call" ? `<span class="today-hint">«Дзвінок» — у CRM з'явиться угода, якщо її ще немає.</span>` : ""}
   </div>`;
 }
 
@@ -438,7 +442,9 @@ function render() {
             <button type="button" data-today="scope" data-scope="mine" class="${today.scope === "mine" ? "active" : ""}">Мої</button>
             <button type="button" data-today="scope" data-scope="all" class="${today.scope === "all" ? "active" : ""}">Усі</button>
           </div>` : ""}
-          ${data.canSeeAll ? `<button type="button" data-today="import-toggle">${today.importOpen ? "До пінгів" : "Відкриті діалоги з 01.08"}</button>` : ""}
+          ${data.canSeeAll ? (today.importOpen
+            ? `<button type="button" data-today="import-toggle">До пінгів</button>`
+            : `<button type="button" class="icon-button" data-today="import-toggle" title="Відкриті діалоги з 01.08 — підтягнути в пінги" aria-label="Відкриті діалоги з 01.08"><i data-lucide="history"></i></button>`) : ""}
           <button type="button" class="icon-button" data-today="reload" title="Оновити" aria-label="Оновити"><i data-lucide="refresh-cw"></i></button>
         </div>
       </header>
@@ -479,6 +485,7 @@ document.addEventListener("click", (event) => {
     if (today.text.trim() && today.textFor && today.textFor !== target.dataset.id && today.text !== (today.detail?.draft?.text || "")
       && !window.confirm("Текст ще не надіслано. Перейти до іншого ліда?")) return;
     today.selected = target.dataset.id;
+    today.callMode = false;
     today.detail = null;
     today.text = "";
     today.textFor = "";
@@ -514,14 +521,23 @@ document.addEventListener("click", (event) => {
   if (act === "rewrite") return void writeDraft(true);
   if (act === "send") return void send();
   if (act === "move") return void movePing(target.dataset.when);
-  if (act === "move-date" || act === "call") {
-    const day = document.getElementById("todayMoveDate")?.value || "";
-    if (!day) {
-      say("Оберіть дату в полі поруч.", "is-warn");
-      return render();
-    }
-    return void movePing(day, act === "call");
+  if (act === "call") {
+    // «Дзвінок» вмикає режим: наступний вибір дати ставить дзвінок, а не просто переносить пінг.
+    today.callMode = !today.callMode;
+    render();
+    const input = document.getElementById("todayMoveDate");
+    input?.focus();
+    try { if (today.callMode) input?.showPicker?.(); } catch {}
+    return;
   }
+});
+
+// D5: вибір дати сам переносить пінг — без окремої кнопки «На дату».
+document.addEventListener("change", (event) => {
+  if (event.target?.id !== "todayMoveDate" || !event.target.value) return;
+  const call = Boolean(today.callMode);
+  today.callMode = false;
+  void movePing(event.target.value, call);
 });
 
 document.addEventListener("change", (event) => {
