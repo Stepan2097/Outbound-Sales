@@ -1,0 +1,128 @@
+/* Сценарій кампанії: редактор у формі й перегляд під кампанією — app/screens/campaign-plan.js. */
+
+.plan-editor-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.plan-editor-head h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.plan-editor-head p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.plan-template {
+  min-width: min(100%, 280px);
+}
+
+.plan-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: 10px;
+}
+
+.plan-steps {
+  display: grid;
+  gap: 8px;
+}
+
+.plan-steps-head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.plan-steps-head span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.plan-step {
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--green);
+  background: var(--surface-strong);
+  border-radius: 0 8px 8px 0;
+}
+
+.plan-step-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.plan-step-head input {
+  flex: 1;
+  min-width: 0;
+}
+
+.plan-step-number {
+  font-weight: 700;
+  color: var(--green);
+  min-width: 18px;
+}
+
+.plan-step textarea {
+  width: 100%;
+}
+
+.plan-summary {
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+
+.plan-summary summary {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.plan-summary dl {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0 0;
+}
+
+.plan-summary-row dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.plan-summary-row dd {
+  margin: 2px 0 0;
+  white-space: pre-wrap;
+  font-size: 13px;
+}
+
+.plan-summary-steps {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0 0;
+  padding-left: 20px;
+}
+
+.plan-summary-steps p {
+  margin: 2px 0 0;
+  white-space: pre-wrap;
+  font-size: 13px;
+}
+
+.plan-summary-empty {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}

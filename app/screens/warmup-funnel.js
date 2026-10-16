@@ -6,7 +6,8 @@
 import { escapeHtml, onScreen, refreshIcons } from "../core.js";
 import { warmupApi, warmupCount } from "./warmup-accounts.js";
 
-onScreen("warmup", { open: () => void loadWarmupFunnel() });
+// Конвеєр LinkedIn-кампаній — у WorkSpace (16.10), поруч із кампаніями.
+onScreen("workspace", { open: () => void loadWarmupFunnel() });
 
 // The funnel itself — moved here from home.js when «LinkedIn · огляд» was removed (15.10).
 function homePercent(part, whole) {

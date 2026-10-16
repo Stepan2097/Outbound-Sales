@@ -1,3 +1,4 @@
+import { scenarioForPrompt } from "./scenarios.mjs";
 import { LIVE_ACCOUNT_STATUSES, withAccountQuota } from "./store.mjs";
 import { connectCeiling, weeklyAllowance, weeklyConnectAllowance, weeklyConnectCounts } from "./weekly.mjs";
 import { anty, crm, CONTACT_ID_BATCH, IN_FOLDER, antyTeamId, crmError, leadById, queueTotal, today, withFolder } from "./db.mjs";
@@ -949,7 +950,7 @@ function campaignProductFor(accountId, campaigns) {
  * when there is not. Ukrainian for somebody in Ukraine, English otherwise, as on
  * the contact card.
  */
-async function writeFirstDraft(row, choice, campaigns, writer) {
+async function writeFirstDraft(row, choice, campaigns, writer, spine = null) {
   let record = null;
   if (row.crm_contact_id) {
     try { record = await leadById(row.crm_contact_id); } catch { record = null; }
@@ -964,12 +965,14 @@ async function writeFirstDraft(row, choice, campaigns, writer) {
   };
   const language = choice.language
     || (/^(ua|ukr|україн|украин)/i.test(String(contact.country || "").trim()) ? "uk" : "en");
-  // Підхід кампанії (етап 3/6) — те, з чим ми йдемо до людини, коли окремої вказівки немає.
-  const approach = campaigns.find((campaign) => campaign.state === "running" && campaign.accountIds.includes(row.account_id) && campaign.approach)?.approach || "";
+  // Сценарій кампанії (WorkSpace, 16.10) і спільний хребет — те, з чим ми йдемо до
+  // людини: перше повідомлення після прийнятого запиту — це опенер флоу.
+  const campaign = campaigns.find((item) => item.state === "running" && item.accountIds.includes(row.account_id)) || null;
   const written = await writer.write(contact, {
     productId: choice.productId || campaignProductFor(row.account_id, campaigns),
     language,
-    instruction: choice.instruction || (approach ? `Campaign approach: ${approach}` : "")
+    instruction: choice.instruction || "",
+    scenario: scenarioForPrompt(campaign, spine)
   });
   if (!written?.text?.trim()) return null;
   return saveDraft(row, written);
@@ -1500,7 +1503,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         productId: typeof body.productId === "string" ? body.productId : "",
         language: typeof body.language === "string" ? body.language : "",
         instruction: typeof body.instruction === "string" ? body.instruction.slice(0, 600) : ""
-      }, readCampaigns(), writer));
+      }, readCampaigns(), writer, campaignStore.spine?.() || null));
       if (!draft?.text) return fail(response, sendJson, 502, "Модель не написала повідомлення — спробуйте ще раз.");
       sendJson(response, 200, { success: true, draft });
       return true;

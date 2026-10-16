@@ -14,7 +14,7 @@ import {
   loadWarmupInbox, setWarmupUnread, showWarmupInboxAccount, showWarmupInboxThread, warmupAccountRepliesHtml, warmupInboxUnreadFor
 } from "./inbox.js";
 import {
-  loadWarmupCampaigns, loadWarmupStrategy, renderWarmupCampaignDetail, renderWarmupCampaigns, renderWarmupStrategy, toggleWarmupAccount, warmupAutoFeedHtml, warmupCampaignAccountIds, warmupEditsInProgress, warmupSelectedCampaign
+  loadWarmupCampaigns, loadWarmupStrategy, renderWarmupCampaignDetail, renderWarmupCampaigns, renderWarmupStrategy, toggleWarmupAccount, warmupAccountCampaign, warmupAutoFeedHtml, warmupEditsInProgress
 } from "./warmup-campaign.js";
 
 onScreen("warmup", { open: () => loadWarmup() });
@@ -157,7 +157,7 @@ function warmupPauseUntil(iso) {
 }
 
 /** The status pill, with the pause's last date beside a pause or a limit. */
-function warmupStatusPill(profile) {
+export function warmupStatusPill(profile) {
   const status = profile.status;
   const until = (status === "paused" || status === "limited") ? warmupPauseUntil(profile.pause?.until) : "";
   const title = status === "limited"
@@ -339,15 +339,18 @@ function warmupQueueState(accountId) {
  * account is looked at, and whether it works the campaign is the first thing
  * to see or change there. The same tick, the same save.
  */
+/** Колонка «Кампанія» в таблиці прогріву: що веде акаунт; змінюється у WorkSpace. */
+function warmupCampaignCellHtml(accountId) {
+  const campaign = warmupAccountCampaign(accountId);
+  if (!campaign) return '<span class="warmup-subtle" title="Акаунти кампанії обирають у WorkSpace">—</span>';
+  return `<span class="warmup-campaign-chip ${campaign.state === "running" ? "is-running" : ""}" title="${escapeAttr(`Веде «${campaign.name || "без назви"}»${campaign.state === "running" ? "" : " — не запущена"}. Змінюється у WorkSpace.`)}">${escapeHtml(campaign.name || "без назви")}</span>`;
+}
+
 function warmupCardCampaignHtml(accountId) {
-  const campaign = warmupSelectedCampaign();
-  if (!campaign) return "";
-  const ticked = warmupCampaignAccountIds(campaign).has(accountId);
-  const tickable = warmupState.campaignsReady;
-  return `<label class="warmup-card-campaign">
-    <input type="checkbox" data-warmup-account-tick="${escapeAttr(accountId)}" ${ticked ? "checked" : ""} ${tickable ? "" : "disabled"} />
-    <span>Веде кампанію «${escapeHtml(campaign.name || "без назви")}»</span>
-  </label>`;
+  // Кампанії — у WorkSpace (16.10): тут лише видно, яку веде акаунт.
+  const campaign = warmupAccountCampaign(accountId);
+  if (!campaign) return `<p class="warmup-card-campaign">Кампанії не веде — акаунти кампанії обирають у WorkSpace.</p>`;
+  return `<p class="warmup-card-campaign">Веде кампанію «${escapeHtml(campaign.name || "без назви")}»${campaign.state === "running" ? "" : " · не запущена"}</p>`;
 }
 
 /**
@@ -530,16 +533,6 @@ export function renderWarmupProfiles() {
     return;
   }
 
-  // The tick column belongs to the selected campaign: an account works a
-  // campaign, not "the targeting", and there is no second place that answers
-  // which folder an account is on.
-  const campaign = warmupSelectedCampaign();
-  const ticked = warmupCampaignAccountIds(campaign);
-  const tickable = Boolean(campaign) && warmupState.campaignsReady;
-  const tickTitle = campaign
-    ? `Вести «${campaign.name || "цю кампанію"}» з цього акаунта`
-    : "Спочатку обери кампанію вгорі, потім познач акаунти, які її ведуть";
-
   body.innerHTML = warmupSortedProfiles(warmupState.profiles)
     .map((profile) => {
       const status = profile.status;
@@ -551,7 +544,7 @@ export function renderWarmupProfiles() {
         <tr data-warmup-profile="${escapeHtml(profile.id)}" class="${profile.id === warmupState.selectedProfileId ? "is-selected" : ""}">
           <td class="warmup-tick">
             ${account
-              ? `<input type="checkbox" data-warmup-account-tick="${escapeAttr(account.id)}" ${ticked.has(account.id) ? "checked" : ""} ${tickable ? "" : "disabled"} aria-label="Вести вибрану кампанію з акаунта ${escapeAttr(profile.name)}" title="${escapeAttr(tickTitle)}" />`
+              ? warmupCampaignCellHtml(account.id)
               : '<span class="warmup-subtle" title="Ще не на прогріві, тож із нього не можна надсилати">—</span>'}
           </td>
           <td>

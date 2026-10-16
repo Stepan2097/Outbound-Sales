@@ -12,6 +12,8 @@
     <link rel="stylesheet" href="/styles/home-triage.css" />
     <link rel="stylesheet" href="/styles/today.css" />
     <link rel="stylesheet" href="/styles/campaign-report.css" />
+    <link rel="stylesheet" href="/styles/workspace.css" />
+    <link rel="stylesheet" href="/styles/campaign-plan.css" />
     <link rel="stylesheet" href="/styles/work.css" />
     <link rel="stylesheet" href="/styles/inbox.css" />
     <link rel="stylesheet" href="/styles/contacts.css" />
@@ -70,9 +72,11 @@
           <div class="nav-group" data-nav-group="linkedin">
             <button class="nav-group-toggle" type="button" aria-expanded="true"><i data-lucide="folder-open"></i><span>LinkedIn</span><i data-lucide="chevron-down" class="nav-group-chevron"></i></button>
             <div class="nav-group-items">
-              <button class="nav-item" data-view="warmup" aria-label="Прогрів LinkedIn" title="Прогрів LinkedIn"><i data-lucide="flame"></i><span>Прогрів</span></button>
-              <button class="nav-item" data-view="inbox" aria-label="Вхідні LinkedIn" title="Вхідні LinkedIn"><i data-lucide="inbox"></i><span>Вхідні</span><span class="nav-badge" id="warmupNavBadge" hidden></span></button>
+              <!-- Від щоденного до технічного (аудит 16.10): кампанії → відповіді → смисли → прогрів акаунтів. -->
+              <button class="nav-item" data-view="workspace" aria-label="WorkSpace LinkedIn" title="WorkSpace: кампанії, сценарії, звіт"><i data-lucide="layout-dashboard"></i><span>WorkSpace</span></button>
+              <button class="nav-item" data-view="inbox" aria-label="Вхідні LinkedIn" title="Вхідні LinkedIn: непрочитані розмови акаунтів"><i data-lucide="inbox"></i><span>Вхідні</span><span class="nav-badge" id="warmupNavBadge" hidden></span></button>
               <button class="nav-item" data-view="pitch" aria-label="Смисли продуктів" title="Смисли продуктів: що продаємо і як про це говорити"><i data-lucide="book-open-text"></i><span>Смисли</span></button>
+              <button class="nav-item" data-view="warmup" aria-label="Прогрів LinkedIn" title="Прогрів LinkedIn: акаунти, розклад і ліміти"><i data-lucide="flame"></i><span>Прогрів</span></button>
             </div>
           </div>
           <div class="nav-group" data-nav-group="mail">
@@ -243,8 +247,6 @@
              строк зберігання — app/screens/esp-reports.js (ESP 16). -->
         <section class="view" id="view-reports">
           <div class="mail-page reports-page" id="reportsPage">
-            <!-- LinkedIn-кампанії (етап 6/6): кваліфіковані відповіді на 100 написаних — app/screens/campaign-report.js. -->
-            <div id="campaignReportRoot"></div>
             <div id="reportsTop"></div>
             <section class="panel esp-reports-panel">
               <div class="panel-heading">
@@ -331,12 +333,25 @@
           </div>
         </section>
 
-        <section class="view" id="view-warmup">
+        <!-- WorkSpace (16.10): кампанії окремо від прогріву — список, форма зі сценарієм і
+             акаунтами, як іде розсилка, порівняння кампаній і спільний хребет. -->
+        <section class="view" id="view-workspace">
           <div class="warmup-layout">
             <!-- Розмітку панелі кампанії малює app/screens/warmup-campaign.js. -->
             <section class="panel warmup-campaigns-panel span-2" id="warmupCampaignPanel"></section>
-            <!-- «Як іде розсилка» — конвеєр LinkedIn; малює app/screens/warmup-funnel.js. -->
+            <!-- «Як іде розсилка» — конвеєр LinkedIn-кампаній; малює app/screens/warmup-funnel.js. -->
             <section class="panel warmup-funnel-panel home-panel span-2" id="warmupFunnelPanel"></section>
+            <!-- Порівняння кампаній: кваліфіковані на 100 написаних — app/screens/campaign-report.js. -->
+            <div class="span-2" id="campaignReportRoot"></div>
+            <!-- Хребет: драбина кваліфікації, маршрути, правила — app/screens/workspace.js. -->
+            <section class="panel span-2" id="workspaceSpinePanel"></section>
+          </div>
+        </section>
+
+        <section class="view" id="view-warmup">
+          <div class="warmup-layout">
+            <!-- Розклад прогріву — свій блок зі своєю кнопкою «Зберегти»; малює app/screens/warmup-campaign.js. -->
+            <section class="panel warmup-strategy-panel span-2" id="warmupStrategyPanel"></section>
             <section class="panel warmup-list-panel span-2">
               <div class="panel-heading">
                 <div>
@@ -350,7 +365,7 @@
                 <table>
                   <thead>
                     <tr>
-                      <th class="warmup-tick-head" title="Відмічені акаунти ведуть вибрану кампанію">Веде</th>
+                      <th class="warmup-tick-head" title="Яку кампанію веде акаунт; змінюється у WorkSpace">Кампанія</th>
                       <th>Акаунт</th>
                       <th>Статус</th>
                       <th>Теги</th>

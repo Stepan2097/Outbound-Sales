@@ -45,7 +45,7 @@ function sources(dir = APP.pathname) {
   });
 }
 
-const SCREENS = [["home", "Головна"], ["work", "По днях"], ["warmup", "Прогрів"], ["inbox", "Вхідні"], ["pitch", "Смисли"], ["mail-warmup", "Прогрів пошт"], ["campaigns", "Кампанії"], ["mail-inbox", "Вхідні"], ["leads", "Ліди"], ["reports", "Звіти"], ["contacts", "Контакти"], ["account", "Налаштування"]];
+const SCREENS = [["home", "Головна"], ["work", "По днях"], ["workspace", "WorkSpace"], ["inbox", "Вхідні"], ["pitch", "Смисли"], ["warmup", "Прогрів"], ["mail-warmup", "Прогрів пошт"], ["campaigns", "Кампанії"], ["mail-inbox", "Вхідні"], ["leads", "Ліди"], ["reports", "Звіти"], ["contacts", "Контакти"], ["account", "Налаштування"]];
 
 const REMOVED_VIEWS = ["email", "prospects", "ai", "products", "overview", "models", "routing", "budgets", "privacy", "evaluation"];
 
@@ -98,6 +98,8 @@ const SCREEN_FILES = {
   // «Сьогодні» (пінги, 16.10) реєструє Головну й відкриває нові контакти з home-triage.js.
   home: ["screens/today.js", "screens/home-triage.js"],
   work: ["screens/work.js"],
+  // WorkSpace (16.10): кампанії зі сценарієм, розсилка, порівняння й хребет — окремо від прогріву.
+  workspace: ["screens/workspace.js", "screens/warmup-campaign.js", "screens/campaign-plan.js", "screens/campaign-report.js"],
   warmup: ["screens/warmup-accounts.js", "screens/warmup-campaign.js"],
   inbox: ["screens/inbox.js"],
   pitch: ["screens/pitch.js"],

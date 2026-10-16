@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { cleanPlan } from "./scenarios.mjs";
 
 import { normalizeFilters, normalizeTargeting } from "./targeting.mjs";
 
@@ -118,6 +119,8 @@ export function parseScenario(body) {
     if (people !== null && !(Number.isInteger(people) && people >= 1 && people <= 5000)) return { error: "Людей у кампанії — ціле число від 1 до 5000" };
     out.maxPeople = people;
   }
+  // Сценарій кампанії як в артефакті (WorkSpace, 16.10): сигнал, гіпотеза, ціль, флоу, розгалуження.
+  if (body.plan !== undefined) out.plan = cleanPlan(body.plan);
   return { value: out };
 }
 
@@ -158,6 +161,7 @@ export function normalizeCampaign(raw, index = 0) {
     approach: typeof raw?.approach === "string" ? raw.approach.trim().slice(0, 2000) : "",
     silentSteps: isSilentSteps(raw?.silentSteps) ? [...raw.silentSteps] : [...DEFAULT_SILENT_STEPS],
     maxPeople: Number.isInteger(raw?.maxPeople) && raw.maxPeople >= 1 ? raw.maxPeople : null,
+    plan: cleanPlan(raw?.plan),
     state: isCampaignState(raw?.state) ? raw.state : "draft",
     order: Number.isFinite(raw?.order) ? Number(raw.order) : index,
     createdAt: typeof raw?.createdAt === "string" ? raw.createdAt : now,
@@ -280,6 +284,7 @@ export function describeCampaign(campaign, folderName = null) {
     approach: campaign.approach || "",
     silentSteps: [...(campaign.silentSteps || DEFAULT_SILENT_STEPS)],
     maxPeople: campaign.maxPeople ?? null,
+    plan: cleanPlan(campaign.plan),
     state: campaign.state,
     order: campaign.order,
     createdAt: campaign.createdAt,

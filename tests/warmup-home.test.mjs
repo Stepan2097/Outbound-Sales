@@ -1,3 +1,4 @@
+import { SCENARIO_TEMPLATES } from "../warmup/scenarios.mjs";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import test from "node:test";
@@ -331,6 +332,24 @@ test("модель пише перше повідомлення з картки 
   assert.equal(forced.status, 200);
   assert.equal(asked.length, 2, "«Переписати» — нова чернетка");
   assert.equal(asked[1].choice.instruction, "коротше");
+});
+
+// WorkSpace (16.10): перше повідомлення пишеться за сценарієм кампанії — опенер флоу — і хребтом.
+test("чернетка першого повідомлення отримує сценарій кампанії й хребет; без сценарію — лише хребет", async () => {
+  const template = SCENARIO_TEMPLATES.find((item) => item.id === "meta-operators");
+  campaignList = [{ ...campaignList[0], plan: { ...template.plan, template: template.id } }];
+  await ask("first-messages/draft", { outreachId: "o-1", force: true });
+  const scenario = asked.at(-1).choice.scenario;
+  assert.equal(scenario.campaign.name, "iGaming UK");
+  assert.equal(scenario.campaign.flow[0].label, "Опенер — на конкретній деталі");
+  assert.match(scenario.campaign.flow[0].text, /\{Name\}/, "шаблон зі змінними, які модель заповнює лише фактами");
+  assert.match(scenario.spine.rules, /Ціну лідген не називає/);
+  assert.equal(asked.at(-1).choice.instruction, "", "вказівка лідгена не змішується зі сценарієм");
+
+  campaignList = [{ ...campaignList[0], plan: {} }];
+  await ask("first-messages/draft", { outreachId: "o-1", force: true });
+  assert.equal(asked.at(-1).choice.scenario.campaign, null);
+  assert.match(asked.at(-1).choice.scenario.spine.qualificationLadder, /Вертикаль/);
 });
 
 test("людині з України — українською; без кампанії — продукт простору", async () => {

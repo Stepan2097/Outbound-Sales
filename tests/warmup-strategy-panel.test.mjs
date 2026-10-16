@@ -18,28 +18,33 @@ import { loadMain, mainSource, declaration } from "./app-main-excerpt.mjs";
  */
 
 const INDEX = readFileSync(new URL("../app/index.html", import.meta.url), "utf8");
-// The campaign panel — schedule included — is drawn by its own module, not
-// kept in index.html: its markup is the template in warmup-campaign.js.
+// Панелі малює свій модуль, не index.html: розклад — шаблон WARMUP_STRATEGY_PANEL_HTML,
+// кампанії — WARMUP_CAMPAIGN_PANEL_HTML у warmup-campaign.js.
 const CAMPAIGN = readFileSync(new URL("../app/screens/warmup-campaign.js", import.meta.url), "utf8");
-const PANEL = CAMPAIGN.slice(CAMPAIGN.indexOf("const WARMUP_CAMPAIGN_PANEL_HTML = `"), CAMPAIGN.indexOf("`;", CAMPAIGN.indexOf("const WARMUP_CAMPAIGN_PANEL_HTML = `")));
+const template = (name) => CAMPAIGN.slice(CAMPAIGN.indexOf(`const ${name} = \``), CAMPAIGN.indexOf("`;", CAMPAIGN.indexOf(`const ${name} = \``)));
+const PANEL = template("WARMUP_STRATEGY_PANEL_HTML");
+const CAMPAIGN_PANEL = template("WARMUP_CAMPAIGN_PANEL_HTML");
 const STYLES_DIR = new URL("../app/styles/", import.meta.url);
 const STYLES = readdirSync(STYLES_DIR).filter((name) => name.endsWith(".css"))
   .map((name) => readFileSync(new URL(name, STYLES_DIR), "utf8")).join("\n");
 
-test("розмітка розкладу лежить у панелі кампанії, під деталями кампанії, і зберігається її одним «Зберегти»", () => {
-  assert.ok(PANEL.length > 0, "шаблону панелі кампанії в warmup-campaign.js немає");
-  for (const id of ["warmupStrategyPill", "warmupStrategySubtitle", "warmupStrategyToggleBtn", "warmupStrategyBody", "warmupCampaignDetail", "warmupPanelSaveBtn"]) {
-    assert.equal(PANEL.split(`id="${id}"`).length - 1, 1, `у панелі кампанії має бути рівно один #${id}`);
-    assert.equal(INDEX.includes(`id="${id}"`), false, `#${id} знову в index.html — панель кампанії мусить жити у своєму модулі`);
+// 16.10 (аудит, WorkSpace): розклад прогріву — окрема панель «Прогріву» зі своєю кнопкою;
+// кампанії — у WorkSpace зі своєю. До того обидва жили в одній панелі під одним «Зберегти».
+test("розклад — окрема панель «Прогріву» зі своїм «Зберегти розклад»; кампанія зберігається у своїй формі у WorkSpace", () => {
+  assert.ok(PANEL.length > 0, "шаблону панелі розкладу в warmup-campaign.js немає");
+  for (const id of ["warmupStrategyPill", "warmupStrategySubtitle", "warmupStrategyToggleBtn", "warmupStrategyBody", "warmupStrategySaveBtn"]) {
+    assert.equal(PANEL.split(`id="${id}"`).length - 1, 1, `у панелі розкладу має бути рівно один #${id}`);
+    assert.equal(INDEX.includes(`id="${id}"`), false, `#${id} знову в index.html — панель мусить жити у своєму модулі`);
+    assert.equal(CAMPAIGN_PANEL.includes(`id="${id}"`), false, `#${id} знову в панелі кампанії`);
   }
-  assert.ok(INDEX.includes('id="warmupCampaignPanel"'), "index.html має місце, куди модуль малює панель");
-  const detail = PANEL.indexOf('id="warmupCampaignDetail"');
-  const section = PANEL.indexOf("warmup-strategy-section");
-  const save = PANEL.indexOf('id="warmupPanelSaveBtn"');
-  assert.ok(detail < section, "розклад мусить стояти після деталей кампанії");
-  assert.ok(section < save, "одне «Зберегти» — внизу, під усім, що воно зберігає");
-  assert.equal((PANEL.match(/Зберегти/g) || []).length, 1, "у панелі одна кнопка «Зберегти», не дві");
-  assert.match(PANEL, /<h3>Стратегія прогріву<\/h3>/);
+  const warmupView = INDEX.slice(INDEX.indexOf('id="view-warmup"'), INDEX.indexOf("</section>", INDEX.indexOf('id="warmupStrategyPanel"')));
+  assert.ok(warmupView.includes('id="warmupStrategyPanel"'), "розклад — на вкладці «Прогрів»");
+  const workspaceView = INDEX.slice(INDEX.indexOf('id="view-workspace"'), INDEX.indexOf('id="view-warmup"'));
+  assert.ok(workspaceView.includes('id="warmupCampaignPanel"'), "кампанії — на вкладці WorkSpace");
+  assert.equal(warmupView.includes('id="warmupCampaignPanel"'), false, "кампаній на «Прогріві» більше немає");
+  assert.equal((PANEL.match(/Зберегти/g) || []).length, 1, "у панелі розкладу одна кнопка «Зберегти»");
+  assert.match(CAMPAIGN_PANEL, /id="warmupCampaignSaveBtn" type="submit"/, "кампанія зберігається кнопкою у своїй формі");
+  assert.match(PANEL, /<h2>Стратегія прогріву<\/h2>/);
 });
 
 test("стилі таблиці розкладу на місці", () => {
@@ -67,7 +72,7 @@ const NAMES = [
   "uaPlural", "escapeHtml", "escapeAttr", "WARMUP_EDITABLE_KINDS", "WARMUP_KIND_LABEL",
   "warmupStrategyDays", "warmupStrategyDirty", "warmupQuotaCell", "warmupStrategyRowHtml",
   "renderWarmupStrategy", "editWarmupStrategyDay", "loadWarmupStrategy", "saveWarmupStrategy",
-  "warmupPanelChanges", "renderWarmupPanelSave"
+  "renderWarmupPanelSave"
 ];
 
 function element() {
@@ -97,8 +102,9 @@ function panel({ api, strategy = serverStrategy(), open = true, extra = {} } = {
     warmupStrategySubtitle: element(),
     warmupStrategyToggleBtn: element(),
     warmupStrategyBody: element(),
-    // The panel's one «Зберегти» and the line under it.
-    warmupPanelSaveBtn: { disabled: true, querySelector: () => label },
+    // «Зберегти розклад» під таблицею і рядок під ним.
+    warmupStrategySave: element(),
+    warmupStrategySaveBtn: { disabled: true, querySelector: () => label },
     warmupPanelSaveNote: element()
   };
   const warmupState = {
@@ -111,7 +117,7 @@ function panel({ api, strategy = serverStrategy(), open = true, extra = {} } = {
     document: { getElementById: (id) => els[id] || null },
     refreshIcons: () => {}
   });
-  return { els, warmupState, main, render: main.get("renderWarmupStrategy"), edit: main.get("editWarmupStrategyDay") };
+  return { els, warmupState, main, label, render: main.get("renderWarmupStrategy"), edit: main.get("editWarmupStrategyDay") };
 }
 
 const rows = (html) => (html.match(/<tr class="/g) || []).length;
@@ -147,17 +153,18 @@ test("нотатку до запиту не можна ввімкнути в д�
   assert.match(checkbox(3), /checked/);
 });
 
-test("правка йде в чернетку, збережене не чіпається, і «Зберегти» панелі вмикається лише з правкою", () => {
-  const { els, warmupState, render, edit } = panel();
+test("правка йде в чернетку, збережене не чіпається, і «Зберегти розклад» вмикається лише з правкою", () => {
+  const { els, warmupState, render, edit, label } = panel();
   render();
-  assert.equal(els.warmupPanelSaveBtn.disabled, true, "без правки зберігати нічого");
-  assert.doesNotMatch(els.warmupStrategyBody.innerHTML, /warmupStrategySaveBtn/, "у розкладу більше немає власного «Зберегти»");
+  assert.equal(els.warmupStrategySaveBtn.disabled, true, "без правки зберігати нічого");
+  assert.doesNotMatch(els.warmupStrategyBody.innerHTML, /warmupStrategySaveBtn/, "кнопка — під таблицею, а не в тілі, яке перемальовується");
 
   edit(2, (row) => { row.quotas = { ...row.quotas, profile_view: [6, 9] }; });
   render();
   assert.deepEqual(warmupState.strategy.days[1].quotas.profile_view, [3, 5], "правка дісталась збереженого, а не чернетки");
   assert.deepEqual(warmupState.strategyDraft[1].quotas.profile_view, [6, 9]);
-  assert.equal(els.warmupPanelSaveBtn.disabled, false);
+  assert.equal(els.warmupStrategySaveBtn.disabled, false);
+  assert.equal(label.textContent, "Зберегти розклад");
   assert.match(els.warmupPanelSaveNote.textContent, /розклад/, "під кнопкою сказано, що саме збережеться");
 });
 

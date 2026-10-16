@@ -217,9 +217,12 @@ test("невідома мітка — 400, нічого не записано", 
   assert.deepEqual(labels, {});
 });
 
-test("звіти ESP не зачеплені: свій блок над ними, без маршрутів /api/esp", () => {
+test("порівняння кампаній — у WorkSpace, а звіти ESP не зачеплені й без нього", () => {
   const html = readFileSync(new URL("../app/index.html", import.meta.url), "utf8");
-  assert.ok(html.indexOf('id="campaignReportRoot"') < html.indexOf('id="reportsTop"'), "блок кампаній — над звітами ESP");
+  const workspace = html.slice(html.indexOf('id="view-workspace"'), html.indexOf('id="view-warmup"'));
+  assert.ok(workspace.includes('id="campaignReportRoot"'), "порівняння кампаній живе у WorkSpace (аудит 16.10)");
+  assert.equal(html.split('id="campaignReportRoot"').length - 1, 1, "і лише там — у «Пошта → Звіти» його більше немає");
+  assert.ok(html.includes('id="reportsTop"'), "звіти ESP на місці");
   const screen = readFileSync(new URL("../app/screens/campaign-report.js", import.meta.url), "utf8");
   assert.doesNotMatch(screen, /\/api\/esp/);
   assert.doesNotMatch(screen, /reportsTop/, "не рендерить у корінь звітів ESP");

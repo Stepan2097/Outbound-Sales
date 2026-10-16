@@ -12,6 +12,7 @@ import { handleKnowledgeLibraryApi } from "./knowledge/api.mjs";
 import { handlePitchApi } from "./knowledge/pitch-api.mjs";
 import { handleTodayApi, reconcileSoon, setCampaignsReader, setLeadgenStore, startPingReconciler } from "./triage/today.mjs";
 import { handleCampaignReportApi, setReportStores, startReplyLabeler } from "./triage/campaign-report.mjs";
+import { handleScenarioApi, scenarioForPrompt } from "./warmup/scenarios.mjs";
 import { loadPitchBook, pitchCardForPrompt, pitchCatalogForPrompt, pitchFallbackBrief, pitchProductList } from "./knowledge/pitch.mjs";
 import { allEntries, append as espAppend, useJournal } from "./esp/journal.mjs";
 import { channelsFor as triageChannels, nextContact as nextTriageContact } from "./triage/queue.mjs";
@@ -294,6 +295,8 @@ const state = {
   accountLeadgens: {},
   // Мітки відповідей у звіті кампаній (етап 6/6): { contactId: { label, by: ai|human, basis, at } }.
   replyLabels: {},
+  // Хребет LinkedIn-кампаній (WorkSpace, 16.10): драбина кваліфікації, маршрути, правила. null — як в артефакті.
+  campaignSpine: null,
   // ESP 1: sending mailboxes Google stopped letting us act as, by address —
   // why and since when. A person lifts each one; nothing retries on its own.
   espSenderPauses: {},
@@ -1059,7 +1062,9 @@ async function handleApi(request, response, url) {
         // A campaign points at one of the workspace's own products, which is
         // all it says about the message — the wording is not this phase's.
         // Продукти кампаній — картки «Смислів» (WorkSpace, 16.10): одне джерело для лідгенів і AI.
-        products: () => pitchProductList()
+        products: () => pitchProductList(),
+        // Спільний хребет кампаній — для чернетки першого повідомлення.
+        spine: () => state.campaignSpine
       },
       // The first message to somebody who accepted, written the way the contact
       // card writes it — the same model, product brief and rules — and only its
@@ -1067,9 +1072,13 @@ async function handleApi(request, response, url) {
       // the brief's own template, and `status` says so to the Home screen.
       writer: {
         status: () => ({ ready: Boolean(state.vault) && state.providerHealth.status === "healthy" }),
-        async write(contact, { productId = "", language = "en", instruction = "" } = {}) {
+        async write(contact, { productId = "", language = "en", instruction = "", scenario = null } = {}) {
           const product = draftProduct(productId);
-          const drafts = await generateContactDrafts(contact, product, { language, instruction });
+          // Сценарій кампанії й хребет (WorkSpace, 16.10): перше повідомлення після прийнятого запиту — опенер флоу.
+          const scenarioNote = scenario?.campaign
+            ? `Campaign scenario — the first LinkedIn message after they accepted is the flow's opener step: ${JSON.stringify(scenario).slice(0, 6000)}`
+            : scenario?.spine ? `Rules for every campaign: ${JSON.stringify(scenario.spine).slice(0, 3000)}` : "";
+          const drafts = await generateContactDrafts(contact, product, { language, instruction: [instruction, scenarioNote].filter(Boolean).join("\n\n") });
           addEvent("outreach", `First message written for ${contact.name || "a contact"} (${product?.name || "no product"}).`);
           return {
             text: drafts.linkedin?.body || "",
@@ -1127,6 +1136,21 @@ async function handleApi(request, response, url) {
   // мітки відповідей (AI, лідген змінює одним кліком). triage/campaign-report.mjs.
   if (url.pathname === "/api/campaign-report" || url.pathname.startsWith("/api/campaign-report/")) {
     const handled = await handleCampaignReportApi({ request, response, url, sendJson, readJson, classify: classifyReply });
+    if (handled) return;
+  }
+
+  // WorkSpace: шаблони сценаріїв кампаній і спільний хребет (пише адміністратор).
+  if (url.pathname === "/api/scenarios" || url.pathname.startsWith("/api/scenarios/")) {
+    const handled = await handleScenarioApi({
+      request, response, url, sendJson, readJson, profile: request.auth?.profile,
+      spineStore: {
+        read: () => state.campaignSpine,
+        async write(value) {
+          state.campaignSpine = value;
+          await writePersistentWorkspaceState();
+        }
+      }
+    });
     if (handled) return;
   }
 
@@ -5064,6 +5088,9 @@ function applyPersistentWorkspaceState(saved = {}) {
   if (saved.replyLabels && typeof saved.replyLabels === "object" && !Array.isArray(saved.replyLabels)) {
     state.replyLabels = saved.replyLabels;
   }
+  if (saved.campaignSpine && typeof saved.campaignSpine === "object" && !Array.isArray(saved.campaignSpine)) {
+    state.campaignSpine = saved.campaignSpine;
+  }
   if (Array.isArray(saved.warmupCampaigns)) {
     state.warmupCampaigns = saved.warmupCampaigns;
   }
@@ -5320,6 +5347,7 @@ async function writeWorkspaceStateNow() {
       warmupCampaigns: state.warmupCampaigns,
       accountLeadgens: state.accountLeadgens,
       replyLabels: state.replyLabels,
+      campaignSpine: state.campaignSpine,
       warmupTargeting: state.warmupTargeting,
       espSenderPauses: state.espSenderPauses,
       espTemplates: state.espTemplates,
@@ -15166,12 +15194,12 @@ async function writeTodayDraft({ contact, messages = [], kind = "reply", account
     messages: [
       {
         role: "system",
-        content: "You write the next LinkedIn message in an ongoing conversation for a lead-gen person at a team that runs and teaches iGaming media buying. Return only strict JSON {\"text\": \"...\"}. Write in the language of their last message (English if unclear). Plain, calm, one professional to another; no compliments, no 'hope you are well', no lists of adjectives. Never invent facts, prices, numbers or promises that are not in the product card (or, without one, the product catalog). When campaignApproach is given, write within that approach. kind=reply: answer what they actually said first, then at most one qualifying question; when they show interest, offer a short 15-minute call. 30–90 words. kind=follow-up: they have not answered our last message — 15–45 words, refer to what we said, ask one easy question or offer an easy way out; no guilt, no 'just following up'."
+        content: "You write the next LinkedIn message in an ongoing conversation for a lead-gen person at a team that runs and teaches iGaming media buying. Return only strict JSON {\"text\": \"...\"}. scenario holds the campaign's flow (steps with message templates, branches) and the spine every campaign shares (qualification ladder, where each lead goes, rules): follow scenario.howToUse. Write in the language of their last message (English if unclear). Plain, calm, one professional to another; no compliments, no 'hope you are well', no lists of adjectives. Never invent facts, prices, numbers or promises that are not in the product card (or, without one, the product catalog). When campaignApproach is given, write within that approach. kind=reply: answer what they actually said first, then at most one qualifying question; when they show interest, offer a short 15-minute call. 30–90 words. kind=follow-up: they have not answered our last message — 15–45 words, refer to what we said, ask one easy question or offer an easy way out; no guilt, no 'just following up'."
       },
       {
         role: "user",
         // Підхід кампанії й номер нагадування (етап 3/6): з чим ми йдемо і котрий це дотик.
-        content: JSON.stringify({ kind, campaignApproach: campaign?.approach || null, followUpNumber: kind === "follow-up" ? conversation.reduce((count, message) => (message.from === "us" ? count + 1 : 0), 0) : null, contact: { name: contact?.name || "", position: contact?.position || "", company: contact?.company || "", country: contact?.country || "" }, product: productForPrompt(product, contact?.company || ""), conversation })
+        content: JSON.stringify({ kind, scenario: scenarioForPrompt(campaign, state.campaignSpine), campaignApproach: campaign?.approach || null, followUpNumber: kind === "follow-up" ? conversation.reduce((count, message) => (message.from === "us" ? count + 1 : 0), 0) : null, contact: { name: contact?.name || "", position: contact?.position || "", company: contact?.company || "", country: contact?.country || "" }, product: productForPrompt(product, contact?.company || ""), conversation })
       }
     ]
   });

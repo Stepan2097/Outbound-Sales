@@ -8,8 +8,6 @@
 // так і каже («Як рахуємо»).
 
 import { api, escapeAttr, escapeHtml, onScreen, refreshIcons, uaPlural } from "../core.js";
-// LinkedIn-кампанії (етап 6/6) — свій блок над звітами ESP, у тому ж екрані.
-import "./campaign-report.js";
 
 const PERIODS = { 7: "Останні 7 днів", 30: "Останні 30 днів", 90: "Останні 90 днів", 365: "Останній рік", 0: "Увесь час" };
 const BUCKETS = { day: "По днях", week: "По тижнях", month: "По місяцях" };

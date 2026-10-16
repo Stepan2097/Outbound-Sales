@@ -105,13 +105,15 @@ test("signing out (or a lapsed session) forgets every screen the tab remembered"
   assert.doesNotMatch(cache, /localStorage/);
 });
 
-test("the warm-up screen opens on the campaign, and the account card is not there until an account is picked", () => {
+// 16.10: кампанії переїхали у WorkSpace; «Прогрів» відкривається розкладом, далі акаунти й картка.
+test("the warm-up screen opens on the schedule, and the account card is not there until an account is picked", () => {
   const html = readFileSync(new URL("../app/index.html", import.meta.url), "utf8");
   const view = html.slice(html.indexOf('id="view-warmup"'), html.indexOf('id="view-contacts"'));
-  const campaign = view.indexOf('id="warmupCampaignPanel"');
+  const strategy = view.indexOf('id="warmupStrategyPanel"');
   const accounts = view.indexOf("warmup-list-panel");
   const card = view.indexOf('id="warmupDetailPanel"');
-  assert.ok(campaign > 0 && campaign < accounts && accounts < card, "campaign, then accounts, then the card");
+  assert.ok(strategy > 0 && strategy < accounts && accounts < card, "schedule, then accounts, then the card");
+  assert.equal(view.includes('id="warmupCampaignPanel"'), false, "campaigns live in WorkSpace");
   assert.match(view, /id="warmupDetailPanel" hidden/);
   assert.doesNotMatch(view, /Вибери акаунт у таблиці/);
 });

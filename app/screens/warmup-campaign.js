@@ -1,6 +1,10 @@
-// Прогрів — the campaign: which CRM folder feeds which accounts, from which
-// day, with which note, and the warm-up schedule by day. The accounts it feeds
-// live in warmup-accounts.js.
+// LinkedIn-кампанії (WorkSpace, 16.10.2026) і розклад прогріву (Прогрів).
+//
+// Кампанія — папка CRM, акаунти, які її ведуть, продукт зі «Смислів» і сценарій
+// (campaign-plan.js); усе це в одній формі з однією кнопкою «Зберегти», на вкладці
+// WorkSpace. Розклад прогріву — окремий блок на вкладці «Прогрів» зі своєю кнопкою:
+// до 16.10 обидва жили на «Прогріві» під однією кнопкою, а акаунти кампанії
+// позначались галочками в таблиці прогріву (аудит 16.10, P1).
 
 import {
   autoFeedLine, campaignFeedStart, campaignStateNote
@@ -9,26 +13,24 @@ import {
   escapeAttr, escapeHtml, refreshIcons, uaPlural
 } from "../core.js";
 import {
-  WARMUP_CAMPAIGN_STATE_LABEL, WARMUP_CAMPAIGN_TONE, WARMUP_DEFAULT_FROM_DAY, WARMUP_EDITABLE_KINDS, WARMUP_EMPTY_FILTERS, WARMUP_KIND_LABEL, refreshWarmupAccountQueue, renderWarmupProfiles, warmupApi, warmupCount, warmupDuration, warmupState
+  WARMUP_CAMPAIGN_STATE_LABEL, WARMUP_CAMPAIGN_TONE, WARMUP_DEFAULT_FROM_DAY, WARMUP_EDITABLE_KINDS, WARMUP_EMPTY_FILTERS, WARMUP_KIND_LABEL, refreshWarmupAccountQueue, renderWarmupProfiles, warmupApi, warmupCount, warmupDuration, warmupState, warmupStatusPill
 } from "./warmup-accounts.js";
 import { loadPitchProducts, pitchProductName, pitchProducts } from "../pitch-products.js";
 import { pitchProductOptions } from "../pitch-options.js";
-// «Як іде розсилка» — панель цієї ж сторінки, під кампанією.
+import { bindPlanEditor, loadScenarios, planSummaryHtml, readPlan, renderPlanEditor, samePlan } from "./campaign-plan.js";
+// WorkSpace: «Як іде розсилка», порівняння кампаній і хребет — панелі тієї ж вкладки.
 import "./warmup-funnel.js";
+import "./workspace.js";
 
 /**
- * The whole campaign panel, drawn by this module rather than kept in
- * index.html: the campaign is one screen's business, and its markup living in
- * a shared file meant every change to it touched a file the other screens
- * edit too. index.html holds only the empty #warmupCampaignPanel.
- *
- * One «Зберегти» at the bottom saves whatever changed — the campaign, the
- * schedule, or both (`saveWarmupPanel`).
+ * Панель кампаній (WorkSpace) і панель розкладу (Прогрів) малює цей модуль;
+ * index.html тримає лише порожні #warmupCampaignPanel і #warmupStrategyPanel.
  */
 const WARMUP_CAMPAIGN_PANEL_HTML = `
   <div class="panel-heading">
     <div>
-      <h2>Кампанія</h2>
+      <h2>Кампанії</h2>
+      <p>Папка CRM, акаунти, продукт і сценарій. Порядок вирішує, яка кампанія першою бере спільні акаунти.</p>
     </div>
     <div class="warmup-campaigns-controls">
       <span class="pill tone-muted" id="warmupCampaignsPill">завантаження</span>
@@ -37,33 +39,39 @@ const WARMUP_CAMPAIGN_PANEL_HTML = `
   </div>
 
   <form class="warmup-campaign-form" id="warmupCampaignForm" hidden>
-    <div class="warmup-campaign-grid">
-      <label class="warmup-field warmup-field-folder">
-        <span>База контактів — папка CRM</span>
-        <select id="warmupFolderSelect" aria-label="Папка CRM">
-          <option value="">Завантаження папок...</option>
-        </select>
-      </label>
-      <label class="warmup-field warmup-field-name">
-        <span>Назва</span>
-        <input id="warmupCampaignName" type="text" placeholder="Для чого ця кампанія?" autocomplete="off" />
-      </label>
-      <label class="warmup-field warmup-field-product">
-        <span>Продукт</span>
-        <select id="warmupCampaignProduct" aria-label="Продукт">
-          <option value="">Без продукту</option>
-        </select>
-      </label>
-      <label class="warmup-field warmup-field-filter" title="З якого дня прогріву акаунт починає брати людей із папки">
-        <span>Брати людей з дня прогріву</span>
-        <input id="warmupCampaignFromDay" type="number" min="1" max="365" step="1" value="7" inputmode="numeric" aria-label="З якого дня прогріву кампанія сама бере людей із папки" />
-      </label>
+    <div class="campaign-form-section">
+      <h3>Основне</h3>
+      <div class="warmup-campaign-grid">
+        <label class="warmup-field warmup-field-name">
+          <span>Назва</span>
+          <input id="warmupCampaignName" type="text" placeholder="Напр.: Оператори, що вже ллють Meta" autocomplete="off" />
+        </label>
+        <label class="warmup-field warmup-field-folder">
+          <span>База контактів — папка CRM</span>
+          <select id="warmupFolderSelect" aria-label="Папка CRM">
+            <option value="">Завантаження папок...</option>
+          </select>
+        </label>
+        <label class="warmup-field warmup-field-product">
+          <span>Продукт — зі «Смислів»</span>
+          <select id="warmupCampaignProduct" aria-label="Продукт">
+            <option value="">Без продукту — AI підбере з каталогу</option>
+          </select>
+        </label>
+      </div>
     </div>
-    <!-- Сценарій (етап 3/6, 16.10): з чим ідемо, коли нагадувати, скільки людей. -->
-    <div class="warmup-campaign-scenario">
+    <div class="campaign-form-section">
+      <h3>Акаунти, які ведуть кампанію</h3>
+      <p class="campaign-form-hint">Люди з папки діляться порівну між позначеними акаунтами. Акаунт веде одну живу кампанію.</p>
+      <div class="campaign-accounts" id="warmupCampaignAccounts"></div>
+    </div>
+    <!-- Сценарій як в артефакті: app/screens/campaign-plan.js. -->
+    <div class="campaign-form-section campaign-plan-editor" id="campaignPlanEditor"></div>
+    <div class="campaign-form-section warmup-campaign-scenario">
+      <h3>Темп і межі</h3>
       <label class="warmup-field warmup-field-approach">
-        <span>Підхід — з чим ми йдемо до цих людей (за ним AI пише перше повідомлення й нагадування)</span>
-        <textarea id="warmupCampaignApproach" rows="3" maxlength="2000" placeholder="Напр.: SiGMA World у Римі — 15 хвилин зі Степаном 2–5.11; хто не їде — дзвінок 10–12.11."></textarea>
+        <span>Привід цієї хвилі, якщо є (конференція, акція) — AI додасть його до сценарію</span>
+        <textarea id="warmupCampaignApproach" rows="2" maxlength="2000" placeholder="Напр.: SiGMA World у Римі — 15 хвилин зі Степаном 2–5.11; хто не їде — дзвінок 10–12.11."></textarea>
       </label>
       <div class="warmup-campaign-grid">
         <label class="warmup-field warmup-field-filter" title="Через скільки робочих днів після нашого повідомлення — нагадування; через кому — кілька">
@@ -74,8 +82,12 @@ const WARMUP_CAMPAIGN_PANEL_HTML = `
           <span>Людей у кампанії</span>
           <input id="warmupCampaignMaxPeople" type="number" min="1" max="5000" step="1" value="200" inputmode="numeric" />
         </label>
+        <label class="warmup-field warmup-field-filter" title="З якого дня прогріву акаунт починає брати людей із папки">
+          <span>Брати людей з дня прогріву</span>
+          <input id="warmupCampaignFromDay" type="number" min="1" max="365" step="1" value="7" inputmode="numeric" aria-label="З якого дня прогріву кампанія сама бере людей із папки" />
+        </label>
       </div>
-      <p class="warmup-campaign-scenario-hint">Лід відповів — нагадування для нього зупиняються, а в «Сьогодні» з'являється «Відповісти». Після останнього нагадування і ще стількох днів тиші — статус CRM «Не відповідає».</p>
+      <p class="warmup-campaign-scenario-hint">Лід відповів — нагадування для нього зупиняються, а в «Сьогодні» з'являється «Відповісти». Після останнього нагадування і ще стількох днів тиші — статус CRM «Без відповіді».</p>
     </div>
     <details class="warmup-campaign-filters" id="warmupCampaignFilters">
       <summary id="warmupCampaignFiltersSummary">Звузити папку</summary>
@@ -102,6 +114,7 @@ const WARMUP_CAMPAIGN_PANEL_HTML = `
       </div>
     </details>
     <div class="warmup-campaign-form-footer">
+      <button class="primary-button" id="warmupCampaignSaveBtn" type="submit" disabled><i data-lucide="save"></i><span>Зберегти кампанію</span></button>
       <button class="text-button" id="warmupCampaignCancelBtn" type="button"><i data-lucide="x"></i><span>Скасувати</span></button>
       <button class="text-button" id="warmupCampaignFinishBtn" type="button" hidden title="Більше нікого не брати з папки"><i data-lucide="check"></i><span>Завершити</span></button>
       <button class="text-button warmup-campaign-delete" id="warmupCampaignDeleteBtn" type="button" hidden><i data-lucide="trash-2"></i><span>Видалити</span></button>
@@ -112,14 +125,14 @@ const WARMUP_CAMPAIGN_PANEL_HTML = `
   <div class="warmup-campaign-list" id="warmupCampaignList"></div>
 
   <div class="warmup-campaign-detail" id="warmupCampaignDetail"></div>
+`;
 
-  <!-- Кого вести — вище; як швидко — тут. Один блок, бо це дві
-       половини одного рішення, і розведені по двох панелях вони
-       читалися як дві різні теми. -->
+/** Розклад прогріву — окремий блок «Прогріву» зі своєю кнопкою. */
+const WARMUP_STRATEGY_PANEL_HTML = `
   <section class="warmup-strategy-section">
     <div class="warmup-strategy-head">
       <div>
-        <h3>Стратегія прогріву</h3>
+        <h2>Стратегія прогріву</h2>
         <p id="warmupStrategySubtitle">Одна на всі акаунти: скільки чого дозволено кожного дня</p>
       </div>
       <div class="warmup-strategy-controls">
@@ -129,14 +142,17 @@ const WARMUP_CAMPAIGN_PANEL_HTML = `
     </div>
     <div id="warmupStrategyBody" hidden></div>
   </section>
-  <div class="warmup-panel-save">
-    <button class="primary-button" id="warmupPanelSaveBtn" type="button" disabled><i data-lucide="save"></i><span>Зберегти</span></button>
+  <div class="warmup-panel-save" id="warmupStrategySave" hidden>
+    <button class="primary-button" id="warmupStrategySaveBtn" type="button" disabled><i data-lucide="save"></i><span>Зберегти розклад</span></button>
     <p class="warmup-panel-save-note" id="warmupPanelSaveNote"></p>
   </div>
 `;
 
 const warmupCampaignPanel = document.getElementById("warmupCampaignPanel");
 if (warmupCampaignPanel) warmupCampaignPanel.innerHTML = WARMUP_CAMPAIGN_PANEL_HTML;
+const warmupStrategyPanel = document.getElementById("warmupStrategyPanel");
+if (warmupStrategyPanel) warmupStrategyPanel.innerHTML = WARMUP_STRATEGY_PANEL_HTML;
+const campaignPlanHost = () => document.getElementById("campaignPlanEditor");
 
 /** День із поля форми, як рядок: перевіряє його сервер і каже реченням, що не так. */
 function warmupFromDayValue() {
@@ -166,6 +182,9 @@ function warmupFormValues() {
     approach: (document.getElementById("warmupCampaignApproach")?.value || "").trim(),
     silentSteps: (document.getElementById("warmupCampaignSteps")?.value || "").split(/[,;\s]+/).filter(Boolean).join(", "),
     maxPeople: (document.getElementById("warmupCampaignMaxPeople")?.value || "").trim(),
+    // Акаунти й сценарій — у самій формі (WorkSpace, 16.10), не галочками в таблиці прогріву.
+    accountIds: [...document.querySelectorAll("#warmupCampaignAccounts [data-campaign-account]:checked")].map((input) => input.value).sort(),
+    plan: readPlan(campaignPlanHost()),
     filters
   };
 }
@@ -193,6 +212,8 @@ function warmupCampaignSaved(campaign) {
     silentSteps: (campaign?.silentSteps || [3, 3]).join(", "),
     // Кампанія, збережена до межі, межі не має — поле порожнє; нова — 200.
     maxPeople: campaign ? (campaign.maxPeople ? String(campaign.maxPeople) : "") : "200",
+    accountIds: [...(campaign?.accountIds || [])].sort(),
+    plan: campaign?.plan || {},
     filters: { ...WARMUP_EMPTY_FILTERS, ...(campaign?.filters || {}) }
   };
 }
@@ -207,6 +228,8 @@ function warmupFormDirty() {
   if (form.name !== saved.name || form.folderId !== saved.folderId || form.productId !== saved.productId) return true;
   if (form.fromDay !== saved.fromDay) return true;
   if (form.approach !== saved.approach || form.silentSteps !== saved.silentSteps || form.maxPeople !== saved.maxPeople) return true;
+  if (form.accountIds.join(",") !== saved.accountIds.join(",")) return true;
+  if (form.plan && !samePlan(form.plan, saved.plan)) return true;
   return Object.keys(WARMUP_EMPTY_FILTERS).some((key) => form.filters[key] !== saved.filters[key]);
 }
 
@@ -497,7 +520,9 @@ export function renderWarmupCampaignDetail() {
         : warmupTickedAccountsLine(campaign)}</p>
       ${note ? `<p class="warmup-campaign-state-note">${escapeHtml(note)}</p>` : ""}
       ${warmupScenarioLine(campaign)}
-    </div>`;
+      ${campaign.approach ? `<p class="warmup-campaign-scenario-line">Привід хвилі: ${escapeHtml(campaign.approach)}</p>` : ""}
+    </div>
+    ${planSummaryHtml(campaign.plan)}`;
   refreshIcons();
 }
 
@@ -515,6 +540,45 @@ function warmupScenarioLine(campaign) {
     parts.push("без межі людей");
   }
   return `<p class="warmup-campaign-scenario-line">${parts.join(" · ")}</p>`;
+}
+
+/** Жива кампанія, яку веде акаунт (а без живої — остання не завершена). Для таблиці прогріву. */
+export function warmupAccountCampaign(accountId) {
+  const mine = warmupState.campaigns.filter((campaign) => campaign.state !== "done" && (campaign.accountIds || []).includes(accountId));
+  return mine.find((campaign) => campaign.state === "running") || mine[0] || null;
+}
+
+/**
+ * Акаунти, які ведуть кампанію, — у самій формі (аудит 16.10, P1: раніше галочки
+ * стояли в таблиці прогріву нижче й чіплялись до вибраної, а не до відкритої
+ * кампанії). Заблоковані й виключені не позначити; акаунт, що веде іншу живу
+ * кампанію, підписаний — сервер не дасть одному акаунту дві живі кампанії.
+ */
+function renderWarmupCampaignAccounts(selected, { force = false } = {}) {
+  const host = document.getElementById("warmupCampaignAccounts");
+  if (!host) return;
+  const editingId = warmupState.formCampaignId || null;
+  const profiles = warmupState.profiles.filter((profile) => profile.account);
+  const signature = JSON.stringify([editingId, profiles.map((profile) => [profile.account.id, profile.status, profile.account.health]), warmupState.campaigns.map((campaign) => [campaign.id, campaign.state, campaign.accountIds])]);
+  if (!force && host.dataset.signature === signature) return;
+  host.dataset.signature = signature;
+  if (!profiles.length) {
+    host.innerHTML = '<p class="campaign-form-hint">Акаунтів на прогріві ще немає — їх додають на вкладці «Прогрів».</p>';
+    return;
+  }
+  host.innerHTML = profiles.map((profile) => {
+    const account = profile.account;
+    const retired = account.status === "excluded" || account.health === "blocked";
+    const other = warmupState.campaigns.find((campaign) => campaign.id !== editingId && campaign.state === "running" && (campaign.accountIds || []).includes(account.id));
+    const checked = selected.has(account.id);
+    const hint = retired ? "заблокований або виключений" : other ? `веде «${other.name || "іншу кампанію"}»` : "";
+    return `<label class="campaign-account ${checked ? "is-on" : ""} ${retired ? "is-retired" : ""}">
+      <input type="checkbox" data-campaign-account value="${escapeAttr(account.id)}" ${checked ? "checked" : ""} ${retired && !checked ? "disabled" : ""} />
+      <span class="campaign-account-name">${escapeHtml(profile.name)}</span>
+      ${warmupStatusPill(profile)}
+      ${hint ? `<small>${escapeHtml(hint)}</small>` : ""}
+    </label>`;
+  }).join("");
 }
 
 function renderWarmupCampaignForm({ resetForm = false } = {}) {
@@ -544,9 +608,12 @@ function renderWarmupCampaignForm({ resetForm = false } = {}) {
     }
     renderWarmupProductOptions(saved.productId);
     renderWarmupFolderOptions(saved.folderId);
+    renderWarmupCampaignAccounts(new Set(saved.accountIds), { force: true });
+    renderPlanEditor(campaignPlanHost(), saved.plan);
   } else {
     renderWarmupProductOptions(document.getElementById("warmupCampaignProduct")?.value || saved.productId);
     renderWarmupFolderOptions(document.getElementById("warmupFolderSelect")?.value || saved.folderId);
+    renderWarmupCampaignAccounts(new Set(warmupFormValues().accountIds));
   }
 
   for (const input of Object.values(warmupFilterInputs())) {
@@ -564,8 +631,8 @@ function renderWarmupCampaignForm({ resetForm = false } = {}) {
     note.innerHTML = warmupState.campaignNotice
       ? `<em class="warmup-campaign-problem">${escapeHtml(warmupState.campaignNotice)}</em>`
       : (editing
-        ? escapeHtml(`Редагуємо: ${editing.name || "ця кампанія"}. Які акаунти її ведуть — позначається галочками в таблиці акаунтів вище.`)
-        : "Нова кампанія починається як чернетка. Познач галочками в таблиці акаунтів вище, які акаунти її ведуть, і запусти її.");
+        ? escapeHtml(`Редагуємо: ${editing.name || "ця кампанія"}.`)
+        : "Нова кампанія зберігається як чернетка; запускається кнопкою «Старт» у списку.");
   }
   // Measured once the fields hold the campaign's values: on the half-filled
   // form a campaign nobody had touched read as changed.
@@ -629,7 +696,8 @@ export async function loadWarmupCampaigns({ resetForm = true } = {}) {
   const [folders, campaigns] = await Promise.allSettled([
     warmupApi("/folders"),
     warmupApi("/campaigns"),
-    loadPitchProducts()
+    loadPitchProducts(),
+    loadScenarios()
   ]);
 
   const problems = [];
@@ -693,7 +761,12 @@ function openWarmupCampaignForm(campaignId = null) {
   // «Редагувати» on another campaign selects it, and the open account's queue
   // has to follow — whether the folder feeds it was read for the one before.
   if (moved) refreshWarmupAccountQueue();
-  document.getElementById("warmupFolderSelect")?.focus();
+  // Шаблони сценаріїв ще не прочитані — перемалювати редактор, щойно прийдуть.
+  void loadScenarios().then(() => {
+    const host = campaignPlanHost();
+    if (warmupState.formOpen && host && host.querySelectorAll("[data-plan-template] option").length <= 1) renderPlanEditor(host, readPlan(host) || {});
+  });
+  document.getElementById("warmupCampaignName")?.focus();
 }
 
 function closeWarmupCampaignForm() {
@@ -735,7 +808,9 @@ async function saveWarmupCampaignForm() {
       ...(form.fromDay === "" ? {} : { fromDay: form.fromDay }),
       approach: form.approach,
       silentSteps: form.silentSteps.split(", ").filter(Boolean).map(Number),
-      maxPeople: form.maxPeople === "" ? null : Number(form.maxPeople)
+      maxPeople: form.maxPeople === "" ? null : Number(form.maxPeople),
+      accountIds: form.accountIds,
+      plan: form.plan || {}
     };
     const payload = editing
       ? await warmupApi("/campaigns", { method: "PATCH", body: JSON.stringify({ id: editing.id, ...body }) })
@@ -1077,7 +1152,7 @@ export function renderWarmupStrategy() {
       <button class="text-button" type="button" id="warmupStrategyResetBtn" ${dirty && !warmupState.strategyBusy ? "" : "disabled"}>
         <i data-lucide="undo-2"></i><span>Скасувати зміни розкладу</span>
       </button>
-      <p class="warmup-strategy-warning">Зберігається кнопкою «Зберегти» внизу панелі. Зміни діють на прогони, які почнуться після збереження. Акаунт, який уже прогрівається, доживе свої дні за тим розкладом, з яким стартував, — інакше правки сьогодні переписували б те, під що він уже працював.</p>
+      <p class="warmup-strategy-warning">Зберігається кнопкою «Зберегти розклад» нижче. Зміни діють на прогони, які почнуться після збереження. Акаунт, який уже прогрівається, доживе свої дні за тим розкладом, з яким стартував, — інакше правки сьогодні переписували б те, під що він уже працював.</p>
     </div>`;
   renderWarmupPanelSave();
   refreshIcons();
@@ -1155,6 +1230,7 @@ async function saveWarmupStrategy() {
 document.getElementById("warmupStrategyToggleBtn")?.addEventListener("click", () => {
   warmupState.strategyOpen = !warmupState.strategyOpen;
   renderWarmupStrategy();
+  renderWarmupPanelSave();
 });
 
 document.getElementById("warmupStrategyBody")?.addEventListener("change", (event) => {
@@ -1203,33 +1279,29 @@ function warmupCampaignFormTouched() {
   renderWarmupPanelSave();
 }
 
-/** Is there anything for the panel's one «Зберегти» to save? */
-function warmupPanelChanges() {
-  const changes = [];
-  if (warmupState.formOpen && warmupFormDirty()) changes.push(warmupEditingCampaign() ? "кампанію" : "нову кампанію");
-  if (warmupStrategyDirty()) changes.push("розклад");
-  return changes;
-}
-
+/**
+ * Дві кнопки, кожна про своє (аудит 16.10): «Зберегти кампанію» — у формі кампанії
+ * (WorkSpace), «Зберегти розклад» — під розкладом прогріву (Прогрів).
+ */
 function renderWarmupPanelSave() {
-  const button = document.getElementById("warmupPanelSaveBtn");
-  const note = document.getElementById("warmupPanelSaveNote");
-  if (!button) return;
-  const changes = warmupPanelChanges();
-  const busy = warmupState.savingCampaign || warmupState.strategyBusy;
-  button.disabled = busy || !changes.length;
-  const label = button.querySelector("span");
-  if (label) label.textContent = busy ? "Зберігаємо..." : "Зберегти";
-  if (note) note.textContent = changes.length && !busy ? `Збережеться: ${changes.join(" і ")}.` : "";
-}
-
-/** The panel's one «Зберегти»: the campaign if it changed, the schedule if it did. */
-async function saveWarmupPanel() {
-  const changes = warmupPanelChanges();
-  if (!changes.length) return;
-  if (warmupState.formOpen && warmupFormDirty()) await saveWarmupCampaignForm();
-  if (warmupStrategyDirty()) await saveWarmupStrategy();
-  renderWarmupPanelSave();
+  const campaignButton = document.getElementById("warmupCampaignSaveBtn");
+  if (campaignButton) {
+    const dirty = warmupState.formOpen && warmupFormDirty();
+    campaignButton.disabled = warmupState.savingCampaign || !dirty;
+    const label = campaignButton.querySelector("span");
+    if (label) label.textContent = warmupState.savingCampaign ? "Зберігаємо..." : (warmupEditingCampaign() ? "Зберегти кампанію" : "Створити кампанію");
+  }
+  const strategyButton = document.getElementById("warmupStrategySaveBtn");
+  if (strategyButton) {
+    const dirty = warmupStrategyDirty();
+    const wrap = document.getElementById("warmupStrategySave");
+    if (wrap) wrap.hidden = !warmupState.strategyOpen && !dirty;
+    strategyButton.disabled = warmupState.strategyBusy || !dirty;
+    const label = strategyButton.querySelector("span");
+    if (label) label.textContent = warmupState.strategyBusy ? "Зберігаємо..." : "Зберегти розклад";
+    const note = document.getElementById("warmupPanelSaveNote");
+    if (note) note.textContent = dirty && !warmupState.strategyBusy ? "Є незбережені зміни розкладу." : "";
+  }
 }
 
 document.getElementById("warmupFolderSelect")?.addEventListener("change", warmupCampaignFormTouched);
@@ -1248,10 +1320,30 @@ document.getElementById("warmupCampaignCancelBtn")?.addEventListener("click", ()
 
 document.getElementById("warmupCampaignForm")?.addEventListener("submit", (event) => {
   event.preventDefault();
-  saveWarmupPanel();
+  if (warmupState.formOpen && warmupFormDirty()) void saveWarmupCampaignForm();
 });
 
-document.getElementById("warmupPanelSaveBtn")?.addEventListener("click", () => saveWarmupPanel());
+document.getElementById("warmupStrategySaveBtn")?.addEventListener("click", () => {
+  if (warmupStrategyDirty()) void saveWarmupStrategy();
+});
+
+for (const id of ["warmupCampaignApproach", "warmupCampaignSteps", "warmupCampaignMaxPeople"]) {
+  document.getElementById(id)?.addEventListener("input", warmupCampaignFormTouched);
+}
+document.getElementById("warmupCampaignAccounts")?.addEventListener("change", (event) => {
+  event.target.closest(".campaign-account")?.classList.toggle("is-on", Boolean(event.target.checked));
+  warmupCampaignFormTouched();
+});
+bindPlanEditor(campaignPlanHost(), {
+  onChange: warmupCampaignFormTouched,
+  // Шаблон підказує продукт і назву, якщо їх ще не вибрали.
+  onTemplate: (template) => {
+    const product = document.getElementById("warmupCampaignProduct");
+    if (product && !product.value && template.productId && [...product.options].some((option) => option.value === template.productId)) product.value = template.productId;
+    const name = document.getElementById("warmupCampaignName");
+    if (name && !name.value.trim()) name.value = template.name;
+  }
+});
 
 document.getElementById("warmupCampaignFinishBtn")?.addEventListener("click", () => {
   if (warmupState.formCampaignId) setWarmupCampaignState(warmupState.formCampaignId, "done");

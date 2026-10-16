@@ -1,7 +1,7 @@
 /* «Звіти» → LinkedIn-кампанії (етап 6/6) — app/screens/campaign-report.js. */
 
 .campaign-report {
-  margin-bottom: 24px;
+  margin-bottom: 0;
   padding: 16px;
   border: 1px solid var(--line);
   border-radius: 8px;

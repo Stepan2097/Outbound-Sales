@@ -1,14 +1,16 @@
-// «Звіти» → LinkedIn-кампанії (етап 6/6 плану кампаній і пінгів, 16.10.2026).
+// WorkSpace → порівняння LinkedIn-кампаній (етап 6/6 плану кампаній і пінгів, 16.10.2026;
+// з «Пошта → Звіти» перенесено у WorkSpace того ж дня, аудит P1).
 //
 // Кампанії поруч: людей, написали, прийняли, відповіли, кваліфіковані відповіді на
 // 100 написаних, дзвінки. Головне число — кваліфіковані на 100 написаних (лідген-
 // стратегія 10.2026, §5). Рядок розгортається в список відповідей: у кожної мітка
 // (AI ставить, лідген змінює одним кліком — і звіт одразу перераховується).
-// Звіти ESP нижче (mail-reports.js) цей блок не чіпає.
+// Звіти ESP (mail-reports.js) цей блок не чіпає.
 
 import { api, escapeAttr, escapeHtml, onScreen, refreshIcons } from "../core.js";
 
-onScreen("reports", { open: () => void loadCampaignReport() });
+// WorkSpace (16.10): порівняння кампаній поруч із кампаніями, не в «Пошта → Звіти».
+onScreen("workspace", { open: () => void loadCampaignReport() });
 
 const STATES = { running: "Іде", paused: "Пауза", done: "Завершена", draft: "Чернетка" };
 const report = { data: null, error: "", open: "", replies: {}, saving: "" };
@@ -79,7 +81,7 @@ function renderCampaignReport() {
   const jobLine = job?.running ? `AI ставить мітки: ${job.done} з ${job.total}…` : job && job.total ? `AI розмітив ${job.done - job.failed} з ${job.total}${job.failed ? `, не вдалось ${job.failed}` : ""}.` : "";
   const head = `
     <div class="campaign-report-head">
-      <div><h2>LinkedIn-кампанії</h2><p>Порівнюємо за кваліфікованими відповідями на 100 написаних; дзвінки — як підтвердження.</p></div>
+      <div><h2>Порівняння кампаній</h2><p>Головне число — кваліфіковані відповіді на 100 написаних; дзвінки — як підтвердження.</p></div>
       <button type="button" class="text-button" data-campaign-report-ai ${job?.running ? "disabled" : ""}><i data-lucide="sparkles"></i><span>Розмітити нові відповіді</span></button>
     </div>
     ${jobLine ? `<p class="campaign-report-job">${escapeHtml(jobLine)}</p>` : ""}`;

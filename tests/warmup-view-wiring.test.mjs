@@ -122,6 +122,9 @@ test("opening the form on another campaign reads the open account's queue again;
     document: { getElementById: () => null },
     renderWarmupCampaigns: () => {},
     renderWarmupProfiles: () => {},
+    // Шаблони сценаріїв (WorkSpace, 16.10) — форма лише дочитує їх, якщо ще не прийшли.
+    loadScenarios: async () => ({ templates: [] }),
+    campaignPlanHost: () => null,
     refreshWarmupAccountQueue: async () => { loads.push(`queue:${warmupState.selectedCampaignId}`); }
   });
   const open = form.get("openWarmupCampaignForm");
@@ -151,6 +154,7 @@ test("the campaign detail shows the state note only when there is one to say", (
       warmupFormDirty: () => false,
       warmupForecastHtml: () => ({ tone: "", html: "" }),
       warmupTickedAccountsLine: () => "",
+      planSummaryHtml: () => "",
       refreshIcons: () => {}
     });
     detail.get("renderWarmupCampaignDetail")();
