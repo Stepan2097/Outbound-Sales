@@ -32,7 +32,7 @@ const NAMES = [
   "renderWarmupReply", "submitWarmupReply", "removeWarmupReply",
   "renderWarmupInbox", "renderWarmupNavBadge", "setWarmupUnread", "refreshWarmupBadge", "stopWarmupBadgePoll",
   "warmupInboxListOnScreen", "loadWarmupInbox", "warmupThreadIsOpen", "markWarmupThreadRead", "openWarmupThread",
-  "closeWarmupThread", "showWarmupInboxAccount"
+  "closeWarmupThread", "pendingUnreadAccount", "openPendingUnread", "showWarmupInboxAccount"
 ];
 
 /** Слухачі екрана: те, що людина робить руками. Беруться з коду як є. */
@@ -287,14 +287,16 @@ test("з одним акаунтом кнопка теж є — видно, чи
   assert.equal(other.get("warmupInboxAccountId")(), "acc-a", "нічого не вибрано — відкрито найсвіжіший");
 });
 
-test("перехід із бейджа акаунта у «Прогріві» відкриває «Вхідні» з цим акаунтом і закриває відкриту розмову", () => {
+test("перехід із бейджа акаунта у «Прогріві» відкриває «Вхідні» з цим акаунтом і одразу його нову розмову, а не розмову іншого акаунта", () => {
   const { els, clicks, get, warmupState, main } = screen({ accounts: [{ accountId: "acc-a", identity: "Anna Kovalenko", unread: 1 }, { accountId: "acc-b", label: "Profile 7", unread: 1 }] });
   warmupState.inbox.openAccountId = "acc-a";
   warmupState.inbox.openThreadKey = "t-read";
   get("showWarmupInboxAccount")("acc-b");
   assert.deepEqual(clicks, ['.nav-item[data-view="inbox"]'], "екран «Вхідні» не відкрито через меню");
   assert.equal(main.get("inboxAccountFilter"), "acc-b");
-  assert.equal(warmupState.inbox.openThreadKey, null, "розмова іншого акаунта лишилась відкритою");
+  // Власник 16.10: «має тут зразу відкриватися» — нова відповідь цього акаунта відкрита.
+  assert.equal(warmupState.inbox.openThreadKey, "t-old-unread", "нова розмова акаунта не відкрилась");
+  assert.equal(warmupState.inbox.openAccountId, "acc-b");
   assert.deepEqual(orderOf(els.warmupInboxBody.innerHTML), ["t-old-unread"]);
   assert.match(els.warmupInboxAccounts.innerHTML, /is-active[^>]*data-warmup-account="acc-b"/);
   assert.match(els.warmupInboxAccounts.innerHTML, /Profile 7/);

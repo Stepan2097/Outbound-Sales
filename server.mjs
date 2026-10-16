@@ -24,6 +24,7 @@ import { logAdminAction } from "./esp/access.mjs";
 import { knowledgeExcerptsForPrompt, knowledgeFilesForProduct, loadKnowledgeLibrary } from "./knowledge/library.mjs";
 import { handleWarmupApi } from "./warmup/api.mjs";
 import { networkStore } from "./warmup/network.mjs";
+import { adoptNetwork } from "./warmup/network-contacts.mjs";
 import { handleEspApi } from "./esp/api.mjs";
 import { connectorFromEnv } from "./esp/gmail.mjs";
 import { GmailOAuthConnector, NotConnectedConnector, googleSignIn, grantStore, oauthConfigFromEnv, redirectUriFor } from "./esp/google-oauth.mjs";
@@ -1019,6 +1020,10 @@ async function handleApi(request, response, url) {
       },
       network: linkedinNetwork,
       onReply: announceReply,
+      onNetwork: async (account, people) => {
+        const result = await adoptNetwork({ account, people });
+        if (result.added || result.failed) console.log(`[warmup] friends → CRM (${account.login || account.label || account.id}): ${JSON.stringify(result)}`);
+      },
       // Campaigns are workspace configuration, so the warm-up reads and writes
       // them through the state this app already persists rather than keeping a
       // store of its own.

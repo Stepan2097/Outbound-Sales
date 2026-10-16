@@ -1172,7 +1172,7 @@ const RECHECK_REFUSALS = {
   expired: "Посилання застаріло — дочекайся наступного повідомлення в групі."
 };
 
-export async function handleWarmupApi({ request, response, url, sendJson, readJson, campaigns: campaignStore, writer = null, network = null, onReply = null }) {
+export async function handleWarmupApi({ request, response, url, sendJson, readJson, campaigns: campaignStore, writer = null, network = null, onReply = null, onNetwork = null }) {
   const path = url.pathname.replace(/^\/api\/warmup/, "") || "/";
   const method = request.method;
 
@@ -3820,6 +3820,11 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           ? await network.batch(account.id, body.people, { first: body.first === true })
           : await network.done(account.id, { total: body.total, complete: body.complete === true });
         sendJson(response, 200, { success: true, ...result });
+        // The friends the CRM does not know go into it (warmup/network-contacts.mjs)
+        // — after the answer, so the agent does not wait for a thousand lookups.
+        if (action === "network.done" && onNetwork) {
+          void network.view(account.id).then((view) => onNetwork(account, view.people)).catch((error) => console.warn(`[warmup] friends → CRM: ${error.message}`));
+        }
         return true;
       }
 

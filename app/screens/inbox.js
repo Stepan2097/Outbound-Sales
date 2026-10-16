@@ -25,8 +25,24 @@ onScreen("inbox", {
     if (warmupState.inbox.ready) renderWarmupInbox();
     await loadWarmupInbox();
     rememberWarmupInbox();
+    openPendingUnread();
   }
 });
+
+// From the «N нові відповіді» badge on «Прогрів»: the account's newest unread
+// conversation opens at once, at the top of the page (власник 16.10: «має тут
+// зразу відкриватися а не з самого низу» — the page kept the scroll of the
+// long accounts table it came from).
+let pendingUnreadAccount = null;
+function openPendingUnread() {
+  const accountId = pendingUnreadAccount;
+  if (!accountId) return;
+  const first = warmupInboxRows().find((thread) => thread.accountId === accountId && thread.unread);
+  if (!first && !warmupState.inbox.ready) return;
+  pendingUnreadAccount = null;
+  if (first) openWarmupThread(first.accountId, first.threadKey);
+  globalThis.scrollTo?.(0, 0);
+}
 
 // The count is wanted the moment somebody is inside, on whatever screen they
 // landed — not only when this one is opened.
@@ -1223,9 +1239,13 @@ function closeWarmupThread() {
  */
 export function showWarmupInboxAccount(accountId) {
   if (!accountId) return;
+  pendingUnreadAccount = accountId;
   openWarmupInboxAccount(accountId);
   document.querySelector('.nav-item[data-view="inbox"]')?.click();
   renderWarmupInbox();
+  globalThis.scrollTo?.(0, 0);
+  // Already read before: no need to wait for the screen's own read.
+  if (warmupState.inbox.threads.length) openPendingUnread();
 }
 
 /**
@@ -1237,6 +1257,7 @@ export function showWarmupInboxThread(accountId, threadKey) {
   openWarmupInboxAccount(accountId);
   document.querySelector('.nav-item[data-view="inbox"]')?.click();
   openWarmupThread(accountId, threadKey);
+  globalThis.scrollTo?.(0, 0);
 }
 
 /**
