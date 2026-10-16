@@ -92,7 +92,7 @@ function renderCampaignReport() {
     <div class="campaign-report-scroll"><table class="campaign-report-table">
       <thead><tr><th>Кампанія</th><th>Людей</th><th>Написали</th><th>Прийняли</th><th>Відповіли</th><th>Кваліфіковані</th><th>На 100 написаних</th><th>Дзвінки</th></tr></thead>
       <tbody>${rows.map(rowHtml).join("")}</tbody>
-    </table></div>` : `<div class="empty-state">Кампаній ще немає — їх створюють у «Прогріві».</div>`}</section>`;
+    </table></div>` : `<div class="empty-state">Кампаній лідгенів ще немає — «Нова кампанія» вище.</div>`}</section>`;
   refreshIcons(root);
 }
 
