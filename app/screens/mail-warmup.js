@@ -160,7 +160,7 @@ function tableHtml(data) {
         return `${heading}<tr>
           <td><button type="button" class="warmup-mail-email${mailWarmupState.open === row.email ? " is-open" : ""}" data-warmup-history="${escapeAttr(row.email)}" title="Статистика за весь час по днях" aria-expanded="${mailWarmupState.open === row.email}"><i data-lucide="${mailWarmupState.open === row.email ? "chevron-down" : "chevron-right"}"></i><strong>${escapeHtml(row.email)}</strong></button>${ownTags(row).length ? `<span class="warmup-mail-tags">${tagPills(ownTags(row))}</span>` : ""}${accountNotesHtml(row.email)}</td>
           <td>${roleHtml(row, canChange)}</td>
-          <td class="warmup-mail-status"><span class="pill ${tone}">${word}</span>${row.day ? `<b class="warmup-mail-day">день ${escapeHtml(String(row.day))}</b>` : ""}${row.status === "paused" && row.pausedAt ? `<small>з ${escapeHtml(when(row.pausedAt))}</small>` : row.status === "running" && row.startedAt ? `<small>старт ${escapeHtml(when(row.startedAt))}</small>` : ""}</td>
+          <td class="warmup-mail-status">${row.status === "running" ? "" : `<span class="pill ${tone}">${word}</span>`}${row.status === "paused" && row.pausedAt ? `<small>з ${escapeHtml(when(row.pausedAt))}</small>` : row.status === "running" && row.startedAt ? `<small>старт ${escapeHtml(when(row.startedAt))}</small>` : ""}</td>
           <td class="is-number">${row.status === "running" ? `<div class="warmup-mail-progress"><span style="width:${share}%"></span></div>` : ""}${row.firstsToday} / ${row.plannedToday}</td>
           <td class="is-number warmup-mail-pair"><span title="Скільки відповідей прийшло на листи цієї пошти"><b>${row.repliesReceived}</b> отримала</span><small title="На скільки чужих листів прогріву відповіла вона сама">відповіла сама: ${row.repliesSent}</small></td>
           <td class="is-number warmup-mail-pair" title="Листи цієї пошти, що в інших наших пошт потрапили у «Спам». Прогрів виймає їх усі й позначає важливими."><span class="${spamShare(row) >= 10 ? "is-bad" : ""}"><b>${row.landedInSpam}</b> з ${row.sent}</span><small>${row.sent ? `${spamShare(row)}%` : "—"}</small></td>
@@ -219,7 +219,7 @@ export function renderMailWarmup() {
     ${planHtml(data)}
     ${notice ? `<p class="esp-notice ${error ? "is-bad" : ""}">${escapeHtml(notice)}</p>` : ""}
     ${summaryHtml(data.rows)}
-    <section class="panel"><div class="panel-heading"><div><h2>Пошти</h2><p>Статус, день прогріву, листи сьогодні проти плану, відповіді й листи, вийняті зі спаму.</p></div>
+    <section class="panel"><div class="panel-heading"><div><h2>Пошти</h2><p>Статус, листи сьогодні проти плану, відповіді й листи, що потрапили в спам. Клік по пошті — її статистика по днях.</p></div>
       <div class="warmup-mail-tools">${filter}<button type="button" class="text-button" data-warmup-refresh><i data-lucide="refresh-cw"></i><span>Оновити</span></button></div></div>
       ${tableHtml(data)}
     </section>
