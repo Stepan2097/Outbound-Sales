@@ -47,3 +47,13 @@ test("гілка «мовчить» за кроками кампанії: 2 → 
   assert.equal(stop.key, null);
   assert.equal(stop.noReplyDue, "2026-10-23");
 });
+
+import { planReassign } from "../warmup/reassign.mjs";
+
+test("бан: люди розходяться порівну, першим — тому, у кого зараз найменше", () => {
+  const rows = Array.from({ length: 5 }, (_, index) => ({ id: `r${index}` }));
+  const plan = planReassign(rows, ["a2", "a3"], new Map([["a2", 2], ["a3", 0]]));
+  const count = (id) => plan.filter((item) => item.target === id).length;
+  assert.equal(plan[0].target, "a3", "у a3 менше — перший туди");
+  assert.deepEqual([count("a2"), count("a3")], [2, 3], "разом із тими, що вже були: 4 і 3 — різниця не більше одного");
+});

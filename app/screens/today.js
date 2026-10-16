@@ -330,6 +330,7 @@ function workHtml() {
       ${item.crmUrl ? ` · <a href="${escapeAttr(item.crmUrl)}" target="_blank" rel="noopener noreferrer">Відкрити в CRM</a>` : ""}
       ${item.assignee && today.scope === "all" ? ` · ${escapeHtml(item.assignee)}` : ""}
     </p>
+    ${item.reassigned ? `<p class="today-note today-note-moved">Перепризначено з ${escapeHtml(item.reassigned.from)} на ${escapeHtml(item.reassigned.to)} (${escapeHtml(new Date(item.reassigned.at).toLocaleDateString("uk-UA"))}): старий акаунт заблоковано${item.channel === "moved" ? `; запит у друзі піде з ${escapeHtml(item.reassigned.to)}, і коли прийме — тут буде «Перше повідомлення»` : ""}.</p>` : ""}
     ${item.channel === "first" ? `<p class="today-note">Прийняв запит${detail.acceptedAt ? ` ${escapeHtml(new Date(detail.acceptedAt).toLocaleDateString("uk-UA"))}` : ""} — розмови ще немає, це перше повідомлення.</p>` : ""}
     ${messagesHtml(detail.messages)}
     ${waiting.length ? `<p class="today-note">У черзі · ще не надіслано: ${waiting.map((entry) => `«${escapeHtml(entry.body.slice(0, 80))}${entry.body.length > 80 ? "…" : ""}»`).join(", ")}</p>` : ""}
@@ -346,7 +347,7 @@ function workHtml() {
           <button type="button" class="primary-button" data-today="send" ${today.sending || !today.text.trim() ? "disabled" : ""}><i data-lucide="send"></i><span>${today.sending ? "Ставлю в чергу…" : "Погодити й надіслати"}</span></button>
           <span class="today-hint">Піде з цього акаунта в найближчу сесію. Наступний пінг — через 3 робочі дні.</span>
         </div>
-      </div>` : `<p class="today-note">Переписки з цим контактом тут немає — відкрийте його в CRM або перенесіть пінг.</p>`}
+      </div>` : item.channel === "moved" ? "" : `<p class="today-note">Переписки з цим контактом тут немає — відкрийте його в CRM або перенесіть пінг.</p>`}
     <div class="today-move">
       <span>Перенести:</span>
       <button type="button" data-today="move" data-when="+1">+1 день</button>

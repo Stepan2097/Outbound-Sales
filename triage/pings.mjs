@@ -168,7 +168,9 @@ const ms = (iso) => {
  */
 export function desiredPing(contactId, state, { now = new Date() } = {}) {
   const windowStart = now.getTime() - WINDOW_DAYS * 86400000;
-  const threads = (state.threads || []).filter((thread) => thread.lastMessage);
+  // Тред заблокованого акаунта, з якого людину перепризначено (етап 4/6), — історія:
+  // наступний крок веде новий акаунт.
+  const threads = (state.threads || []).filter((thread) => thread.lastMessage && !thread.moved);
   const thread = threads.sort((left, right) => ms(right.lastStoredAt) - ms(left.lastStoredAt))[0] || null;
 
   if (thread) {

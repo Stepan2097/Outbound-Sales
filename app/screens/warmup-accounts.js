@@ -1228,7 +1228,7 @@ document.getElementById("warmupDetailBody")?.addEventListener("click", (event) =
       method: "POST",
       body: JSON.stringify({ accountId: warmupState.selectedAccountId, health, note: health === "blocked" ? "Заблоковано в LinkedIn" : "" })
     })
-      .then(() => loadWarmup({ full: false }))
+      .then((payload) => { announceReassigned(payload?.reassigned); return loadWarmup({ full: false }); })
       .catch((error) => {
         warmupState.error = error.message;
         renderWarmupConfigNote();
@@ -1242,13 +1242,22 @@ document.getElementById("warmupDetailBody")?.addEventListener("click", (event) =
       method: "POST",
       body: JSON.stringify({ accountId: warmupState.selectedAccountId, health, note })
     })
-      .then(() => loadWarmup({ full: false }))
+      .then((payload) => { announceReassigned(payload?.reassigned); return loadWarmup({ full: false }); })
       .catch((error) => {
         warmupState.error = error.message;
         renderWarmupConfigNote();
       });
   }
 });
+
+/** Етап 4/6: після «Заблоковано» — куди перейшли люди акаунта, або чому ні. */
+function announceReassigned(result) {
+  if (!result) return;
+  const text = result.moved
+    ? `Людей перепризначено: ${result.moved} — ${result.to.filter((item) => item.count).map((item) => `${item.name}: ${item.count}`).join(", ")}. Нові запити в друзі підуть у межах лімітів цих акаунтів; переписка й історія в CRM лишились.`
+    : result.reason || "На заблокованому акаунті не було людей для перенесення.";
+  window.alert(text);
+}
 
 /** Статус — це дані; пігулка на екрані — це текст. */
 /**

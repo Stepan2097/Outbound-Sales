@@ -167,6 +167,7 @@
 .today-msg-at { color: var(--muted); font-size: 11px; }
 
 .today-note { margin: 0; color: var(--muted); font-size: 12.5px; }
+.today-note-moved { color: var(--amber); }
 
 .today-notice { margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--teal-weak); font-size: 13px; }
 .today-notice.is-error { background: rgba(239, 124, 114, 0.12); color: var(--red); }

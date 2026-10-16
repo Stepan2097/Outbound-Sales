@@ -1773,3 +1773,44 @@ test("кампанію не запустити з акаунтом, який у�
   assert.match(refused.payload.error, /LinkedIn2/);
   assert.equal(campaigns.find((campaign) => campaign.id === "camp-2").state, "draft");
 });
+
+// Етап 4/6 (таск 7735844f): бан не губить діалогів.
+test("«Заблоковано» переносить людей акаунта на інший справний акаунт кампанії: у черзі, з запитом, прийнятих і в розмові — в чергу на новий запит; інших не чіпає", async () => {
+  rows.wl_accounts.push({ id: "acc-2", label: "Mary Lindsay", login: "mary@example.com", profile_remote_id: "profile-2", status: "warming", health: "ok" });
+  campaigns = [normalizeCampaign({ id: "camp-1", name: "SiGMA", folderId: "folder-1", filters: {}, accountIds: ["acc-1", "acc-2"], state: "running", order: 0 })];
+  rows.wl_outreach = [
+    { id: "o-wait", account_id: "acc-1", crm_contact_id: "c-1", person_name: "A", status: "waiting", created_at: "2026-10-01T00:00:00Z" },
+    { id: "o-pend", account_id: "acc-1", crm_contact_id: "c-2", person_name: "B", status: "pending", created_at: "2026-10-01T00:00:00Z" },
+    { id: "o-acc", account_id: "acc-1", crm_contact_id: "c-3", person_name: "C", status: "accepted", created_at: "2026-10-01T00:00:00Z" },
+    { id: "o-con", account_id: "acc-1", crm_contact_id: "c-4", person_name: "D", status: "connected", created_at: "2026-10-01T00:00:00Z" },
+    { id: "o-dec", account_id: "acc-1", crm_contact_id: "c-5", person_name: "E", status: "declined", created_at: "2026-10-01T00:00:00Z" },
+    { id: "o-other", account_id: "acc-2", crm_contact_id: "c-6", person_name: "F", status: "connected", created_at: "2026-10-01T00:00:00Z" }
+  ];
+  rows.activities = [];
+  const answer = await call({ method: "POST", path: "/api/warmup/accounts/health", body: { accountId: "acc-1", health: "blocked" } });
+  assert.equal(answer.status, 200);
+  assert.equal(answer.payload.reassigned.moved, 4);
+  const byId = (id) => rows.wl_outreach.find((row) => row.id === id);
+  for (const id of ["o-wait", "o-pend", "o-acc", "o-con"]) {
+    assert.equal(byId(id).account_id, "acc-2", `${id} — на справному акаунті`);
+    assert.equal(byId(id).status, "waiting", `${id} — у черзі на запит з нового акаунта`);
+  }
+  assert.equal(byId("o-dec").account_id, "acc-1", "той, хто відмовив, лишається історією");
+  assert.equal(byId("o-other").status, "connected", "люди іншого акаунта не зачеплені");
+  const moved = events("invite.reassigned").filter((event) => event.meta.reason === "account_blocked");
+  assert.equal(moved.length, 4);
+  assert.ok(moved.every((event) => event.meta.fromAccount === "chloe@example.com" && event.meta.toAccount === "mary@example.com"));
+  assert.equal(rows.activities.length, 4, "у картці CRM — нотатка про перенос");
+  assert.match(rows.activities[0].content, /перепризначено на mary@example\.com/);
+
+  const again = await call({ method: "POST", path: "/api/warmup/accounts/health", body: { accountId: "acc-1", health: "blocked", note: "ще раз" } });
+  assert.equal(again.payload.reassigned, null, "повторна позначка нікого не переносить удруге");
+});
+
+test("«Заблоковано» без іншого справного акаунта в кампанії — нікого не переносить і каже чому", async () => {
+  rows.wl_outreach = [{ id: "o-1", account_id: "acc-1", crm_contact_id: "c-1", person_name: "A", status: "connected", created_at: "2026-10-01T00:00:00Z" }];
+  const answer = await call({ method: "POST", path: "/api/warmup/accounts/health", body: { accountId: "acc-1", health: "blocked" } });
+  assert.equal(answer.payload.reassigned.moved, 0);
+  assert.match(answer.payload.reassigned.reason, /немає іншого справного акаунта/);
+  assert.equal(rows.wl_outreach[0].account_id, "acc-1");
+});

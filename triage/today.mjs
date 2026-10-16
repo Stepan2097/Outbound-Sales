@@ -121,6 +121,24 @@ export async function gatherDialogs() {
       state.pending.push({ id: reply.id, accountId: reply.accountId, threadKey: reply.threadKey, queuedAt: reply.queuedAt, state: reply.state, body: reply.body });
     }
   }
+  // Перепризначені після бану (етап 4/6): тред старого акаунта — лише історія.
+  for (let offset = 0; ; offset += 1000) {
+    const rows = await anty.from("wl_events").select("id,meta,created_at").eq("type", "invite.reassigned")
+      .eq("meta->>reason", "account_blocked").order("id").limit(1000).offset(offset).rows();
+    for (const row of rows) {
+      const contactId = row.meta?.crmContactId ? String(row.meta.crmContactId) : null;
+      if (!contactId || !states.has(contactId)) continue;
+      const state = states.get(contactId);
+      if (state.reassigned && state.reassigned.at > row.created_at) continue;
+      state.reassigned = { from: row.meta.fromAccount || "", to: row.meta.toAccount || "", fromAccountId: row.meta.fromAccountId, toAccountId: row.meta.accountId, at: row.created_at };
+    }
+    if (rows.length < 1000) break;
+  }
+  for (const state of states.values()) {
+    if (!state.reassigned) continue;
+    state.threads = state.threads.map((thread) => (thread.accountId === state.reassigned.fromAccountId ? { ...thread, moved: true } : thread));
+  }
+
   // Хто з людей прийшов з папки якої кампанії — з `invite.requested`, де це записано.
   const campaigns = new Map((campaignsReader() || []).map((campaign) => [campaign.id, campaign]));
   if (campaigns.size) {
@@ -326,7 +344,10 @@ function itemOf(task, { contact, state, today, now, emails, accounts = new Map()
   const contactId = task.contact_id ? String(task.contact_id) : null;
   const next = state ? desiredPing(contactId, state, { now }) : null;
   const thread = newestThread(state);
-  const reason = taskReason(task);
+  const moved = Boolean(state?.reassigned) && !next && (state?.threads || []).every((item) => item.moved);
+  // Перепризначений і ще не прийняв запит з нового акаунта: відповісти звідси нема
+  // куди, тож пінг стоїть за датою, а не у «Відповідях».
+  const reason = moved ? "manual" : taskReason(task);
   const dueDay = dayIn(task.due_date);
   const awaitingUs = next?.reason === "reply";
   return {
@@ -347,7 +368,8 @@ function itemOf(task, { contact, state, today, now, emails, accounts = new Map()
     threadKey: thread?.threadKey || null,
     outreachId: state?.accepted?.outreachId || null,
     // Перше повідомлення: треду ще немає, пише сторінка прийнятого запиту.
-    channel: thread ? "thread" : state?.accepted ? "first" : "none",
+    channel: moved ? "moved" : thread ? "thread" : state?.accepted ? "first" : "none",
+    reassigned: state?.reassigned ? { from: state.reassigned.from, to: state.reassigned.to, at: state.reassigned.at } : null,
     preview: thread?.lastMessage ? { direction: thread.lastMessage.direction, body: String(thread.lastMessage.body || "").slice(0, 200), at: thread.lastMessage.at } : null,
     queued: (state?.pending || []).filter((item) => item.state === "waiting").length,
     assignee: emails.get(task.assigned_to) || null,
@@ -409,7 +431,7 @@ export async function todayItem({ pingId, viewer, now = new Date() }) {
   const contact = contacts.get(contactId) || null;
   const item = itemOf(task, { contact, state, today: dayIn(now), now, emails, accounts: gathered?.accounts });
   let messages = [];
-  if (item.channel === "thread") messages = (await readThread({ accountId: item.accountId, threadKey: item.threadKey }))?.messages || [];
+  if (item.channel === "thread" || item.channel === "moved") messages = (await readThread({ accountId: item.accountId, threadKey: item.threadKey }))?.messages || [];
   let firstDraft = null;
   if (item.channel === "first" && item.outreachId) firstDraft = (await firstMarks([item.outreachId])).drafts.get(item.outreachId) || null;
   const key = parseTaskMarks(task.description).key;

@@ -282,3 +282,17 @@ test("кампанія: нагадування за її кроками; піс�
     setCampaignsReader(() => []);
   }
 });
+
+test("перепризначений після бану: пінг лишається, на картці «перепризначено з X на Y», відповісти зі старого акаунта не пропонується", async () => {
+  await reconcilePings();
+  const [ping] = openOf("c1");
+  rows.wl_accounts.push({ id: "acc-2", label: "Mary", login: "mary@example.com", status: "warming", health: "ok" });
+  rows.wl_events.push({ id: `rs-${++nextId}`, account_id: "acc-2", type: "invite.reassigned", created_at: ago(1), meta: { reason: "account_blocked", crmContactId: "c1", fromAccountId: "acc-1", fromAccount: "chloe@example.com", toAccount: "mary@example.com", accountId: "acc-2" } });
+  await reconcilePings();
+  assert.deepEqual(openOf("c1").map((row) => row.id), [ping.id], "пінг той самий, не закритий і не задубльований");
+  const detail = await todayItem({ pingId: ping.id, viewer: BOHDAN });
+  assert.equal(detail.item.channel, "moved");
+  assert.deepEqual(detail.item.reassigned && [detail.item.reassigned.from, detail.item.reassigned.to], ["chloe@example.com", "mary@example.com"]);
+  assert.deepEqual(detail.messages.map((message) => message.body), ["Hi, tell me more"], "переписка лишається історією");
+  assert.notEqual(detail.item.block, "replies", "відповісти зі старого акаунта нема куди — пінг за датою");
+});

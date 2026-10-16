@@ -47,6 +47,7 @@ import {
   progressApproximate, progressFrom, renumber, runningFor, targetingOf
 } from "./campaigns.mjs";
 import { nextCandidates, takeFromCampaigns } from "./feed.mjs";
+import { reassignBlockedAccount } from "./reassign.mjs";
 
 /**
  * The warm-up's HTTP surface, mounted under /api/warmup.
@@ -1945,7 +1946,19 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         meta: { health, previous: account.health, note }
       });
 
-      sendJson(response, 200, { success: true, account: await describeAccount(fresh) });
+      // Етап 4/6: бан не губить діалогів — люди заблокованого акаунта переходять на
+      // інші справні акаунти його кампанії (warmup/reassign.mjs).
+      let reassigned = null;
+      if (health === "blocked" && account.health !== "blocked") {
+        try {
+          reassigned = await reassignBlockedAccount({ account: fresh, campaigns: await loadCampaigns(), movedBy: request.auth?.profile?.email || "" });
+        } catch (error) {
+          console.error("[warmup] reassign after block:", error);
+          reassigned = { moved: 0, reason: `Людей не перенесено: ${error.message}` };
+        }
+      }
+
+      sendJson(response, 200, { success: true, account: await describeAccount(fresh), reassigned });
       return true;
     }
 
