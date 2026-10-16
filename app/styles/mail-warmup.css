@@ -73,10 +73,31 @@
   vertical-align: top;
 }
 
+/* Колонки вирівняні з заголовками (власник 16.10): «Старт прогріву» — ліворуч,
+   як і дати під ним; числа (колонки 4–7) і їхні заголовки — праворуч. */
 .warmup-mail-table td.is-number,
-.warmup-mail-table th:nth-child(n + 3):nth-child(-n + 7) {
+.warmup-mail-table th:nth-child(n + 4):nth-child(-n + 7) {
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+.warmup-mail-table th {
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+
+.warmup-mail-table tbody td {
+  vertical-align: middle;
+}
+
+.warmup-mail-status {
+  white-space: nowrap;
+}
+
+.warmup-mail-status .pill {
+  display: block;
+  width: fit-content;
+  margin-top: 4px;
 }
 
 .warmup-mail-table small {
