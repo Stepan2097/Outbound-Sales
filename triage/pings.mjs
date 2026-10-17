@@ -308,3 +308,30 @@ export function manualDueDay(when, today) {
   if (!Number.isInteger(days) || days < 0 || days > 365) return "";
   return days === 0 ? today : addCalendarDays(today, days);
 }
+
+/* ── Статус «Відповів» (Марко 17.10: «Ставити «Відповів» статус») ─────────── */
+
+export const REPLIED_STATUS = "responded";
+/** Статуси, які звірка сама піднімає до «Відповів». Решту ставить людина — їх не чіпаємо. */
+export const AUTO_REPLIED_FROM = ["new", "in_progress"];
+
+const lastMessageAt = (thread) => Date.parse(thread?.lastMessage?.at || thread?.lastStoredAt || "") || 0;
+
+/** Лід хоч раз написав у будь-якій розмові. */
+export function leadReplied(state) {
+  return (state?.threads || []).some((thread) => thread.answered || Number(thread.inCount) > 0);
+}
+
+/**
+ * Чи ставити «Відповів»: лід писав, а статус «Новий» чи «В обробці». «Без відповіді» —
+ * лише якщо останнім у найсвіжішій розмові написав лід (повернувся після тиші).
+ * «Кваліфікація», «Дзвінок», «Відмова», «Не ICP», «Невдалий час», «Відповів» — без змін.
+ */
+export function repliedStatusDue(state, leadStatus) {
+  if (!leadReplied(state)) return false;
+  const status = leadStatus || "new";
+  if (AUTO_REPLIED_FROM.includes(status)) return true;
+  if (status !== "no_response") return false;
+  const newest = [...(state?.threads || [])].filter((thread) => thread.lastMessage).sort((left, right) => lastMessageAt(right) - lastMessageAt(left))[0];
+  return newest?.lastMessage?.direction === "in";
+}

@@ -17,7 +17,7 @@ import { acceptOpenDialogs, openDialogs, suggestOpenDialogs } from "./open-dialo
 import { CLOSING, DEFAULT_EXIT, EXIT_REASONS, LEAD_STATUSES, ORIGIN, statusPatch } from "./statuses.mjs";
 import {
   PING_QUEUE, REASONS, blockOf, compareItems, dayIn, desiredPing, manualDueDay,
-  newContactsAllowed, planPingChanges, reasonOfKey, stripMarks, taskDescription, taskMarks, taskReason, zonedIso
+  REPLIED_STATUS, leadReplied, newContactsAllowed, planPingChanges, reasonOfKey, repliedStatusDue, stripMarks, taskDescription, taskMarks, taskReason, zonedIso
 } from "./pings.mjs";
 
 const TASK_COLUMNS = "id,title,description,contact_id,owner_id,assigned_to,due_date,completed,status,task_type,queue,created_at,updated_at,ping_key,ping_superseded";
@@ -248,7 +248,7 @@ export async function reconcilePings({ now = new Date() } = {}) {
     const ids = [...desired.keys()];
     const [tasks, contacts] = await Promise.all([tasksOf(ids), contactsOf(ids)]);
     const owner = await fallbackOwner(contacts);
-    const stats = { contacts: ids.length, created: 0, superseded: 0, reopened: 0, reassigned: 0, noReply: 0, failed: 0 };
+    const stats = { contacts: ids.length, created: 0, superseded: 0, reopened: 0, reassigned: 0, noReply: 0, responded: 0, failed: 0 };
     const todayDay = dayIn(now);
     const nowIso = now.toISOString();
     for (const contactId of ids) {
@@ -285,9 +285,25 @@ export async function reconcilePings({ now = new Date() } = {}) {
         }
       }
     }
+    // Лід відповів — статус CRM «Відповів» (Марко 17.10). Людські статуси не чіпаються;
+    // історію пише тригер CRM — одна зміна, один рядок.
+    const repliedIds = [...gathered.states].filter(([, state]) => leadReplied(state)).map(([contactId]) => contactId);
+    const extra = await contactsOf(repliedIds.filter((contactId) => !contacts.has(contactId)));
+    for (const contactId of repliedIds) {
+      const contact = contacts.get(contactId) || extra.get(contactId);
+      if (!contact || !repliedStatusDue(gathered.states.get(contactId), contact.lead_status)) continue;
+      try {
+        await crm.from("contacts").update({ lead_status: REPLIED_STATUS, exit_reason: null }).eq("id", contactId).rows();
+        contact.lead_status = REPLIED_STATUS;
+        stats.responded += 1;
+      } catch (error) {
+        stats.failed += 1;
+        console.error(`[pings] responded for ${contactId}: ${error.message}`);
+      }
+    }
     lastRunAt = Date.now();
     lastStats = { ...stats, at: nowIso };
-    if (stats.created || stats.superseded || stats.reopened || stats.reassigned || stats.noReply || stats.failed) console.log(`[pings] ${JSON.stringify(lastStats)}`);
+    if (stats.created || stats.superseded || stats.reopened || stats.reassigned || stats.noReply || stats.responded || stats.failed) console.log(`[pings] ${JSON.stringify(lastStats)}`);
     return lastStats;
   })().finally(() => { running = null; });
   return running;

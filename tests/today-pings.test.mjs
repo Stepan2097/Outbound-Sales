@@ -258,7 +258,10 @@ test("відкриті діалоги з 01.08: пропозиції → при�
   assert.deepEqual(await acceptOpenDialogs({ items, assignee: "u-bohdan" }), { created: 0, skipped: 1 });
   assert.equal(tasksOf("c9").length, 1);
   const list = await todayList({ viewerId: "u-bohdan" });
-  assert.ok(list.blocks.replies.some((item) => item.contactId === "c9"), "імпортована відповідь — у «Відповідях»");
+  // У вихідний імпорт ставить пінг на найближчий робочий день — тоді він «Далі за планом» (тест падав у суботу 17.10).
+  const imported = [...list.blocks.replies, ...list.later].find((item) => item.contactId === "c9");
+  assert.ok(imported, "імпортована відповідь — у «Сьогодні»");
+  assert.equal(imported.reason, "reply");
 });
 
 test("перенесене «Перше повідомлення» стає ручним пінгом: на свій день — «На сьогодні», після — «Прострочені», і стримує нові контакти", async () => {
@@ -305,7 +308,7 @@ test("кампанія: нагадування за її кроками; піс�
     rows.wl_events.push(message("in", "Sorry for the delay — tell me more", 10));
     await reconcilePings();
     assert.equal(openOf("c1")[0]?.title, "Відповісти: Lead One", "відповів — «Відповісти», нагадувань більше немає");
-    assert.equal(rows.contacts.find((row) => row.id === "c1").lead_status, "in_progress");
+    assert.equal(rows.contacts.find((row) => row.id === "c1").lead_status, "responded", "лід відповів — статус CRM «Відповів» (Марко 17.10)");
     const list = await todayList({ viewerId: "u-bohdan" });
     assert.equal(list.blocks.replies[0]?.campaign?.name, "SiGMA", "у «Сьогодні» видно кампанію людини");
   } finally {
@@ -359,4 +362,16 @@ test("статус із «Сьогодні» — у CRM: вихід закрив
   assert.ok((await todayList({ viewerId: "u-bohdan" })).blocks.replies.some((item) => item.pingId === fresh.id));
   fresh.completed = true;
   assert.equal((await todayList({ viewerId: "u-bohdan" })).blocks.replies.some((item) => item.pingId === fresh.id), false);
+});
+
+test("звірка: лід відповів — «Новий» стає «Відповів» одним записом; «Кваліфікація» лишається", async () => {
+  rows.contacts.find((row) => row.id === "c1").lead_status = "new";
+  rows.contacts.push({ id: "c3", name: "Lead Three", company: "Casino Three", owner_id: "u-bohdan", lead_status: "qualification" });
+  rows.wl_events.push(message("in", "Sounds good", 30, "c3", "t3"));
+  await reconcilePings();
+  assert.equal(rows.contacts.find((row) => row.id === "c1").lead_status, "responded");
+  assert.equal(rows.contacts.find((row) => row.id === "c3").lead_status, "qualification", "людський статус не чіпається");
+  const statusBefore = rows.contacts.find((row) => row.id === "c1").lead_status;
+  await reconcilePings();
+  assert.equal(rows.contacts.find((row) => row.id === "c1").lead_status, statusBefore, "повторна звірка нічого не змінює");
 });

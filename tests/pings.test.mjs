@@ -215,3 +215,25 @@ test("статус і причина виходу: вихідний статус
   assert.match(statusPatch("not_interested", "bogus").error, /причину/);
   assert.match(statusPatch("won").error, /Невідомий/);
 });
+
+// ── Статус «Відповів» (Марко 17.10) ─────────────────────────────────────────
+
+import { repliedStatusDue } from "../triage/pings.mjs";
+
+test("«Відповів»: лід писав — «Новий» і «В обробці» піднімаються; людські статуси не чіпаються", () => {
+  const thread = (direction, at, answered = true) => ({ answered, inCount: answered ? 1 : 0, lastMessage: { direction, at } });
+  const replied = { threads: [thread("out", "2026-10-16T10:00:00Z")] };
+  for (const status of ["new", "in_progress", undefined, null]) assert.equal(repliedStatusDue(replied, status), true, String(status));
+  for (const status of ["responded", "qualification", "booked_call", "not_interested", "not_icp", "bad_timing"]) {
+    assert.equal(repliedStatusDue(replied, status), false, `${status} ставить людина`);
+  }
+  assert.equal(repliedStatusDue({ threads: [thread("out", "2026-10-16T10:00:00Z", false)] }, "new"), false, "лід не писав — без змін");
+  assert.equal(repliedStatusDue({ threads: [] }, "new"), false);
+});
+
+test("«Без відповіді» → «Відповів» лише коли останнім написав лід (повернувся після тиші)", () => {
+  const thread = (direction, at) => ({ answered: true, inCount: 1, lastMessage: { direction, at } });
+  assert.equal(repliedStatusDue({ threads: [thread("in", "2026-10-17T09:00:00Z")] }, "no_response"), true);
+  assert.equal(repliedStatusDue({ threads: [thread("out", "2026-10-17T09:00:00Z")] }, "no_response"), false, "мовчить після нашого — лишається «Без відповіді»");
+  assert.equal(repliedStatusDue({ threads: [thread("in", "2026-10-01T09:00:00Z"), thread("out", "2026-10-17T09:00:00Z")] }, "no_response"), false, "дивимось найсвіжішу розмову");
+});
