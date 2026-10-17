@@ -49,15 +49,20 @@ function rowHtml(campaign) {
       <div class="lead-campaign-head">
         <div class="lead-campaign-who">
           <strong>${escapeHtml(campaign.name)}</strong>
-          <span class="lead-campaign-meta">${escapeHtml(campaign.folderIds.map((id) => folderName(id, campaign)).join(", "))} · ${escapeHtml(product)} · нагадування ${escapeHtml(campaign.silentSteps.join(" → "))} роб. дн.</span>
+          <span class="pill ${campaign.state === "active" ? "state-run" : "state-pause"}">${campaign.state === "active" ? "іде" : "пауза"}</span>
         </div>
         <div class="lead-campaign-actions">
-          <span class="pill ${campaign.state === "active" ? "tone-live" : "tone-muted"}">${campaign.state === "active" ? "іде" : "пауза"}</span>
           <button class="text-button" type="button" data-lead-open aria-expanded="${open}"><i data-lucide="${open ? "chevron-up" : "route"}"></i><span>Сценарій</span></button>
           <button class="text-button" type="button" data-lead-state="${campaign.state === "active" ? "paused" : "active"}"><i data-lucide="${campaign.state === "active" ? "pause" : "play"}"></i><span>${campaign.state === "active" ? "Пауза" : "Запустити"}</span></button>
           <button class="text-button" type="button" data-lead-edit><i data-lucide="pencil"></i><span>Редагувати</span></button>
         </div>
       </div>
+      <dl class="kv">
+        <div><dt>Папки CRM</dt><dd>${escapeHtml(campaign.folderIds.map((id) => folderName(id, campaign)).join(", "))}</dd></div>
+        <div><dt>Продукт</dt><dd>${escapeHtml(product)}</dd></div>
+        <div><dt>Нагадування</dt><dd>через ${escapeHtml(campaign.silentSteps.join(" → "))} роб. дн.</dd></div>
+        <div><dt>Ціль</dt><dd>${escapeHtml(campaign.plan?.goal || "—")}</dd></div>
+      </dl>
       ${open ? `<div class="lead-campaign-body">${campaign.approach ? `<p class="lead-campaign-meta">Привід хвилі: ${escapeHtml(campaign.approach)}</p>` : ""}${planSummaryHtml(campaign.plan, { open: true })}</div>` : ""}
     </article>`;
 }

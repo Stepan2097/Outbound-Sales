@@ -409,11 +409,11 @@ function render() {
   const host = root();
   if (!host) return;
   if (today.loading && !today.data) {
-    host.innerHTML = `<section class="panel today"><p class="today-empty">Збираю пінги…</p></section>`;
+    host.innerHTML = `<section class="panel blk-queue today"><p class="today-empty">Збираю пінги…</p></section>`;
     return;
   }
   if (today.error && !today.data) {
-    host.innerHTML = `<section class="panel today"><p class="today-empty is-error">${escapeHtml(today.error)} <button type="button" data-today="reload">Спробувати ще раз</button></p></section>`;
+    host.innerHTML = `<section class="panel blk-queue today"><p class="today-empty is-error">${escapeHtml(today.error)} <button type="button" data-today="reload">Спробувати ще раз</button></p></section>`;
     return;
   }
   const data = today.data;
@@ -431,7 +431,7 @@ function render() {
       </div>`
     : "";
   host.innerHTML = `
-    <section class="panel today">
+    <section class="panel blk-queue today">
       <header class="today-head">
         <div>
           <h2>Сьогодні</h2>

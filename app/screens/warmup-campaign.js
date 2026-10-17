@@ -324,19 +324,14 @@ function warmupForecastHtml(campaign, { stale = "" } = {}) {
   };
 }
 
-function warmupTickedAccountsLine(campaign) {
+/** Імена акаунтів автозапитів — для поля «Акаунти» в картці. */
+function accountNames(campaign) {
   const ids = warmupCampaignAccountIds(campaign);
-  if (!ids.size) return "";
-  const names = [];
-  for (const profile of warmupState.profiles) {
-    if (profile.account && ids.has(profile.account.id)) names.push(profile.name);
-  }
-  const hidden = ids.size - names.length;
-  if (!names.length) return `Ведуть ${ids.size} ${uaPlural(ids.size, "акаунт", "акаунти", "акаунтів")}`;
-  const listed = escapeHtml(names.slice(0, 4).join(", "));
-  const more = names.length > 4 ? ` +${names.length - 4} ще` : "";
-  return `Ведуть: ${listed}${more}${hidden > 0 ? ` +${hidden}` : ""}`;
+  const names = warmupState.profiles.filter((profile) => profile.account && ids.has(profile.account.id)).map((profile) => profile.name);
+  if (!names.length) return "";
+  return escapeHtml(names.slice(0, 4).join(", ")) + (names.length > 4 ? ` +${names.length - 4}` : "");
 }
+
 
 /**
  * One row. It carries the scale of the campaign — sent of what is left — and
@@ -354,11 +349,6 @@ function warmupCampaignRowHtml(campaign, rank) {
   const folder = campaign.folderName || warmupFolderName(campaign.folderId) || (campaign.folderId ? "папка, якої CRM не показує" : "без папки");
 
   const feedStart = campaignFeedStart(campaign, WARMUP_DEFAULT_FROM_DAY);
-  const meta = [
-    escapeHtml(folder),
-    `${accounts} ${uaPlural(accounts, "акаунт", "акаунти", "акаунтів")}`,
-    feedStart ? `<span title="${escapeAttr(feedStart.title)}">${escapeHtml(feedStart.text)}</span>` : ""
-  ].filter(Boolean);
 
   const controls = [];
   // The order is the only thing deciding which campaign an account actually
@@ -383,27 +373,37 @@ function warmupCampaignRowHtml(campaign, rank) {
   }
   controls.push(`<button class="text-button" type="button" data-warmup-campaign-edit><i data-lucide="pencil"></i><span>Редагувати</span></button>`);
 
-  const count = remaining === null
-    ? `<span class="warmup-campaign-count-unknown">${warmupCount(sent)} надіслано</span>`
-    : `<strong>${warmupCount(sent)}</strong><span>надіслано · ${warmupCount(remaining)} лишилось</span>`;
+  // Граматика (таск 9180724e): шапка — назва, стан і дії; далі поля з підписами; далі
+  // прогрес смугою. Усе, що стосується автозапитів, — у картці, нічого під нею.
+  const total = remaining === null ? null : sent + remaining;
+  const share = total ? Math.min(100, Math.round((sent / total) * 100)) : 0;
+  const names = accountNames(campaign);
+  const fields = [
+    ["Папка CRM", escapeHtml(folder)],
+    ["Акаунти", names || `${accounts} ${uaPlural(accounts, "акаунт", "акаунти", "акаунтів")}`],
+    ["Старт", feedStart ? `<span title="${escapeAttr(feedStart.title)}">${escapeHtml(feedStart.text)}</span>` : "одразу"],
+    ["Межа людей", campaign.maxPeople ? `${warmupCount(campaign.maxPeople)}` : "без межі"]
+  ];
+  const progressHtml = `
+    <div class="progress">
+      ${total ? `<div class="progress-bar" role="img" aria-label="${escapeAttr(`Надіслано ${sent} з ${total}`)}"><span style="width:${share}%"></span></div>` : ""}
+      <div class="progress-label">
+        <span><b>${warmupCount(sent)}</b> надіслано${total ? ` з ${warmupCount(total)}` : ""}${campaign.progressApproximate ? ' <em class="warmup-campaign-approx" title="Інша кампанія ділить із цією акаунт і папку — їхні числа змішані">приблизно</em>' : ""}</span>
+        <span>${queued ? `<b>${warmupCount(queued)}</b> у черзі` : "черга порожня"}</span>
+      </div>
+    </div>`;
 
   return `
-    <article class="warmup-campaign-row ${tone} ${selected ? "is-selected" : ""}" data-warmup-campaign="${escapeAttr(campaign.id)}">
-      <div class="warmup-campaign-who">
+    <article class="warmup-campaign-row feed-card ${tone} ${selected ? "is-selected" : ""}" data-warmup-campaign="${escapeAttr(campaign.id)}">
+      <header class="feed-card-head">
         <div class="warmup-campaign-name">
           <button class="warmup-campaign-select" type="button" data-warmup-campaign-select aria-pressed="${selected}">${escapeHtml(campaign.name || "Кампанія без назви")}</button>
-          <span class="pill ${WARMUP_CAMPAIGN_TONE[campaign.state] || "tone-muted"}">${escapeHtml(WARMUP_CAMPAIGN_STATE_LABEL[campaign.state] || campaign.state || "чернетка")}</span>
+          <span class="pill ${campaign.state === "running" ? "state-run" : campaign.state === "paused" ? "state-pause" : "tone-muted"}">${escapeHtml(WARMUP_CAMPAIGN_STATE_LABEL[campaign.state] || campaign.state || "чернетка")}</span>
         </div>
-        <div class="warmup-campaign-meta">${meta.join('<span class="warmup-forecast-dot" aria-hidden="true">·</span>')}</div>
-      </div>
-      <div class="warmup-campaign-count">
-        ${count}
-        ${queued ? `<span class="warmup-campaign-claimed">${warmupCount(queued)} у черзі</span>` : ""}
-        ${campaign.progressApproximate
-          ? '<span class="warmup-campaign-approx" title="Інша кампанія ділить із цією акаунт і папку — їхні числа змішані">приблизно</span>'
-          : ""}
-      </div>
-      <div class="warmup-campaign-actions">${controls.join("")}</div>
+        <div class="warmup-campaign-actions">${controls.join("")}</div>
+      </header>
+      <dl class="kv">${fields.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${value}</dd></div>`).join("")}</dl>
+      ${progressHtml}
     </article>`;
 }
 
@@ -468,13 +468,9 @@ export function renderWarmupCampaignDetail() {
 
   host.innerHTML = `
     ${problem ? `<p class="warmup-campaign-problem">${problem}</p>` : ""}${stale}
-    <div class="warmup-campaign-detail-foot">
-      <p class="warmup-campaign-accounts">${warmupState.campaignNotice
-        ? `<em class="warmup-campaign-problem">${escapeHtml(warmupState.campaignNotice)}</em>`
-        : warmupTickedAccountsLine(campaign)}</p>
-      ${note ? `<p class="warmup-campaign-state-note">${escapeHtml(note)}</p>` : ""}
-      ${warmupScenarioLine(campaign)}
-    </div>`;
+    ${warmupState.campaignNotice ? `<p class="warmup-campaign-problem">${escapeHtml(warmupState.campaignNotice)}</p>` : ""}
+    ${note ? `<p class="warmup-campaign-state-note">${escapeHtml(note)}</p>` : ""}
+    ${campaign.maxPeople && campaign.distribution ? warmupScenarioLine(campaign) : ""}`;
   refreshIcons();
 }
 

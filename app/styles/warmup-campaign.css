@@ -693,3 +693,22 @@
 .warmup-field-approach textarea { font: inherit; min-height: 70px; }
 .warmup-campaign-scenario-hint,
 .warmup-campaign-scenario-line { margin: 0; color: var(--muted); font-size: 12.5px; }
+
+/* Граматика (таск 9180724e, 17.10): картка автозапитів — шапка (назва, стан, дії),
+   поля з підписами, прогрес смугою. Смуга зліва — лише коли є про що попередити. */
+.warmup-campaign-row.feed-card {
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  cursor: default;
+}
+.warmup-campaign-row.feed-card.is-ok,
+.warmup-campaign-row.feed-card.is-muted { border-left-color: var(--line); }
+.warmup-campaign-row.feed-card.is-selected { background: var(--surface-strong); border-color: var(--line); }
+.feed-card-head { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
+.feed-card-head .warmup-campaign-select { font-size: 15px; font-weight: 700; }
+.feed-card .warmup-campaign-actions { display: flex; gap: var(--sp-1); flex-wrap: wrap; }
+.warmup-campaign-detail:empty { display: none; }
+.warmup-campaign-detail { margin-top: var(--sp-2); display: grid; gap: var(--sp-1); }
+.warmup-campaign-list { display: grid; gap: var(--sp-3); }

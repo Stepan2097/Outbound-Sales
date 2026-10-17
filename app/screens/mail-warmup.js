@@ -220,11 +220,11 @@ export function renderMailWarmup() {
     ${planHtml(data)}
     ${notice ? `<p class="esp-notice ${error ? "is-bad" : ""}">${escapeHtml(notice)}</p>` : ""}
     ${summaryHtml(data.rows)}
-    <section class="panel"><div class="panel-heading"><div><h2 title="Коли почався прогрів, листи сьогодні проти плану, відповіді й листи, що потрапили в спам. Клік по пошті — її статистика по днях.">Пошти</h2></div>
+    <section class="panel blk-list"><div class="panel-heading"><div><h2 title="Коли почався прогрів, листи сьогодні проти плану, відповіді й листи, що потрапили в спам. Клік по пошті — її статистика по днях.">Пошти</h2></div>
       <div class="warmup-mail-tools">${filter}<button type="button" class="text-button" data-warmup-refresh><i data-lucide="refresh-cw"></i><span>Оновити</span></button></div></div>
       ${tableHtml(data)}
     </section>
-    <section class="panel"><div class="panel-heading"><div><h2>Що робив прогрів</h2><p>Останні 30 подій.</p></div></div>${logHtml(data.log)}</section>
+    <section class="panel blk-ref"><div class="panel-heading"><div><h2 title="Останні 30 подій">Що робив прогрів</h2></div></div>${logHtml(data.log)}</section>
     ${addDialogHtml()}`;
   refreshIcons(root);
   afterAccountsRender(wasOpen);

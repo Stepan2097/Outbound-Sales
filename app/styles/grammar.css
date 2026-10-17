@@ -1,0 +1,91 @@
+/* Граматика інтерфейсу (таск 9180724e, 17.10.2026; запит Марка: «трішки все на купі…
+   блоки, які відповідають за різні речі, виглядають в схожий спосіб»).
+
+   Правила — одні на весь портал:
+   1. Відступи — лише зі шкали --sp-*: між групами більше, ніж усередині групи.
+   2. П'ять типів блоків, кожен свого вигляду:
+      .blk-queue    — робоча черга: те, що робити зараз (тонка смуга дії згори);
+      .blk-settings — налаштування: поля «підпис — значення», форма;
+      .blk-metrics  — показники: великі числа з підписами, без рамок навколо;
+      .blk-list     — список записів: рядки з тонкими лініями, без карток у картках;
+      .blk-ref      — довідка: текст на заглибленому тлі, без рамки й тіні.
+   3. Колір має одне значення: бірюзовий — лише дія (кнопки, посилання, смуга черги);
+      стан — свої тони: .state-run (іде), .state-pause, .state-warn, .state-bad.
+   4. Числа — завжди з підписом; прогрес — смугою (.progress).
+   5. Одна головна дія на блок; решта — тихі (.text-button). */
+
+:root {
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  --state-run: var(--green);
+  --state-pause: var(--muted);
+  --state-warn: var(--amber);
+  --state-bad: var(--red);
+}
+
+/* ── стан: окремо від дії ─────────────────────────────────────────────── */
+
+.pill.tone-live,
+.pill.state-run { background: color-mix(in srgb, var(--state-run) 15%, transparent); color: var(--state-run); }
+.pill.state-pause { background: var(--surface-strong); color: var(--state-pause); }
+.pill.state-warn { background: color-mix(in srgb, var(--state-warn) 16%, transparent); color: var(--state-warn); }
+.pill.state-bad { background: color-mix(in srgb, var(--state-bad) 15%, transparent); color: var(--state-bad); }
+.pill { font-weight: 700; }
+
+/* ── типи блоків ──────────────────────────────────────────────────────── */
+
+.panel.blk-queue { border-top: 3px solid var(--teal); }
+
+.panel.blk-settings { background: var(--surface); }
+.panel.blk-settings > .panel-heading h2::before,
+.panel.blk-list > .panel-heading h2::before,
+.panel.blk-metrics > .panel-heading h2::before {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.panel.blk-settings > .panel-heading h2::before { content: "Налаштування"; }
+.panel.blk-list > .panel-heading h2::before { content: "Список"; }
+.panel.blk-metrics > .panel-heading h2::before { content: "Показники"; }
+
+.panel.blk-metrics { background: transparent; box-shadow: none; border-color: transparent; padding-inline: 0; }
+
+.panel.blk-list .blk-rows > * + * { border-top: 1px solid var(--line); }
+
+.panel.blk-ref,
+.blk-ref { background: var(--surface-sunk); box-shadow: none; border-color: transparent; color: var(--muted); }
+.panel.blk-ref h2 { color: var(--ink); }
+
+/* ── поля «підпис — значення» ─────────────────────────────────────────── */
+
+.kv {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr));
+  gap: var(--sp-3) var(--sp-5);
+  margin: 0;
+}
+.kv > div { min-width: 0; display: grid; gap: 2px; }
+.kv dt { font-size: 11px; color: var(--muted); letter-spacing: 0.02em; }
+.kv dd { margin: 0; font-size: 13px; color: var(--ink); overflow-wrap: anywhere; }
+
+/* ── прогрес смугою ───────────────────────────────────────────────────── */
+
+.progress { display: grid; gap: var(--sp-1); }
+.progress-bar { height: 6px; border-radius: 99px; background: var(--surface-strong); overflow: hidden; }
+.progress-bar > span { display: block; height: 100%; background: var(--state-run); border-radius: inherit; }
+.progress-label { display: flex; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+.progress-label b { color: var(--ink); font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* ── велике число з підписом ──────────────────────────────────────────── */
+
+.metric { display: grid; gap: 2px; }
+.metric b { font-size: 22px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.metric span { font-size: 12px; color: var(--muted); }

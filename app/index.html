@@ -6,6 +6,7 @@
     <title>Outbound Sales OS · Аналітика продажів</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/styles/base.css" />
+    <link rel="stylesheet" href="/styles/grammar.css" />
     <link rel="stylesheet" href="/styles/warmup-accounts.css" />
     <link rel="stylesheet" href="/styles/warmup-campaign.css" />
     <link rel="stylesheet" href="/styles/home.css" />
@@ -123,7 +124,7 @@
 
         <section class="view" id="view-account">
           <div class="account-layout">
-            <section class="panel profile-identity span-2">
+            <section class="panel blk-ref profile-identity span-2">
               <div class="panel-heading">
                 <div>
                   <h2 id="profileName">Профіль</h2>
@@ -133,7 +134,7 @@
               </div>
             </section>
 
-            <section class="panel users-panel span-2" id="teamPanel" hidden>
+            <section class="panel blk-list users-panel span-2" id="teamPanel" hidden>
               <div class="panel-heading">
                 <div>
                   <h2>Команда</h2>
@@ -156,7 +157,7 @@
               </details>
             </section>
 
-            <section class="panel profile-admin span-2" id="accountSelfPanel">
+            <section class="panel blk-settings profile-admin span-2" id="accountSelfPanel">
               <details class="profile-details">
                 <summary><span>Свій пароль</span><i data-lucide="chevron-down"></i></summary>
                 <div class="profile-details-body">
@@ -171,7 +172,7 @@
 
             <!-- Пошта для адміністратора (13.10 перенесено з «Пошт»): домени, доступи, ключ домену. -->
             <!-- ESP 9: реєстр доменів і відправників; малює app/screens/esp-registry.js. -->
-            <section class="panel esp-registry-panel span-2" id="espRegistryPanel">
+            <section class="panel blk-settings esp-registry-panel span-2" id="espRegistryPanel">
               <div class="panel-heading">
                 <div>
                   <h2>Пошта: домени й відправники</h2>
@@ -182,7 +183,7 @@
             </section>
 
             <!-- ESP 10: доступи, журнал дій адміністраторів, секрети; малює app/screens/esp-access.js. -->
-            <section class="panel esp-access-panel span-2" id="espAccessPanel">
+            <section class="panel blk-settings esp-access-panel span-2" id="espAccessPanel">
               <div class="panel-heading">
                 <div>
                   <h2>Пошта: доступи й журнал дій</h2>
@@ -193,7 +194,7 @@
             </section>
 
             <!-- ESP 1: з чим сервер ходить у Gmail; малює app/screens/esp-mailboxes.js, лише адміністраторові. -->
-            <section class="panel esp-mail-panel span-2" id="espMailPanel" hidden>
+            <section class="panel blk-settings esp-mail-panel span-2" id="espMailPanel" hidden>
               <div class="panel-heading">
                 <div>
                   <h2>Пошта: доступ через адміністратора домену</h2>
@@ -216,7 +217,7 @@
                 <div id="leadsMain"></div>
                 <div class="leads-pane" id="leadsExclusions" hidden>
                 <!-- ESP 6: виключення, фільтр країн, перевірка списку; малює app/screens/esp-filters.js. -->
-                <section class="panel esp-filters-panel span-2" id="espFiltersPanel">
+                <section class="panel blk-settings esp-filters-panel span-2" id="espFiltersPanel">
                   <div class="panel-heading">
                     <div>
                       <h2>Пошта: виключення й перевірки перед відправкою</h2>
@@ -228,7 +229,7 @@
                 </div>
                 <div class="leads-pane" id="leadsPrivacy" hidden>
                 <!-- ESP 17: запит людини про її дані — показати й видалити; малює app/screens/esp-privacy.js. -->
-                <section class="panel esp-privacy-panel span-2" id="espPrivacyPanel">
+                <section class="panel blk-ref esp-privacy-panel span-2" id="espPrivacyPanel">
                   <div class="panel-heading">
                     <div>
                       <h2>Пошта: запит людини про її дані</h2>
@@ -249,7 +250,7 @@
         <section class="view" id="view-reports">
           <div class="mail-page reports-page" id="reportsPage">
             <div id="reportsTop"></div>
-            <section class="panel esp-reports-panel">
+            <section class="panel blk-metrics esp-reports-panel">
               <div class="panel-heading">
                 <div>
                   <h2>По відправниках, доменах і кампаніях</h2>
@@ -272,7 +273,7 @@
           <!-- LinkedIn → «Вхідні»: відповіді на прогрів, по акаунтах, як у месенджері (app/screens/inbox.js).
                Пошта має свої «Вхідні» в папці «Пошта» (view-mail-inbox). -->
           <div class="warmup-layout">
-            <section class="panel warmup-inbox-panel span-2">
+            <section class="panel blk-queue warmup-inbox-panel span-2">
               <div class="panel-heading">
                 <!-- Розвантаження (аудит 16.10, D7): заголовок «Вхідні» вже є вгорі сторінки, а стан
                      оновлення — у підказці «Оновити». Елементи лишаються для inbox.js. -->
@@ -321,7 +322,7 @@
               <div class="unibox-main">
                 <div id="uniboxMail"></div>
                 <!-- ESP 7: усе, що прийшло в пошти, рядками журналу — і «Перевірити зараз»; малює app/screens/esp-inbox.js. -->
-                <section class="panel esp-inbox-panel" id="uniboxEvents" hidden>
+                <section class="panel blk-list esp-inbox-panel" id="uniboxEvents" hidden>
                   <div class="panel-heading">
                     <div>
                       <h2>Журнал пошт</h2>
@@ -340,23 +341,23 @@
         <section class="view" id="view-workspace">
           <div class="warmup-layout">
             <!-- Кампанії лідгенів: папки CRM, продукт, сценарій — app/screens/lead-campaigns.js. -->
-            <section class="panel span-2" id="leadCampaignPanel"></section>
+            <section class="panel blk-settings span-2" id="leadCampaignPanel"></section>
             <!-- Порівняння кампаній: кваліфіковані на 100 написаних — app/screens/campaign-report.js. -->
             <div class="span-2" id="campaignReportRoot"></div>
             <!-- Хребет: драбина кваліфікації, маршрути, правила — app/screens/workspace.js. -->
-            <section class="panel span-2" id="workspaceSpinePanel"></section>
+            <section class="panel blk-ref span-2" id="workspaceSpinePanel"></section>
           </div>
         </section>
 
         <section class="view" id="view-warmup">
           <div class="warmup-layout">
             <!-- Автозапити в друзі (у коді — «кампанії» прогріву): app/screens/warmup-campaign.js. -->
-            <section class="panel warmup-campaigns-panel span-2" id="warmupCampaignPanel"></section>
+            <section class="panel blk-settings warmup-campaigns-panel span-2" id="warmupCampaignPanel"></section>
             <!-- «Як іде розсилка» — конвеєр автозапитів; малює app/screens/warmup-funnel.js. -->
-            <section class="panel warmup-funnel-panel home-panel span-2" id="warmupFunnelPanel"></section>
+            <section class="panel blk-metrics warmup-funnel-panel home-panel span-2" id="warmupFunnelPanel"></section>
             <!-- Розклад прогріву — свій блок зі своєю кнопкою «Зберегти розклад». -->
-            <section class="panel warmup-strategy-panel span-2" id="warmupStrategyPanel"></section>
-            <section class="panel warmup-list-panel span-2">
+            <section class="panel blk-settings warmup-strategy-panel span-2" id="warmupStrategyPanel"></section>
+            <section class="panel blk-list warmup-list-panel span-2">
               <div class="panel-heading">
                 <div>
                   <h2>Акаунти</h2>
@@ -383,7 +384,7 @@
               </div>
             </section>
             <!-- Картка з'являється, коли акаунт вибрано в таблиці; доти її немає зовсім. -->
-            <section class="panel warmup-detail-panel span-2" id="warmupDetailPanel" hidden>
+            <section class="panel blk-settings warmup-detail-panel span-2" id="warmupDetailPanel" hidden>
               <div class="panel-heading">
                 <div>
                   <h2 id="warmupDetailTitle">Акаунт</h2>
@@ -409,7 +410,7 @@
         <section class="view" id="view-contacts">
           <div class="contacts-layout">
             <div class="contacts-sidebar">
-            <section class="panel contact-list-panel">
+            <section class="panel blk-list contact-list-panel">
               <div class="panel-heading">
                 <div>
                   <h2>Контакти</h2>

@@ -85,10 +85,10 @@ function renderCampaignReport() {
       <button type="button" class="text-button" data-campaign-report-ai ${job?.running ? "disabled" : ""}><i data-lucide="sparkles"></i><span>Розмітити нові відповіді</span></button>
     </div>
     ${jobLine ? `<p class="campaign-report-job">${escapeHtml(jobLine)}</p>` : ""}`;
-  if (report.error && !data) { root.innerHTML = `<section class="campaign-report">${head}<div class="empty-state">${escapeHtml(report.error)}</div></section>`; refreshIcons(root); return; }
-  if (!data) { root.innerHTML = `<section class="campaign-report">${head}<div class="empty-state">Рахуємо кампанії...</div></section>`; return; }
+  if (report.error && !data) { root.innerHTML = `<section class="campaign-report panel blk-metrics">${head}<div class="empty-state">${escapeHtml(report.error)}</div></section>`; refreshIcons(root); return; }
+  if (!data) { root.innerHTML = `<section class="campaign-report panel blk-metrics">${head}<div class="empty-state">Рахуємо кампанії...</div></section>`; return; }
   const rows = data.campaigns || [];
-  root.innerHTML = `<section class="campaign-report">${head}${rows.length ? `
+  root.innerHTML = `<section class="campaign-report panel blk-metrics">${head}${rows.length ? `
     <div class="campaign-report-scroll"><table class="campaign-report-table">
       <thead><tr><th>Кампанія</th><th>Людей</th><th>Написали</th><th>Прийняли</th><th>Відповіли</th><th>Кваліфіковані</th><th>На 100 написаних</th><th>Дзвінки</th></tr></thead>
       <tbody>${rows.map(rowHtml).join("")}</tbody>
