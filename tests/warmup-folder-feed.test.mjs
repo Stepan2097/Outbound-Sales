@@ -531,9 +531,16 @@ test("a CRM that does not answer costs the poll the folder, not the answer — a
   const said = logged.mock.calls.filter((entry) => String(entry.arguments[0]).includes("folder check"));
   assert.equal(said.length, 1, "an outage is said once, not on every poll all morning");
 
-  // The CRM answers again, and the folder counts again.
+  // The CRM answers again, and the folder counts again — as soon as the slow read
+  // still in flight from the polls above has settled (up to ~1 s; on a busy test
+  // box the very next poll could still land on it, 17.10).
   slow.clear();
-  const back = await call({ method: "GET", path: "/api/warmup/agent/due" });
+  let back;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    back = await call({ method: "GET", path: "/api/warmup/agent/due" });
+    if (back.payload.next) break;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
   assert.equal(back.payload.next?.accountId, "acc-1");
   assert.equal(back.payload.next.invites, quota);
 });
