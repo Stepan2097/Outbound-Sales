@@ -785,6 +785,8 @@ async function loadWarmupProfiles() {
   warmupState.profiles = payload.profiles;
   warmupState.knownTags = payload.knownTags || [];
   renderWarmupProfiles();
+  // Картка автозапитів називає акаунти іменами — перемалювати, щойно імена прийшли.
+  renderWarmupCampaigns();
 }
 
 async function loadWarmupAccountDetail(accountId) {

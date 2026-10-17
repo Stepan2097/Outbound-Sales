@@ -236,3 +236,11 @@
 .today-chips button.active { background: var(--teal-weak); border-color: var(--teal); color: var(--ink); }
 .today-empty button { margin-left: 8px; }
 .today-move button.active { background: var(--teal-weak); border-color: var(--teal); color: var(--ink); }
+
+/* Граматика (таск 9180724e): робоче місце — три зони з однаковими відступами:
+   розмова → відповідь → дії з лідом (статус і перенесення — одним рядком унизу). */
+.today-work { gap: var(--sp-4); }
+.today-work-foot { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--sp-3) var(--sp-5); padding-top: var(--sp-3); border-top: 1px solid var(--line); }
+.today-work-foot .today-status,
+.today-work-foot .today-move { border-top: 0; padding-top: 0; }
+.today-work-meta { margin-top: calc(-1 * var(--sp-2)); }

@@ -89,3 +89,17 @@
 .metric { display: grid; gap: 2px; }
 .metric b { font-size: 22px; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .metric span { font-size: 12px; color: var(--muted); }
+
+/* Мітки типу й для заголовків, що живуть не в .panel-heading. */
+.panel.blk-settings .warmup-strategy-head h2::before,
+.campaign-report.blk-metrics .campaign-report-head h2::before {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.panel.blk-settings .warmup-strategy-head h2::before { content: "Налаштування"; }
+.campaign-report.blk-metrics .campaign-report-head h2::before { content: "Показники"; }

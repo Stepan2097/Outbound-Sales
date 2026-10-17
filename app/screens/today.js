@@ -360,6 +360,7 @@ function workHtml() {
           <button type="button" class="primary-button" data-today="send" title="Піде з цього акаунта в найближчу сесію. Наступний пінг — через 3 робочі дні." ${today.sending || !today.text.trim() ? "disabled" : ""}><i data-lucide="send"></i><span>${today.sending ? "Ставлю в чергу…" : "Погодити й надіслати"}</span></button>
         </div>
       </div>` : item.channel === "moved" ? "" : `<p class="today-note">Переписки з цим контактом тут немає — відкрийте його в CRM або перенесіть пінг.</p>`}
+    <footer class="today-work-foot">
     ${statusHtml(item)}
     <div class="today-move">
       <span>Перенести:</span>
@@ -368,7 +369,8 @@ function workHtml() {
       <button type="button" data-today="move" data-when="+7" title="Через тиждень">+7</button>
       <input type="date" id="todayMoveDate" aria-label="Перенести на дату" title="Вибір дати одразу переносить пінг" min="${escapeAttr(today.data?.today || "")}" />
       <button type="button" data-today="call" class="${today.callMode ? "active" : ""}" aria-pressed="${Boolean(today.callMode)}" title="Дзвінок: натисніть і оберіть дату"><i data-lucide="phone"></i><span>${today.callMode ? "Дзвінок — оберіть дату" : "Дзвінок"}</span></button>
-    </div>`;
+    </div>
+    </footer>`;
 }
 
 /** Статус і причина виходу — ті самі, що в CRM, і записуються в CRM (етап 5/6). */
