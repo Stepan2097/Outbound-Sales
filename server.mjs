@@ -10,7 +10,7 @@ import { CHANNEL_RULES, LANGUAGES, buildFallbackDrafts, draftsPromptPayload, nor
 import { invalidateContactCaches, contactAsProspect, contactsConfigured, contactsMissingConfig, crmKeyKind, folderContactAt, listContactFolders, listFolderContacts, searchFolderContacts, readContact, supabaseKeyKind } from "./contacts/store.mjs";
 import { handleKnowledgeLibraryApi } from "./knowledge/api.mjs";
 import { handlePitchApi } from "./knowledge/pitch-api.mjs";
-import { handleTodayApi, reconcileSoon, setLeadgenStore, startPingReconciler } from "./triage/today.mjs";
+import { handleTodayApi, reconcileSoon, setLeadgenStore, setNewContactPolicyStore, startPingReconciler } from "./triage/today.mjs";
 import { campaignsByContact, handleLeadCampaignApi, leadCampaigns, setLeadCampaignStore } from "./triage/lead-campaigns.mjs";
 import { handleCampaignReportApi, setReportStores, startReplyLabeler } from "./triage/campaign-report.mjs";
 import { handleScenarioApi, scenarioForPrompt } from "./warmup/scenarios.mjs";
@@ -294,6 +294,9 @@ const state = {
   warmupCampaigns: null,
   // Хто з лідгенів веде який акаунт LinkedIn: { accountId: id користувача CRM }. Пінги діалогів акаунта — йому (16.10).
   accountLeadgens: {},
+  // Скільки нових контактів лідген бере, коли в нього є живі розмови (Марко 19.10):
+  // { email: { mode: "gate" | "limit" | "open", limit } }. Немає запису — правило як було.
+  newContactPolicy: {},
   // Мітки відповідей у звіті кампаній (етап 6/6): { contactId: { label, by: ai|human, basis, at } }.
   replyLabels: {},
   // Кампанії лідгенів (WorkSpace, 16.10): папки CRM, продукт, сценарій, кроки — triage/lead-campaigns.mjs.
@@ -755,6 +758,13 @@ server.listen(port, listenHost, () => {
       await writePersistentWorkspaceState();
     }
   });
+  setNewContactPolicyStore({
+    read: () => state.newContactPolicy || {},
+    async write(value) {
+      state.newContactPolicy = value;
+      await writePersistentWorkspaceState();
+    }
+  });
   // Кампанії лідгенів (WorkSpace, 16.10) — окремо від автозапитів прогріву.
   setLeadCampaignStore({
     read: () => state.leadCampaigns || [],
@@ -1142,7 +1152,7 @@ async function handleApi(request, response, url) {
     const profile = request.auth?.profile;
     const handled = await handleTodayApi({
       request, response, url, sendJson, readJson,
-      viewer: { id: profile?.id || "", role: profile?.role || "seller" },
+      viewer: { id: profile?.id || "", role: profile?.role || "seller", email: String(profile?.email || "").toLowerCase() },
       writer: { write: writeTodayDraft, classify: classifyOpenDialog }
     });
     if (handled) return;
@@ -3331,9 +3341,9 @@ async function workFromRoute(profile, path, body, payload) {
   if (path === "/api/warmup/first-messages/send" && !payload.duplicate) {
     const [row] = await warmupAnty.from("wl_outreach").select("id,account_id,crm_contact_id,person_name").eq("id", String(body.outreachId)).limit(1).rows();
     if (!row) return;
-    await logWork(profile, { action: "wrote", channel: "linkedin", contactId: row.crm_contact_id, name: row.person_name, accountId: row.account_id, accountName: await accountName(row.account_id), detail: String(body.text || "").slice(0, 500) });
+    await logWork(profile, { action: "wrote", channel: "linkedin", contactId: row.crm_contact_id, name: row.person_name, accountId: row.account_id, accountName: await accountName(row.account_id), detail: String(body.text || "").slice(0, 500), source: body.source });
   } else if (path === "/api/warmup/invites") {
-    await logWork(profile, { action: "invited", channel: "linkedin", contactId: String(body.crmContactId), accountId: String(body.accountId || ""), accountName: await accountName(body.accountId), detail: String(body.note || "").slice(0, 300) || null });
+    await logWork(profile, { action: "invited", channel: "linkedin", contactId: String(body.crmContactId), accountId: String(body.accountId || ""), accountName: await accountName(body.accountId), detail: String(body.note || "").slice(0, 300) || null, source: body.source });
   } else if (path === "/api/warmup/inbox/reply" && !payload.duplicate) {
     const rows = await warmupAnty.from("wl_events").select("meta").eq("account_id", String(body.accountId)).eq("meta->>threadKey", String(body.threadKey))
       .order("created_at", { ascending: false }).limit(50).rows();
@@ -3344,7 +3354,7 @@ async function workFromRoute(profile, path, body, payload) {
   } else if (path === "/api/esp/send-one") {
     const email = String(payload.to || body.lead?.email || "").toLowerCase();
     const contactId = body.lead?.crmContactId || (await baseContactByEmail(email))?.id || null;
-    await logWork(profile, { action: "wrote", channel: "email", contactId, email, name: body.lead?.name, mailbox: payload.mailbox || body.mailbox, detail: String(body.subject || "").slice(0, 300) });
+    await logWork(profile, { action: "wrote", channel: "email", contactId, email, name: body.lead?.name, mailbox: payload.mailbox || body.mailbox, detail: String(body.subject || "").slice(0, 300), source: body.source });
   }
 }
 
@@ -5108,6 +5118,9 @@ function applyPersistentWorkspaceState(saved = {}) {
   if (saved.accountLeadgens && typeof saved.accountLeadgens === "object" && !Array.isArray(saved.accountLeadgens)) {
     state.accountLeadgens = saved.accountLeadgens;
   }
+  if (saved.newContactPolicy && typeof saved.newContactPolicy === "object" && !Array.isArray(saved.newContactPolicy)) {
+    state.newContactPolicy = saved.newContactPolicy;
+  }
   if (saved.replyLabels && typeof saved.replyLabels === "object" && !Array.isArray(saved.replyLabels)) {
     state.replyLabels = saved.replyLabels;
   }
@@ -5372,6 +5385,7 @@ async function writeWorkspaceStateNow() {
       accountDossiers: state.accountDossiers,
       warmupCampaigns: state.warmupCampaigns,
       accountLeadgens: state.accountLeadgens,
+      newContactPolicy: state.newContactPolicy,
       replyLabels: state.replyLabels,
       campaignSpine: state.campaignSpine,
       leadCampaigns: state.leadCampaigns,

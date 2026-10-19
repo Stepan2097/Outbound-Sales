@@ -4,13 +4,102 @@
 // (campaign-report.js) і хребет, спільний для всіх кампаній: драбина кваліфікації,
 // куди веде кожен лід, правила. Прогріву (автозапити, розсилка, акаунти) тут немає —
 // він на своїй вкладці й з кампаніями не пов'язаний (Марко, 16.10).
+//
+// Друга частина WorkSpace — «Нові контакти» (Марко 19.10: конвеєр з Головної «напевно
+// є сенс перенести у WorkSpace»): папка CRM → людина за людиною (home-triage.js).
+// Правило без змін — спершу свої відповіді й прострочені пінги (/api/today/gate).
 
 import { api, escapeHtml, onScreen, refreshIcons } from "../core.js";
 import { loadLeadCampaigns } from "./lead-campaigns.js";
 import { loadScenarios, scenarioBook } from "./campaign-plan.js";
+import { openTriage } from "./home-triage.js";
+import { openTodayBlock } from "./today.js";
 import "./campaign-report.js";
 
-onScreen("workspace", { open: () => { void loadLeadCampaigns(); void openSpine(); } });
+const TAB_KEY = "outbound.workspace.tab";
+const WS_TABS = ["campaigns", "contacts"];
+let wsTab = readTab();
+let gate = null;
+
+function readTab() {
+  try { return WS_TABS.includes(window.localStorage.getItem(TAB_KEY)) ? window.localStorage.getItem(TAB_KEY) : "campaigns"; } catch { return "campaigns"; }
+}
+
+onScreen("workspace", { open: () => openTab() });
+
+function openTab() {
+  for (const button of document.querySelectorAll("[data-ws-tab]")) {
+    const on = button.dataset.wsTab === wsTab;
+    button.classList.toggle("is-active", on);
+    button.setAttribute("aria-selected", String(on));
+  }
+  for (const pane of document.querySelectorAll("[data-ws-pane]")) pane.hidden = pane.dataset.wsPane !== wsTab;
+  if (wsTab === "contacts") return void openNewContacts();
+  void loadLeadCampaigns();
+  void openSpine();
+}
+
+/** «Нові контакти»: конвеєр — або рядок, що спершу розмови, і шлях до них. */
+async function openNewContacts({ recheck = false } = {}) {
+  const slot = document.getElementById("triageGate");
+  const conveyor = document.getElementById("triageRoot");
+  const wasAllowed = !conveyor?.hidden;
+  try {
+    gate = await api("/api/today/gate");
+  } catch {
+    gate = null; // Не прочитали — не блокуємо: правило лише про порядок роботи.
+  }
+  const allowed = !gate || gate.allowed !== false;
+  if (conveyor) conveyor.hidden = !allowed;
+  if (slot) {
+    slot.innerHTML = allowed ? (gate?.busy ? allowanceHtml(gate) : "") : gateHtml(gate);
+    refreshIcons(slot);
+  }
+  // Перевірка після відправки не перезапускає конвеєр, що й так відкритий.
+  if (allowed && !(recheck && wasAllowed)) await openTriage();
+}
+
+const waiting = (data) => [data.replies ? `відповідей ${data.replies}` : "", data.overdue ? `прострочених ${data.overdue}` : ""].filter(Boolean).join(", ");
+
+function gateHtml(data) {
+  const spent = data.mode === "limit" ? ` Норму нових на сьогодні (${data.limit}) уже взято.` : "";
+  return `<section class="panel blk-ref triage-gate">
+    <p><b>Спершу розмови</b>: у вас ${escapeHtml(waiting(data))}.${spent} Нові контакти з папки з'являться, коли їх розберете.</p>
+    <button type="button" class="primary-button" data-ws-to-work><i data-lucide="inbox"></i><span>До роботи</span></button>
+  </section>`;
+}
+
+/** Розмови чекають, але адмін дозволив цьому лідгену нових попри них (Налаштування → Команда). */
+function allowanceHtml(data) {
+  const left = data.mode === "limit" ? `Нових сьогодні: <b>${data.used} з ${data.limit}</b>.` : "Нові контакти без обмеження.";
+  return `<p class="triage-allowance">${left} Розмови теж чекають (${escapeHtml(waiting(data))}) — <button type="button" class="text-button" data-ws-to-work>До роботи</button></p>`;
+}
+
+// Взяли людину з конвеєра — ворота перечитуються: на нормі конвеєр поступається розмовам.
+// Пауза — бо журнал роботи пишеться вже після відповіді сервера.
+document.addEventListener("triage:outreach", () => {
+  if (wsTab !== "contacts") return;
+  setTimeout(() => void openNewContacts({ recheck: true }), 1500);
+});
+
+document.querySelector("#view-workspace .view-tabs")?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-ws-tab]");
+  if (!button || button.dataset.wsTab === wsTab) return;
+  wsTab = button.dataset.wsTab;
+  try { window.localStorage.setItem(TAB_KEY, wsTab); } catch {}
+  openTab();
+});
+
+document.getElementById("triageGate")?.addEventListener("click", (event) => {
+  if (event.target.closest("[data-ws-to-work]")) openTodayBlock();
+});
+
+/** З Головної-пульту: відкрити WorkSpace одразу на «Нові контакти» (або на «Кампаніях»). */
+export function showNewContacts(tab = "contacts") {
+  wsTab = WS_TABS.includes(tab) ? tab : "contacts";
+  try { window.localStorage.setItem(TAB_KEY, wsTab); } catch {}
+  document.querySelector('.nav-item[data-view="workspace"]')?.click();
+}
 
 const SPINE_PARTS = [
   ["ladder", "Драбина кваліфікації", "2–3 питання до пропозиції дзвінка, по рядку на крок"],

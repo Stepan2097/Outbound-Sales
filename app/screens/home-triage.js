@@ -641,6 +641,15 @@ async function enrich() {
   if (triage.enrich?.added?.length && triage.item?.contact?.id === contact.id && !triage.dirty.has("body")) await draftTexts();
 }
 
+/**
+ * Людину взято в роботу (запит, перше повідомлення чи лист). WorkSpace перечитує
+ * ворота: у лідгена з денною нормою нових контактів лічильник росте, а на нормі
+ * конвеєр знову поступається розмовам (налаштування 19.10).
+ */
+function tookNewContact() {
+  document.dispatchEvent(new CustomEvent("triage:outreach"));
+}
+
 async function sendLinkedin(outreachId) {
   readTexts();
   const friend = triage.item.linkedin.friends.find((row) => row.outreachId === outreachId);
@@ -648,7 +657,8 @@ async function sendLinkedin(outreachId) {
   triage.sending = "linkedin";
   renderTriage();
   try {
-    const answer = await api("/api/warmup/first-messages/send", { method: "POST", body: JSON.stringify({ outreachId, text: triage.texts.linkedin }) });
+    const answer = await api("/api/warmup/first-messages/send", { method: "POST", body: JSON.stringify({ outreachId, text: triage.texts.linkedin, source: "triage" }) });
+    tookNewContact();
     void loadRecent();
     const when = (iso) => new Date(iso).toLocaleString("uk-UA", { weekday: "short", hour: "2-digit", minute: "2-digit" });
     say(answer.goesOutNow
@@ -677,13 +687,14 @@ async function sendEmail() {
   for (const row of chosen) {
     try {
       const lead = { email: row.address, crmContactId: contact.id, name: contact.name, company: contact.company, country: contact.country, position: contact.position, source: "CRM", sourceDate: contact.created_at, verification: row.check?.status, verifiedAt: row.check?.checkedAt };
-      const answer = await api("/api/esp/send-one", { method: "POST", body: JSON.stringify({ lead, mailbox: triage.mailbox, subject: triage.texts.subject, body: triage.texts.body }) });
+      const answer = await api("/api/esp/send-one", { method: "POST", body: JSON.stringify({ lead, mailbox: triage.mailbox, subject: triage.texts.subject, body: triage.texts.body, source: "triage" }) });
       if (answer.ok) went.push(row.address); else failed.push(`${row.address}: ${answer.error || "не пішов"}`);
     } catch (error) {
       failed.push(`${row.address}: ${error.message || "не пішов"}`);
     }
   }
   triage.sending = "";
+  if (went.length) tookNewContact();
   if (failed.length) {
     say(`${went.length ? `Надіслано з ${triage.mailbox}: ${went.join(", ")}. ` : ""}Не пішло — ${failed.join("; ")}`, "is-bad");
     return renderTriage();
@@ -699,7 +710,8 @@ async function invite() {
   triage.sending = "invite";
   renderTriage();
   try {
-    await api("/api/warmup/invites", { method: "POST", body: JSON.stringify({ crmContactId: contact.id, accountId: triage.inviteAccount }) });
+    await api("/api/warmup/invites", { method: "POST", body: JSON.stringify({ crmContactId: contact.id, accountId: triage.inviteAccount, source: "triage" }) });
+    tookNewContact();
     const account = triage.inviteAccounts.find((row) => row.id === triage.inviteAccount);
     void loadRecent();
     say(`Запит у друзі від ${account?.label || "акаунта"} стоїть у черзі — після прийняття людина повернеться сюди першою.`);
