@@ -303,7 +303,9 @@ export function newContactsAllowed(blocks) {
 /** Дата ручного пінгу: «+1», «+3», «+7» днів або конкретний день. */
 export function manualDueDay(when, today) {
   const text = String(when || "").trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+  // Дата — лише повна й не в минулому й не далі року (суддя 19.10: ввід з клавіатури
+  // давав 0002-10-19, і пінг падав у «Прострочені»).
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text >= today && text <= addCalendarDays(today, 365) ? text : "";
   const days = Number(text.replace(/^\+/, ""));
   if (!Number.isInteger(days) || days < 0 || days > 365) return "";
   return days === 0 ? today : addCalendarDays(today, days);

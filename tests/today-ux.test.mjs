@@ -31,3 +31,11 @@ test("робоче місце називає кампанію ліда", () => {
   assert.match(API, /campaign: campaignOf\(state\?\.campaignId\)/);
   assert.match(TODAY, /item\.campaign \? `<b>\$\{escapeHtml\(item\.campaign\.name/);
 });
+
+test("вибір дати переносить лише повну дату від сьогодні; Головна пише чернетки про продукт «Смислів»", () => {
+  assert.match(TODAY, /value < first/, "минула чи неповна дата з клавіатури ігнорується");
+  const server = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+  const prep = server.slice(server.indexOf("function prepareTriageContact"), server.indexOf("function prepareTriageContact") + 400);
+  assert.match(prep, /const product = draftProduct\(options\.productId \|\| ""\)/);
+  assert.doesNotMatch(prep, /state\.products\.find/);
+});

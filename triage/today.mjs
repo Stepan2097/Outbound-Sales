@@ -490,7 +490,7 @@ export async function todayDraft({ pingId, viewer, force = false, writer }) {
  */
 export async function setManualPing({ pingId = "", contactId = "", when, call = false, viewer, now = new Date() }) {
   const dueDay = manualDueDay(when, dayIn(now));
-  if (!dueDay) throw refuse("Оберіть, на коли пінг.", 400);
+  if (!dueDay) throw refuse("Оберіть, на коли пінг: дата від сьогодні до року вперед.", 400);
   const nowIso = now.toISOString();
   let task = pingId ? await loadTask(pingId) : null;
   const targetContact = String(task?.contact_id || contactId || "");

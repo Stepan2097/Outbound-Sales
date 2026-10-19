@@ -537,6 +537,12 @@ document.addEventListener("click", (event) => {
 // D5: вибір дати сам переносить пінг — без окремої кнопки «На дату».
 document.addEventListener("change", (event) => {
   if (event.target?.id !== "todayMoveDate" || !event.target.value) return;
+  // З клавіатури браузер шле change на кожній цифрі року (0002-10-19): переносимо лише
+  // повну дату від сьогодні до року вперед; вибір у календарі — як і був, в один крок.
+  const value = event.target.value;
+  const first = today.data?.today || "";
+  const year = Number(value.slice(0, 4));
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || (first && value < first) || year > Number(first.slice(0, 4) || year) + 1) return;
   const call = Boolean(today.callMode);
   today.callMode = false;
   void movePing(event.target.value, call);
