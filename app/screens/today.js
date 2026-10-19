@@ -1,4 +1,8 @@
-// «Сьогодні» — Головна лідгена (етап 1/6 плану кампаній і пінгів, 16.10.2026).
+// «Сьогодні» — черга пінгів лідгена (етап 1/6 плану кампаній і пінгів, 16.10.2026).
+// З 19.10 (Марко: «поточний функціонал вкладки Головна перенести в Вхідні і грамотно
+// поєднати») живе у LinkedIn → Вхідні як вкладка «До роботи»; поруч — «Усі розмови»
+// (месенджер, inbox.js). Між ними — переходи: пінг → «Уся розмова», розмова з пінгом →
+// «До роботи» (connectInboxWork). Головна тепер — пульт (home.js).
 //
 // Кожен живий діалог має пінг — задачу CRM з датою наступного дотику. Тут вони в
 // тому порядку, в якому їх робити: відповіді → прострочені → на сьогодні →
@@ -8,13 +12,86 @@
 // Робоче місце — один лід за раз: хто це, уся переписка, чернетка, «Погодити й
 // надіслати» → наступний. Пінг можна перенести (+1 день, +3, тиждень, дата) чи
 // зробити дзвінком. Надсилає не ця сторінка: повідомлення стає в чергу акаунта
-// тими самими маршрутами, що й «Вхідні» та Головна, а сервер звіряє пінги —
+// тими самими маршрутами, що й «Усі розмови», а сервер звіряє пінги —
 // закриває цей і ставить наступний (через 3 робочі дні).
 
 import { api, escapeAttr, escapeHtml, onScreen, refreshIcons } from "../core.js";
-import { warmupGoesOutText } from "./inbox.js";
+import { connectInboxWork, renderWarmupInbox, showWarmupInboxThread, warmupGoesOutText } from "./inbox.js";
 
-onScreen("home", { open: () => void openToday() });
+onScreen("inbox", { open: () => applyInboxMode() });
+
+/* ── дві частини «Вхідних»: «До роботи» і «Усі розмови» ─────────────────── */
+
+const MODE_KEY = "outbound.inbox.mode";
+let inboxMode = readMode();
+
+function readMode() {
+  try { return window.localStorage.getItem(MODE_KEY) === "all" ? "all" : "work"; } catch { return "work"; }
+}
+
+function setInboxMode(mode) {
+  inboxMode = mode === "all" ? "all" : "work";
+  try { window.localStorage.setItem(MODE_KEY, inboxMode); } catch {}
+}
+
+/** Показати вибрану частину; «До роботи» читає пінги, «Усі розмови» малює inbox.js. */
+function applyInboxMode() {
+  for (const button of document.querySelectorAll("[data-inbox-mode]")) {
+    const on = button.dataset.inboxMode === inboxMode;
+    button.classList.toggle("is-active", on);
+    button.setAttribute("aria-selected", String(on));
+  }
+  for (const pane of document.querySelectorAll("[data-inbox-pane]")) pane.hidden = pane.dataset.inboxPane !== inboxMode;
+  // Пінги потрібні й «Усім розмовам»: розмова з пінгом має кнопку «До роботи».
+  void openToday({ keepSelection: true });
+}
+
+function renderModeCounts() {
+  const work = document.getElementById("inboxWorkCount");
+  if (work) work.textContent = today.data?.configured ? String(allItems().length || "") : "";
+  const all = document.getElementById("inboxAllCount");
+  const unread = document.getElementById("warmupNavBadge");
+  if (all) all.textContent = unread && !unread.hidden ? unread.textContent : "";
+}
+
+document.addEventListener("click", (event) => {
+  const tab = event.target.closest?.("[data-inbox-mode]");
+  if (tab && tab.dataset.inboxMode !== inboxMode) {
+    setInboxMode(tab.dataset.inboxMode);
+    return void applyInboxMode();
+  }
+  const toWork = event.target.closest?.("[data-inbox-to-work]");
+  if (toWork) return void openPing(toWork.dataset.inboxToWork);
+});
+
+/** Пінг цієї розмови — у черзі або «далі за планом». */
+function pingFor(accountId, threadKey) {
+  if (!accountId || !threadKey || !today.data) return null;
+  return [...allItems(), ...(today.data.later || [])].find((item) => item.accountId === accountId && item.threadKey === threadKey) || null;
+}
+
+/** Відкрити пінг у «До роботи» — з розмови в «Усіх розмовах» чи з Головної. */
+export function openPing(pingId) {
+  if (!pingId) return;
+  setInboxMode("work");
+  today.blockFilter = "";
+  today.selected = pingId;
+  today.detail = null;
+  today.text = "";
+  today.textFor = "";
+  today.draftNote = "";
+  document.querySelector('.nav-item[data-view="inbox"]')?.click();
+}
+
+/** З Головної-пульту: «До роботи» з одним блоком (відповіді, прострочені…) або всі. */
+export function openTodayBlock(block = "") {
+  setInboxMode("work");
+  today.blockFilter = BLOCKS.some(([key]) => key === block) ? block : "";
+  today.selected = "";
+  document.querySelector('.nav-item[data-view="inbox"]')?.click();
+}
+
+connectInboxWork({ showAll: () => setInboxMode("all"), pingFor });
 
 const SCOPE_KEY = "outbound.today.scope";
 const BLOCKS = [
@@ -67,8 +144,14 @@ async function openToday({ keepSelection = false } = {}) {
     today.loading = false;
   }
   const items = allItems();
-  if (!keepSelection || !items.some((item) => item.pingId === today.selected)) today.selected = items[0]?.pingId || "";
+  // Вибраним лишається пінг, відкритий з розмови чи з Головної, — навіть «далі за планом».
+  const known = [...items, ...(today.data?.later || [])];
+  const first = (today.blockFilter && today.data?.blocks?.[today.blockFilter]?.[0]) || items[0];
+  if (!keepSelection || !known.some((item) => item.pingId === today.selected)) today.selected = first?.pingId || "";
   render();
+  // «Усі розмови» читають пінги лише заради кнопки «До роботи»: картку не відкриваємо —
+  // відкриття відповіді позначає її прочитаною.
+  if (inboxMode !== "work") return void renderWarmupInbox();
   if (today.selected) void loadDetail(today.selected);
   else today.detail = null;
 }
@@ -335,6 +418,7 @@ function workHtml() {
     <p class="today-work-meta">
       ${item.campaign ? `<b>${escapeHtml(item.campaign.name || "без назви")}</b> · ` : ""}${item.accountName ? `<span title="Акаунт LinkedIn, з якого йде розмова">${escapeHtml(item.accountName)}</span>` : "LinkedIn"}
       ${item.crmUrl ? ` · <a href="${escapeAttr(item.crmUrl)}" target="_blank" rel="noopener noreferrer">Відкрити в CRM</a>` : ""}
+      ${item.channel === "thread" && item.threadKey ? ` · <button type="button" class="text-button today-to-thread" data-today="thread" title="Ця розмова в «Усіх розмовах»: акаунт, ручна відповідь, скасування">Уся розмова</button>` : ""}
       ${item.assignee && today.scope === "all" && mixedAssignees() ? ` · ${escapeHtml(shortName(item.assignee))}` : ""}
     </p>
     ${item.reassigned ? `<p class="today-note today-note-moved">Перепризначено з ${escapeHtml(item.reassigned.from)} на ${escapeHtml(item.reassigned.to)} (${escapeHtml(new Date(item.reassigned.at).toLocaleDateString("uk-UA"))}): старий акаунт заблоковано${item.channel === "moved" ? `; запит у друзі піде з ${escapeHtml(item.reassigned.to)}, і коли прийме — тут буде «Перше повідомлення»` : ""}.</p>` : ""}
@@ -402,6 +486,7 @@ async function saveStatus() {
 }
 
 function render() {
+  renderModeCounts();
   const host = root();
   if (!host) return;
   if (today.loading && !today.data) {
@@ -448,7 +533,7 @@ function render() {
         <aside class="today-queue">${queueHtml()}</aside>
         <article class="today-work">${workHtml()}</article>
       </div>` : `${today.notice ? `<p class="today-notice ${today.tone}" role="status">${escapeHtml(today.notice)}</p>` : ""}<div class="today-queue today-queue-solo">${queueHtml()}</div>`}
-      ${data.newContactsAllowed ? "" : `<p class="today-gate">Нові контакти з папки (WorkSpace) — коли розберете відповіді й прострочені.</p>`}
+      ${data.newContactsAllowed ? "" : `<p class="today-gate">Нові контакти з папки (WorkSpace → «Нові контакти») — коли розберете відповіді й прострочені.</p>`}
     </section>`;
   refreshIcons(host);
 }
@@ -514,6 +599,12 @@ document.addEventListener("click", (event) => {
     return render();
   }
   if (act === "import-accept") return void acceptImports();
+  if (act === "thread") {
+    const item = today.detail?.item;
+    if (!item?.threadKey) return;
+    setInboxMode("all");
+    return void showWarmupInboxThread(item.accountId, item.threadKey);
+  }
   if (act === "rewrite") return void writeDraft(true);
   if (act === "send") return void send();
   if (act === "move") return void movePing(target.dataset.when);

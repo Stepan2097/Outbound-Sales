@@ -48,6 +48,18 @@ function openPendingUnread() {
 // landed — not only when this one is opened.
 onWorkspaceEnter(() => refreshWarmupBadge());
 
+/**
+ * «Вхідні» з 19.10 мають дві частини (Марко: «поточний функціонал вкладки Головна
+ * перенести в Вхідні і грамотно поєднати»): «До роботи» — черга пінгів (today.js) і
+ * ці «Усі розмови». today.js імпортує цей модуль і підключає сюди свої функції — так
+ * немає кола імпортів. Доки не підключив, розмови просто без кнопки «До роботи».
+ */
+let inboxWork = { showAll: () => {}, pingFor: () => null };
+
+export function connectInboxWork(parts) {
+  inboxWork = { ...inboxWork, ...parts };
+}
+
 /** A run is roughly daily, so a gap longer than this is a stopped agent. */
 const WARMUP_SYNC_STALE_HOURS = 36;
 
@@ -681,6 +693,8 @@ function warmupThreadViewHtml() {
   const status = String(thread.outreachStatus || "").trim();
   const contactId = thread.crmContactId ? String(thread.crmContactId) : "";
   const messages = Array.isArray(inbox.open.messages) ? inbox.open.messages : [];
+  // Розмова з пінгом — шлях у «До роботи»: там чернетка, статус CRM, перенесення (19.10).
+  const ping = inboxWork.pingFor(thread.accountId || inbox.openAccountId, thread.threadKey || inbox.openThreadKey);
 
   const head = `
     <div class="warmup-thread-head">
@@ -693,6 +707,9 @@ function warmupThreadViewHtml() {
           : '<span class="warmup-subtle">цієї людини ще нема в CRM</span>'}
         ${link
           ? `<a href="${escapeAttr(link)}" target="_blank" rel="noreferrer noopener"><i data-lucide="external-link"></i><span>їхній LinkedIn</span></a>`
+          : ""}
+        ${ping
+          ? `<button class="text-button" type="button" data-inbox-to-work="${escapeAttr(ping.pingId)}" title="Пінг цієї розмови: чернетка, статус CRM, перенесення"><i data-lucide="list-checks"></i><span>До роботи · ${escapeHtml(ping.reasonTitle || "пінг")}</span></button>`
           : ""}
       </div>
       <div class="warmup-thread-head-meta">
@@ -1307,6 +1324,7 @@ export function showWarmupInboxAccount(accountId) {
   if (!accountId) return;
   pendingUnreadAccount = accountId;
   openWarmupInboxAccount(accountId);
+  inboxWork.showAll();
   document.querySelector('.nav-item[data-view="inbox"]')?.click();
   renderWarmupInbox();
   globalThis.scrollTo?.(0, 0);
@@ -1321,6 +1339,7 @@ export function showWarmupInboxAccount(accountId) {
 export function showWarmupInboxThread(accountId, threadKey) {
   if (!accountId || !threadKey) return;
   openWarmupInboxAccount(accountId);
+  inboxWork.showAll();
   document.querySelector('.nav-item[data-view="inbox"]')?.click();
   openWarmupThread(accountId, threadKey);
   globalThis.scrollTo?.(0, 0);

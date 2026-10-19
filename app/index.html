@@ -110,10 +110,10 @@
           </div>
         </header>
 
-        <!-- Головна. Конвеєр нових контактів (home-triage.js) з 19.10 — у WorkSpace → «Нові контакти». -->
+        <!-- Головна — пульт (Марко 19.10, варіант А): план дня, що потребує уваги, тиждень, кампанії — app/screens/home.js.
+             Черга пінгів — у LinkedIn → Вхідні → «До роботи»; конвеєр нових контактів — у WorkSpace → «Нові контакти». -->
         <section class="view" id="view-home">
-          <!-- «Сьогодні» (16.10): відповіді → прострочені → на сьогодні → перші повідомлення — app/screens/today.js. -->
-          <div class="today-page" id="todayRoot"></div>
+          <div class="home-page" id="homeRoot"></div>
         </section>
 
         <!-- «По днях» (12.10): кому писали за день, хто відповів, діалог — app/screens/work.js. -->
@@ -269,9 +269,16 @@
         <!-- Налаштування пошти: підключення Gmail, домени й відправники, доступи й журнал дій
              (esp-mailboxes.js, esp-registry.js, esp-access.js). У «Налаштуваннях» — лише профіль і команда. -->
         <section class="view" id="view-inbox">
-          <!-- LinkedIn → «Вхідні»: відповіді на прогрів, по акаунтах, як у месенджері (app/screens/inbox.js).
-               Пошта має свої «Вхідні» в папці «Пошта» (view-mail-inbox). -->
-          <div class="warmup-layout">
+          <!-- LinkedIn → «Вхідні» (19.10) — дві частини: «До роботи» — черга пінгів, що була на Головній
+               (відповіді → прострочені → на сьогодні → перші повідомлення, app/screens/today.js), і
+               «Усі розмови» — месенджер усіх акаунтів (app/screens/inbox.js). Між ними — переходи
+               (connectInboxWork у inbox.js). Пошта має свої «Вхідні» в папці «Пошта» (view-mail-inbox). -->
+          <div class="view-tabs" role="tablist" aria-label="Вхідні LinkedIn">
+            <button type="button" role="tab" data-inbox-mode="work" title="Пінги: кому відповісти, нагадати, написати першим — з чернеткою">До роботи <b id="inboxWorkCount"></b></button>
+            <button type="button" role="tab" data-inbox-mode="all" title="Усі розмови всіх акаунтів, як у месенджері">Усі розмови <b id="inboxAllCount"></b></button>
+          </div>
+          <div class="today-page" id="todayRoot" data-inbox-pane="work"></div>
+          <div class="warmup-layout" data-inbox-pane="all">
             <section class="panel blk-queue warmup-inbox-panel span-2">
               <div class="panel-heading">
                 <!-- Розвантаження (аудит 16.10, D7): заголовок «Вхідні» вже є вгорі сторінки, а стан
