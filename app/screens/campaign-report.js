@@ -12,8 +12,7 @@ import { api, escapeAttr, escapeHtml, onScreen, refreshIcons } from "../core.js"
 // WorkSpace (16.10): порівняння кампаній поруч із кампаніями, не в «Пошта → Звіти».
 onScreen("workspace", { open: () => void loadCampaignReport() });
 
-// Кампанії лідгенів мають стан active / paused (lead-campaigns.mjs); running — давніший запис.
-const STATES = { active: "Іде", running: "Іде", paused: "Пауза", done: "Завершена", draft: "Чернетка" };
+const STATES = { running: "Іде", paused: "Пауза", done: "Завершена", draft: "Чернетка" };
 const report = { data: null, error: "", open: "", replies: {}, saving: "" };
 
 async function loadCampaignReport() {

@@ -32,9 +32,7 @@ const NAMES = [
   "renderWarmupReply", "submitWarmupReply", "removeWarmupReply",
   "renderWarmupInbox", "renderWarmupNavBadge", "setWarmupUnread", "refreshWarmupBadge", "stopWarmupBadgePoll",
   "warmupInboxListOnScreen", "loadWarmupInbox", "warmupThreadIsOpen", "markWarmupThreadRead", "openWarmupThread",
-  "closeWarmupThread", "pendingUnreadAccount", "openPendingUnread", "showWarmupInboxAccount",
-  // Міст до «До роботи» (19.10): у тестах — заглушка з inbox.js, без пінгів.
-  "inboxWork"
+  "closeWarmupThread", "pendingUnreadAccount", "openPendingUnread", "showWarmupInboxAccount"
 ];
 
 /** Слухачі екрана: те, що людина робить руками. Беруться з коду як є. */

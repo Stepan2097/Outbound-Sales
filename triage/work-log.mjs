@@ -72,10 +72,7 @@ export function logWork(profile, entry, { now = new Date() } = {}) {
     accountId: clean(entry.accountId, 80),
     accountName: clean(entry.accountName, 120),
     mailbox: lower(entry.mailbox) || null,
-    detail: clean(entry.detail, 500),
-    // Звідки дія (19.10): "triage" — конвеєр нових контактів; за цим рахується денна
-    // норма нових контактів лідгена (triage/today.mjs → newContactsGate).
-    source: entry.source === "triage" ? "triage" : null
+    detail: clean(entry.detail, 500)
   };
   tail = tail.then(async () => {
     await load();

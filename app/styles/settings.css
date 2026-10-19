@@ -132,10 +132,3 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
-
-/* «Нові, коли є розмови» (19.10): налаштування лідгена поруч із роллю. */
-.team-who { flex: 1 1 220px; min-width: 0; }
-.team-policy { display: grid; gap: 2px; flex: 0 1 auto; }
-.team-row .team-policy > span:first-child { font-size: 11px; }
-.team-row .team-policy-row { display: flex; gap: 6px; align-items: center; color: inherit; font-size: inherit; }
-.team-policy input[type="number"] { width: 64px; }

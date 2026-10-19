@@ -159,32 +159,3 @@
 .work-dialog.is-empty { background: var(--surface-sunk); border-color: transparent; box-shadow: none; }
 .triage-card { padding-top: var(--sp-3); }
 .triage-card::before { grid-column: 1 / -1; }
-
-/* ── Вкладки екрана (19.10): дві частини одного екрана — WorkSpace «Кампанії / Нові
-   контакти», «Вхідні» «До роботи / Усі розмови». Підкреслення — дія, не ще одна картка. */
-.view-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-1);
-  margin-bottom: var(--sp-4);
-  border-bottom: 1px solid var(--line);
-}
-.view-tabs button,
-.view-tabs button:hover {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 38px;
-  margin-bottom: -1px;
-  padding: var(--sp-2) var(--sp-3);
-  border: 0;
-  border-bottom: 2px solid transparent;
-  border-radius: 0;
-  background: transparent;
-  color: var(--muted);
-  font-weight: 600;
-}
-.view-tabs button:hover { color: var(--ink); }
-.view-tabs button.is-active { color: var(--ink); border-bottom-color: var(--teal); }
-.view-tabs button b { font-variant-numeric: tabular-nums; color: var(--muted); font-weight: 600; }
-.view-tabs button.is-active b { color: var(--teal); }

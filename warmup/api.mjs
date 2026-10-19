@@ -1093,9 +1093,6 @@ async function homeView(campaigns, writer) {
 
   const unread = threads.filter((thread) => thread.unread && !retiredIds.has(thread.accountId))
     .sort((left, right) => String(right.lastMessage?.sentAt || "").localeCompare(String(left.lastMessage?.sentAt || "")));
-  // Коли агент востаннє читав вхідні робочих акаунтів — для «Потребує уваги» на Головній (19.10).
-  const inboxSyncedAt = threads.filter((thread) => !retiredIds.has(thread.accountId))
-    .map((thread) => thread.lastSyncedAt).filter(Boolean).sort().pop() || null;
 
   return {
     date: todayIso,
@@ -1124,7 +1121,6 @@ async function homeView(campaigns, writer) {
       }))
     },
     accounts,
-    inbox: { lastSyncedAt: inboxSyncedAt },
     campaigns: campaigns.map((campaign) => ({
       id: campaign.id, name: campaign.name, state: campaign.state,
       folderName: campaign.folderName || null, accounts: campaign.accountIds.length
