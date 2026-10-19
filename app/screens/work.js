@@ -186,7 +186,7 @@ function plannedHtml(data) {
     <header><h3>Заплановані на сьогодні <b>${planned.total}</b></h3>
       <p>Кому ми написали в LinkedIn, а людина мовчить: наступного дня — написати знову. Хто не дочекався — переходить на наступний день. Після ${planned.limit} повідомлень поспіль без відповіді людина зі списку зникає.</p></header>
     ${planned.error ? `<p class="esp-notice is-bad">${escapeHtml(planned.error)}</p>` : ""}
-    ${planned.items.length ? `<ol class="work-plan-list">${rows}</ol>${planned.total > planned.items.length ? `<p class="work-muted">Показано ${planned.items.length} з ${planned.total}.</p>` : ""}` : planned.error ? "" : '<p class="work-muted">На сьогодні нікому не треба писати повторно.</p>'}
+    ${planned.items.length ? `<ol class="work-plan-list scroll-list">${rows}</ol>${planned.total > planned.items.length ? `<p class="work-muted">Показано ${planned.items.length} з ${planned.total}.</p>` : ""}` : planned.error ? "" : '<p class="work-muted">На сьогодні нікому не треба писати повторно.</p>'}
   </section>`;
 }
 
@@ -196,7 +196,7 @@ function listHtml(data) {
   const list = shown(contacts);
   return `<div class="work-list">
     <div class="work-filters">${FILTERS.map(([key, label]) => `<button type="button" class="${work.filter === key ? "is-on" : ""} ${key === "fresh" && count.fresh ? "has-fresh" : ""}" data-work-filter="${key}">${label} <b>${count[key]}</b></button>`).join("")}</div>
-    ${list.length ? list.map((item) => rowHtml(item, data)).join("") : `<p class="work-empty">${contacts.length ? "Тут нікого." : `${escapeHtml(dayWord(work.date))} нікому не писали${data.user === "all" ? "" : " з цього логіна"}.`}</p>`}
+    ${list.length ? `<div class="work-rows scroll-list">${list.map((item) => rowHtml(item, data)).join("")}</div>` : `<p class="work-empty">${contacts.length ? "Тут нікого." : `${escapeHtml(dayWord(work.date))} нікому не писали${data.user === "all" ? "" : " з цього логіна"}.`}</p>`}
   </div>`;
 }
 

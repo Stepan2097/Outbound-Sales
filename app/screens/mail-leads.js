@@ -292,7 +292,7 @@ function listHtml() {
   const empty = !page ? '<div class="empty-state">Читаємо список...</div>'
     : !rows.length ? `<div class="empty-state">${leadsState.q ? "Нікого не знайдено." : crmFolder ? "У цій папці CRM немає людей з поштою." : list ? "У списку нікого немає — «Додати лідів»." : meta?.lists.length ? "Лідів ще немає." : "Виберіть папку CRM ліворуч — або створіть список і вставте лідів."}</div>` : "";
   const table = rows.length ? `
-    <div class="table-wrap"><table class="leads-table">
+    <div class="table-wrap leads-table-wrap"><table class="leads-table">
       <thead><tr><th></th><th>Лід (${page.total})</th><th>Адреса</th><th>Провайдер</th><th>Країна</th><th>Джерело</th><th>Кампанії</th><th>Додано</th></tr></thead>
       <tbody>${rows.map((row) => `
         <tr class="${leadsState.selected.has(row.id) ? "is-picked" : ""}">

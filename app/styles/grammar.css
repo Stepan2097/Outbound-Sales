@@ -188,3 +188,36 @@
 .view-tabs button.is-active { color: var(--ink); border-bottom-color: var(--teal); }
 .view-tabs button b { font-variant-numeric: tabular-nums; color: var(--muted); font-weight: 600; }
 .view-tabs button.is-active b { color: var(--teal); }
+
+/* ── Назва сторінки (Марко 19.10: «на кожній сторінці зверху дублюється назва вкладки…
+   назву сторінки зверху можна забрати, це звільнить місце»). Де ти — видно з меню й
+   вкладок. Верхня смуга лишається лише для рядка стану дії. На телефоні меню — рядок
+   іконок унизу без папок, тож коротка назва там лишається. */
+@media (min-width: 721px) {
+  .topbar h1 { display: none; }
+  .topbar:has(#workspaceMeta[hidden]) { display: none; }
+  .topbar { min-height: 0; }
+}
+
+/* ── Довгі списки (Марко 19.10: «деякі списки дуже розтягуються донизу, замість
+   робочого скролу»): список має свою висоту й прокручується всередині блоку,
+   сторінка не тягнеться. Шапка таблиці лишається видно під час прокрутки. */
+.scroll-list,
+.work-plan-list,
+.work-rows,
+.warmup-list-panel .table-wrap,
+.leads-table-wrap,
+.unibox-list,
+.pitch-list {
+  max-height: min(560px, 62vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.warmup-list-panel .table-wrap thead th,
+.leads-table-wrap thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
+}
+.work-rows { display: grid; gap: 8px; padding-right: 2px; }
