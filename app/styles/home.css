@@ -481,3 +481,40 @@
 .home-contacts .ws-pane {
   margin-top: 12px;
 }
+
+/* ── Головна 19.10 (таск ca978070): смуга дня (Г2) + «Почати з відповідей» (Г1), увага, нові контакти ── */
+.home-page { display: grid; gap: var(--sp-4); margin-bottom: var(--sp-4); }
+.home-plan { display: grid; gap: var(--sp-3); }
+.home-plan-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: var(--sp-3); }
+.home-plan-head h2 { margin: 0; font-size: 18px; }
+.home-plan-head h2 b { color: var(--teal); font-variant-numeric: tabular-nums; margin-left: 4px; }
+.home-plan-head p { margin: 2px 0 0; color: var(--muted); font-size: 12.5px; }
+.home-plan-done { color: var(--state-run); font-weight: 600; }
+.home-bar { display: flex; gap: 3px; height: 14px; border-radius: 99px; overflow: hidden; background: var(--surface-strong); }
+.home-bar.is-empty { opacity: .5; }
+.home-bar-part,
+.home-bar-part:hover { flex-basis: 0; min-width: 8px; min-height: 0; height: 100%; padding: 0; border: 0; border-radius: 0; background: var(--part); cursor: pointer; }
+.home-bar-part:hover { filter: brightness(1.15); }
+.home-legend { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-4); }
+.home-legend-item,
+.home-legend-item:hover { display: inline-flex; align-items: center; gap: 6px; min-height: 0; padding: 2px 0; border: 0; background: transparent; color: var(--muted); font-size: 13px; }
+.home-legend-item::before { content: ""; width: 10px; height: 10px; border-radius: 3px; background: var(--part); }
+.home-legend-item b { color: var(--ink); font-size: 15px; font-variant-numeric: tabular-nums; }
+.home-legend-item:hover { color: var(--ink); }
+.home-legend-item.is-zero { opacity: .55; }
+
+.home-attention { display: grid; gap: var(--sp-3); padding: var(--sp-4); border-left: 3px solid var(--state-warn); }
+.home-attention h2 { margin: 0; font-size: 15px; }
+.home-attention-list { display: grid; gap: var(--sp-2); }
+.home-attention-item,
+.home-attention-item:hover {
+  display: flex; align-items: flex-start; gap: var(--sp-2); margin: 0; min-height: 0;
+  padding: var(--sp-2) var(--sp-3); border: 0; border-radius: 8px; text-align: left; white-space: normal;
+  background: color-mix(in srgb, var(--state-warn) 10%, transparent); color: var(--ink); font-size: 13.5px;
+}
+button.home-attention-item:hover { background: color-mix(in srgb, var(--state-warn) 18%, transparent); }
+.home-attention-item svg, .home-attention-item i { flex: none; width: 16px; height: 16px; color: var(--state-warn); margin-top: 1px; }
+
+.home-contacts-head { display: grid; gap: 2px; margin-top: var(--sp-2); }
+.home-contacts-head .eyebrow { font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.home-contacts-head p { margin: 0; color: var(--muted); font-size: 13px; }
