@@ -60,12 +60,20 @@ export async function resolveProfiles(page, items, {
         await sleep(rand(1200, 2500) * pace);
         await page.goto(`${ORIGIN}/in/${encodeURIComponent(member)}/`, { waitUntil: 'domcontentloaded', timeout: 45_000 });
         await sleep(rand(2500, 4000) * pace);
+        await page.waitForSelector?.('main h1', { timeout: 8000 }).catch(() => {});
         await guard();
-        const seen = await page.evaluate(() => ({
-          url: location.href,
-          name: document.querySelector('main h1, h1')?.innerText?.trim() || null,
-          headline: document.querySelector('main .text-body-medium')?.innerText?.trim() || null
-        })).catch(() => ({ url: page.url(), name: null, headline: null }));
+        // The heading is sometimes not painted yet, or not an h1 in this build;
+        // the tab title is «Name | LinkedIn» from the first byte (19.10: the
+        // first run read no names at all from the heading).
+        const seen = await page.evaluate(() => {
+          const heading = document.querySelector('main h1, h1')?.innerText?.trim();
+          const title = document.title.replace(/^\(\d+\)\s*/, '').replace(/\s*[|(].*$/, '').trim();
+          return {
+            url: location.href,
+            name: heading || (title && !/^linkedin$/i.test(title) ? title : null),
+            headline: document.querySelector('main .text-body-medium')?.innerText?.trim() || null
+          };
+        }).catch(() => ({ url: page.url(), name: null, headline: null }));
         const vanity = vanitySlug(seen.url);
         answer = vanity
           ? { ...answer, memberId: member, vanity, name: seen.name, headline: seen.headline }
