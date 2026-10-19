@@ -44,7 +44,10 @@ test("every number of the plan leads where the work is", () => {
   for (const key of ["replies", "overdue", "today", "first"]) assert.match(home, new RegExp(`\\["${key}", `));
   assert.match(home, /openTodayBlock\(go, \{ scope: scope\(\) \}\)/);
   assert.match(home, /data-home-go="contacts"/);
-  assert.match(home, /if \(go === "contacts"\) return void showNewContacts\(\)/);
+  // Власник 19.10: нові контакти з листами — на Головній під пультом; плитка веде туди.
+  assert.match(home, /if \(go === "contacts"\) return void document\.getElementById\("homeContacts"\)/);
+  assert.match(home, /openNewContactsOnHome\(\)/);
+  assert.match(html, /id="homeContacts"/);
 });
 
 test("the funnel and the campaigns are the same numbers as «Прогрів» and «Порівняння кампаній»", () => {

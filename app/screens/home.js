@@ -12,7 +12,7 @@
 
 import { api, authState, escapeAttr, escapeHtml, onScreen, refreshIcons, uaPlural } from "../core.js";
 import { openAllConversations, openTodayBlock } from "./today.js";
-import { showNewContacts } from "./workspace.js";
+import { openNewContactsOnHome, showNewContacts } from "./workspace.js";
 import { homeFunnelHtml } from "./warmup-funnel.js";
 import { warmupApi } from "./warmup-accounts.js";
 
@@ -36,6 +36,8 @@ const scope = () => (isAdmin() ? "all" : "mine");
 async function openHome() {
   home.loading = true;
   render();
+  // Під пультом — нові контакти з листами (власник 19.10).
+  void openNewContactsOnHome();
   const errors = [];
   const read = (promise, what) => promise.catch((error) => { if (error?.name !== "AbortError") errors.push(`${what}: ${error.message || "не прочиталось"}`); return null; });
   const [today, gate, warmup, report] = await Promise.all([
@@ -166,7 +168,7 @@ document.getElementById("homeRoot")?.addEventListener("click", (event) => {
   const go = event.target.closest("[data-home-go]")?.dataset.homeGo;
   if (!go) return;
   if (PLAN.some(([key]) => key === go)) return void openTodayBlock(go, { scope: scope() });
-  if (go === "contacts") return void showNewContacts();
+  if (go === "contacts") return void document.getElementById("homeContacts")?.scrollIntoView({ behavior: "smooth", block: "start" });
   if (go === "campaigns") return void showNewContacts("campaigns");
   if (go === "inbox-all") return void openAllConversations();
   if (go === "warmup") document.querySelector('.nav-item[data-view="warmup"]')?.click();

@@ -472,3 +472,12 @@
   .home-funnel { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .home-step + .home-step::before { content: none; }
 }
+
+/* Нові контакти під пультом (власник 19.10): той самий конвеєр, що у WorkSpace. */
+.home-contacts {
+  margin-top: 18px;
+}
+
+.home-contacts .ws-pane {
+  margin-top: 12px;
+}

@@ -20,6 +20,33 @@ const TAB_KEY = "outbound.workspace.tab";
 const WS_TABS = ["campaigns", "contacts"];
 let wsTab = readTab();
 let gate = null;
+// «Нові контакти» — один блок на дві сторінки: у WorkSpace і на Головній під
+// пультом (власник 19.10). Переноситься туди, де відкритий, зі своїми слухачами.
+let paneHome = null;
+let onHome = false;
+
+function contactsPane() {
+  return document.querySelector('[data-ws-pane="contacts"]');
+}
+
+function placeContactsPane(host = null) {
+  const pane = contactsPane();
+  if (!pane) return null;
+  paneHome ||= { parent: pane.parentElement, next: pane.nextSibling };
+  if (host) host.appendChild(pane);
+  else if (pane.parentElement !== paneHome.parent) paneHome.parent.insertBefore(pane, paneHome.next);
+  onHome = Boolean(host);
+  return pane;
+}
+
+/** Головна: «Нові контакти» під пультом — конвеєр з листами, як у WorkSpace. */
+export async function openNewContactsOnHome() {
+  const host = document.getElementById("homeContacts");
+  const pane = placeContactsPane(host);
+  if (!pane) return;
+  pane.hidden = false;
+  await openNewContacts();
+}
 
 function readTab() {
   try { return WS_TABS.includes(window.localStorage.getItem(TAB_KEY)) ? window.localStorage.getItem(TAB_KEY) : "campaigns"; } catch { return "campaigns"; }
@@ -28,6 +55,7 @@ function readTab() {
 onScreen("workspace", { open: () => openTab() });
 
 function openTab() {
+  placeContactsPane(null);
   for (const button of document.querySelectorAll("[data-ws-tab]")) {
     const on = button.dataset.wsTab === wsTab;
     button.classList.toggle("is-active", on);
@@ -78,7 +106,7 @@ function allowanceHtml(data) {
 // Взяли людину з конвеєра — ворота перечитуються: на нормі конвеєр поступається розмовам.
 // Пауза — бо журнал роботи пишеться вже після відповіді сервера.
 document.addEventListener("triage:outreach", () => {
-  if (wsTab !== "contacts") return;
+  if (wsTab !== "contacts" && !onHome) return;
   setTimeout(() => void openNewContacts({ recheck: true }), 1500);
 });
 
