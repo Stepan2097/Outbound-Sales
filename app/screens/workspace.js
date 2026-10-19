@@ -24,6 +24,7 @@ let gate = null;
 // пультом (власник 19.10). Переноситься туди, де відкритий, зі своїми слухачами.
 let paneHome = null;
 let onHome = false;
+let homeGate = false;
 
 function contactsPane() {
   return document.querySelector('[data-ws-pane="contacts"]');
@@ -39,13 +40,16 @@ function placeContactsPane(host = null) {
   return pane;
 }
 
-/** Головна: «Нові контакти» під пультом — конвеєр з листами, як у WorkSpace. */
-export async function openNewContactsOnHome() {
+/**
+ * Головна: «Нові контакти» — конвеєр з листами, як у WorkSpace. `gate: false` —
+ * без умови «спершу розмови» (власник 19.10: Головна як до 16.10).
+ */
+export async function openNewContactsOnHome({ gate: useGate = true } = {}) {
   const host = document.getElementById("homeContacts");
   const pane = placeContactsPane(host);
   if (!pane) return;
   pane.hidden = false;
-  await openNewContacts();
+  await openNewContacts({ gate: useGate });
 }
 
 function readTab() {
@@ -68,12 +72,13 @@ function openTab() {
 }
 
 /** «Нові контакти»: конвеєр — або рядок, що спершу розмови, і шлях до них. */
-async function openNewContacts({ recheck = false } = {}) {
+async function openNewContacts({ recheck = false, gate: useGate = !onHome || homeGate } = {}) {
   const slot = document.getElementById("triageGate");
   const conveyor = document.getElementById("triageRoot");
   const wasAllowed = !conveyor?.hidden;
+  if (onHome) homeGate = useGate;
   try {
-    gate = await api("/api/today/gate");
+    gate = useGate ? await api("/api/today/gate") : null;
   } catch {
     gate = null; // Не прочитали — не блокуємо: правило лише про порядок роботи.
   }
