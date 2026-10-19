@@ -510,7 +510,13 @@ export async function todayItem({ pingId, viewer, now = new Date() }) {
   const contact = contacts.get(contactId) || null;
   const item = itemOf(task, { contact, state, today: dayIn(now), now, emails, accounts: gathered?.accounts });
   let messages = [];
-  if (item.channel === "thread" || item.channel === "moved") messages = (await readThread({ accountId: item.accountId, threadKey: item.threadKey }))?.messages || [];
+  let participant = null;
+  if (item.channel === "thread" || item.channel === "moved") {
+    const read = await readThread({ accountId: item.accountId, threadKey: item.threadKey });
+    messages = read?.messages || [];
+    // Хто це в LinkedIn — для шапки, однакової з «Усіма розмовами» (19.10, В1).
+    participant = read?.thread?.participant || null;
+  }
   let firstDraft = null;
   if (item.channel === "first" && item.outreachId) firstDraft = (await firstMarks([item.outreachId])).drafts.get(item.outreachId) || null;
   const key = taskMarks(task).key;
@@ -518,6 +524,7 @@ export async function todayItem({ pingId, viewer, now = new Date() }) {
     item,
     contact,
     messages,
+    participant,
     pending: (state?.pending || []).map(({ id, state: status, body, queuedAt }) => ({ id, state: status, body, queuedAt })),
     acceptedAt: state?.accepted?.acceptedAt || null,
     draft: drafts.get(`${pingId}|${key}`) || (firstDraft?.text ? { text: firstDraft.text, model: firstDraft.model, kind: "first" } : null)

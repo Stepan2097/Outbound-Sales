@@ -29,7 +29,8 @@ test("адмін у «Мої» з порожнім списком бачить �
 
 test("робоче місце називає кампанію ліда", () => {
   assert.match(API, /campaign: campaignOf\(state\?\.campaignId\)/);
-  assert.match(TODAY, /item\.campaign \? `<b>\$\{escapeHtml\(item\.campaign\.name/);
+  // 19.10 (В1): кампанія — у шапці розмови, поруч з акаунтом.
+  assert.match(TODAY, /item\.campaign \? `<span class="warmup-subtle">\$\{escapeHtml\(item\.campaign\.name/);
 });
 
 test("вибір дати переносить лише повну дату від сьогодні; Головна пише чернетки про продукт «Смислів»", () => {

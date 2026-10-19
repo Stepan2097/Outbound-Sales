@@ -16,7 +16,8 @@
 // закриває цей і ставить наступний (через 3 робочі дні).
 
 import { api, escapeAttr, escapeHtml, onScreen, refreshIcons } from "../core.js";
-import { connectInboxWork, renderWarmupInbox, showWarmupInboxThread, warmupGoesOutText } from "./inbox.js";
+import { connectInboxWork, renderWarmupInbox, showWarmupInboxThread, warmupGoesOutText, warmupMessageHtml, warmupProfileUrl } from "./inbox.js";
+import { showContactCard } from "./contacts.js";
 
 onScreen("inbox", { open: () => applyInboxMode() });
 
@@ -42,6 +43,11 @@ function applyInboxMode() {
     button.setAttribute("aria-selected", String(on));
   }
   for (const pane of document.querySelectorAll("[data-inbox-pane]")) pane.hidden = pane.dataset.inboxPane !== inboxMode;
+  // Один каркас — різне призначення (Марко 19.10, В1): рядком під вкладками.
+  const purpose = document.getElementById("inboxPurpose");
+  if (purpose) purpose.textContent = inboxMode === "work"
+    ? "Кому написати сьогодні — з готовою чернеткою AI, статусом у CRM і перенесенням."
+    : "Усі переписки акаунтів — знайти, перечитати, відповісти вручну.";
   // Пінги потрібні й «Усім розмовам»: розмова з пінгом має кнопку «До роботи».
   void openToday({ keepSelection: true });
 }
@@ -114,6 +120,8 @@ const today = {
   scope: readScope(),
   // Чіп блоку в шапці (аудит 16.10): показати лише «Прострочені», «На сьогодні»… — порожньо = усі.
   blockFilter: "", statusSaving: false,
+  // Акаунт і пошук — так само, як в «Усіх розмовах» (19.10, В1). Порожньо — усі акаунти.
+  account: "", search: "",
   selected: "", detail: null, detailError: "", detailLoading: false,
   draftLoading: false, draftNote: "", sending: false, notice: "", tone: "", text: "", textFor: "",
   // Етап 2/6: відкриті діалоги з 01.08 (адмін).
@@ -256,6 +264,20 @@ async function send() {
   }
 }
 
+/** «Скасувати» повідомлення, що ще чекає відправки (той самий маршрут, що в «Усіх розмовах»). */
+async function cancelReply(replyId) {
+  const item = today.detail?.item;
+  if (!item || !replyId) return;
+  try {
+    await api("/api/warmup/inbox/reply/cancel", { method: "POST", body: JSON.stringify({ accountId: item.accountId, replyId }) });
+    say("Скасовано — повідомлення не піде.");
+    await loadDetail(item.pingId);
+  } catch (error) {
+    if (error?.name !== "AbortError") say(error.message || "Не вдалося скасувати.", "is-error");
+    render();
+  }
+}
+
 async function movePing(when, call = false) {
   const item = today.detail?.item;
   if (!item) return;
@@ -363,20 +385,42 @@ function mixedAssignees() {
   return new Set(allItems().map((item) => item.assignee).filter(Boolean)).size > 1;
 }
 
+/** Рядок черги — той самий, що в «Усіх розмовах» (warmup-thread): ім'я, дата, посада, прев'ю. */
 function queueItem(item) {
-  const preview = item.preview?.body ? `${item.preview.direction === "in" ? "" : "Ви: "}${item.preview.body}` : item.reasonTitle;
-  return `<button type="button" class="today-item${item.pingId === today.selected ? " active" : ""}" data-today="select" data-id="${escapeAttr(item.pingId)}">
-    <span class="today-item-top"><strong>${escapeHtml(item.name)}</strong><span class="today-due">${escapeHtml(dayLabel(item.dueDay, today.data.today))}</span></span>
-    <span class="today-item-sub">${escapeHtml([item.position, item.company].filter(Boolean).join(" · "))}</span>
-    <span class="today-item-preview">${escapeHtml(preview)}</span>
-    ${today.scope === "all" && item.assignee && mixedAssignees() ? `<span class="today-item-who">${escapeHtml(shortName(item.assignee))}</span>` : ""}
+  const mine = item.preview?.body && item.preview.direction !== "in";
+  const preview = item.preview?.body || item.reasonTitle;
+  const active = item.pingId === today.selected;
+  return `<button type="button" class="warmup-thread today-item${item.block === "replies" ? " is-unread" : ""}${active ? " is-open active" : ""}" data-today="select" data-id="${escapeAttr(item.pingId)}"${active ? ' aria-current="true"' : ""}>
+    <span class="warmup-thread-mark" aria-hidden="true"></span>
+    <span class="warmup-thread-main">
+      <span class="warmup-thread-top"><strong>${escapeHtml(item.name)}</strong><span class="today-due">${escapeHtml(dayLabel(item.dueDay, today.data.today))}</span></span>
+      ${item.position || item.company ? `<span class="warmup-thread-headline">${escapeHtml([item.position, item.company].filter(Boolean).join(" · "))}</span>` : ""}
+      <span class="warmup-thread-preview">${mine ? '<span class="warmup-thread-from">Ви:</span> ' : ""}${escapeHtml(String(preview).slice(0, 150))}</span>
+      ${!today.account && item.accountName ? `<span class="warmup-thread-account">${escapeHtml(item.accountName)}${today.scope === "all" && item.assignee && mixedAssignees() ? ` · ${escapeHtml(shortName(item.assignee))}` : ""}</span>` : ""}
+    </span>
   </button>`;
+}
+
+/** Акаунт і пошук (19.10, В1): що з черги лишається видно. */
+function visible(items) {
+  const terms = today.search.toLowerCase().split(/\s+/).filter(Boolean);
+  return items.filter((item) => (!today.account || item.accountId === today.account)
+    && terms.every((term) => [item.name, item.position, item.company, item.preview?.body, item.accountName].join(" ").toLowerCase().includes(term)));
+}
+
+/** Кнопки акаунтів — як в «Усіх розмовах»: «Усі акаунти» і кожен акаунт з кількістю пінгів. */
+function accountChipsHtml() {
+  const counts = new Map();
+  for (const item of allItems()) if (item.accountId) counts.set(item.accountId, { name: item.accountName || "акаунт", count: (counts.get(item.accountId)?.count || 0) + 1 });
+  if (counts.size < 2 && !today.account) return "";
+  const chip = (id, name, count) => `<button class="inbox-chip${today.account === id ? " is-active" : ""}" type="button" data-today="account" data-account="${escapeAttr(id)}" aria-pressed="${today.account === id}"><span class="inbox-chip-name">${escapeHtml(name)}</span><span class="inbox-chip-count">${count}</span></button>`;
+  return `<div class="inbox-accounts today-accounts">${chip("", "Усі акаунти", allItems().length)}${[...counts.entries()].sort((a, b) => b[1].count - a[1].count).map(([id, entry]) => chip(id, entry.name, entry.count)).join("")}</div>`;
 }
 
 function queueHtml() {
   const data = today.data;
   const blocks = BLOCKS.map(([key, title, hint]) => {
-    const items = data.blocks[key] || [];
+    const items = visible(data.blocks[key] || []);
     if (!items.length || (today.blockFilter && today.blockFilter !== key)) return "";
     return `<section class="today-block today-block-${key}">
       <h3 title="${escapeAttr(hint)}">${escapeHtml(title)}${data.blocks && Object.values(data.blocks).filter((list) => list.length).length > 1 ? "" : ` <span class="today-count">${items.length}</span>`}</h3>
@@ -389,6 +433,7 @@ function queueHtml() {
       </details>`
     : "";
   if (blocks || later) return `${blocks}${later}`;
+  if ((today.search.trim() || today.account) && allItems().length) return `<p class="today-empty">За цим пошуком чи акаунтом у черзі нікого. <button type="button" data-today="clear-filter">Показати всіх</button></p>`;
   // Адмін у «Мої» з порожнім списком — пінги команди лежать в «Усі» (аудит 16.10, P2).
   if (data.canSeeAll && today.scope === "mine") {
     return `<p class="today-empty">Ваших пінгів сьогодні немає. Пінги лідгенів — у «Усі». <button type="button" data-today="scope" data-scope="all">Показати пінги команди</button></p>`;
@@ -396,12 +441,22 @@ function queueHtml() {
   return `<p class="today-empty">Сьогодні все розібрано.</p>`;
 }
 
-function messagesHtml(messages) {
+/** Уся розмова тими самими бульбашками, що в «Усіх розмовах» (19.10, В1). */
+function messagesHtml(messages, name, accountName) {
   if (!messages.length) return "";
-  return `<ol class="today-thread">${messages.slice(-15).map((message) => `
-    <li class="today-msg ${message.direction === "in" ? "is-them" : "is-us"}">
-      <span class="today-msg-body">${escapeHtml(message.body)}</span>
-      <span class="today-msg-at">${escapeHtml(message.sentAt ? new Date(message.sentAt).toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "")}</span>
+  return `<ol class="warmup-messages today-thread">${messages.map((message) => warmupMessageHtml(message, name, accountName || "Ми")).join("")}</ol>`;
+}
+
+/** Що стоїть у черзі на відправку — як в «Усіх розмовах», зі «Скасувати». */
+function pendingHtml(detail) {
+  const waiting = (detail.pending || []).filter((entry) => entry.state === "waiting");
+  if (!waiting.length) return "";
+  const who = detail.item.accountName || "акаунт";
+  return `<ol class="warmup-messages warmup-outbox">${waiting.map((entry) => `<li class="warmup-message is-out is-reply is-reply-waiting">
+      <div class="warmup-message-head"><strong>${escapeHtml(who)}</strong><span class="warmup-reply-state">чекає відправки</span></div>
+      <div class="warmup-message-body">${escapeHtml(entry.body || "")}</div>
+      <p class="warmup-reply-note">Піде з акаунта ${escapeHtml(who)} у найближчу сесію. До того її можна скасувати.</p>
+      <div class="warmup-reply-actions"><button class="text-button" type="button" data-today="cancel-reply" data-reply="${escapeAttr(entry.id)}"><i data-lucide="x"></i><span>Скасувати</span></button></div>
     </li>`).join("")}</ol>`;
 }
 
@@ -413,25 +468,26 @@ function workHtml() {
   const item = detail.item;
   const kind = item.channel === "first" ? "first" : detail.messages.at(-1)?.direction === "in" ? "reply" : "follow-up";
   const canWrite = item.channel === "thread" || item.channel === "first";
-  const waiting = (detail.pending || []).filter((entry) => entry.state === "waiting");
   return `
-    <header class="today-work-head">
-      <div>
-        <h3>${escapeHtml(item.name)}</h3>
-        <p>${escapeHtml([item.position, item.company].filter(Boolean).join(" · "))}</p>
+    <div class="warmup-thread-head today-work-head">
+      <div class="warmup-thread-head-who">
+        <strong>${escapeHtml(item.name)}</strong>
+        ${item.position || item.company ? `<span class="warmup-subtle">${escapeHtml([item.position, item.company].filter(Boolean).join(" · "))}</span>` : ""}
+        ${item.contactId ? `<button class="text-button" type="button" data-today="contact" title="Картка людини в «Контактах»"><i data-lucide="contact"></i><span>Відкрити в CRM</span></button>` : ""}
+        ${warmupProfileUrl(detail.participant?.slug) ? `<a href="${escapeAttr(warmupProfileUrl(detail.participant.slug))}" target="_blank" rel="noreferrer noopener"><i data-lucide="external-link"></i><span>їхній LinkedIn</span></a>` : ""}
+        ${item.channel === "thread" && item.threadKey ? `<button type="button" class="text-button today-to-thread" data-today="thread" title="Ця розмова в «Усіх розмовах»: ручна відповідь, уся історія"><i data-lucide="messages-square"></i><span>Уся розмова</span></button>` : ""}
       </div>
-      <span class="pill today-reason today-reason-${escapeAttr(item.block)}">${escapeHtml(item.reasonTitle)} · ${escapeHtml(dayLabel(item.dueDay, today.data?.today))}</span>
-    </header>
-    <p class="today-work-meta">
-      ${item.campaign ? `<b>${escapeHtml(item.campaign.name || "без назви")}</b> · ` : ""}${item.accountName ? `<span title="Акаунт LinkedIn, з якого йде розмова">${escapeHtml(item.accountName)}</span>` : "LinkedIn"}
-      ${item.crmUrl ? ` · <a href="${escapeAttr(item.crmUrl)}" target="_blank" rel="noopener noreferrer">Відкрити в CRM</a>` : ""}
-      ${item.channel === "thread" && item.threadKey ? ` · <button type="button" class="text-button today-to-thread" data-today="thread" title="Ця розмова в «Усіх розмовах»: акаунт, ручна відповідь, скасування">Уся розмова</button>` : ""}
-      ${item.assignee && today.scope === "all" && mixedAssignees() ? ` · ${escapeHtml(shortName(item.assignee))}` : ""}
-    </p>
+      <div class="warmup-thread-head-meta">
+        <span class="warmup-identity" title="Акаунт LinkedIn, з якого йде розмова"><i data-lucide="badge-check"></i><span>${item.accountName ? `через ${escapeHtml(item.accountName)}` : "LinkedIn"}</span></span>
+        ${item.campaign ? `<span class="warmup-subtle">${escapeHtml(item.campaign.name || "кампанія без назви")}</span>` : ""}
+        ${item.assignee && today.scope === "all" && mixedAssignees() ? `<span class="warmup-subtle">${escapeHtml(shortName(item.assignee))}</span>` : ""}
+        <span class="pill today-reason today-reason-${escapeAttr(item.block)}">${escapeHtml(item.reasonTitle)} · ${escapeHtml(dayLabel(item.dueDay, today.data?.today))}</span>
+      </div>
+    </div>
     ${item.reassigned ? `<p class="today-note today-note-moved">Перепризначено з ${escapeHtml(item.reassigned.from)} на ${escapeHtml(item.reassigned.to)} (${escapeHtml(new Date(item.reassigned.at).toLocaleDateString("uk-UA"))}): старий акаунт заблоковано${item.channel === "moved" ? `; запит у друзі піде з ${escapeHtml(item.reassigned.to)}, і коли прийме — тут буде «Перше повідомлення»` : ""}.</p>` : ""}
     ${item.channel === "first" ? `<p class="today-note">Прийняв запит${detail.acceptedAt ? ` ${escapeHtml(new Date(detail.acceptedAt).toLocaleDateString("uk-UA"))}` : ""} — розмови ще немає, це перше повідомлення.</p>` : ""}
-    ${messagesHtml(detail.messages)}
-    ${waiting.length ? `<p class="today-note">У черзі · ще не надіслано: ${waiting.map((entry) => `«${escapeHtml(entry.body.slice(0, 80))}${entry.body.length > 80 ? "…" : ""}»`).join(", ")}</p>` : ""}
+    ${messagesHtml(detail.messages, item.name, item.accountName)}
+    ${pendingHtml(detail)}
     ${today.notice ? `<p class="today-notice ${today.tone}" role="status">${escapeHtml(today.notice)}</p>` : ""}
     ${canWrite ? `
       <div class="today-draft">
@@ -536,6 +592,10 @@ function render() {
           <button type="button" class="icon-button" data-today="reload" title="Оновити" aria-label="Оновити"><i data-lucide="refresh-cw"></i></button>
         </div>
       </header>
+      ${today.importOpen || !allItems().length ? "" : `<div class="today-toolbar">
+        ${accountChipsHtml()}
+        <label class="warmup-inbox-search today-search"><i data-lucide="search"></i><input id="todaySearch" type="search" autocomplete="off" aria-label="Пошук у черзі" placeholder="Ім'я, компанія або слово з повідомлення" value="${escapeAttr(today.search)}" /></label>
+      </div>`}
       ${today.importOpen ? `${today.notice ? `<p class="today-notice ${today.tone}" role="status">${escapeHtml(today.notice)}</p>` : ""}<div class="today-import">${importHtml()}</div>` : allItems().length ? `<div class="today-layout">
         <aside class="today-queue">${queueHtml()}</aside>
         <article class="today-work">${workHtml()}</article>
@@ -548,6 +608,13 @@ function render() {
 /* ── дії ─────────────────────────────────────────────────────────────────── */
 
 document.addEventListener("input", (event) => {
+  if (event.target?.id === "todaySearch") {
+    today.search = event.target.value;
+    // Лише список: поле пошуку не перемальовується, курсор лишається на місці.
+    const queue = document.querySelector("#todayRoot .today-queue");
+    if (queue) { queue.innerHTML = queueHtml(); refreshIcons(queue); }
+    return;
+  }
   if (event.target?.id === "todayText") {
     today.text = event.target.value;
     const sendButton = document.querySelector('#todayRoot [data-today="send"]');
@@ -560,6 +627,20 @@ document.addEventListener("click", (event) => {
   if (!target) return;
   const act = target.dataset.today;
   if (act === "reload") return void openToday({ keepSelection: true });
+  if (act === "account") {
+    today.account = target.dataset.account || "";
+    return render();
+  }
+  if (act === "clear-filter") {
+    today.account = "";
+    today.search = "";
+    return render();
+  }
+  if (act === "contact") {
+    const contactId = today.detail?.item?.contactId;
+    return void (contactId && showContactCard(contactId));
+  }
+  if (act === "cancel-reply") return void cancelReply(target.dataset.reply);
   if (act === "block") {
     today.blockFilter = target.dataset.block || "";
     return render();

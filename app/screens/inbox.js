@@ -71,6 +71,17 @@ const WARMUP_SYNC_STALE_HOURS = 36;
 let inboxAccountFilter = null;
 
 /**
+ * «Усі акаунти» (Марко 19.10, В1: вибір акаунта — однаковий у «До роботи» й «Усіх
+ * розмовах»): усі розмови робочих акаунтів одним списком, непрочитані зверху.
+ */
+const INBOX_ALL_ACCOUNTS = "*";
+
+function inboxThreadsOf(accountId) {
+  const index = warmupInboxIndex();
+  return (accountId === INBOX_ALL_ACCOUNTS ? index.all : index.accounts.get(accountId)) || [];
+}
+
+/**
  * Що вписано в пошук над списком — рівно як вписано, з пробілами. Фільтр живе в
  * стані, а не в полі: список перемальовується щоразу, коли приходить відповідь чи
  * прочитано розмову. Обрізати пробіли тут не можна: поле звіряється з цим
@@ -112,9 +123,12 @@ function warmupInboxIndex() {
     Number(warmupInboxRetired(left)) - Number(warmupInboxRetired(right))
     || sentAt(accounts.get(right)[0]) - sentAt(accounts.get(left)[0])
     || warmupInboxAccountName(left).localeCompare(warmupInboxAccountName(right), "uk"));
+  // «Усі акаунти»: робочі акаунти разом, непрочитані зверху, далі найсвіжіші.
+  const all = inbox.threads.filter((thread) => thread.accountId && !warmupInboxRetired(thread.accountId))
+    .sort((left, right) => Number(Boolean(right.unread)) - Number(Boolean(left.unread)) || sentAt(right) - sentAt(left));
   inboxIndexedThreads = inbox.threads;
   inboxIndexedAccounts = inbox.accounts;
-  inboxThreadIndex = { accounts, searchText, order };
+  inboxThreadIndex = { accounts, searchText, order, all };
   return inboxThreadIndex;
 }
 
@@ -226,7 +240,7 @@ function warmupPreviewHtml(body, limit = 150) {
  * not plainly a slug or an http(s) URL gets no link at all — a person's own
  * profile is not worth inventing a destination for.
  */
-function warmupProfileUrl(slug) {
+export function warmupProfileUrl(slug) {
   const value = String(slug || "").trim();
   if (!value) return null;
   if (/^https?:\/\//i.test(value)) return value;
@@ -406,13 +420,13 @@ function warmupInboxEmptyHtml(sync) {
  */
 function warmupInboxRows() {
   const terms = inboxSearchTerms();
-  const rows = (warmupInboxIndex().accounts.get(warmupInboxAccountId()) || []).filter(repliedTest[inboxReplied] || repliedTest.all);
+  const rows = inboxThreadsOf(warmupInboxAccountId()).filter(repliedTest[inboxReplied] || repliedTest.all);
   return terms.length ? rows.filter((thread) => warmupInboxMatches(thread, terms)) : rows;
 }
 
 /** The three tabs over the list, each with how many of this account's conversations it holds. */
 function warmupInboxRepliedHtml() {
-  const all = warmupInboxIndex().accounts.get(warmupInboxAccountId()) || [];
+  const all = inboxThreadsOf(warmupInboxAccountId());
   return `<div class="warmup-inbox-replied" role="tablist">${INBOX_REPLIED.map(([key, label]) => `<button type="button" role="tab" class="${inboxReplied === key ? "is-active" : ""}" aria-selected="${inboxReplied === key}" data-warmup-inbox-replied="${key}">${label} <b>${all.filter(repliedTest[key]).length}</b></button>`).join("")}</div>`;
 }
 
@@ -446,6 +460,7 @@ function warmupThreadRowHtml(thread) {
         </span>
         ${participant.headline ? `<span class="warmup-thread-headline">${escapeHtml(participant.headline)}</span>` : ""}
         <span class="warmup-thread-preview">${mine ? '<span class="warmup-thread-from">Ви:</span> ' : ""}${warmupPreviewHtml(last.body)}</span>
+        ${inboxAccountFilter === INBOX_ALL_ACCOUNTS ? `<span class="warmup-thread-account">${escapeHtml(warmupInboxAccountName(thread.accountId))}</span>` : ""}
       </span>
     </button>`;
 }
@@ -497,7 +512,7 @@ export function warmupInboxUnreadFor(accountId) {
  */
 function warmupInboxFilterHtml(shown) {
   if (!inboxSearchTerms().length) return "";
-  const total = warmupInboxIndex().accounts.get(warmupInboxAccountId())?.length || 0;
+  const total = inboxThreadsOf(warmupInboxAccountId()).length;
   return `<div class="warmup-inbox-filter">
     <span>Знайдено: <strong>${warmupCount(shown)}</strong> з ${warmupCount(total)}</span>
     <button class="warmup-inbox-link" type="button" data-warmup-inbox-reset>Скинути пошук</button>
@@ -563,7 +578,11 @@ function warmupInboxChipsHtml() {
       </button>${showRetired ? retired.map((entry) => `<button class="inbox-chip is-retired ${entry.accountId === open ? "is-active" : ""}" type="button" data-warmup-account="${escapeAttr(entry.accountId)}" aria-pressed="${entry.accountId === open}" title="Заблоковано або виключено — нових листів не буде">
         <span class="inbox-chip-name">${escapeHtml(entry.name)}</span></button>`).join("") : ""}`
     : "";
-  return options.map((entry) => {
+  const unreadAll = options.reduce((sum, entry) => sum + (entry.unread || 0), 0);
+  const allChip = `<button class="inbox-chip ${open === INBOX_ALL_ACCOUNTS ? "is-active" : ""}" type="button" data-warmup-account="${INBOX_ALL_ACCOUNTS}" aria-pressed="${open === INBOX_ALL_ACCOUNTS}" title="Розмови всіх робочих акаунтів разом, непрочитані зверху">
+      <span class="inbox-chip-name">Усі акаунти</span>${unreadAll ? `<span class="inbox-chip-count" aria-label="непрочитаних: ${unreadAll}">${warmupCount(unreadAll)}</span>` : ""}
+    </button>`;
+  return allChip + options.map((entry) => {
     const active = entry.accountId === open;
     const read = warmupInboxSync(entry.accountId);
     const title = read.lastSyncedAt
@@ -592,7 +611,7 @@ function warmupNextUnread() {
     && !(thread.accountId === inbox.openAccountId && thread.threadKey === inbox.openThreadKey)) || null;
 }
 
-function warmupMessageHtml(message, participantName, accountName) {
+export function warmupMessageHtml(message, participantName, accountName) {
   const inbound = message.direction !== "out";
   const who = inbound ? (participantName || "Вони") : accountName;
   return `<li class="warmup-message ${inbound ? "is-in" : "is-out"}">
@@ -872,8 +891,9 @@ export function renderWarmupInbox() {
   // For the account that is open, and how often that happens: the answer to
   // «коли це востаннє оновлювалось» is a time and a rhythm, not a time alone.
   const openId = warmupInboxAccountId();
-  const sync = warmupInboxSync(openId);
-  const openName = warmupInboxAccountName(openId);
+  const allAccounts = openId === INBOX_ALL_ACCOUNTS;
+  const sync = warmupInboxSync(allAccounts ? null : openId);
+  const openName = allAccounts ? "Усі акаунти" : warmupInboxAccountName(openId);
   subtitle.textContent = sync.lastSyncedAt
     ? `${openName}: листи оновлено ${warmupAgo(sync.lastSyncedAt)} · агент заглядає кожні 12–20 хв${sync.window ? `, у вікні ${sync.window}` : ""}`
     : (sync.known ? `${openName}: листи ще не читали` : "");
@@ -1354,7 +1374,8 @@ function openWarmupInboxAccount(accountId) {
   const inbox = warmupState.inbox;
   inboxAccountFilter = accountId;
   inboxSearch = "";
-  if (inbox.openThreadKey !== null && inbox.openAccountId !== accountId) closeWarmupThread();
+  // «Усі акаунти» містять і відкриту розмову — вона лишається.
+  if (inbox.openThreadKey !== null && accountId !== INBOX_ALL_ACCOUNTS && inbox.openAccountId !== accountId) closeWarmupThread();
   else renderWarmupInbox();
 }
 

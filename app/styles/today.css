@@ -66,23 +66,8 @@
   text-align: center;
 }
 
-.today-item {
-  display: grid;
-  gap: 2px;
-  width: 100%;
-  min-height: 0;
-  padding: 8px 10px;
-  text-align: left;
-  white-space: normal;
-  justify-content: stretch;
-  justify-items: start;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: transparent;
-}
-
-.today-item:hover { background: var(--surface-strong); border-color: var(--line); }
-.today-item.active { background: var(--teal-weak); border-color: rgba(52, 214, 189, 0.34); }
+/* Рядок черги — той самий .warmup-thread, що в «Усіх розмовах» (19.10, В1; стилі — inbox.css). */
+.today-item { width: 100%; }
 
 .today-item-top {
   display: flex;
@@ -126,16 +111,7 @@
   background: var(--surface-sunk);
 }
 
-.today-work-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.today-work-head h3 { margin: 0; font-size: 16px; overflow-wrap: anywhere; }
-.today-work-head p { margin: 2px 0 0; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+/* Шапка — .warmup-thread-head, як в «Усіх розмовах» (19.10, В1). */
 .today-reason { white-space: nowrap; }
 .today-reason-overdue { background: rgba(224, 178, 94, 0.16); color: var(--amber); }
 
@@ -244,3 +220,10 @@
 .today-work-foot .today-status,
 .today-work-foot .today-move { border-top: 0; padding-top: 0; }
 .today-work-meta { margin-top: calc(-1 * var(--sp-2)); }
+
+/* ── «До роботи» в одному каркасі з «Усіма розмовами» (Марко 19.10, В1) ── */
+.today-toolbar { display: grid; gap: var(--sp-2); margin-bottom: var(--sp-3); }
+.today-toolbar .inbox-accounts { margin: 0; }
+.today-search { max-width: 520px; }
+.today-thread { max-height: 420px; }
+.today-work .warmup-thread-head { margin-bottom: 0; }

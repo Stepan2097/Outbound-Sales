@@ -221,3 +221,6 @@
   background: var(--surface);
 }
 .work-rows { display: grid; gap: 8px; padding-right: 2px; }
+
+/* Рядок призначення під вкладками «Вхідних» (19.10, В1). */
+.inbox-purpose { margin: calc(-1 * var(--sp-2)) 0 var(--sp-3); color: var(--muted); font-size: 13px; }

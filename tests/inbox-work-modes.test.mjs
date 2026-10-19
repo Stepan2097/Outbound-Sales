@@ -54,3 +54,16 @@ test("links from other screens to one conversation land on «Усі розмов
     assert.ok(body.indexOf("inboxWork.showAll()") > -1 && body.indexOf("inboxWork.showAll()") < body.indexOf('data-view="inbox"'), `${name}: спершу «Усі розмови», потім перехід`);
   }
 });
+
+test("В1 (Марко 19.10): «До роботи» на компонентах «Усіх розмов» — акаунт, пошук, рядок, шапка, бульбашки, черга відправки", () => {
+  assert.match(today, /class="warmup-thread today-item/);
+  assert.match(today, /class="warmup-thread-head today-work-head"/);
+  assert.match(today, /warmupMessageHtml\(message, name, accountName \|\| "Ми"\)/);
+  assert.match(today, /data-today="cancel-reply"/);
+  assert.match(today, /chip\("", "Усі акаунти", allItems\(\)\.length\)/);
+  assert.match(today, /id="todaySearch"/);
+  assert.match(inbox, /const INBOX_ALL_ACCOUNTS = "\*";/);
+  assert.match(html, /id="inboxPurpose"/);
+  assert.match(today, /Кому написати сьогодні — з готовою чернеткою AI/);
+  assert.match(today, /Усі переписки акаунтів — знайти, перечитати, відповісти вручну/);
+});

@@ -34,7 +34,9 @@ const NAMES = [
   "warmupInboxListOnScreen", "loadWarmupInbox", "warmupThreadIsOpen", "markWarmupThreadRead", "openWarmupThread",
   "closeWarmupThread", "pendingUnreadAccount", "openPendingUnread", "showWarmupInboxAccount",
   // Міст до «До роботи» (19.10): у тестах — заглушка з inbox.js, без пінгів.
-  "inboxWork"
+  "inboxWork",
+  // «Усі акаунти» (19.10, В1).
+  "INBOX_ALL_ACCOUNTS", "inboxThreadsOf"
 ];
 
 /** Слухачі екрана: те, що людина робить руками. Беруться з коду як є. */
@@ -247,16 +249,18 @@ function accountsThreads() {
   ];
 }
 
-test("зверху — кнопки лише акаунтів, без «Усі»; найсвіжіший першим, з числом відповідей, що чекають", () => {
+// Марко 19.10 (таск ca978070, В1): «Усі акаунти» — перша кнопка, як і у «До роботи»;
+// відкривається, як і раніше, найсвіжіший акаунт.
+test("зверху — «Усі акаунти», далі акаунти: найсвіжіший першим, з числом відповідей, що чекають", () => {
   const { els, get } = screen({ threads: accountsThreads() });
   get("renderWarmupInbox")();
   const html = els.warmupInboxAccounts.innerHTML;
   assert.equal(els.warmupInboxAccounts.hidden, false);
   const names = [...html.matchAll(/inbox-chip-name">([^<]+)</g)].map((match) => match[1]);
-  assert.deepEqual(names, ["Oksana Melnyk", "Anna Kovalenko", "Profile 3"], "за свіжістю відповіді, а не за кількістю непрочитаних");
+  assert.deepEqual(names, ["Усі акаунти", "Oksana Melnyk", "Anna Kovalenko", "Profile 3"], "за свіжістю відповіді, а не за кількістю непрочитаних");
   const counts = [...html.matchAll(/inbox-chip-count" aria-label="непрочитаних: (\d+)"/g)].map((match) => match[1]);
-  assert.deepEqual(counts, ["2", "1", "2"], "у Profile 3 непрочитаних більше, ніж в Анни, але відповіді давніші — тож він останній");
-  assert.doesNotMatch(html, /Усі акаунти|data-warmup-account=""/);
+  assert.deepEqual(counts, ["5", "2", "1", "2"], "у Profile 3 непрочитаних більше, ніж в Анни, але відповіді давніші — тож він останній");
+  assert.doesNotMatch(html, /data-warmup-account=""/);
   assert.match(html, /is-active[^>]*data-warmup-account="acc-c"[^>]*aria-pressed="true"/, "відкритий — найсвіжіший");
   assert.deepEqual(orderOf(els.warmupInboxBody.innerHTML), ["c1", "c2"], "у списку — лише розмови відкритого акаунта");
 });
@@ -297,7 +301,7 @@ test("з одним акаунтом кнопка теж є — видно, чи
   const { els, get, set } = screen({ threads: threeThreads().filter((row) => row.accountId === "acc-a") });
   get("renderWarmupInbox")();
   assert.equal(els.warmupInboxAccounts.hidden, false);
-  assert.equal((els.warmupInboxAccounts.innerHTML.match(/inbox-chip /g) || []).length, 1);
+  assert.equal((els.warmupInboxAccounts.innerHTML.match(/inbox-chip /g) || []).length, 2, "«Усі акаунти» і сам акаунт");
   assert.match(els.warmupInboxAccounts.innerHTML, /is-active/);
 
   set("inboxAccountFilter", "acc-gone");
@@ -1159,4 +1163,15 @@ test("«Оновити» перечитує список і відкриту р�
   await listeners["refresh:click"]();
   await tick();
   assert.deepEqual(calls.map((call) => call.path), ["/inbox"]);
+});
+
+test("«Усі акаунти»: розмови всіх робочих акаунтів, непрочитані зверху, з назвою акаунта в рядку", () => {
+  const { els, listeners, get, main } = screen({ threads: accountsThreads() });
+  get("renderWarmupInbox")();
+  listeners["chips:click"]({ target: { closest: (selector) => (selector === "[data-warmup-account]" ? { dataset: { warmupAccount: "*" } } : null) } });
+  assert.equal(main.get("inboxAccountFilter"), "*");
+  const order = orderOf(els.warmupInboxBody.innerHTML);
+  assert.equal(order.length, accountsThreads().length);
+  assert.match(els.warmupInboxBody.innerHTML, /warmup-thread-account/);
+  assert.match(els.warmupInboxAccounts.innerHTML, /is-active[^>]*data-warmup-account="\*"/);
 });
