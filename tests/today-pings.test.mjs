@@ -364,13 +364,13 @@ test("статус із «Сьогодні» — у CRM: вихід закрив
   assert.equal((await todayList({ viewerId: "u-bohdan" })).blocks.replies.some((item) => item.pingId === fresh.id), false);
 });
 
-test("звірка: лід відповів — «Новий» стає «Відповів» одним записом; «Кваліфікація» лишається", async () => {
+test("звірка: лід відповів — «Новий» стає «Відповів» одним записом; «Дзвінок» лишається", async () => {
   rows.contacts.find((row) => row.id === "c1").lead_status = "new";
-  rows.contacts.push({ id: "c3", name: "Lead Three", company: "Casino Three", owner_id: "u-bohdan", lead_status: "qualification" });
+  rows.contacts.push({ id: "c3", name: "Lead Three", company: "Casino Three", owner_id: "u-bohdan", lead_status: "booked_call" });
   rows.wl_events.push(message("in", "Sounds good", 30, "c3", "t3"));
   await reconcilePings();
   assert.equal(rows.contacts.find((row) => row.id === "c1").lead_status, "responded");
-  assert.equal(rows.contacts.find((row) => row.id === "c3").lead_status, "qualification", "людський статус не чіпається");
+  assert.equal(rows.contacts.find((row) => row.id === "c3").lead_status, "booked_call", "людський статус не чіпається");
   const statusBefore = rows.contacts.find((row) => row.id === "c1").lead_status;
   await reconcilePings();
   assert.equal(rows.contacts.find((row) => row.id === "c1").lead_status, statusBefore, "повторна звірка нічого не змінює");

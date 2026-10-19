@@ -6,19 +6,23 @@
 // розкладаються по робочих днях із межею на день, адміністратор переглядає,
 // править і приймає пачкою. Пінги стають задачами CRM, як в етапі 1.
 //
-// «Відкритий діалог» (заміряно 16.10): статус responded / qualification / booked_call
+// «Відкритий діалог» (заміряно 16.10): статус responded / booked_call
 // з будь-яким дотиком після 01.08, або лід відповів після 01.08 — вхідний дотик
 // (direction=incoming або наш рядок «LinkedIn · Відповідь на акаунт…»: до 16.10
-// відповіді писались як outgoing) чи статус перейшов у responded / qualification
-// / booked_call — і статус зараз один із відкритих. Контакт, у якого вже є
+// відповіді писались як outgoing) чи статус перейшов у responded / booked_call (або
+// колись у qualification — статус прибрано з CRM 19.10, але в історії він лишився)
+// — і статус зараз один із відкритих. Контакт, у якого вже є
 // відкритий пінг Outbound, не кандидат — повторний імпорт не дублює.
 
 import { crm } from "../warmup/db.mjs";
 import { PING_QUEUE, addWorkingDays, dayIn, taskDescription, zonedIso } from "./pings.mjs";
 
 export const SINCE = "2026-08-01T00:00:00Z";
-export const OPEN_STATUSES = ["in_progress", "responded", "qualification", "booked_call"];
-const ADVANCED = ["responded", "qualification", "booked_call"];
+export const OPEN_STATUSES = ["in_progress", "responded", "booked_call"];
+const ADVANCED = ["responded", "booked_call"];
+// Історія статусів пам'ятає «Кваліфікацію», прибрану з CRM 19.10: такий перехід
+// і далі каже, що лід відповідав.
+const ADVANCED_IN_HISTORY = [...ADVANCED, "qualification"];
 export const PER_DAY = 20;
 const REPLY_PREFIX = "LinkedIn · Відповідь на акаунт";
 const CHUNK = 100;
@@ -40,13 +44,13 @@ export function pickOpenDialogs({ activities, statusChanges, contacts, openPingC
     if (!activity.contact_id) continue;
     byContact.set(activity.contact_id, [...(byContact.get(activity.contact_id) || []), activity]);
   }
-  const advanced = new Set(statusChanges.filter((row) => ADVANCED.includes(row.new_status)).map((row) => row.contact_id));
+  const advanced = new Set(statusChanges.filter((row) => ADVANCED_IN_HISTORY.includes(row.new_status)).map((row) => row.contact_id));
   const out = [];
   for (const contact of contacts) {
     if (!OPEN_STATUSES.includes(contact.lead_status) || openPingContacts.has(contact.id)) continue;
     const touches = (byContact.get(contact.id) || []).sort((left, right) => String(left.created_at).localeCompare(String(right.created_at)));
     const theirs = touches.filter(isTheirs);
-    // Статус уже каже, що лід відповідав (responded / qualification / booked_call), —
+    // Статус уже каже, що лід відповідав (responded / booked_call), —
     // живий діалог, навіть коли після 01.08 писали лише ми (вердикт судді, 16.10).
     const advancedNow = ADVANCED.includes(contact.lead_status) && touches.length > 0;
     if (!theirs.length && !advanced.has(contact.id) && !advancedNow) continue;
@@ -81,7 +85,6 @@ export function ruleVerdict(candidate) {
   }
   if (candidate.status === "booked_call") return { reason: "call", priority: "high", why: "У CRM статус «дзвінок призначено» — підтвердити дзвінок." };
   if (candidate.lastBy === "them") return { reason: "reply", priority: "high", why: "Останнє повідомлення — від ліда, відповіді немає." };
-  if (candidate.status === "qualification") return { reason: "silent", priority: "high", why: "Лід на кваліфікації, ми написали останніми — нагадати." };
   if (!candidate.lastBy) return { reason: "silent", priority: "normal", why: "У CRM лише нотатки, без повідомлень — нагадати про себе." };
   return { reason: "silent", priority: "normal", why: "Ми написали останніми — нагадати." };
 }

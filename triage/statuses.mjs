@@ -8,12 +8,14 @@
 // «Без відповіді» й «Відмова» — це наявні в CRM no_response і not_interested (нові
 // підписи), «Не ICP» — новий not_icp. Причина виходу — закритий список, колонка
 // `contacts.exit_reason` з перевіркою в базі.
+//
+// «Кваліфікація» (qualification) з CRM прибрано 19.10 (власник; контакти з нею
+// переведено в «В обробці») — Outbound її більше не ставить.
 
 export const LEAD_STATUSES = [
   ["new", "Новий"],
   ["in_progress", "В обробці"],
   ["responded", "Відповів"],
-  ["qualification", "Кваліфікація"],
   ["booked_call", "Дзвінок"],
   ["no_response", "Без відповіді"],
   ["not_interested", "Відмова"],

@@ -154,16 +154,23 @@ test("відкритий діалог: лід відповів після 01.08 
   ];
   const contacts = [
     { id: "a", name: "A", lead_status: "in_progress" }, { id: "b", name: "B", lead_status: "responded" },
-    { id: "c", name: "C", lead_status: "bad_timing" }, { id: "d", name: "D", lead_status: "responded" }, { id: "e", name: "E", lead_status: "qualification" }
+    { id: "c", name: "C", lead_status: "bad_timing" }, { id: "d", name: "D", lead_status: "responded" }, { id: "e", name: "E", lead_status: "booked_call" }
   ];
   const statusChanges = [{ contact_id: "b", new_status: "responded" }];
   const picked = pickOpenDialogs({ activities, statusChanges, contacts, openPingContacts: new Set(["d"]) });
   assert.deepEqual(picked.map((item) => item.contactId).sort(), ["a", "b"], "c закритий, d має пінг, e без дотику й переходу");
   const onlyOurs = pickOpenDialogs({
     activities: [{ contact_id: "f", created_at: "2026-09-06T10:00:00Z", direction: "outgoing", content: "LinkedIn · Ми написали…" }, { contact_id: "g", created_at: "2026-09-06T10:00:00Z", direction: "outgoing", content: "hi" }],
-    statusChanges: [], contacts: [{ id: "f", name: "F", lead_status: "qualification" }, { id: "g", name: "G", lead_status: "in_progress" }], openPingContacts: new Set()
+    statusChanges: [], contacts: [{ id: "f", name: "F", lead_status: "responded" }, { id: "g", name: "G", lead_status: "in_progress" }], openPingContacts: new Set()
   });
-  assert.deepEqual(onlyOurs.map((item) => item.contactId), ["f"], "qualification з нашим дотиком — живий; in_progress лише з нашими — ні");
+  assert.deepEqual(onlyOurs.map((item) => item.contactId), ["f"], "responded з нашим дотиком — живий; in_progress лише з нашими — ні");
+  // «Кваліфікацію» прибрано з CRM 19.10: такого статусу немає, а перехід у неї в історії — і далі ознака відповіді.
+  const legacy = pickOpenDialogs({
+    activities: [{ contact_id: "h", created_at: "2026-09-06T10:00:00Z", direction: "outgoing", content: "hi" }, { contact_id: "q", created_at: "2026-09-06T10:00:00Z", direction: "outgoing", content: "hi" }],
+    statusChanges: [{ contact_id: "h", new_status: "qualification" }],
+    contacts: [{ id: "h", name: "H", lead_status: "in_progress" }, { id: "q", name: "Q", lead_status: "qualification" }], openPingContacts: new Set()
+  });
+  assert.deepEqual(legacy.map((item) => item.contactId), ["h"], "статус qualification більше не відкритий; перехід у нього в історії — так");
   assert.equal(picked.find((item) => item.contactId === "a").lastBy, "them");
   assert.equal(isTheirs({ direction: "outgoing", content: "LinkedIn · Відповідь на акаунт Y" }), true);
 });
@@ -208,7 +215,8 @@ test("дотики читаються сторінками: CRM віддає д�
 import { statusPatch } from "../triage/statuses.mjs";
 
 test("статус і причина виходу: вихідний статус — з причиною із закритого списку; інший — причину знімає", () => {
-  assert.deepEqual(statusPatch("qualification").patch, { lead_status: "qualification", exit_reason: null });
+  assert.deepEqual(statusPatch("booked_call").patch, { lead_status: "booked_call", exit_reason: null });
+  assert.match(statusPatch("qualification").error, /Невідомий/, "«Кваліфікацію» прибрано з CRM 19.10");
   assert.deepEqual(statusPatch("not_interested", "traffic_only").patch, { lead_status: "not_interested", exit_reason: "traffic_only" });
   assert.deepEqual(statusPatch("not_icp").patch, { lead_status: "not_icp", exit_reason: "not_icp" }, "«Не ICP» має свою причину за замовчуванням");
   assert.match(statusPatch("not_interested").error, /причину/);
@@ -224,7 +232,7 @@ test("«Відповів»: лід писав — «Новий» і «В обр�
   const thread = (direction, at, answered = true) => ({ answered, inCount: answered ? 1 : 0, lastMessage: { direction, at } });
   const replied = { threads: [thread("out", "2026-10-16T10:00:00Z")] };
   for (const status of ["new", "in_progress", undefined, null]) assert.equal(repliedStatusDue(replied, status), true, String(status));
-  for (const status of ["responded", "qualification", "booked_call", "not_interested", "not_icp", "bad_timing"]) {
+  for (const status of ["responded", "booked_call", "not_interested", "not_icp", "bad_timing"]) {
     assert.equal(repliedStatusDue(replied, status), false, `${status} ставить людина`);
   }
   assert.equal(repliedStatusDue({ threads: [thread("out", "2026-10-16T10:00:00Z", false)] }, "new"), false, "лід не писав — без змін");
