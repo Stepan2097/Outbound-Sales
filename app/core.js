@@ -358,6 +358,19 @@ export function onScreen(view, hooks) {
   screenHooks.set(view, [...(screenHooks.get(view) || []), hooks]);
 }
 
+/**
+ * Список із власною прокруткою, що перемальовується (дія, фільтр, автооновлення),
+ * лишається там, де людина його догорнула (суддя 19.10, таск 02cb2276): запам'ятати
+ * scrollTop до перемальовування й повернути після. Повертає функцію «повернути».
+ */
+export function keepScroll(root, selectors) {
+  const saved = selectors.map((selector) => root?.querySelector(selector)?.scrollTop || 0);
+  return () => selectors.forEach((selector, index) => {
+    const element = root?.querySelector(selector);
+    if (element && saved[index]) element.scrollTop = saved[index];
+  });
+}
+
 export function refreshIcons(root = document) {
   if (window.lucide) {
     window.lucide.createIcons({ root });

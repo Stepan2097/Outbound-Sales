@@ -8,7 +8,7 @@
 // запрошення й повідомлення обома боками (прогрів, через контакт CRM з цією
 // адресою). Відкриттів і кліків немає.
 
-import { HISTORY_EVENT_LABEL, api, escapeAttr, escapeHtml, onScreen, refreshIcons } from "../core.js";
+import { HISTORY_EVENT_LABEL, api, escapeAttr, escapeHtml, keepScroll, onScreen, refreshIcons } from "../core.js";
 import { showPrivacyFor } from "../screens/esp-privacy.js";
 
 const EXCLUSIONS = "exclusions";
@@ -442,7 +442,11 @@ export function renderLeads() {
   exclusions.hidden = pane !== EXCLUSIONS;
   privacyPane.hidden = pane !== PRIVACY;
   main.hidden = pane === EXCLUSIONS || pane === PRIVACY;
-  if (!main.hidden) main.innerHTML = pane === "card" ? cardHtml() : listHtml();
+  if (!main.hidden) {
+    const restore = keepScroll(main, [".leads-table-wrap"]);
+    main.innerHTML = pane === "card" ? cardHtml() : listHtml();
+    restore();
+  }
   if (typing !== null) {
     const search = document.getElementById("leadsSearch");
     search?.focus();

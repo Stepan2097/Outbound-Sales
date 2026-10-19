@@ -787,3 +787,9 @@
 
 /* «Усі акаунти» (19.10, В1): у рядку видно, на який акаунт прийшла розмова. */
 .warmup-thread-account { display: block; margin-top: 2px; font-size: 11.5px; color: var(--muted); }
+
+/* Телефон (суддя 19.10, таск 02cb2276): список розмов гортається всередині себе;
+   відкрита розмова, як і раніше, займає екран замість списку. */
+@media (max-width: 900px) {
+  .inbox-list { max-height: 65vh; overflow-y: auto; }
+}

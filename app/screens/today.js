@@ -15,7 +15,7 @@
 // тими самими маршрутами, що й «Усі розмови», а сервер звіряє пінги —
 // закриває цей і ставить наступний (через 3 робочі дні).
 
-import { api, escapeAttr, escapeHtml, onScreen, refreshIcons } from "../core.js";
+import { api, escapeAttr, escapeHtml, keepScroll, onScreen, refreshIcons } from "../core.js";
 import { connectInboxWork, renderWarmupInbox, showWarmupInboxThread, warmupGoesOutText, warmupMessageHtml, warmupProfileUrl } from "./inbox.js";
 import { showContactCard } from "./contacts.js";
 
@@ -574,6 +574,7 @@ function render() {
         ${counts.map(([key, title, count]) => `<button type="button" data-today="block" data-block="${escapeAttr(key)}" class="${today.blockFilter === key ? "active" : ""}">${escapeHtml(title)} ${count}</button>`).join("")}
       </div>`
     : "";
+  const restoreScroll = keepScroll(host, [".today-queue"]);
   host.innerHTML = `
     <section class="panel blk-queue today">
       <header class="today-head">
@@ -602,6 +603,7 @@ function render() {
       </div>` : `${today.notice ? `<p class="today-notice ${today.tone}" role="status">${escapeHtml(today.notice)}</p>` : ""}<div class="today-queue today-queue-solo">${queueHtml()}</div>`}
       ${data.newContactsAllowed ? "" : `<p class="today-gate">Нові контакти з папки (WorkSpace → «Нові контакти») — коли розберете відповіді й прострочені.</p>`}
     </section>`;
+  restoreScroll();
   refreshIcons(host);
 }
 

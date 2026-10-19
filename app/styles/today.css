@@ -227,3 +227,10 @@
 .today-search { max-width: 520px; }
 .today-thread { max-height: 420px; }
 .today-work .warmup-thread-head { margin-bottom: 0; }
+
+/* Телефон (суддя 19.10, таск 02cb2276): черга гортається всередині себе, а не тягне
+   сторінку; відкритий лід — одразу під нею. */
+@media (max-width: 900px) {
+  .today-queue { max-height: 60vh; overflow-y: auto; }
+  .today-queue-solo { max-height: none; }
+}

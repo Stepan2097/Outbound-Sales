@@ -6,7 +6,7 @@
 // Сервер: /api/work/day і /api/work/contact (triage/work-log.mjs); сама розмова
 // — з /api/warmup/history і /api/esp/contacts/timeline, як у картках лідів.
 
-import { api, escapeAttr, escapeHtml, onScreen, refreshIcons } from "../core.js";
+import { api, escapeAttr, escapeHtml, keepScroll, onScreen, refreshIcons } from "../core.js";
 import { pathTracks } from "./work-path.js";
 
 onScreen("work", { open: () => void openWork() });
@@ -316,7 +316,9 @@ function render() {
       ${plannedHtml(data)}
       <div class="work-body">${listHtml(data)}${dialogHtml()}</div>`;
   }
+  const restore = keepScroll(root, [".work-rows", ".work-plan-list"]);
   root.innerHTML = `${toolbarHtml(data)}${body}`;
+  restore();
   refreshIcons(root);
 }
 
