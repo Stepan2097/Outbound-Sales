@@ -36,7 +36,10 @@ export async function profilesToResolve(accountId, { limit = RESOLVE_PER_SESSION
   if (!ids.length) return [];
 
   const since = new Date(now - RETRY_AFTER_MS).toISOString();
+  // «no_participant_link» came from the agent before it could scroll a thread up
+  // or follow the name at its top (1e976b4): those are worth asking again now.
   const tried = new Set((await anty.from("wl_events").select("meta").eq("type", PROFILE_UNRESOLVED).gte("created_at", since).limit(1000).rows())
+    .filter((row) => row.meta?.reason !== "no_participant_link")
     .map((row) => String(row.meta?.contactId ?? "")));
 
   const threads = new Map();

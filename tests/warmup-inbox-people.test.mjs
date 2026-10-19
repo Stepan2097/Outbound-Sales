@@ -820,3 +820,11 @@ test("профіль не тієї людини (ім'я не збігаєтьс
   const { profilesToResolve } = await import("../warmup/profile-resolve.mjs");
   assert.deepEqual((await profilesToResolve("acc-1")).find((row) => row.contactId === "c-jel"), { contactId: "c-jel", threadKey: "t-jel", memberId: "ACoAABNXATYBPGQXib3r" });
 });
+
+test("стара невдача «немає посилання» (агент до прогортання й кліку по імені) не відкладає контакт — його пробують знову", async () => {
+  rows.contacts.push({ id: "c-old", name: "Lewis", linkedin: "https://www.linkedin.com/in/acoaaoldoldoldoldoldold", custom_fields: { source: "linkedin_inbox" }, created_at: "2026-10-14T00:00:00.000Z" });
+  rows.wl_events.push({ id: "m-old", account_id: "acc-1", type: "message.in", created_at: new Date().toISOString(), meta: { threadKey: "t-old", crmContactId: "c-old", body: "Cheers." } });
+  await resolved({ contactId: "c-old", failed: "no_participant_link" });
+  const { profilesToResolve } = await import("../warmup/profile-resolve.mjs");
+  assert.ok((await profilesToResolve("acc-1")).some((row) => row.contactId === "c-old"));
+});
