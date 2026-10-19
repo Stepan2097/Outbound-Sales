@@ -28,7 +28,7 @@ import { sendReplies } from './lib/outbox.mjs';
 import { AntyApi } from './lib/anty-api.mjs';
 import { settle } from './lib/login-probe.mjs';
 import { UNREACTED_BUTTON, isUnreacted } from './lib/reactions.mjs';
-import { describeMemory, freshTab, oneTab, tabMemory } from './lib/tab.mjs';
+import { TAB_HEAP_LIMIT_MB, describeMemory, freshTab, isTabCrash, oneTab, tabMemory } from './lib/tab.mjs';
 
 // ── arguments ──────────────────────────────────────────────────────────────
 const argv = process.argv.slice(2);
@@ -222,6 +222,24 @@ log(`сесію відкрито (${session.sessionId}${session.resumed ? ', п�
     page = await freshTab(context);
     log(`  вкладка: ${describeMemory(used)} → нова перед «${stage}»`);
   };
+  // Within a stage that walks profile after profile: a fresh tab once this
+  // one has grown past the limit (19.10: Profile 48 and Chloe died of it), and
+  // after a tab that crashed — the rest of the visit goes on in a new one
+  // instead of failing on a dead tab, step after step.
+  const keepSmall = async (stage) => {
+    const used = await tabMemory(page);
+    if (used && used.heapMb < TAB_HEAP_LIMIT_MB) return page;
+    report.memory.push({ stage, ...(used ?? {}) });
+    page = await freshTab(context);
+    log(`  вкладка: ${describeMemory(used)} → нова посеред «${stage}»`);
+    return page;
+  };
+  const afterCrash = async (stage, error) => {
+    if (!isTabCrash(error)) return false;
+    page = await freshTab(context);
+    log(`  💥 вкладка впала посеред «${stage}» — далі в новій`);
+    return true;
+  };
   const guard = async () => {
     await stopOnWarning(page, portal);
     const fresh = await portal.plan();
@@ -302,6 +320,7 @@ log(`сесію відкрито (${session.sessionId}${session.resumed ? ', п�
         if (done >= remaining.profile_view) break;
         seen.add(slug);
         try {
+          await keepSmall('перегляди');
           await page.goto(`https://www.linkedin.com/in/${slug}/`, { waitUntil: 'domcontentloaded', timeout: 45000 });
           await sleep(rand(2500, 4000));
           await guard();
@@ -325,9 +344,11 @@ log(`сесію відкрито (${session.sessionId}${session.resumed ? ', п�
           if (e instanceof VisitStopped) throw e;
           report.errors.push(`profile_view ${slug}: ${e.message}`);
           log(`  ⚠️ профіль ${slug}: ${e.message}`);
+          await afterCrash('перегляди', e);
         }
       }
 
+      await keepSmall('перегляди');
       await page.goto('https://www.linkedin.com/feed/', { waitUntil: 'domcontentloaded', timeout: 60000 });
       await sleep(rand(2000, 3500));
       await page.mouse.wheel(0, rand(1200, 2000));
@@ -408,7 +429,7 @@ log(`сесію відкрито (${session.sessionId}${session.resumed ? ', п�
   // inbox and the replies below still happen.
   try {
   await sendQueuedInvitations(page, portal, plan.invites?.toSend, {
-    guard, leaseId: portal.leaseId,
+    guard, leaseId: portal.leaseId, refresh: () => keepSmall('запрошення'),
     onSent: (invite) => report.actions.push({ kind: 'connect', detail: `Запит до ${invite.name}` }),
     onMiss: async (invite, outcome) => {
       const dialog = await page.getByRole('dialog').last().isVisible().catch(() => false);
@@ -417,7 +438,7 @@ log(`сесію відкрито (${session.sessionId}${session.resumed ? ', п�
       log(`  ⚠️ ${invite.name}: ${outcome} · ${page.url()} · вікно запрошення ${dialog ? 'відкрите' : 'немає'}`);
     }
   });
-  if (plan.invites?.toCheck?.length) await checkInvitations(page, portal, plan.invites.toCheck, { guard });
+  if (plan.invites?.toCheck?.length) await checkInvitations(page, portal, plan.invites.toCheck, { guard, refresh: () => keepSmall('перевірка запрошень') });
   } catch (e) {
     if (!(e instanceof InvitesStopped)) throw e;
     report.errors.push(`запрошення: ${e.message}`);

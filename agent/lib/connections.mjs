@@ -423,7 +423,9 @@ export async function sendInvitation(page, invite, { sleep = wait, guard = async
 
 export async function sendQueuedInvitations(page, portal, invites, {
   sleep = wait, guard = () => stopOnWarning(page, portal), leaseId = null,
-  send = sendInvitation, onSent = () => {}, onMiss = async () => {}, pending = null
+  send = sendInvitation, onSent = () => {}, onMiss = async () => {}, pending = null,
+  // Before each person: the tab to use — a fresh one when this one has grown (lib/tab.mjs).
+  refresh = async (current) => current
 } = {}) {
   const queue = invites ?? [];
   // One read for the whole visit: everybody this account is already waiting
@@ -431,6 +433,7 @@ export async function sendQueuedInvitations(page, portal, invites, {
   // second requests to the same people.
   const alreadyPending = pending ?? (queue.length ? await pendingSlugs(page, { sleep, guard }) : new Set());
   for (const queued of queue) {
+    page = await refresh(page);
     await guard();
     const prepared = await reportWithRetry(() => portal.prepareInvite(queued.outreachId), { sleep });
     if (prepared.stopAll || prepared.duringPause) throw new VisitStopped('Server stopped this account');
@@ -461,10 +464,11 @@ export async function sendQueuedInvitations(page, portal, invites, {
 
 /** An absent invitation is never called withdrawn without proof. */
 export async function checkInvitations(page, portal, invites, {
-  sleep = wait, guard = () => stopOnWarning(page, portal)
+  sleep = wait, guard = () => stopOnWarning(page, portal), refresh = async (current) => current
 } = {}) {
   const results = [];
   for (const invite of invites ?? []) {
+    page = await refresh(page);
     const { card } = await openProfile(page, invite, { sleep, guard });
     await guard();
     const state = card ? await relation(card) : null;

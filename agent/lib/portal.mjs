@@ -2,7 +2,8 @@ import './env.mjs';
 
 /** All scheduling, recipients and allowances come from Outbound-Sales. */
 export class Portal {
-  constructor(base, { token = process.env.WARMUP_AGENT_TOKEN ?? null, prefix = '/api/warmup/agent', timeoutMs = 30000 } = {}) {
+  constructor(base, { token = process.env.WARMUP_AGENT_TOKEN ?? null, prefix = '/api/warmup/agent', timeoutMs = 30000,
+    gatewayWaitsMs = [5000, 10000, 20000, 30000], wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) } = {}) {
     this.base = base.replace(/\/$/, '');
     this.token = token && String(token).trim() ? String(token).trim() : null;
     if (prefix !== '/api/warmup/agent') throw new Error('The agent requires the Outbound-Sales API');
@@ -11,13 +12,30 @@ export class Portal {
     this.accountId = null;
     this.leaseId = null;
     this.timeoutMs = timeoutMs;
+    this.gatewayWaitsMs = gatewayWaitsMs;
+    this.wait = wait;
   }
+  /**
+   * 502/503 is the proxy in front of the portal with nothing behind it — the
+   * portal is being redeployed, which takes about a minute. The request never
+   * reached it, so it is waited out and sent again rather than ending the visit
+   * (19.10: Profile 48's session died on «Bad Gateway» mid-visit). Any other
+   * answer, or a body that is not JSON, is returned as an error to the caller.
+   */
   async #json(path, init = {}) {
-    const res = await fetch(`${this.base}${path}`, {
-      ...init, signal: AbortSignal.timeout(this.timeoutMs),
-      headers: { ...(init.headers ?? {}), ...(this.token ? { 'X-Agent-Token': this.token } : {}) }
-    });
-    const body = await res.json();
+    let res;
+    for (let attempt = 0; ; attempt += 1) {
+      res = await fetch(`${this.base}${path}`, {
+        ...init, signal: AbortSignal.timeout(this.timeoutMs),
+        headers: { ...(init.headers ?? {}), ...(this.token ? { 'X-Agent-Token': this.token } : {}) }
+      });
+      if (![502, 503].includes(res.status) || attempt >= this.gatewayWaitsMs.length) break;
+      await res.body?.cancel?.().catch(() => {});
+      await this.wait(this.gatewayWaitsMs[attempt]);
+    }
+    const text = typeof res.text === 'function' ? await res.text() : JSON.stringify(await res.json());
+    let body;
+    try { body = text ? JSON.parse(text) : {}; } catch { body = { error: `HTTP ${res.status}: ${text.slice(0, 80)}` }; }
     return { ...body, ok: res.ok, status: res.status, success: res.ok && body.success === true,
       ...(!res.ok && !body.error ? { error: `HTTP ${res.status}` } : {}) };
   }

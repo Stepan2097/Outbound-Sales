@@ -49,3 +49,28 @@ test('відмова порталу — це помилка з текстом, �
     await assert.rejects(() => portal.accounts(), /Agent authentication failed/);
   });
 });
+
+test('502/503 — портал саме перезапускається: запит повторюється після паузи, а не валить сесію (19.10: «Bad Gateway» у Profile 48)', async () => {
+  const original = globalThis.fetch;
+  const answers = [
+    { ok: false, status: 502, text: async () => 'Bad Gateway' },
+    { ok: false, status: 503, text: async () => 'Service Unavailable' },
+    { ok: true, status: 200, text: async () => JSON.stringify({ success: true, accounts: ACCOUNTS }) }
+  ];
+  const waits = [];
+  globalThis.fetch = async () => answers.shift();
+  try {
+    const portal = new Portal('https://portal.example', { token: 't', gatewayWaitsMs: [5, 10], wait: async (ms) => { waits.push(ms); } });
+    assert.equal((await portal.accounts()).length, 3);
+    assert.deepEqual(waits, [5, 10]);
+  } finally { globalThis.fetch = original; }
+});
+
+test('портал довго лежить — після всіх пауз помилка словами, а не «Unexpected token B»', async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => ({ ok: false, status: 502, text: async () => 'Bad Gateway' });
+  try {
+    const portal = new Portal('https://portal.example', { token: 't', gatewayWaitsMs: [1], wait: async () => {} });
+    await assert.rejects(portal.accounts(), /HTTP 502: Bad Gateway/);
+  } finally { globalThis.fetch = original; }
+});

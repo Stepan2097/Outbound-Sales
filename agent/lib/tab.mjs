@@ -31,6 +31,20 @@ export async function tabMemory(page) {
   }
 }
 
+/**
+ * How big a tab may get before the next profile opens in a fresh one. A stage
+ * that walks profile after profile in one tab grows by ~100 MB of JS a profile
+ * (19.10: 161 → 932 MB over eight profile views, ~3.5 GB for the whole
+ * renderer), and the container's 4 GB ends the visit. Checked before each
+ * profile, so a stage stays a few profiles' worth of memory at most.
+ */
+export const TAB_HEAP_LIMIT_MB = 350;
+
+/** A tab that died under us: Chromium's own words for it. */
+export function isTabCrash(error) {
+  return /Target crashed|Page crashed|Target closed|Target page, context or browser has been closed/i.test(String(error?.message ?? error ?? ''));
+}
+
 /** The numbers in words, for the log line. */
 export function describeMemory(memory) {
   if (!memory) return 'пам\'ять вкладки невідома';

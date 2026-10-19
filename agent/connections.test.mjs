@@ -367,6 +367,30 @@ test('a server stop after the first send prevents the next person from opening',
   assert.deepEqual(reports, [{ id: 'invite-1', outcome: 'sent', lease: 'lease-1' }]);
 });
 
+test('each person opens in the tab refresh hands back — a fresh one once the old has grown (19.10: tabs died of memory on Profile 48)', async () => {
+  const used = [];
+  const tabs = [{ name: 'tab-1' }, { name: 'tab-2' }];
+  let handed = 0;
+  const portal = {
+    prepareInvite: async (id) => ({ success: true, allowed: true, invite: { ...queued, outreachId: id } }),
+    inviteSent: async () => ({ success: true })
+  };
+  await sendQueuedInvitations({ name: 'tab-0' }, portal, [queued, { ...queued, outreachId: 'invite-2' }], {
+    sleep, guard: async () => {}, pending: new Set(),
+    refresh: async () => tabs[handed++],
+    send: async (page) => { used.push(page.name); return 'sent'; }
+  });
+  assert.deepEqual(used, ['tab-1', 'tab-2']);
+});
+
+test('the tab helper knows a crashed tab when it sees one', async () => {
+  const { isTabCrash, TAB_HEAP_LIMIT_MB } = await import('./lib/tab.mjs');
+  assert.equal(isTabCrash(new Error('page.goto: Page crashed')), true);
+  assert.equal(isTabCrash(new Error('locator.innerText: Target crashed ')), true);
+  assert.equal(isTabCrash(new Error('Timeout 45000ms exceeded')), false);
+  assert.ok(TAB_HEAP_LIMIT_MB > 0 && TAB_HEAP_LIMIT_MB < 900);
+});
+
 test('a pause before sending and two lost reports each stop the entire visit', async () => {
   let sends = 0;
   await assert.rejects(sendQueuedInvitations({}, {
