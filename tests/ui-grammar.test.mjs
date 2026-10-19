@@ -33,3 +33,19 @@ test("картка автозапитів: поля з підписами й п�
   assert.match(js, /campaign\.state === "running" \? "state-run"/);
   assert.doesNotMatch(js, /warmupTickedAccountsLine\(campaign\)/, "«Ведуть: …» більше не висить під карткою");
 });
+
+// Суддя, коло 1 (17.10): решта екранів — ті самі типи через їхні класи.
+test("Головна (нові контакти), По днях, Смисли, Кампанії пошти й Контакти мають типи блоків", () => {
+  const css = read("styles/grammar.css");
+  for (const [selector, label] of [
+    [".work-plan::before", "Робоча черга"], [".triage-card::before", "Робоча черга"],
+    [".work-stats::before", "Показники"], [".work-team::before", "Список"], [".work-list::before", "Список"],
+    [".pitch-side::before", "Список"], [".mc-list-main::before", "Список"], [".triage-recent::before", "Список"]
+  ]) {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    assert.match(css, new RegExp(`${escaped} \\{ content: "${label}`), selector);
+  }
+  assert.match(css, /\.work-toolbar,\s*\.mc-toolbar,\s*\.triage-toolbar \{/, "смуги фільтрів — один тихий вигляд");
+  assert.match(css, /\.panel\.pitch-intro,/, "вступ «Смислів» — довідка");
+  assert.match(html, /class="panel blk-settings contact-card-panel"/, "картка контакту — налаштування (поля)");
+});

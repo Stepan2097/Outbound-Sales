@@ -103,3 +103,59 @@
 }
 .panel.blk-settings .warmup-strategy-head h2::before { content: "Налаштування"; }
 .campaign-report.blk-metrics .campaign-report-head h2::before { content: "Показники"; }
+
+/* ── Екрани з власною розміткою — ті самі типи через їхні класи (суддя, коло 1) ──
+   Головна (нові контакти), По днях, Смисли, Кампанії пошти, Контакти. Мітка типу —
+   той самий маленький напис над блоком (.blk-tag або ::before), що й на панелях. */
+
+.blk-tag,
+.work-stats::before,
+.work-team::before,
+.work-plan::before,
+.work-list::before,
+.pitch-side::before,
+.mc-list-main::before,
+.triage-card::before,
+.triage-recent::before {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* Смуги фільтрів (дата, папка, пошук): тихий заглиблений рядок, а не ще одна картка. */
+.work-toolbar,
+.mc-toolbar,
+.triage-toolbar {
+  background: var(--surface-sunk);
+  border: 1px solid transparent;
+  border-radius: 10px;
+  box-shadow: none;
+  padding: var(--sp-2) var(--sp-3);
+}
+
+/* Показники: великі числа без рамки навколо блоку. */
+.work-stats { margin-top: var(--sp-2); }
+.work-stats::before { content: "Показники"; grid-column: 1 / -1; margin-bottom: calc(-1 * var(--sp-1)); }
+.work-days { margin-bottom: var(--sp-2); }
+
+/* Список: рядки з тонкими лініями. */
+.work-team::before { content: "Список"; padding: var(--sp-2) var(--sp-3) 0; }
+.work-list::before { content: "Список"; margin-bottom: var(--sp-2); }
+.pitch-side::before { content: "Список"; margin-bottom: var(--sp-2); }
+.mc-list-main::before { content: "Список"; margin-bottom: var(--sp-2); }
+.triage-recent::before { content: "Список"; margin-bottom: var(--sp-2); }
+
+/* Робоча черга: тонка смуга дії згори. */
+.work-plan,
+.triage-card { border-top: 3px solid var(--teal) !important; }
+.work-plan::before { content: "Робоча черга"; margin-bottom: var(--sp-1); }
+.triage-card::before { content: "Робоча черга · нові контакти"; margin-bottom: var(--sp-2); }
+
+/* Довідка: заглиблене тло без рамки й тіні. */
+.panel.pitch-intro,
+.work-dialog.is-empty { background: var(--surface-sunk); border-color: transparent; box-shadow: none; }
+.triage-card { padding-top: var(--sp-3); }
+.triage-card::before { grid-column: 1 / -1; }
