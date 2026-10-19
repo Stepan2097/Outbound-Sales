@@ -50,11 +50,12 @@ async function openHome() {
 
 /* ── план дня ───────────────────────────────────────────────────────────── */
 
+/** Ворота нових контактів — завжди свої (у адміна план дня командний, а конвеєр — його власний). */
 function newContactsTile(gate) {
   if (!gate) return { value: "—", note: "" };
-  if (!gate.allowed) return { value: "0", note: "спершу розмови" };
-  if (gate.busy && gate.mode === "limit") return { value: `${gate.used} з ${gate.limit}`, note: "норма на сьогодні" };
-  return { value: "відкрито", note: gate.busy ? "без обмеження" : "розмови розібрано" };
+  if (!gate.allowed) return { value: "0", note: "спершу ваші розмови" };
+  if (gate.busy && gate.mode === "limit") return { value: `${gate.used} з ${gate.limit}`, note: "ваша норма на сьогодні" };
+  return { value: "відкрито", note: gate.busy ? "без обмеження" : "ваші розмови розібрано" };
 }
 
 function planHtml() {
