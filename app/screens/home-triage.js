@@ -312,6 +312,11 @@ function fillTexts(item) {
 
 // ── малювання ─────────────────────────────────────────────────────────────
 
+function folderName() {
+  if (triage.folderId === "all") return "Усі контакти бази";
+  return (triage.folders || []).find((folder) => folder.id === triage.folderId)?.name || "папка";
+}
+
 function foldersHtml() {
   const folders = triage.folders || [];
   return `<div class="triage-toolbar">
@@ -550,8 +555,9 @@ export function renderTriage() {
   if (!root) return;
   const item = triage.item;
   let body;
-  if (!triage.folderId) body = '<div class="triage-empty"><i data-lucide="folder-open"></i><strong>Оберіть папку бази</strong><p>Далі — людина за людиною: спершу ті, хто вже в друзях наших LinkedIn-акаунтів, потім решта папки. Лише ті, кому ще ніхто не писав.</p></div>';
-  else if (triage.loading && !item) body = '<div class="empty-state">Шукаємо наступну людину…</div>';
+  // Що це і що буде після вибору (Марко 19.10: «не дуже розумію призначення цього»).
+  if (!triage.folderId) body = '<div class="triage-empty"><i data-lucide="folder-open"></i><strong>Оберіть папку бази — і тут з\'явиться перша людина</strong><p>Люди з папки CRM, яким ще ніхто не писав, по одному: спершу ті, хто вже в друзях наших LinkedIn-акаунтів. Про кожного сервер сам збере пошти, компанію й напише лист; ви надсилаєте повідомлення в LinkedIn, запит у друзі чи лист — або «Не валідний», «Пропустити». «Продукт» і «Мова» — про що й якою мовою AI пише текст.</p></div>';
+  else if (triage.loading && !item) body = `<div class="empty-state triage-searching" role="status">Шукаю ${triage.cursor ? "наступну" : "першу"} людину в папці «${escapeHtml(folderName())}»… У великій папці це може тривати до хвилини.</div>`;
   else if (triage.error) body = `<p class="esp-notice is-bad">${escapeHtml(triage.error)}</p>`;
   else if (item?.done || !item?.contact) body = '<div class="triage-empty"><i data-lucide="party-popper"></i><strong>У цій папці всіх уже опрацьовано</strong><p>Кожному або вже писали, або його позначено невалідним. Пропущені сьогодні повернуться після перезавантаження.</p><button type="button" data-triage="restart">Почати папку спочатку</button></div>';
   else body = `${progressHtml(item)}${cardHtml(item)}`;
@@ -732,7 +738,9 @@ root?.addEventListener("change", (event) => {
     triage.folderId = event.target.value;
     try { window.localStorage.setItem(FOLDER_KEY, triage.folderId); } catch {}
     Object.assign(triage, { cursor: 0, skip: [], item: null, notice: "" });
-    void loadNext();
+    // Відповідь великої папки йде довго: рядок «Шукаю…» і картка — одразу в полі зору.
+    void loadNext().then(() => rootEl()?.querySelector(".triage-progress, .triage-empty, .esp-notice")?.scrollIntoView?.({ block: "nearest", behavior: "smooth" }));
+    rootEl()?.querySelector(".triage-searching")?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
   } else if (field === "tactic") {
     triage.tactic = event.target.value;
     save(TACTIC_KEY, triage.tactic);
@@ -741,8 +749,16 @@ root?.addEventListener("change", (event) => {
     triage.event = event.target.value.trim();
     save(EVENT_KEY, triage.event);
     if (triage.tactic === "conference" && triage.event) void draftTexts();
-  } else if (field === "product") triage.productId = event.target.value;
-  else if (field === "language") triage.language = event.target.value;
+  } else if (field === "product" || field === "language") {
+    // Людина вже на екрані — її текст переписується під новий продукт чи мову (19.10);
+    // без людини вибір просто запам'ятовується для наступної.
+    if (field === "product") triage.productId = event.target.value;
+    else triage.language = event.target.value;
+    if (triage.item?.contact) {
+      say(field === "product" ? "Пишу текст під новий продукт — з'явиться в полях нижче за кілька секунд." : "Пишу текст іншою мовою — з'явиться в полях нижче за кілька секунд.");
+      void draftTexts();
+    }
+  }
   else if (field === "mailbox") { readTexts(); triage.mailbox = event.target.value; renderTriage(); }
   else if (field === "invite-account") { readTexts(); triage.inviteAccount = event.target.value; renderTriage(); }
 });

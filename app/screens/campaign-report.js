@@ -80,10 +80,18 @@ function renderCampaignReport() {
   const data = report.data;
   const job = data?.job;
   const jobLine = job?.running ? `AI ставить мітки: ${job.done} з ${job.total}…` : job && job.total ? `AI розмітив ${job.done - job.failed} з ${job.total}${job.failed ? `, не вдалось ${job.failed}` : ""}.` : "";
+  // Кнопка — лише коли є що розмічати (Марко 19.10: «нічого не робить, не розумію для чого
+  // вона»): мітки AI ставить і сам кожні 10 хв, кнопка — щоб не чекати.
+  const unlabeled = (data?.campaigns || []).reduce((sum, row) => sum + (Number(row.unlabeled) || 0), 0);
+  const action = job?.running
+    ? ""
+    : unlabeled
+      ? `<button type="button" class="text-button" data-campaign-report-ai title="Відповіді без мітки: AI скаже, кваліфікована, не ICP, відмова, тільки трафік чи інше. Сам він це робить кожні 10 хв."><i data-lucide="sparkles"></i><span>Розмітити нові відповіді (${unlabeled})</span></button>`
+      : data ? `<span class="campaign-report-quiet" title="Мітки відповідей (кваліфікована, не ICP, відмова…) AI ставить сам кожні 10 хв.">Усі відповіді розмічено · AI робить це сам кожні 10 хв</span>` : "";
   const head = `
     <div class="campaign-report-head">
       <div><h2 title="Головне число — кваліфіковані відповіді на 100 написаних; дзвінки — як підтвердження.">Порівняння кампаній</h2></div>
-      <button type="button" class="text-button" data-campaign-report-ai ${job?.running ? "disabled" : ""}><i data-lucide="sparkles"></i><span>Розмітити нові відповіді</span></button>
+      ${action}
     </div>
     ${jobLine ? `<p class="campaign-report-job">${escapeHtml(jobLine)}</p>` : ""}`;
   if (report.error && !data) { root.innerHTML = `<section class="campaign-report panel blk-metrics">${head}<div class="empty-state">${escapeHtml(report.error)}</div></section>`; refreshIcons(root); return; }
