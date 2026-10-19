@@ -3156,7 +3156,8 @@ function draftsCurrent(contactId, options) {
  * job, unless the drafts are asked for again (`redraft`: a new tactic).
  */
 function prepareTriageContact(contactId, options = {}, { redraft = false, cacheScope = "" } = {}) {
-  const product = state.products.find((item) => item.id === options.productId) || currentProduct();
+  // Продукт — картка «Смислів», обрана на Головній, або каталог, коли «AI підбере» (суддя 19.10).
+  const product = draftProduct(options.productId || "");
   const wanted = {
     productId: product?.id || "",
     language: normalizeLanguage(options.language || "en"),
