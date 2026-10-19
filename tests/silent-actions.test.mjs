@@ -21,3 +21,11 @@ test("the conveyor says what it is, says it is searching, and rewrites the text 
   assert.match(triage, /Шукаю \$\{triage\.cursor \? "наступну" : "першу"\} людину в папці/);
   assert.match(triage, /field === "product" \|\| field === "language"[\s\S]{0,400}if \(triage\.item\?\.contact\) \{[\s\S]{0,300}void draftTexts\(\);/);
 });
+
+test("суддя 19.10: продукт чи мову змінили, поки людина ще готується, — лист переписується під новий вибір, раз", () => {
+  const server = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+  assert.match(server, /productId: job\.options\.productId \|\| "",\n    language: job\.options\.language,/);
+  assert.match(triage, /\(prep\.productId !== undefined && \(prep\.productId \|\| ""\) !== \(triage\.productId \|\| ""\)\)/);
+  assert.match(triage, /\(prep\.language && prep\.language !== triage\.language\)/);
+  assert.match(triage, /if \(stale && triage\.redraftedFor !== wanted\) \{\n    triage\.redraftedFor = wanted;\n    void draftTexts\(\);/);
+});

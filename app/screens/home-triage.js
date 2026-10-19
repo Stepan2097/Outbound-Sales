@@ -205,8 +205,18 @@ function applyPrep(prep) {
     for (const field of Object.keys(fresh)) if (!triage.dirty.has(field)) triage.texts[field] = fresh[field];
   }
   renderTriage();
-  // The tactic was changed while the preparation was still writing with the old one.
-  if (prep.state === "done" && prep.tactic && prep.tactic !== triage.tactic && !triage.drafting && !(triage.tactic === "conference" && !triage.event)) void draftTexts();
+  // Тактику, продукт чи мову змінили, поки підготовка ще писала лист зі старими (суддя
+  // 19.10: зміна в будь-який момент має закінчитись чернеткою під новий вибір). Один
+  // повтор на кожен вибір — щоб розбіжність, яку сервер не може усунути, не крутилась колом.
+  if (prep.state !== "done" || triage.drafting || (triage.tactic === "conference" && !triage.event)) return;
+  const stale = (prep.tactic && prep.tactic !== triage.tactic)
+    || (prep.productId !== undefined && (prep.productId || "") !== (triage.productId || ""))
+    || (prep.language && prep.language !== triage.language);
+  const wanted = `${prep.contactId}|${triage.tactic}|${triage.productId || ""}|${triage.language}`;
+  if (stale && triage.redraftedFor !== wanted) {
+    triage.redraftedFor = wanted;
+    void draftTexts();
+  }
 }
 
 /** The person's addresses, as the card holds them now. */

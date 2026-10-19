@@ -3128,6 +3128,10 @@ function prepView(job) {
     startedAt: job.startedAt,
     finishedAt: job.finishedAt || null,
     tactic: job.options.tactic,
+    // Під який продукт і якою мовою пишеться лист — щоб сторінка бачила, що вибір
+    // змінився, поки людина ще готувалась (суддя 19.10, таск e4a00a5b).
+    productId: job.options.productId || "",
+    language: job.options.language,
     steps: PREP_STEPS.map(([id, label]) => ({ id, label, state: job.steps[id].state, note: job.steps[id].note || "" })),
     ...(job.contact ? { contact: job.contact, emails: contactEmails(job.contact) } : {}),
     company: job.company || null,
