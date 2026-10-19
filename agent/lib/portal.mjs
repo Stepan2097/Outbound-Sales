@@ -99,6 +99,8 @@ export class Portal {
   inboxThread(thread) { return this.#post({ action: 'inbox.thread', ...thread }); }
   inboxDone(threadsSeen, backfill = null) { return this.#post({ action: 'inbox.done', threadsSeen, ...(backfill ? { backfill } : {}) }); }
   /** All of the account's LinkedIn connections, in parts; `first` starts a new read. */
+  /** Who somebody from a conversation really is (lib/profiles.mjs). */
+  profileResolved(answer) { return this.#post({ action: 'profile.resolved', ...answer }); }
   networkBatch(people, first = false) { return this.#post({ action: 'network.batch', people, first }); }
   networkDone({ total = null, complete = false } = {}) { return this.#post({ action: 'network.done', total, complete }); }
   /** Right before typing: is this reply still wanted, and is the account still allowed to send it? */

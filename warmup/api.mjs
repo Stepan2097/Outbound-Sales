@@ -1,5 +1,6 @@
 import { scenarioForPrompt } from "./scenarios.mjs";
 import { LIVE_ACCOUNT_STATUSES, withAccountQuota } from "./store.mjs";
+import { applyResolved, profilesToResolve } from "./profile-resolve.mjs";
 import { connectCeiling, weeklyAllowance, weeklyConnectAllowance, weeklyConnectCounts } from "./weekly.mjs";
 import { anty, crm, CONTACT_ID_BATCH, IN_FOLDER, antyTeamId, crmError, leadById, queueTotal, today, withFolder } from "./db.mjs";
 import { RestError, likeLiteral } from "./rest.mjs";
@@ -899,6 +900,31 @@ async function enrichCampaigns(campaigns) {
  * enough — "Profile 47 - linkedin" is not something to put in front of a seller
  * deciding which of five logins somebody answered.
  */
+/**
+ * The messenger names somebody by their first name. When the thread's CRM
+ * contact has the full one — set from their profile (warmup/profile-resolve.mjs)
+ * or entered by a person — and it starts with that first name, the screen says
+ * the full one (власник 19.10: «іноді показує тільки імя людини без прізвища»).
+ */
+async function withFullNames(threads) {
+  const short = threads.filter((thread) => thread.crmContactId && !/\s/.test(String(thread.participant?.name || "").trim()));
+  const ids = [...new Set(short.map((thread) => String(thread.crmContactId)))];
+  if (!ids.length) return threads;
+  const names = new Map();
+  try {
+    for (let at = 0; at < ids.length; at += CONTACT_ID_BATCH) {
+      for (const row of await crm.from("contacts").select("id,name").in("id", ids.slice(at, at + CONTACT_ID_BATCH)).rows()) names.set(String(row.id), String(row.name || "").trim());
+    }
+  } catch { return threads; }
+  return threads.map((thread) => {
+    const first = String(thread.participant?.name || "").trim().toLowerCase();
+    const full = thread.crmContactId ? names.get(String(thread.crmContactId)) : null;
+    return full && /\s/.test(full) && first && full.toLowerCase().startsWith(first)
+      ? { ...thread, participant: { ...thread.participant, name: full } }
+      : thread;
+  });
+}
+
 function describeThread(thread, { labels, identities, outreach }) {
   const found = outreach.get(threadKeyOf(thread)) || { crmContactId: null, outreachStatus: null };
   return {
@@ -3269,7 +3295,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         // "nothing arrived" and "the agent never ran" need different people to
         // do different things.
         sync: { ...await syncSummary(accounts.map((account) => account.id)), window: windowLabel() },
-        threads: threads.map((thread) => describeThread(thread, { labels, identities, outreach }))
+        threads: await withFullNames(threads.map((thread) => describeThread(thread, { labels, identities, outreach })))
       });
       return true;
     }
@@ -3299,11 +3325,11 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
 
       sendJson(response, 200, {
         success: true,
-        thread: describeThread(found.thread, {
+        thread: (await withFullNames([describeThread(found.thread, {
           labels: new Map(account ? [[account.id, account.label]] : []),
           identities,
           outreach
-        }),
+        })]))[0],
         messages: found.messages,
         outbox: visibleReplies(own, found.messages),
         reply: {
@@ -3585,6 +3611,11 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         // сесії — раз на кілька днів або коли на сторінці акаунта натиснули
         // «Оновити». Ніколи під час паузи; сесію заради цього не відкриваємо.
         network: { due: Boolean(network) && !paused && account.status !== "excluded" && await network.due(account.id) },
+        // Contacts made from this account's conversations with only a first
+        // name and a member-id link: the agent opens each one's profile and
+        // says who they are (warmup/profile-resolve.mjs, 19.10).
+        profiles: { toResolve: !run || paused || account.status === "excluded" || account.health !== "ok"
+          ? [] : await profilesToResolve(account.id).catch(() => []) },
         // Replies written on the Inbox screen that this account is to send in
         // this session — the oldest few, never past the day's limit, and none at
         // all where the account would not be opened anyway. The agent still asks
@@ -3627,7 +3658,9 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           plan: [],
           invites: { ...base.invites, toSend: [], toCheck: [] },
           inbox: { ...base.inbox, due: Boolean(light.duty) },
-          network: { due: false }
+          network: { due: false },
+          // A look into the inbox sets a few profiles right too; a send-only session does not.
+          profiles: light.duty ? base.profiles : { toResolve: [] }
         });
         return true;
       }
@@ -4010,6 +4043,19 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       // Частинами, бо в акаунта бувають тисячі контактів; `done` закриває
       // читання. Без сховища (тести, старий сервер) — 501, агент це пише в лог
       // і йде далі.
+      // ── хто людина з розмови насправді (19.10) ─────────────────────────
+      if (action === "profile.resolved") {
+        if (!body.contactId) return fail(response, sendJson, 400, "Який контакт?");
+        const result = await applyResolved({
+          accountId: account.id, contactId: String(body.contactId), memberId: body.memberId ?? null,
+          vanity: typeof body.vanity === "string" ? body.vanity : null, name: typeof body.name === "string" ? body.name : null,
+          headline: typeof body.headline === "string" ? body.headline : null, failed: body.failed ?? null
+        });
+        if (!result.ok) return fail(response, sendJson, result.status, result.error);
+        sendJson(response, 200, { success: true, ...result });
+        return true;
+      }
+
       if (action === "network.batch" || action === "network.done") {
         if (!network) return fail(response, sendJson, 501, "Список контактів тут не зберігається");
         const result = action === "network.batch"

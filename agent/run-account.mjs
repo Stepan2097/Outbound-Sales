@@ -29,6 +29,7 @@ import { AntyApi } from './lib/anty-api.mjs';
 import { settle } from './lib/login-probe.mjs';
 import { UNREACTED_BUTTON, isUnreacted } from './lib/reactions.mjs';
 import { TAB_HEAP_LIMIT_MB, describeMemory, freshTab, isTabCrash, oneTab, tabMemory } from './lib/tab.mjs';
+import { resolveProfiles } from './lib/profiles.mjs';
 
 // ── arguments ──────────────────────────────────────────────────────────────
 const argv = process.argv.slice(2);
@@ -513,6 +514,23 @@ log(`сесію відкрито (${session.sessionId}${session.resumed ? ', п�
       report.errors.push(`відповіді: ${e.message}`);
       log(`  ⚠️ відповіді впали: ${e.message}`);
       await portal.log('agent.outbox', `Sending replies failed — ${e.message}`, null, 'warn').catch(() => {});
+    }
+  }
+
+  // ── who the people from the conversations really are (19.10) ─────────────
+  // Contacts made from a conversation had a first name and a member-id link;
+  // each one's profile is opened and its real address and full name go back.
+  if (plan.profiles?.toResolve?.length && !argv.includes('--no-profiles')) {
+    await recycle('профілі з розмов');
+    try {
+      report.profiles = await resolveProfiles(page, plan.profiles.toResolve, {
+        portal, guard, self: { slug: selfSlug, name: me }, log, refresh: () => keepSmall('профілі з розмов')
+      });
+      log(`профілі з розмов: уточнено ${report.profiles.resolved}, не вдалося ${report.profiles.failed}`);
+    } catch (e) {
+      if (e instanceof VisitStopped) throw e;
+      report.errors.push(`профілі з розмов: ${e.message}`);
+      log(`  ⚠️ профілі з розмов: ${e.message}`);
     }
   }
 

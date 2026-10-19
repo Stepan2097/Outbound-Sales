@@ -148,6 +148,10 @@ test.before(async () => {
       return answer({ message: "the CRM is not answering", code: "57014" }, refused);
     }
     if (request.method === "GET") return answer(ordered(found, params).slice(0, 1000));
+    if (request.method === "DELETE") {
+      rows[table] = (rows[table] ?? []).filter((row) => !found.includes(row));
+      return answer(found);
+    }
 
     let payload = "";
     request.on("data", (chunk) => { payload += chunk; });
@@ -735,4 +739,67 @@ test("id LinkedIn і двоє різних людей з одним ім'ям (�
   const [person] = added();
   assert.equal(person.linkedin, `https://www.linkedin.com/in/${MILOS_ID}`, "не малими літерами — інакше посилання нікуди не веде");
   assert.equal(normalizeParticipant(MILOS).slug, MILOS_ID);
+});
+
+// ── хто людина з розмови насправді: агент відкрив її профіль (власник 19.10) ──
+
+const resolved = (body) => call({ method: "POST", path: "/api/warmup/agent", body: { action: "profile.resolved", accountId: "acc-1", ...body } });
+
+test("контакт із розмови з одним ім'ям і посиланням-id: агент знайшов профіль — посилання й повне ім'я виправлено; у план потрапляє лише такий контакт", async () => {
+  rows.contacts.push({ id: "c-abrar", name: "Abrar", linkedin: "https://www.linkedin.com/in/acoaabzvqocbk-izblqelvjwxscwupl99rha8bo", custom_fields: { source: "linkedin_inbox" }, created_at: "2026-10-14T00:00:00.000Z" });
+  rows.wl_events.push({ id: "m-abrar", account_id: "acc-1", type: "message.in", created_at: new Date().toISOString(), meta: { threadKey: "t-abrar", crmContactId: "c-abrar", body: "Hi" } });
+  const { profilesToResolve } = await import("../warmup/profile-resolve.mjs");
+  assert.deepEqual(await profilesToResolve("acc-1"), [{ contactId: "c-abrar", threadKey: "t-abrar" }]);
+  assert.deepEqual(await profilesToResolve("acc-2"), [], "розмова іншого акаунта — не його");
+
+  const answer = await resolved({ contactId: "c-abrar", memberId: "ACoAABzVQocBk", vanity: "abrar-hussain-42", name: "Abrar Hussain", headline: "Head of UA at Apps" });
+  assert.equal(answer.status, 200);
+  assert.equal(answer.payload.merged, false);
+  const contact = rows.contacts.find((row) => row.id === "c-abrar");
+  assert.equal(contact.linkedin, "https://www.linkedin.com/in/abrar-hussain-42");
+  assert.equal(contact.name, "Abrar Hussain");
+  assert.equal(contact.position, "Head of UA at Apps");
+  assert.deepEqual(await profilesToResolve("acc-1"), [], "виправлений більше не в плані");
+});
+
+test("та сама людина вже є в CRM за справжнім профілем: копію злито — листування, задачі й папки на ній, копії немає, розмова на ній", async () => {
+  rows.contacts.push(
+    { id: "c-milos", name: "Miloš Marković", linkedin: "https://www.linkedin.com/in/milo%C5%A1-markovi%C4%87-1990/", created_at: "2026-08-16T00:00:00.000Z" },
+    { id: "c-copy", name: "Miloš", linkedin: "https://www.linkedin.com/in/acoaac3a0tsbsmxznrsyp1eao9vtyvksqpa44m8", custom_fields: { source: "linkedin_inbox" }, created_at: "2026-10-14T00:00:00.000Z" }
+  );
+  rows.activities = [{ id: "a-1", contact_id: "c-copy", content: "Hi Mary" }];
+  rows.tasks = [{ id: "k-1", contact_id: "c-copy", title: "Відповісти" }];
+  rows.contact_folder_memberships = [{ contact_id: "c-copy", folder_id: "f-inbox" }];
+  rows.wl_events.push({ id: "m-copy", account_id: "acc-1", type: "message.in", created_at: new Date().toISOString(), meta: { threadKey: "t-milos", crmContactId: "c-copy", body: "Hi" } });
+
+  const answer = await resolved({ contactId: "c-copy", vanity: "miloš-marković-1990", name: "Miloš Marković" });
+  assert.equal(answer.status, 200);
+  assert.equal(answer.payload.merged, true);
+  assert.equal(answer.payload.contactId, "c-milos");
+  assert.equal(rows.contacts.some((row) => row.id === "c-copy"), false, "копії немає");
+  assert.equal(rows.activities[0].contact_id, "c-milos");
+  assert.equal(rows.tasks[0].contact_id, "c-milos");
+  assert.ok(rows.contact_folder_memberships.some((row) => row.contact_id === "c-milos" && row.folder_id === "f-inbox"));
+  assert.ok(rows.wl_events.some((row) => row.type === CONTACT_TYPE && row.meta?.threadKey === "t-milos" && row.meta?.crmContactId === "c-milos"), "розмова на справжньому контакті");
+});
+
+test("контакт, який внесла людина, або вже виправлений — агентова відповідь його не чіпає; невдача пишеться й не повторюється три дні", async () => {
+  rows.contacts.push({ id: "c-hand", name: "Olena", linkedin: "https://www.linkedin.com/in/acoaaxyzxyzxyzxyzxyzxyz", created_at: "2026-10-01T00:00:00.000Z" });
+  assert.equal((await resolved({ contactId: "c-hand", vanity: "olena-b", name: "Olena B" })).status, 409);
+  assert.equal(rows.contacts.find((row) => row.id === "c-hand").name, "Olena");
+
+  rows.contacts.push({ id: "c-x", name: "Jody", linkedin: "https://www.linkedin.com/in/acoaabi-c44bjqjcuzrrrohrkcpbaj87aonzazu", custom_fields: { source: "linkedin_inbox" }, created_at: "2026-10-14T00:00:00.000Z" });
+  rows.wl_events.push({ id: "m-x", account_id: "acc-1", type: "message.in", created_at: new Date().toISOString(), meta: { threadKey: "t-x", crmContactId: "c-x", body: "Hi" } });
+  const failed = await resolved({ contactId: "c-x", failed: "thread_not_painted" });
+  assert.equal(failed.status, 200);
+  assert.equal(failed.payload.resolved, false);
+  const { profilesToResolve } = await import("../warmup/profile-resolve.mjs");
+  assert.deepEqual(await profilesToResolve("acc-1"), [], "спробували — наступна спроба за три дні");
+});
+
+test("«Вхідні»: LinkedIn дав лише ім'я, а в контакта в CRM — повне: на екрані повне", async () => {
+  rows.contacts.push({ id: "c-full", name: "Abrar Hussain", linkedin: "https://www.linkedin.com/in/abrar-hussain-42", created_at: "2026-10-14T00:00:00.000Z" });
+  stored({ threadKey: "t-abrar", body: "Hi", participant: { name: "Abrar", slug: "acoaabzvqocbk" }, crmContactId: "c-full", minutesAgo: 5 });
+  const list = await call({ method: "GET", path: "/api/warmup/inbox" });
+  assert.equal(list.payload.threads.find((row) => row.threadKey === "t-abrar").participant.name, "Abrar Hussain");
 });
