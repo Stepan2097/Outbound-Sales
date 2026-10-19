@@ -95,11 +95,12 @@ test("the workspace opens on «Головна»", () => {
  * and `main.js` does nothing but load them and start.
  */
 const SCREEN_FILES = {
-  // «Сьогодні» (пінги, 16.10) реєструє Головну й відкриває нові контакти з home-triage.js.
-  home: ["screens/today.js", "screens/home-triage.js"],
+  // «Сьогодні» (пінги, 16.10) реєструє Головну.
+  home: ["screens/today.js"],
   work: ["screens/work.js"],
   // WorkSpace (16.10): кампанії лідгенів, порівняння й хребет — окремо від прогріву.
-  workspace: ["screens/workspace.js", "screens/lead-campaigns.js", "screens/campaign-plan.js", "screens/campaign-report.js"],
+  // З 19.10 — і конвеєр нових контактів (home-triage.js), вкладка «Нові контакти».
+  workspace: ["screens/workspace.js", "screens/lead-campaigns.js", "screens/campaign-plan.js", "screens/campaign-report.js", "screens/home-triage.js"],
   warmup: ["screens/warmup-accounts.js", "screens/warmup-campaign.js"],
   inbox: ["screens/inbox.js"],
   pitch: ["screens/pitch.js"],

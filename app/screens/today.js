@@ -2,8 +2,8 @@
 //
 // Кожен живий діалог має пінг — задачу CRM з датою наступного дотику. Тут вони в
 // тому порядку, в якому їх робити: відповіді → прострочені → на сьогодні →
-// перші повідомлення. Нові контакти з папки (home-triage.js) — лише коли
-// відповідей і прострочених немає.
+// перші повідомлення. Нові контакти з папки — у WorkSpace → «Нові контакти» (19.10),
+// і лише коли відповідей і прострочених немає.
 //
 // Робоче місце — один лід за раз: хто це, уся переписка, чернетка, «Погодити й
 // надіслати» → наступний. Пінг можна перенести (+1 день, +3, тиждень, дата) чи
@@ -12,7 +12,6 @@
 // закриває цей і ставить наступний (через 3 робочі дні).
 
 import { api, escapeAttr, escapeHtml, onScreen, refreshIcons } from "../core.js";
-import { openTriage } from "./home-triage.js";
 import { warmupGoesOutText } from "./inbox.js";
 
 onScreen("home", { open: () => void openToday() });
@@ -42,7 +41,6 @@ function readScope() {
 }
 
 const root = () => document.getElementById("todayRoot");
-const triageRoot = () => document.getElementById("triageRoot");
 
 function dayLabel(day, todayDay) {
   if (!day) return "";
@@ -73,10 +71,6 @@ async function openToday({ keepSelection = false } = {}) {
   render();
   if (today.selected) void loadDetail(today.selected);
   else today.detail = null;
-  // Нові контакти — лише коли живі діалоги розібрано (або пінги ще не налаштовані).
-  const allowed = !today.data || today.data.newContactsAllowed !== false;
-  triageRoot().hidden = !allowed;
-  if (allowed) void openTriage();
 }
 
 async function loadDetail(pingId) {
@@ -454,7 +448,7 @@ function render() {
         <aside class="today-queue">${queueHtml()}</aside>
         <article class="today-work">${workHtml()}</article>
       </div>` : `${today.notice ? `<p class="today-notice ${today.tone}" role="status">${escapeHtml(today.notice)}</p>` : ""}<div class="today-queue today-queue-solo">${queueHtml()}</div>`}
-      ${data.newContactsAllowed ? "" : `<p class="today-gate">Нові контакти з папки — коли розберете відповіді й прострочені.</p>`}
+      ${data.newContactsAllowed ? "" : `<p class="today-gate">Нові контакти з папки (WorkSpace) — коли розберете відповіді й прострочені.</p>`}
     </section>`;
   refreshIcons(host);
 }

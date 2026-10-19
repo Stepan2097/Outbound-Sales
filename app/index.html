@@ -110,11 +110,10 @@
           </div>
         </header>
 
-        <!-- Головна (12.10): CRM-папка, людина за людиною — малює app/screens/home-triage.js. -->
+        <!-- Головна. Конвеєр нових контактів (home-triage.js) з 19.10 — у WorkSpace → «Нові контакти». -->
         <section class="view" id="view-home">
           <!-- «Сьогодні» (16.10): відповіді → прострочені → на сьогодні → перші повідомлення — app/screens/today.js. -->
           <div class="today-page" id="todayRoot"></div>
-          <div class="triage-page" id="triageRoot"></div>
         </section>
 
         <!-- «По днях» (12.10): кому писали за день, хто відповів, діалог — app/screens/work.js. -->
@@ -339,7 +338,18 @@
 
         <!-- WorkSpace (16.10): кампанії лідгенів — стратегія аутріч, з прогрівом не пов'язана. -->
         <section class="view" id="view-workspace">
-          <div class="warmup-layout">
+          <!-- Дві частини WorkSpace (Марко 19.10): кампанії лідгенів і конвеєр нових контактів — app/screens/workspace.js. -->
+          <div class="view-tabs" role="tablist" aria-label="WorkSpace">
+            <button type="button" role="tab" data-ws-tab="campaigns">Кампанії</button>
+            <button type="button" role="tab" data-ws-tab="contacts">Нові контакти</button>
+          </div>
+          <!-- Нові контакти: папка CRM → людина за людиною, кому ще ніхто не писав — app/screens/home-triage.js.
+               Поки є свої відповіді чи прострочені пінги — замість конвеєра рядок, що спершу розмови. -->
+          <div class="ws-pane" data-ws-pane="contacts" hidden>
+            <div id="triageGate"></div>
+            <div class="triage-page" id="triageRoot"></div>
+          </div>
+          <div class="warmup-layout ws-pane" data-ws-pane="campaigns">
             <!-- Кампанії лідгенів: папки CRM, продукт, сценарій — app/screens/lead-campaigns.js. -->
             <section class="panel blk-settings span-2" id="leadCampaignPanel"></section>
             <!-- Порівняння кампаній: кваліфіковані на 100 написаних — app/screens/campaign-report.js. -->

@@ -420,6 +420,22 @@ export async function todayList({ viewerId, scope = "mine", now = new Date() }) 
   };
 }
 
+/**
+ * Чи можна лідгену зараз брати нових людей з папки (WorkSpace → «Нові контакти», 19.10).
+ * Правило без змін: спершу свої відповіді й прострочені пінги. Рахуються лише свої
+ * пінги — і в адміна, щоб пінги команди не закривали йому конвеєр.
+ */
+export async function newContactsGate({ viewerId, now = new Date() }) {
+  if (!pingsConfigured()) return { configured: false, allowed: true, replies: 0, overdue: 0 };
+  const list = await todayList({ viewerId, scope: "mine", now });
+  return {
+    configured: true,
+    allowed: list.newContactsAllowed,
+    replies: list.blocks.replies.length,
+    overdue: list.blocks.overdue.length
+  };
+}
+
 async function loadTask(pingId) {
   const [task] = await crm.from("tasks").select(TASK_COLUMNS).eq("id", pingId).limit(1).rows();
   if (!task || task.queue !== PING_QUEUE) {
@@ -589,6 +605,10 @@ export async function handleTodayApi({ request, response, url, sendJson, readJso
     if (request.method === "GET" && path === "/api/today") {
       const scope = isAdmin && url.searchParams.get("scope") === "all" ? "all" : "mine";
       sendJson(response, 200, { ...(await todayList({ viewerId: viewer.id, scope })), canSeeAll: isAdmin });
+      return true;
+    }
+    if (request.method === "GET" && path === "/api/today/gate") {
+      sendJson(response, 200, await newContactsGate({ viewerId: viewer.id }));
       return true;
     }
     if (request.method === "GET" && path === "/api/today/item") {

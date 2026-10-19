@@ -150,3 +150,14 @@
   font: inherit;
   min-height: 64px;
 }
+
+/* «Нові контакти» (19.10): поки є свої відповіді чи прострочені — рядок і шлях до них. */
+.triage-gate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+.triage-gate p { margin: 0; max-width: 70ch; }
+.triage-gate b { color: var(--ink); }
