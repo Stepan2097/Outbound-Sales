@@ -113,6 +113,7 @@ const SAVED_AS = {
   accountDossiers: "accountDossiers",
   warmupCampaigns: "warmupCampaigns",
   accountLeadgens: "accountLeadgens",
+  newContactPolicy: "newContactPolicy",
   replyLabels: "replyLabels",
   campaignSpine: "campaignSpine",
   leadCampaigns: "leadCampaigns",

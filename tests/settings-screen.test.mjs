@@ -18,7 +18,9 @@ import { loadMain } from "./app-main-excerpt.mjs";
 
 const NAMES = [
   "ROLE_LABEL", "personDisplayName", "renderAccount", "teamRowHtml", "renderTeamDirectory", "loadTeamDirectory",
-  "loadSettingsScreen", "removeTeamUser"
+  "loadSettingsScreen", "removeTeamUser",
+  // «Нові, коли є розмови» (19.10): налаштування лідгена в рядку команди.
+  "POLICY_LABEL", "contactPolicies", "policyHtml", "savePolicy"
 ];
 
 const LISTENERS = [

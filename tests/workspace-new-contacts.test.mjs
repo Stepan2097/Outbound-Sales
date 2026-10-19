@@ -29,7 +29,7 @@ test("the conveyor's root sits in WorkSpace, behind its own tab, and no longer o
 test("WorkSpace opens the conveyor only through the gate, and the queue no longer does", () => {
   assert.match(workspace, /import \{ openTriage \} from "\.\/home-triage\.js"/);
   assert.match(workspace, /api\("\/api\/today\/gate"\)/);
-  assert.match(workspace, /if \(allowed\) await openTriage\(\)/);
+  assert.match(workspace, /if \(allowed && !\(recheck && wasAllowed\)\) await openTriage\(\)/);
   assert.doesNotMatch(today, /openTriage|home-triage/);
 });
 

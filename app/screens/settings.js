@@ -5,6 +5,8 @@
 //   · кошик біля людини (лише адмін)  → /api/account/users/remove: людина більше не входить;
 //   · «Створити новий акаунт» (адмін) → /api/account/users: для того, кого ще нема в CRM;
 //   · «Свій пароль»                   → /api/account/password: вхід самого себе.
+//   · «Нові, коли є розмови» (адмін)  → /api/today/new-contact-policy: скільки нових
+//     контактів лідген бере з конвеєра, поки в нього є відповіді чи прострочені пінги.
 //
 // Не тут і більше: вибір моделі, діаграми витрат і часу. У застосунку не лишилось
 // нічого, що кликало б модель, тож вибирати було нічого, а витрати стояли б на
@@ -25,6 +27,14 @@ onScreen("account", { open: () => void loadSettingsScreen(), render: () => rende
  * застосунку; кого пускати, відповідає CRM.
  */
 const ROLE_LABEL = { admin: "Адміністратор", seller: "Продавець" };
+
+/**
+ * Нові контакти, коли є живі розмови (Марко 19.10: «можемо лише додати десь в
+ * налаштуваннях опцію вручну для Богдана або іншого лідгена зняти обмеження, або
+ * дозволити обмежену кількість»). Без запису — як завжди: спершу розмови.
+ */
+const POLICY_LABEL = { gate: "Ні — спершу розмови", limit: "До N на день", open: "Без обмеження" };
+let contactPolicies = {};
 
 /**
  * Ім'я, тільки якщо воно ім'я. Уламок адреси ним не є: «pavlo.work.101» над
@@ -78,11 +88,39 @@ function teamRowHtml(person, selfEmail) {
       ${name ? `<span>${escapeHtml(person.email)}</span>` : ""}
       ${facts ? `<span>${escapeHtml(facts)}</span>` : ""}
     </div>
+    ${policyHtml(person.email)}
     <select class="team-access" data-email="${escapeAttr(person.email)}"${self ? " disabled title=\"Свою роль змінює інший адміністратор\"" : ""}>${options}</select>
     ${self
       ? ""
       : `<button class="icon-button danger-button" type="button" data-remove-user="${escapeAttr(person.id || "")}" data-remove-email="${escapeAttr(person.email)}" title="Прибрати акаунт назовсім" aria-label="Прибрати акаунт ${escapeAttr(person.email)}"><i data-lucide="trash-2"></i></button>`}
   </article>`;
+}
+
+function policyHtml(email) {
+  const key = String(email || "").toLowerCase();
+  const rule = contactPolicies[key] || { mode: "gate" };
+  return `<label class="team-policy" title="Нові контакти з конвеєра (WorkSpace), поки в людини є відповіді чи прострочені пінги">
+    <span>Нові, коли є розмови</span>
+    <span class="team-policy-row">
+      <select data-policy-email="${escapeAttr(key)}">${Object.entries(POLICY_LABEL).map(([mode, label]) => `<option value="${mode}"${mode === rule.mode ? " selected" : ""}>${label}</option>`).join("")}</select>
+      ${rule.mode === "limit" ? `<input type="number" min="1" max="100" step="1" value="${escapeAttr(rule.limit || 5)}" data-policy-limit="${escapeAttr(key)}" aria-label="Скільки нових на день">` : ""}
+    </span>
+  </label>`;
+}
+
+/** Зберегти й сказати, що тепер діє; рядок пишеться після перечитування списку, бо воно пише туди підсумок. */
+async function savePolicy(email, mode, limit) {
+  let note;
+  try {
+    const result = await api("/api/today/new-contact-policy", { method: "POST", body: JSON.stringify({ email, mode, limit }) });
+    contactPolicies = result.policies || {};
+    const rule = contactPolicies[email];
+    note = `${email}: ${rule ? (rule.mode === "limit" ? `до ${rule.limit} нових на день, навіть коли є розмови` : "нові контакти без обмеження") : "нові контакти — лише коли розмови розібрано"}.`;
+  } catch (error) {
+    note = error.message || "Не вдалося зберегти.";
+  }
+  await loadTeamDirectory();
+  setText("teamUserNote", note);
 }
 
 /**
@@ -110,7 +148,11 @@ async function loadTeamDirectory() {
   const remembered = recallScreen("team")?.value;
   if (remembered?.people && remembered.selfEmail === selfEmail) renderTeamDirectory(remembered, selfEmail);
   try {
-    const directory = await api("/api/account/directory");
+    const [directory, policy] = await Promise.all([
+      api("/api/account/directory"),
+      api("/api/today/new-contact-policy").catch(() => ({ policies: {} }))
+    ]);
+    contactPolicies = policy.policies || {};
     renderTeamDirectory(directory, selfEmail);
     rememberScreen("team", { ...directory, selfEmail });
   } catch (error) {
@@ -160,6 +202,14 @@ async function removeTeamUser(button) {
 }
 
 document.getElementById("teamUserList")?.addEventListener("change", async (event) => {
+  const policy = event.target.closest("[data-policy-email]");
+  const limit = event.target.closest("[data-policy-limit]");
+  const email = policy?.dataset?.policyEmail || limit?.dataset?.policyLimit;
+  if (email) {
+    const mode = policy?.dataset?.policyEmail ? policy.value : "limit";
+    const value = limit?.dataset?.policyLimit ? Number(limit.value) : Number(contactPolicies[email]?.limit) || 5;
+    return void savePolicy(email, mode, value);
+  }
   const select = event.target.closest(".team-access");
   if (!select) return;
   select.disabled = true;

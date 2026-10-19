@@ -13,6 +13,7 @@ import { api, escapeHtml, onScreen, refreshIcons } from "../core.js";
 import { loadLeadCampaigns } from "./lead-campaigns.js";
 import { loadScenarios, scenarioBook } from "./campaign-plan.js";
 import { openTriage } from "./home-triage.js";
+import { openTodayBlock } from "./today.js";
 import "./campaign-report.js";
 
 const TAB_KEY = "outbound.workspace.tab";
@@ -39,9 +40,10 @@ function openTab() {
 }
 
 /** «Нові контакти»: конвеєр — або рядок, що спершу розмови, і шлях до них. */
-async function openNewContacts() {
+async function openNewContacts({ recheck = false } = {}) {
   const slot = document.getElementById("triageGate");
   const conveyor = document.getElementById("triageRoot");
+  const wasAllowed = !conveyor?.hidden;
   try {
     gate = await api("/api/today/gate");
   } catch {
@@ -50,19 +52,35 @@ async function openNewContacts() {
   const allowed = !gate || gate.allowed !== false;
   if (conveyor) conveyor.hidden = !allowed;
   if (slot) {
-    slot.innerHTML = allowed ? "" : gateHtml(gate);
+    slot.innerHTML = allowed ? (gate?.busy ? allowanceHtml(gate) : "") : gateHtml(gate);
     refreshIcons(slot);
   }
-  if (allowed) await openTriage();
+  // Перевірка після відправки не перезапускає конвеєр, що й так відкритий.
+  if (allowed && !(recheck && wasAllowed)) await openTriage();
 }
 
+const waiting = (data) => [data.replies ? `відповідей ${data.replies}` : "", data.overdue ? `прострочених ${data.overdue}` : ""].filter(Boolean).join(", ");
+
 function gateHtml(data) {
-  const parts = [data.replies ? `відповідей ${data.replies}` : "", data.overdue ? `прострочених ${data.overdue}` : ""].filter(Boolean).join(", ");
+  const spent = data.mode === "limit" ? ` Норму нових на сьогодні (${data.limit}) уже взято.` : "";
   return `<section class="panel blk-ref triage-gate">
-    <p><b>Спершу розмови</b>: у вас ${escapeHtml(parts)}. Нові контакти з папки з'являться, коли їх розберете.</p>
+    <p><b>Спершу розмови</b>: у вас ${escapeHtml(waiting(data))}.${spent} Нові контакти з папки з'являться, коли їх розберете.</p>
     <button type="button" class="primary-button" data-ws-to-work><i data-lucide="inbox"></i><span>До роботи</span></button>
   </section>`;
 }
+
+/** Розмови чекають, але адмін дозволив цьому лідгену нових попри них (Налаштування → Команда). */
+function allowanceHtml(data) {
+  const left = data.mode === "limit" ? `Нових сьогодні: <b>${data.used} з ${data.limit}</b>.` : "Нові контакти без обмеження.";
+  return `<p class="triage-allowance">${left} Розмови теж чекають (${escapeHtml(waiting(data))}) — <button type="button" class="text-button" data-ws-to-work>До роботи</button></p>`;
+}
+
+// Взяли людину з конвеєра — ворота перечитуються: на нормі конвеєр поступається розмовам.
+// Пауза — бо журнал роботи пишеться вже після відповіді сервера.
+document.addEventListener("triage:outreach", () => {
+  if (wsTab !== "contacts") return;
+  setTimeout(() => void openNewContacts({ recheck: true }), 1500);
+});
 
 document.querySelector("#view-workspace .view-tabs")?.addEventListener("click", (event) => {
   const button = event.target.closest("[data-ws-tab]");
@@ -73,7 +91,7 @@ document.querySelector("#view-workspace .view-tabs")?.addEventListener("click", 
 });
 
 document.getElementById("triageGate")?.addEventListener("click", (event) => {
-  if (event.target.closest("[data-ws-to-work]")) document.querySelector('.nav-item[data-view="home"]')?.click();
+  if (event.target.closest("[data-ws-to-work]")) openTodayBlock();
 });
 
 /** З Головної-пульту: відкрити WorkSpace одразу на «Нові контакти». */

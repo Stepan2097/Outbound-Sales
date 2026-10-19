@@ -14,6 +14,7 @@ import { acceptedRows, firstMarks } from "../warmup/first-messages.mjs";
 import { INVITE_ACCEPTED } from "../warmup/invites.mjs";
 import { accountName } from "../warmup/activities.mjs";
 import { acceptOpenDialogs, openDialogs, suggestOpenDialogs } from "./open-dialogs.mjs";
+import { OUTREACH_ACTIONS, dayOf, workEntries } from "./work-log.mjs";
 import { CLOSING, DEFAULT_EXIT, EXIT_REASONS, LEAD_STATUSES, ORIGIN, statusPatch } from "./statuses.mjs";
 import {
   PING_QUEUE, REASONS, blockOf, compareItems, dayIn, desiredPing, manualDueDay,
@@ -38,6 +39,48 @@ export function setLeadgenStore(store) {
   if (store?.read && store?.write) leadgenStore = store;
 }
 const leadgenOf = (accountId) => (accountId && leadgenStore.read()[accountId]) || null;
+
+// Скільки нових контактів лідген бере, коли в нього є живі розмови (Марко 19.10:
+// «правило не змінюємо, можемо лише додати в налаштуваннях опцію вручну … зняти
+// обмеження, або дозволити обмежену кількість контактів»). { email: { mode, limit } }:
+// "gate" — як завжди (лише коли відповідей і прострочених нуль), "limit" — до `limit`
+// нових на день попри розмови, "open" — без обмеження. Ставить адміністратор.
+let policyStore = { read: () => ({}), write: async () => {} };
+export function setNewContactPolicyStore(store) {
+  if (store?.read && store?.write) policyStore = store;
+}
+export const NEW_CONTACT_MODES = ["gate", "limit", "open"];
+export const NEW_CONTACT_LIMIT_MAX = 100;
+
+/** Запис налаштування, очищений: невідоме — "gate", ліміт — ціле від 1 до 100. */
+export function cleanNewContactPolicy(value) {
+  const mode = NEW_CONTACT_MODES.includes(value?.mode) ? value.mode : "gate";
+  const limit = Math.min(NEW_CONTACT_LIMIT_MAX, Math.max(1, Math.round(Number(value?.limit) || 5)));
+  return mode === "limit" ? { mode, limit } : { mode };
+}
+
+/**
+ * Рішення воріт за налаштуванням. Без живих розмов нові контакти відкриті завжди;
+ * з ними — за режимом: "gate" закриває, "open" відкриває, "limit" відкриває, доки
+ * сьогодні взято менше за ліміт.
+ */
+export function policyGate({ policy, replies = 0, overdue = 0, used = 0 }) {
+  const rule = cleanNewContactPolicy(policy);
+  const busy = replies > 0 || overdue > 0;
+  const allowed = !busy || rule.mode === "open" || (rule.mode === "limit" && used < rule.limit);
+  return { allowed, busy, mode: rule.mode, limit: rule.limit || null, used };
+}
+
+/** Скільки нових людей лідген узяв сьогодні з конвеєра: запит у друзі, перше повідомлення чи лист. */
+export function newContactsUsedToday(entries, { email, now = new Date() }) {
+  const day = dayOf(now);
+  const people = new Set();
+  for (const row of entries) {
+    if (row.source !== "triage" || row.user !== email || !OUTREACH_ACTIONS.has(row.action) || dayOf(row.at) !== day) continue;
+    people.add(row.contactId || row.email || `${row.at}`);
+  }
+  return people.size;
+}
 
 
 let lastGather = null;
@@ -425,15 +468,15 @@ export async function todayList({ viewerId, scope = "mine", now = new Date() }) 
  * Правило без змін: спершу свої відповіді й прострочені пінги. Рахуються лише свої
  * пінги — і в адміна, щоб пінги команди не закривали йому конвеєр.
  */
-export async function newContactsGate({ viewerId, now = new Date() }) {
-  if (!pingsConfigured()) return { configured: false, allowed: true, replies: 0, overdue: 0 };
+export async function newContactsGate({ viewerId, email = "", now = new Date() }) {
+  if (!pingsConfigured()) return { configured: false, allowed: true, busy: false, mode: "gate", replies: 0, overdue: 0, used: 0, limit: null };
   const list = await todayList({ viewerId, scope: "mine", now });
-  return {
-    configured: true,
-    allowed: list.newContactsAllowed,
-    replies: list.blocks.replies.length,
-    overdue: list.blocks.overdue.length
-  };
+  const replies = list.blocks.replies.length;
+  const overdue = list.blocks.overdue.length;
+  const policy = policyStore.read()[String(email).toLowerCase()];
+  // Лічильник «нових сьогодні» потрібен лише для режиму з лімітом.
+  const used = cleanNewContactPolicy(policy).mode === "limit" ? newContactsUsedToday(await workEntries(), { email: String(email).toLowerCase(), now }) : 0;
+  return { configured: true, replies, overdue, ...policyGate({ policy, replies, overdue, used }) };
 }
 
 async function loadTask(pingId) {
@@ -608,7 +651,27 @@ export async function handleTodayApi({ request, response, url, sendJson, readJso
       return true;
     }
     if (request.method === "GET" && path === "/api/today/gate") {
-      sendJson(response, 200, await newContactsGate({ viewerId: viewer.id }));
+      sendJson(response, 200, await newContactsGate({ viewerId: viewer.id, email: viewer.email }));
+      return true;
+    }
+    // Налаштування «нові контакти, коли є розмови» — по кожному лідгену (Налаштування → Команда).
+    if (request.method === "GET" && path === "/api/today/new-contact-policy") {
+      if (!isAdmin) throw refuse("Це налаштування бачить і змінює адміністратор.", 403);
+      sendJson(response, 200, { policies: policyStore.read(), modes: NEW_CONTACT_MODES, limitMax: NEW_CONTACT_LIMIT_MAX });
+      return true;
+    }
+    if (request.method === "POST" && path === "/api/today/new-contact-policy") {
+      if (!isAdmin) throw refuse("Скільки нових контактів брати, вирішує адміністратор.", 403);
+      const body = await readJson(request);
+      const email = String(body?.email || "").trim().toLowerCase();
+      if (!/^[^@\s]+@[^@\s]+$/.test(email)) throw refuse("Потрібна пошта лідгена.", 400);
+      const next = { ...policyStore.read() };
+      const rule = cleanNewContactPolicy(body);
+      // «Як завжди» — це відсутність запису: так видно, у кого правило змінене.
+      if (rule.mode === "gate") delete next[email];
+      else next[email] = { ...rule, by: viewer.email || null, at: new Date().toISOString() };
+      await policyStore.write(next);
+      sendJson(response, 200, { policies: next });
       return true;
     }
     if (request.method === "GET" && path === "/api/today/item") {
