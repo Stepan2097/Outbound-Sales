@@ -94,9 +94,9 @@ document.getElementById("triageGate")?.addEventListener("click", (event) => {
   if (event.target.closest("[data-ws-to-work]")) openTodayBlock();
 });
 
-/** З Головної-пульту: відкрити WorkSpace одразу на «Нові контакти». */
-export function showNewContacts() {
-  wsTab = "contacts";
+/** З Головної-пульту: відкрити WorkSpace одразу на «Нові контакти» (або на «Кампаніях»). */
+export function showNewContacts(tab = "contacts") {
+  wsTab = WS_TABS.includes(tab) ? tab : "contacts";
   try { window.localStorage.setItem(TAB_KEY, wsTab); } catch {}
   document.querySelector('.nav-item[data-view="workspace"]')?.click();
 }

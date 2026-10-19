@@ -83,11 +83,18 @@ export function openPing(pingId) {
   document.querySelector('.nav-item[data-view="inbox"]')?.click();
 }
 
-/** З Головної-пульту: «До роботи» з одним блоком (відповіді, прострочені…) або всі. */
-export function openTodayBlock(block = "") {
+/** З Головної-пульту: «Усі розмови» (коли вхідні давно не читались — глянути, що там). */
+export function openAllConversations() {
+  setInboxMode("all");
+  document.querySelector('.nav-item[data-view="inbox"]')?.click();
+}
+
+/** З Головної-пульту: «До роботи» з одним блоком (відповіді, прострочені…) або всі — у тих самих «Мої / Усі». */
+export function openTodayBlock(block = "", { scope = "" } = {}) {
   setInboxMode("work");
   today.blockFilter = BLOCKS.some(([key]) => key === block) ? block : "";
   today.selected = "";
+  if (scope === "all" || scope === "mine") today.scope = scope;
   document.querySelector('.nav-item[data-view="inbox"]')?.click();
 }
 
