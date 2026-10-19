@@ -520,6 +520,22 @@ test("the allowance moves when the agent says a request really went out", async 
   assert.equal(sent.meta.by, "agent");
 });
 
+test("кого додали в друзі — у CRM той контакт за б.найборовським (власник 19.10)", async () => {
+  const { forgetInvitedOwner, invitedOwnerEmail } = await import("../warmup/invite-owner.mjs");
+  forgetInvitedOwner();
+  rows.profiles = [{ id: "u-bohdan", email: "b.naiborovskyi@gmail.com" }];
+  rows.contacts[0].owner_id = "u-stepan";
+  const outreachId = await queueOne();
+  assert.equal(rows.contacts[0].owner_id, "u-stepan", "поставлено в чергу — ще нічий новий");
+  const answer = await call({ method: "POST", path: "/api/warmup/agent", body: { action: "invite.sent", accountId: "acc-1", outreachId, outcome: "sent" } });
+  assert.equal(answer.status, 200);
+  assert.equal(rows.contacts[0].owner_id, "u-bohdan");
+  assert.equal(invitedOwnerEmail({}), "b.naiborovskyi@gmail.com");
+  assert.equal(invitedOwnerEmail({ WARMUP_INVITED_OWNER_EMAIL: "off" }), "", "вимикається");
+  delete rows.profiles;
+  forgetInvitedOwner();
+});
+
 test("a request the agent finds already pending costs no allowance", async () => {
   const outreachId = await queueOne();
   const answer = await call({

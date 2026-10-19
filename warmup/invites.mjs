@@ -1,5 +1,6 @@
 import { anty, CONTACT_ID_BATCH, today } from "./db.mjs";
 import { logEvent } from "./store.mjs";
+import { assignInvitedOwner } from "./invite-owner.mjs";
 import { accountName, clampContent, copyToCrm, crmStamp } from "./activities.mjs";
 import { CLAIM_STATUS, OUTREACH_COLUMNS, linkedinSlug, personSnapshot, sentBy } from "./outreach.mjs";
 import { noteUnderRule } from "./strategy.mjs";
@@ -530,6 +531,8 @@ export async function recordSent({ account, run = null, outreach, by, overQuota 
     }
   }, { returning: true });
   await copyRequestToCrm({ account, outreach, event });
+  // In the CRM the person is B. Naiborovskyi's from now on (власник 19.10).
+  await assignInvitedOwner(outreach.crm_contact_id);
 }
 
 /**
