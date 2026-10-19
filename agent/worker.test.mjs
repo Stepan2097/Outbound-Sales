@@ -389,6 +389,26 @@ describe('worker', () => {
     }
   });
 
+  test('a run that never ends is stopped by the watchdog and reported failed, and the worker carries on (17.10: one hung session held every account for 34 h)', async () => {
+    const fake = await startFake({
+      script: [{ next: true }, { reason: REASONS.nothing, retryAfterSeconds: 60 }],
+      token: TOKEN,
+      finished: { nextInSeconds: 120 },
+    });
+    // 0.02 min = 1.2 s; the stub would sleep a minute.
+    const worker = startWorker({ portal: fake.url, env: { STUB_EXIT: '0', STUB_SLEEP: '60000' }, args: ['--run-max-min', '0.02', '--run-kill-grace-s', '1'] });
+    try {
+      await worker.until(/⏱ сесія .* іде довше/, 10_000);
+      await worker.until(/пауза 120 с/, 10_000);
+      const [report] = fake.finishedBodies();
+      assert.equal(report.ok, false, 'зупинена сторожем сесія — не успіх');
+      assert.match(String(report.note), /сторожем/);
+      assert.equal(worker.child.exitCode, null, 'воркер живий і питає далі');
+    } finally {
+      await worker.stop(); await fake.stop();
+    }
+  });
+
   test('a stop signal in the middle of a run still reports it', async () => {
     // launchd stopping the worker, or somebody pressing Ctrl-C, must not be the
     // one path that leaves a lease hanging: the server would keep believing

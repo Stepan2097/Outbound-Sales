@@ -95,6 +95,17 @@ const OFFLINE_FIRST_S = Number(arg('offline-first', 15)) || 15;
 const OFFLINE_MAX_S = 300;
 
 /** `run.finished` is worth one retry, not a queue. See `report()`. */
+/**
+ * The longest one visit may take. A visit that never ends is the whole agent
+ * stopped: on 17.10 one session hung after its invitation check and held every
+ * account for 34 hours, until the server was rebooted. Real visits take 1–15
+ * minutes (reading 780 connections, the longest stage, about 5). Past this the
+ * visit gets SIGTERM — `run-account.mjs` closes the browser and the Anty
+ * profile on it — and SIGKILL if it still has not gone after the grace.
+ */
+const RUN_MAX_MS = (Number(arg('run-max-min', process.env.WARMUP_RUN_MAX_MIN || 40)) || 40) * 60_000;
+const RUN_KILL_GRACE_MS = (Number(arg('run-kill-grace-s', 90)) || 90) * 1000;
+
 const REPORT_ATTEMPTS = 2;
 const REPORT_GAP_MS = 3_000;
 
@@ -243,11 +254,21 @@ function seconds(value, { field, min = SLEEP_FLOOR_S, max = SLEEP_CEIL_S }) {
  * honest "nothing to do today"), anything else is a failure and becomes a
  * cool-off on the server.
  */
-function runAccount(accountId, leaseId) {
+function runAccount(accountId, leaseId, { maxMs = RUN_MAX_MS, graceMs = RUN_KILL_GRACE_MS } = {}) {
   return new Promise((resolve) => {
     const args = [RUN_ACCOUNT, '--account', accountId, '--portal', PORTAL, ...(leaseId ? ['--lease-id', leaseId] : [])];
     let settled = false;
-    const done = (result) => { if (!settled) { settled = true; child = null; resolve(result); } };
+    let overdue = false;
+    let watchdog = null;
+    let killer = null;
+    const done = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(watchdog);
+      clearTimeout(killer);
+      child = null;
+      resolve(result);
+    };
     try {
       child = spawn(process.execPath, args, { cwd: repo, stdio: 'inherit' });
     } catch (error) {
@@ -256,10 +277,22 @@ function runAccount(accountId, leaseId) {
       // has to be reported, which is why this resolves rather than throws.
       return done({ code: -1, note: `не вдалося запустити run-account: ${error.message}` });
     }
-    child.on('error', (error) => done({ code: -1, note: `не вдалося запустити run-account: ${error.message}` }));
-    child.on('close', (code, signal) => done({
-      code: code ?? -1,
-      note: signal ? `run-account зупинено сигналом ${signal}` : null,
+    const proc = child;
+    watchdog = setTimeout(() => {
+      overdue = true;
+      shout(`⏱ сесія ${accountId} іде довше ${Math.round(maxMs / 60000)} хв — зупиняю, щоб не тримати решту акаунтів`);
+      proc.kill('SIGTERM');
+      killer = setTimeout(() => {
+        shout(`⏱ сесія ${accountId} не зупинилась за ${Math.round(graceMs / 1000)} с — SIGKILL`);
+        proc.kill('SIGKILL');
+      }, graceMs);
+    }, maxMs);
+    proc.on('error', (error) => done({ code: -1, note: `не вдалося запустити run-account: ${error.message}` }));
+    proc.on('close', (code, signal) => done({
+      code: overdue ? -1 : (code ?? -1),
+      note: overdue
+        ? `сесію зупинено сторожем: довше ${Math.round(maxMs / 60000)} хв`
+        : signal ? `run-account зупинено сигналом ${signal}` : null,
     }));
   });
 }
