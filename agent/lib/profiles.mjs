@@ -34,12 +34,82 @@ export function vanitySlug(url) {
  * people it got to. `refresh` hands back the tab to use (a fresh one when this
  * one has grown, lib/tab.mjs).
  */
-/** The member link of the person in an open conversation — the inbox sweep's own reader. */
-async function participantOf(page, threadKey, self, pace) {
+/**
+ * The conversation's own scrolling box (the messages, right of the list),
+ * scrolled to its top a few times: LinkedIn paints the last few bubbles, and
+ * the one carrying the person's name and link is often further up (19.10:
+ * Lewis Spice's thread showed only his last, unsigned message).
+ */
+async function scrollThreadUp(page, sleep, pace) {
+  for (let step = 0; step < 4; step += 1) {
+    const moved = await page.evaluate(() => {
+      const boxes = [...document.querySelectorAll('*')].filter((el) => /(auto|scroll)/.test(getComputedStyle(el).overflowY)
+        && el.scrollHeight > el.clientHeight + 40 && el.querySelectorAll('li').length >= 1);
+      // The rightmost such box is the conversation; the leftmost is the list of conversations.
+      const box = boxes.sort((left, right) => right.getBoundingClientRect().x - left.getBoundingClientRect().x)[0];
+      if (!box || box.scrollTop === 0) return false;
+      box.scrollTop = 0;
+      return true;
+    }).catch(() => false);
+    if (!moved) break;
+    await sleep(Math.max(300, 1500 * pace));
+  }
+}
+
+/**
+ * The name at the top of the conversation, clicked: it leads to the person's
+ * profile. For a conversation only we wrote in, nothing below it carries their
+ * link (19.10: P.J. Gunsagar). The title is the topmost short, bold line above
+ * the composer, in the conversation's column.
+ */
+async function profileFromTitle(page, sleep, pace) {
+  const title = await page.evaluate(() => {
+    const composer = document.querySelector('[contenteditable="true"][role="textbox"]');
+    if (!composer) return null;
+    const column = composer.getBoundingClientRect();
+    const candidates = [...document.querySelectorAll('h1, h2, h3, a, span, div, p')].filter((el) => {
+      const rect = el.getBoundingClientRect();
+      const text = (el.innerText || '').trim();
+      return text && text.length <= 80 && !text.includes('\n') && el.children.length <= 2
+        && rect.left >= column.left - 20 && rect.right <= column.right + 40 && rect.bottom < column.top - 250 && rect.top > 120
+        && Number(getComputedStyle(el).fontWeight) >= 600;
+    }).sort((left, right) => left.getBoundingClientRect().top - right.getBoundingClientRect().top);
+    const el = candidates[0];
+    if (!el) return null;
+    const clickable = el.closest('a, button, [role="link"], [tabindex]') || el;
+    clickable.setAttribute('data-outbound-title', '1');
+    return { text: el.innerText.trim(), tag: clickable.tagName.toLowerCase(), href: clickable.getAttribute('href') || null };
+  }).catch(() => null);
+  if (!title) return { failed: 'no_title' };
+  const before = page.url();
+  await page.click('[data-outbound-title]', { timeout: 5000 }).catch(() => {});
+  for (let i = 0; i < 10; i += 1) {
+    await sleep(Math.max(200, 800 * pace));
+    const url = page.url();
+    const slug = (url.match(/linkedin\.com\/in\/([^/?#]+)/i) || [])[1];
+    if (slug && url !== before) return { member: decodeURIComponent(slug), via: 'title' };
+    // A card instead of a page: the profile link is in it.
+    const inCard = await page.evaluate(() => {
+      const link = [...document.querySelectorAll('[role="dialog"] a[href*="/in/"], [class*="profile-card"] a[href*="/in/"], [class*="hovercard"] a[href*="/in/"]')][0];
+      return link ? (link.getAttribute('href').match(/\/in\/([^/?#]+)/) || [])[1] : null;
+    }).catch(() => null);
+    if (inCard) return { member: decodeURIComponent(inCard), via: 'card' };
+  }
+  return { failed: `title_click_nowhere (${title.tag}${title.href ? ` ${title.href.slice(0, 60)}` : ''}: ${title.text.slice(0, 40)})` };
+}
+
+/** The member link of the person in an open conversation — the inbox sweep's own reader, then the two fallbacks. */
+async function participantOf(page, threadKey, self, pace, sleep = wait) {
   const settled = await settleThread(page, { threadKey }, { pace });
   if (!settled.ok) return { failed: 'thread_not_painted' };
-  const member = buildThread({ threadKey, harvest: settled.harvest, self })?.payload?.participant?.slug ?? null;
-  return member ? { member } : { failed: 'no_participant_link' };
+  const read = (harvest) => buildThread({ threadKey, harvest, self })?.payload?.participant?.slug ?? null;
+  let member = read(settled.harvest);
+  if (member) return { member };
+  await scrollThreadUp(page, sleep, pace);
+  const again = await settleThread(page, { threadKey }, { pace, timeoutMs: 6000 });
+  member = again.ok ? read(again.harvest) : null;
+  if (member) return { member, via: 'scroll' };
+  return profileFromTitle(page, sleep, pace);
 }
 
 export async function resolveProfiles(page, items, {
@@ -58,7 +128,7 @@ export async function resolveProfiles(page, items, {
       let failed = null;
       if (!member) {
         await page.goto(`${ORIGIN}/messaging/thread/${encodeURIComponent(item.threadKey)}/`, { waitUntil: 'domcontentloaded', timeout: 45_000 });
-        ({ member = null, failed = null } = await participant(page, item.threadKey, self, pace));
+        ({ member = null, failed = null } = await participant(page, item.threadKey, self, pace, sleep));
         if (!member && shots < 2) { shots += 1; await shot(page, `profile-miss-${shots}`).catch(() => {}); }
       }
       if (!member) {
