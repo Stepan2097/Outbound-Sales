@@ -46,14 +46,28 @@ export async function profilesToResolve(accountId, { limit = RESOLVE_PER_SESSION
       .order("created_at", { ascending: false }).limit(1000).rows();
     for (const row of rows) {
       const contactId = String(row.meta?.crmContactId ?? "");
-      if (contactId && row.meta?.threadKey && !threads.has(contactId)) threads.set(contactId, row.meta.threadKey);
+      if (!contactId || !row.meta?.threadKey) continue;
+      const held = threads.get(contactId) || { threadKey: row.meta.threadKey, memberId: null };
+      // The member id as LinkedIn wrote it — stored since 401ae6c — opens the
+      // profile straight away; lowercased, it opens nothing and the thread is the way.
+      const slug = String(row.meta?.participant?.slug || "");
+      if (!held.memberId && isMemberId(slug) && slug !== slug.toLowerCase()) held.memberId = slug;
+      threads.set(contactId, held);
     }
   }
   return [...threads].filter(([contactId]) => !tried.has(contactId)).slice(0, limit)
-    .map(([contactId, threadKey]) => ({ contactId, threadKey }));
+    .map(([contactId, held]) => ({ contactId, threadKey: held.threadKey, ...(held.memberId ? { memberId: held.memberId } : {}) }));
 }
 
 const oneWord = (name) => !/\s/.test(String(name || "").trim());
+
+const plain = (value) => String(value || "").normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim();
+
+/** «Dany» and «Dany (Dan) Cuello», «Alan Casper, #HIRING» and «Alan Casper», «C» and «C Taylor». */
+export function sameFirstName(conversationName, profileName) {
+  const first = plain(conversationName).split(" ")[0];
+  return Boolean(first) && plain(profileName).startsWith(first);
+}
 
 /** Every conversation tied to `from`, tied to `to` — a new mark each, because rows are not rewritten. */
 async function retieThreads(from, to) {
@@ -104,6 +118,14 @@ export async function applyResolved({ accountId, contactId, memberId = null, van
   }
 
   const fullName = String(name || "").replace(/\s+/g, " ").trim();
+  // The profile must be the person of the conversation: the name read there
+  // starts the name LinkedIn shows on the profile. A link taken from the wrong
+  // place on the page would file somebody's conversation under a stranger.
+  if (fullName && !sameFirstName(copy.name, fullName)) {
+    await logEvent({ accountId, level: "warn", type: PROFILE_UNRESOLVED, message: `Profile not resolved: «${fullName}» is not «${copy.name}»`,
+      meta: { contactId: copy.id, reason: "name_mismatch", memberId, vanity: slug, seen: fullName } });
+    return { ok: true, resolved: false, mismatch: true };
+  }
   const keep = await contactBySlug(slug);
   if (keep && String(keep) !== String(copy.id)) {
     const threads = await mergeInto(copy, keep, headline);

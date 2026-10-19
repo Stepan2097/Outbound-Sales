@@ -44,16 +44,23 @@ async function participantOf(page, threadKey, self, pace) {
 
 export async function resolveProfiles(page, items, {
   portal, guard = async () => {}, self, log = () => {}, refresh = async (current) => current, sleep = wait, pace = 1,
-  participant = participantOf
+  participant = participantOf, shot = async () => {}
 }) {
   const done = { resolved: 0, failed: 0 };
+  let shots = 0;
   for (const item of items ?? []) {
     page = await refresh(page);
     await guard();
     let answer = { contactId: item.contactId, threadKey: item.threadKey };
     try {
-      await page.goto(`${ORIGIN}/messaging/thread/${encodeURIComponent(item.threadKey)}/`, { waitUntil: 'domcontentloaded', timeout: 45_000 });
-      const { member, failed } = await participant(page, item.threadKey, self, pace);
+      // A member id in its own case opens the profile directly; only a lowercased one needs the thread.
+      let member = item.memberId ?? null;
+      let failed = null;
+      if (!member) {
+        await page.goto(`${ORIGIN}/messaging/thread/${encodeURIComponent(item.threadKey)}/`, { waitUntil: 'domcontentloaded', timeout: 45_000 });
+        ({ member = null, failed = null } = await participant(page, item.threadKey, self, pace));
+        if (!member && shots < 2) { shots += 1; await shot(page, `profile-miss-${shots}`).catch(() => {}); }
+      }
       if (!member) {
         answer = { ...answer, failed };
       } else {

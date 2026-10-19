@@ -803,3 +803,20 @@ test("«Вхідні»: LinkedIn дав лише ім'я, а в контакта
   const list = await call({ method: "GET", path: "/api/warmup/inbox" });
   assert.equal(list.payload.threads.find((row) => row.threadKey === "t-abrar").participant.name, "Abrar Hussain");
 });
+
+test("профіль не тієї людини (ім'я не збігається) — нічого не зливається й не міняється; id у власному написанні йде агенту одразу", async () => {
+  rows.contacts.push(
+    { id: "c-real", name: "Peter Pan", linkedin: "https://www.linkedin.com/in/peter-pan", created_at: "2026-08-01T00:00:00.000Z" },
+    { id: "c-chr", name: "Christian", linkedin: "https://www.linkedin.com/in/acoaaqqqqqqqqqqqqqqqqqqq", custom_fields: { source: "linkedin_inbox" }, created_at: "2026-10-14T00:00:00.000Z" }
+  );
+  const answer = await resolved({ contactId: "c-chr", vanity: "peter-pan", name: "Peter Pan" });
+  assert.equal(answer.status, 200);
+  assert.equal(answer.payload.resolved, false);
+  assert.equal(answer.payload.mismatch, true);
+  assert.ok(rows.contacts.some((row) => row.id === "c-chr"), "копія лишилась — це не та людина");
+
+  rows.contacts.push({ id: "c-jel", name: "Jelena", linkedin: "https://www.linkedin.com/in/acoaabnxatybpgqxib3r", custom_fields: { source: "linkedin_inbox" }, created_at: "2026-10-16T00:00:00.000Z" });
+  rows.wl_events.push({ id: "m-jel", account_id: "acc-1", type: "message.out", created_at: new Date().toISOString(), meta: { threadKey: "t-jel", crmContactId: "c-jel", body: "Hi", participant: { name: "Jelena", slug: "ACoAABNXATYBPGQXib3r" } } });
+  const { profilesToResolve } = await import("../warmup/profile-resolve.mjs");
+  assert.deepEqual((await profilesToResolve("acc-1")).find((row) => row.contactId === "c-jel"), { contactId: "c-jel", threadKey: "t-jel", memberId: "ACoAABNXATYBPGQXib3r" });
+});

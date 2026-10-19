@@ -524,7 +524,7 @@ log(`сесію відкрито (${session.sessionId}${session.resumed ? ', п�
     await recycle('профілі з розмов');
     try {
       report.profiles = await resolveProfiles(page, plan.profiles.toResolve, {
-        portal, guard, self: { slug: selfSlug, name: me }, log, refresh: () => keepSmall('профілі з розмов')
+        portal, guard, self: { slug: selfSlug, name: me }, log, shot, refresh: () => keepSmall('профілі з розмов')
       });
       log(`профілі з розмов: уточнено ${report.profiles.resolved}, не вдалося ${report.profiles.failed}`);
     } catch (e) {

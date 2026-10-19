@@ -47,3 +47,15 @@ test('кожна людина: розмова, її профіль за поси
   assert.ok(page.visits[0].includes('/messaging/thread/t-1/'));
   assert.ok(page.visits[1].endsWith('/in/ACoAAMilos/'), 'профіль — за id у його власному написанні');
 });
+
+test('id у власному написанні — одразу профіль, без розмови', async () => {
+  const page = fakePage({ ACoAAJelena: { url: 'https://www.linkedin.com/in/jelena-tomic/', name: 'Jelena Tomić', headline: null } });
+  const sent = [];
+  await resolveProfiles(page, [{ contactId: 'c-j', threadKey: 't-j', memberId: 'ACoAAJelena' }], {
+    portal: { profileResolved: async (answer) => { sent.push(answer); return { success: true }; } }, sleep,
+    participant: async () => { throw new Error('розмову не відкривати'); }
+  });
+  assert.equal(page.visits.length, 1);
+  assert.equal(sent[0].vanity, 'jelena-tomic');
+  assert.equal(sent[0].name, 'Jelena Tomić');
+});
