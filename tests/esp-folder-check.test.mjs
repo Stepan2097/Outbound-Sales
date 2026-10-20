@@ -220,3 +220,27 @@ test("без ключа перевірка позначає провайдера
   assert.deepEqual(run.counts.providers, { zoho: 1, google: 1 });
   assert.equal(run.counts.free, 1);
 });
+
+test("власний аналог MillionVerifier: питає поштовий сервер; catch-all домен удруге не питає; один домен — по черзі; вимикач", async () => {
+  const { smtpVerifier, defaultDeep } = await import("../esp/folder-check.mjs");
+  const asked = [];
+  let inFlight = 0;
+  let maxSameDomain = 0;
+  const check = async (email) => {
+    asked.push(email);
+    inFlight += 1;
+    maxSameDomain = Math.max(maxSameDomain, inFlight);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    inFlight -= 1;
+    if (email.endsWith("@any.com")) return { status: "catch_all", reason: "catch-all" };
+    return email.startsWith("ok") ? { status: "valid", reason: "пошта існує" } : { status: "invalid", reason: "такої пошти немає" };
+  };
+  const verify = smtpVerifier({ check, pauseMs: 0, env: {} });
+  const answers = await Promise.all(["ok1@x.com", "no@x.com", "a@any.com", "b@any.com"].map((email) => verify(email)));
+  assert.deepEqual(answers.map((row) => row.status), ["valid", "invalid", "catch_all", "catch_all"]);
+  assert.equal(answers[0].by, "smtp");
+  assert.equal(asked.filter((email) => email.endsWith("@any.com")).length, 1, "catch-all домен — один раз");
+  assert.equal(maxSameDomain, 2, "різні домени паралельно, один домен — по одному");
+  assert.equal(smtpVerifier({ check, env: { EMAIL_CHECK_SMTP: "off" } }), null);
+  assert.equal(typeof defaultDeep(), "function", "без ключа MillionVerifier — власна перевірка");
+});

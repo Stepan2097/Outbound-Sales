@@ -21,6 +21,8 @@
 
 import { resolve4, resolve6, resolveMx } from "node:dns/promises";
 
+import { checkEmail } from "../contacts/email-check.mjs";
+
 const ADDRESS = /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/i;
 const ROLE = /^(info|sales|support|hello|contact|admin|office|marketing|hr|jobs|careers|team|help|noreply|no-reply|billing|press|partners?)$/i;
 // Throwaway mailboxes: nobody reads them a week later.
@@ -208,10 +210,50 @@ export function millionVerifier({ key = process.env.MILLIONVERIFIER_API_KEY || "
 }
 
 /**
+ * Our own MillionVerifier (власник 20.10: «аналог млнверіфайр»): the mailbox's
+ * own server is asked, the way a sending server asks, whether it has this
+ * mailbox — and a made-up one next to it, so a server that says yes to
+ * everything (catch-all) is told apart (contacts/email-check.mjs). Nothing is
+ * sent. Politely: one conversation per domain at a time, a pause between, and a
+ * domain found to be catch-all is not asked again. Port 25 from the server is
+ * open (the 16.10 «closed» was a test that waited for 120 bytes of banner).
+ * EMAIL_CHECK_SMTP=off turns it off.
+ */
+export function smtpVerifier({ check = checkEmail, helo = process.env.EMAIL_CHECK_HELO || (process.env.PUBLIC_URL ? new URL(process.env.PUBLIC_URL).hostname : undefined), pauseMs = 400, env = process.env } = {}) {
+  if (/^(0|off|false|no)$/i.test(String(env.EMAIL_CHECK_SMTP || ""))) return null;
+  const catchAll = new Set();
+  const lanes = new Map();
+  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  return async (email) => {
+    const domain = String(email).split("@")[1] || "";
+    if (catchAll.has(domain)) return { status: "catch_all", reason: "сервер приймає будь-яку адресу — існування не перевірити", by: "smtp" };
+    const before = lanes.get(domain) || Promise.resolve();
+    let release;
+    const mine = new Promise((resolve) => { release = resolve; });
+    lanes.set(domain, before.then(() => mine));
+    await before;
+    try {
+      if (catchAll.has(domain)) return { status: "catch_all", reason: "сервер приймає будь-яку адресу — існування не перевірити", by: "smtp" };
+      const answer = await check(email, helo ? { helo } : {});
+      if (answer.status === "catch_all") catchAll.add(domain);
+      return { status: answer.status, reason: answer.reason, role: Boolean(answer.role), by: "smtp" };
+    } finally {
+      if (pauseMs) await wait(pauseMs);
+      release();
+    }
+  };
+}
+
+/** The mailbox check this server makes: MillionVerifier when its key is set, else our own. */
+export function defaultDeep() {
+  return millionVerifier() || smtpVerifier();
+}
+
+/**
  * The folder runs, one at a time per folder, kept in memory with their counts.
  * `crm` — the CRM REST client; `deep` — millionVerifier() or null.
  */
-export function folderChecker({ crm, deep = () => millionVerifier(), domainOf = domainChecker(), now = () => new Date(), concurrency = 8 }) {
+export function folderChecker({ crm, deep = defaultDeep, domainOf = domainChecker(), now = () => new Date(), concurrency = 8 }) {
   const runs = new Map();
   const IN_FOLDER = "m:contact_folder_memberships!inner(folder_id)";
 
@@ -268,7 +310,7 @@ export function folderChecker({ crm, deep = () => millionVerifier(), domainOf = 
     const answer = await verifier(email);
     run.counts[answer.status] = (run.counts[answer.status] || 0) + 1;
     if (answer.credits != null) run.credits = answer.credits;
-    await writeCheck(contact, email, { status: answer.status, reason: answer.reason, checkedAt: at, by: "millionverifier", ...(answer.role || quick.role ? { role: true } : {}) }, meta);
+    await writeCheck(contact, email, { status: answer.status, reason: answer.reason, checkedAt: at, by: answer.by || "millionverifier", ...(answer.role || quick.role ? { role: true } : {}) }, meta);
   }
 
   async function go(run) {
@@ -295,7 +337,10 @@ export function folderChecker({ crm, deep = () => millionVerifier(), domainOf = 
             run.done += 1;
           }
         };
-        await Promise.all(Array.from({ length: Math.min(concurrency, rows.length) }, worker));
+        // Asking mail servers: at most four conversations at once — big providers
+        // (Google, Microsoft) count them per sending address.
+        const lanes = verifier ? Math.min(concurrency, 4) : concurrency;
+        await Promise.all(Array.from({ length: Math.min(lanes, rows.length) }, worker));
         if (rows.length < BATCH) { run.state = run.stopRequested ? "stopped" : "done"; break; }
         after = rows.at(-1).id;
       }

@@ -208,7 +208,7 @@ function checkHtml(crmFolder) {
     ].filter(Boolean).join(" · ");
     return `<div class="leads-check-line"><span>Перевірка ${CHECK_STATE_WORD[run.state] || run.state}: ${progress}</span><div class="leads-chips">${parts}</div>${providers ? `<div class="leads-providers">${providers}</div>` : ""}${extra ? `<small>${escapeHtml(extra)}</small>` : ""}${run.error ? `<small class="is-bad">${escapeHtml(run.error)}</small>` : ""}</div>`;
   })() : "";
-  const hint = check.deep ? "" : `<small class="leads-check-hint">Перевіряється: формат адреси, опечатки в домені (gmial.com), одноразові пошти, чи існує домен і чи приймає пошту, хто провайдер пошти (Google, Microsoft, Zoho, Private Email, Amazon SES…), особиста чи загальна (info@) адреса. Чи існує сама скринька — не перевіряється: з нашого сервера поштові сервери не питаються.</small>`;
+  const hint = check.deep ? `<small class="leads-check-hint">Кожну адресу питаємо в її поштового сервера, чи є така скринька, — як MillionVerifier, листів не надсилаємо. Сервери, що відповідають «так» на будь-яку адресу, — жовті (catch-all); що не відповіли — сірі з обідком. По одному запиту на домен, тож велика папка перевіряється кілька годин.</small>` : `<small class="leads-check-hint">Перевіряється: формат адреси, опечатки в домені (gmial.com), одноразові пошти, чи існує домен і чи приймає пошту, хто провайдер пошти (Google, Microsoft, Zoho, Private Email, Amazon SES…), особиста чи загальна (info@) адреса. Чи існує сама скринька — не перевіряється: з нашого сервера поштові сервери не питаються.</small>`;
   return `${button}${line}${hint}`;
 }
 
