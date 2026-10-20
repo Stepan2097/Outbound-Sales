@@ -1443,10 +1443,29 @@ select:not([multiple]):disabled {
 }
 
 /* «Вхідні» LinkedIn: мітка AI на рядку розмови й вибір мітки в розмові (20.10). */
-.warmup-thread-label {
-  align-self: flex-start;
-  margin: 2px 0;
+/* Мітка — маленька позначка поруч з іменем, а не смуга на весь рядок (20.10). */
+.warmup-thread-top .warmup-thread-label {
+  flex: 0 0 auto;
+  margin-right: auto;
+  padding: 1px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
   font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.warmup-thread-top .warmup-thread-label.is-qualified {
+  border-color: rgba(52, 214, 189, 0.45);
+  color: var(--teal);
+}
+
+.warmup-thread-top .warmup-thread-label.is-refusal,
+.warmup-thread-top .warmup-thread-label.is-traffic_only {
+  border-color: rgba(224, 178, 94, 0.4);
+  color: var(--amber);
 }
 
 .warmup-thread-label-pick {

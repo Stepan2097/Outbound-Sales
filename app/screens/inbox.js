@@ -508,10 +508,10 @@ function warmupThreadRowHtml(thread) {
       <span class="warmup-thread-main">
         <span class="warmup-thread-top">
           <strong${warmupParticipantNameAttr(participant)}>${escapeHtml(name)}</strong>
+          ${thread.aiLabel?.label ? `<span class="warmup-thread-label is-${escapeAttr(thread.aiLabel.label)}" title="${escapeAttr(thread.aiLabel.by === "ai" ? "Мітку поставив AI" : "Мітку поставила людина")}">${escapeHtml(inboxLabelWord(thread.aiLabel.label))}</span>` : ""}
           ${warmupTimeHtml(last)}
         </span>
         ${participant.headline ? `<span class="warmup-thread-headline">${escapeHtml(participant.headline)}</span>` : ""}
-        ${thread.aiLabel?.label ? `<span class="pill ${AI_LABEL_TONE[thread.aiLabel.label] || "tone-muted"} warmup-thread-label" title="${escapeAttr(thread.aiLabel.by === "ai" ? "Мітку поставив AI" : "Мітку поставила людина")}">${escapeHtml(inboxLabelWord(thread.aiLabel.label))}</span>` : ""}
         <span class="warmup-thread-preview">${mine ? '<span class="warmup-thread-from">Ви:</span> ' : ""}${warmupPreviewHtml(last.body)}</span>
         ${inboxAccountFilter === INBOX_ALL_ACCOUNTS ? `<span class="warmup-thread-account">${escapeHtml(warmupInboxAccountName(thread.accountId))}</span>` : ""}
       </span>
@@ -790,12 +790,14 @@ function warmupThreadViewHtml() {
       <div class="warmup-thread-head-who">
         <strong${warmupParticipantNameAttr(participant)}>${escapeHtml(name)}</strong>
         ${participant.headline ? `<span class="warmup-subtle">${escapeHtml(participant.headline)}</span>` : ""}
+        <div class="warmup-thread-head-links">
         ${contactId
           ? `<button class="text-button" type="button" data-warmup-contact="${escapeAttr(contactId)}"><i data-lucide="contact"></i><span>Відкрити в CRM</span></button>`
           : '<span class="warmup-subtle">цієї людини ще нема в CRM</span>'}
         ${link
           ? `<a href="${escapeAttr(link)}" target="_blank" rel="noreferrer noopener"><i data-lucide="external-link"></i><span>LinkedIn</span></a>`
           : ""}
+        </div>
         ${warmupThreadLabelHtml(thread)}
         ${ping
           ? `<button class="text-button" type="button" data-inbox-to-work="${escapeAttr(ping.pingId)}" title="Пінг цієї розмови: чернетка, статус CRM, перенесення"><i data-lucide="list-checks"></i><span>До роботи · ${escapeHtml(ping.reasonTitle || "пінг")}</span></button>`

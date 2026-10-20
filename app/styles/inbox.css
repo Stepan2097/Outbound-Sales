@@ -814,3 +814,17 @@
   padding-top: 0;
 }
 #view-inbox[data-mode="all"] .warmup-inbox-panel > .panel-heading { display: none; }
+
+/* «Відкрити в CRM» і «LinkedIn» — в один рядок (власник 20.10). */
+.warmup-thread-head-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+}
+
+.warmup-thread-head-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
