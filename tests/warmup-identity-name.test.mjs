@@ -18,3 +18,12 @@ test("агент не бере підпис картинки за ім'я ака
   for (const text of ["Переглянути зображення", "View image", "Фото профілю"]) assert.equal(filter.test(text), true, text);
   for (const text of ["Chloe Stewart", "Victoria Imagen", "Tom Showalter"]) assert.equal(filter.test(text), false, text);
 });
+
+test("ім'я акаунта — останнє справжнє: один невдалий зчит його не перебиває", async () => {
+  const { knownIdentity } = await import("../warmup/store.mjs");
+  const login = (who, at) => ({ meta: { who }, created_at: at });
+  const events = [login("Переглянути зображення", "2026-10-20T08:43:00Z"), login("Переглянути зображення", "2026-10-20T06:05:00Z"), login("Chloe Stewart", "2026-10-19T15:00:00Z")];
+  assert.equal(knownIdentity(events).name, "Chloe Stewart");
+  assert.equal(knownIdentity([login("Mary Lindsay", "2026-10-20T09:00:00Z"), login("Chloe Stewart", "2026-10-19T15:00:00Z")]).name, "Mary Lindsay", "новий справжній вхід — нове ім'я");
+  assert.equal(knownIdentity([]), null);
+});

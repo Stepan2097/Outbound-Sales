@@ -230,11 +230,12 @@ function toIdentity(event) {
 }
 
 export async function loginIdentity(accountId) {
-  const event = await anty.from("wl_events").select("meta,created_at")
+  const events = await anty.from("wl_events").select("meta,created_at")
     .eq("account_id", accountId).eq("type", "agent.login")
     .order("created_at", { ascending: false })
-    .maybeSingle();
-  return toIdentity(event);
+    .limit(20)
+    .rows();
+  return knownIdentity(events);
 }
 
 /**
@@ -243,12 +244,21 @@ export async function loginIdentity(accountId) {
  * rule the profiles list already follows for sessions.
  */
 export async function loginIdentities() {
+  // The name does not change between sessions (власник 20.10: «для чого кожен
+  // раз це визначати»): the newest sign-in that read a real name, so one bad
+  // read — a picture's caption — does not rename the account.
   const rows = await anty.from("wl_accounts").select("id,wl_events(meta,created_at)")
     .eq("wl_events.type", "agent.login")
     .order("created_at", { ascending: false, foreignTable: "wl_events" })
-    .limit(1, { foreignTable: "wl_events" })
+    .limit(20, { foreignTable: "wl_events" })
     .rows();
-  return new Map(rows.map((row) => [row.id, toIdentity(row.wl_events?.[0])]));
+  return new Map(rows.map((row) => [row.id, knownIdentity(row.wl_events || [])]));
+}
+
+/** Newest first: the newest sign-in with a real name, else whatever the newest one knew. */
+export function knownIdentity(events) {
+  const identities = events.map(toIdentity).filter(Boolean);
+  return identities.find((identity) => identity.name) || identities[0] || null;
 }
 
 /**
