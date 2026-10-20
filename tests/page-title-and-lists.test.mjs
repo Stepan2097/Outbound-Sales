@@ -12,7 +12,8 @@ const work = readFileSync(new URL("../app/screens/work.js", import.meta.url), "u
 const leads = readFileSync(new URL("../app/screens/mail-leads.js", import.meta.url), "utf8");
 
 test("the page title is gone on a computer; the bar shows only when there is a status line", () => {
-  assert.match(grammar, /@media \(min-width: 721px\) \{\n  \.topbar h1 \{ display: none; \}\n  \.topbar:has\(#workspaceMeta\[hidden\]\) \{ display: none; \}/);
+  // З 20.10 — на будь-якій ширині, і на телефоні теж (Марко: «ок»).
+  assert.match(grammar, /\n\.topbar h1 \{ display: none; \}\n\.topbar:has\(#workspaceMeta\[hidden\]\) \{ display: none; \}/);
 });
 
 test("long lists scroll inside their block instead of stretching the page", () => {
