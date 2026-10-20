@@ -1441,3 +1441,27 @@ select:not([multiple]):disabled {
   font-weight: 600;
   font-size: 12px;
 }
+
+/* «Вхідні» LinkedIn: мітка AI на рядку розмови й вибір мітки в розмові (20.10). */
+.warmup-thread-label {
+  align-self: flex-start;
+  margin: 2px 0;
+  font-size: 11px;
+}
+
+.warmup-thread-label-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.warmup-thread-label-pick select {
+  width: auto;
+  min-height: 28px;
+  font-size: 12px;
+}
+
+.warmup-inbox-labels {
+  flex-wrap: wrap;
+}

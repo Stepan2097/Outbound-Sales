@@ -1,3 +1,4 @@
+import { LABELS as INBOX_LABELS, LABEL_ORDER as INBOX_LABEL_ORDER } from "./inbox-labels.mjs";
 import { scenarioForPrompt } from "./scenarios.mjs";
 import { LIVE_ACCOUNT_STATUSES, withAccountQuota } from "./store.mjs";
 import { applyResolved, profilesToResolve } from "./profile-resolve.mjs";
@@ -1326,7 +1327,7 @@ const RECHECK_REFUSALS = {
   expired: "Посилання застаріло — дочекайся наступного повідомлення в групі."
 };
 
-export async function handleWarmupApi({ request, response, url, sendJson, readJson, campaigns: campaignStore, writer = null, network = null, onReply = null, onNetwork = null, onTrouble = null }) {
+export async function handleWarmupApi({ request, response, url, sendJson, readJson, campaigns: campaignStore, writer = null, network = null, onReply = null, onNetwork = null, onTrouble = null, inboxLabels = null }) {
   const path = url.pathname.replace(/^\/api\/warmup/, "") || "/";
   const method = request.method;
 
@@ -3295,8 +3296,26 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         // "nothing arrived" and "the agent never ran" need different people to
         // do different things.
         sync: { ...await syncSummary(accounts.map((account) => account.id)), window: windowLabel() },
-        threads: await withFullNames(threads.map((thread) => describeThread(thread, { labels, identities, outreach })))
+        threads: (await withFullNames(threads.map((thread) => describeThread(thread, { labels, identities, outreach }))))
+          // AI's (or a person's) word on the conversation — the list is sorted by it (20.10).
+          .map((thread) => ({ ...thread, aiLabel: inboxLabels?.labelOf(thread.accountId, thread.threadKey) || null })),
+        aiLabels: inboxLabels ? { list: INBOX_LABELS, order: INBOX_LABEL_ORDER, job: inboxLabels.status() } : null
       });
+      return true;
+    }
+
+    // A person changes the label: AI does not overwrite it after.
+    if (method === "POST" && path === "/inbox/label") {
+      if (!inboxLabels) return fail(response, sendJson, 501, "Мітки тут не зберігаються");
+      const body = await readJson(request);
+      const accountId = String(body?.accountId || "");
+      const threadKey = String(body?.threadKey || "");
+      if (!accountId || !threadKey) return fail(response, sendJson, 400, "Мітці потрібні accountId і threadKey");
+      try {
+        sendJson(response, 200, { success: true, label: await inboxLabels.set(accountId, threadKey, String(body.label || ""), { by: "human" }) });
+      } catch (error) {
+        return fail(response, sendJson, error.status || 500, error.message);
+      }
       return true;
     }
 

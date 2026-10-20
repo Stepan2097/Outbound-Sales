@@ -91,6 +91,30 @@ let inboxSearch = "";
 // «Відповіли» / «Не відповіли» (власник 16.10): усі розмови акаунта, або лише ті,
 // де людина хоч раз написала, або ті, де писали тільки ми.
 let inboxReplied = "all";
+// Мітка AI (власник 20.10: «у вхідних треба якось сортувати всі повідомлення через
+// аі»): "" — усі; ключ мітки; "none" — ще без мітки. Розмови йдуть у порядку міток.
+let inboxLabelFilter = "";
+const AI_LABEL_TONE = { qualified: "tone-live", other: "tone-muted", traffic_only: "tone-warn", not_icp: "tone-muted", refusal: "tone-warn" };
+
+/** The key a conversation is sorted and filtered by: its label, "none" when the person wrote and AI has not looked yet, "" when they never wrote. */
+function inboxLabelOf(thread) {
+  if (thread?.aiLabel?.label) return thread.aiLabel.label;
+  return thread?.answered ? "none" : "";
+}
+
+function inboxLabelRank(thread) {
+  const order = warmupState.inbox.aiLabels?.order || [];
+  const key = inboxLabelOf(thread);
+  if (!key) return order.length + 2;
+  if (key === "none") return Math.min(1, order.length) + 0.5;
+  const at = order.indexOf(key);
+  return at < 0 ? order.length + 1 : at;
+}
+
+function inboxLabelWord(key) {
+  if (key === "none") return "без мітки";
+  return (warmupState.inbox.aiLabels?.list || []).find(([value]) => value === key)?.[1] || key;
+}
 const INBOX_REPLIED = [["all", "Усі"], ["answered", "Відповіли"], ["silent", "Не відповіли"]];
 const repliedTest = { all: () => true, answered: (thread) => thread.answered === true, silent: (thread) => thread.answered !== true };
 
@@ -424,8 +448,27 @@ function warmupInboxEmptyHtml(sync) {
  */
 function warmupInboxRows() {
   const terms = inboxSearchTerms();
-  const rows = inboxThreadsOf(warmupInboxAccountId()).filter(repliedTest[inboxReplied] || repliedTest.all);
+  let rows = inboxThreadsOf(warmupInboxAccountId()).filter(repliedTest[inboxReplied] || repliedTest.all);
+  if (inboxLabelFilter) rows = rows.filter((thread) => inboxLabelOf(thread) === inboxLabelFilter);
+  // With AI's labels: the conversations worth working first, refusals last; same label — as before.
+  if (warmupState.inbox.aiLabels) rows = rows.map((thread, index) => ({ thread, index })).sort((left, right) => inboxLabelRank(left.thread) - inboxLabelRank(right.thread) || left.index - right.index).map((item) => item.thread);
   return terms.length ? rows.filter((thread) => warmupInboxMatches(thread, terms)) : rows;
+}
+
+/** AI's labels over the list: each with how many of this account's conversations carry it; a click filters. */
+function warmupInboxLabelsHtml() {
+  const meta = warmupState.inbox.aiLabels;
+  if (!meta) return "";
+  const all = inboxThreadsOf(warmupInboxAccountId()).filter(repliedTest[inboxReplied] || repliedTest.all);
+  const keys = [...(meta.order || []), "none"];
+  const chips = keys.map((key) => [key, all.filter((thread) => inboxLabelOf(thread) === key).length]).filter(([, count]) => count);
+  if (!chips.length) return "";
+  const job = meta.job?.running ? `<span class="warmup-subtle">AI розбирає: ${meta.job.done} з ${meta.job.total}</span>` : "";
+  return `<div class="warmup-inbox-replied warmup-inbox-labels" role="tablist" aria-label="Мітки AI">
+    <button type="button" role="tab" class="${inboxLabelFilter ? "" : "is-active"}" data-warmup-inbox-label="">Усі мітки</button>
+    ${chips.map(([key, count]) => `<button type="button" role="tab" class="${inboxLabelFilter === key ? "is-active" : ""}" aria-selected="${inboxLabelFilter === key}" data-warmup-inbox-label="${escapeAttr(key)}">${escapeHtml(inboxLabelWord(key))} <b>${count}</b></button>`).join("")}
+    ${job}
+  </div>`;
 }
 
 /** The three tabs over the list, each with how many of this account's conversations it holds. */
@@ -463,6 +506,7 @@ function warmupThreadRowHtml(thread) {
           ${warmupTimeHtml(last)}
         </span>
         ${participant.headline ? `<span class="warmup-thread-headline">${escapeHtml(participant.headline)}</span>` : ""}
+        ${thread.aiLabel?.label ? `<span class="pill ${AI_LABEL_TONE[thread.aiLabel.label] || "tone-muted"} warmup-thread-label" title="${escapeAttr(thread.aiLabel.by === "ai" ? "Мітку поставив AI" : "Мітку поставила людина")}">${escapeHtml(inboxLabelWord(thread.aiLabel.label))}</span>` : ""}
         <span class="warmup-thread-preview">${mine ? '<span class="warmup-thread-from">Ви:</span> ' : ""}${warmupPreviewHtml(last.body)}</span>
         ${inboxAccountFilter === INBOX_ALL_ACCOUNTS ? `<span class="warmup-thread-account">${escapeHtml(warmupInboxAccountName(thread.accountId))}</span>` : ""}
       </span>
@@ -693,6 +737,17 @@ function warmupOutboxHtml(accountName) {
   return `<ol class="warmup-messages warmup-outbox">${items}</ol>`;
 }
 
+/** The open conversation's label — AI's or a person's — and the way to change it. */
+function warmupThreadLabelHtml(thread) {
+  const meta = warmupState.inbox.aiLabels;
+  if (!meta) return "";
+  const listed = warmupState.inbox.threads.find((row) => row.accountId === (thread.accountId || warmupState.inbox.openAccountId) && row.threadKey === (thread.threadKey || warmupState.inbox.openThreadKey));
+  if (!listed?.answered) return "";
+  const current = listed.aiLabel?.label || "";
+  return `<label class="warmup-thread-label-pick" title="${escapeAttr(listed.aiLabel?.by === "ai" ? "Мітку поставив AI — змініть, якщо не так" : current ? "Мітку поставила людина" : "AI ще не дивився")}"><span>Мітка</span>
+    <select data-warmup-label-set>${current ? "" : '<option value="" selected>без мітки</option>'}${meta.list.map(([key, word]) => `<option value="${escapeAttr(key)}"${current === key ? " selected" : ""}>${escapeHtml(word)}</option>`).join("")}</select></label>`;
+}
+
 /**
  * One conversation, oldest first. Above it the things that make a reply
  * actionable: who wrote, the card of that person in «Контакти», where to find
@@ -736,6 +791,7 @@ function warmupThreadViewHtml() {
         ${link
           ? `<a href="${escapeAttr(link)}" target="_blank" rel="noreferrer noopener"><i data-lucide="external-link"></i><span>їхній LinkedIn</span></a>`
           : ""}
+        ${warmupThreadLabelHtml(thread)}
         ${ping
           ? `<button class="text-button" type="button" data-inbox-to-work="${escapeAttr(ping.pingId)}" title="Пінг цієї розмови: чернетка, статус CRM, перенесення"><i data-lucide="list-checks"></i><span>До роботи · ${escapeHtml(ping.reasonTitle || "пінг")}</span></button>`
           : ""}
@@ -811,7 +867,7 @@ function renderWarmupInboxList() {
   const inbox = warmupState.inbox;
   if (!inbox.ready || !inbox.available || inbox.error || !inbox.threads.length) return;
   const rows = warmupInboxRows();
-  const filterLine = `${warmupInboxRepliedHtml()}${warmupInboxFilterHtml(rows.length)}`;
+  const filterLine = `${warmupInboxRepliedHtml()}${warmupInboxLabelsHtml()}${warmupInboxFilterHtml(rows.length)}`;
   const html = rows.length
     ? `${filterLine}<div class="warmup-threads">${rows.map((thread) => warmupThreadRowHtml(thread)).join("")}</div>`
     : `${filterLine}${inboxReplied !== "all" && !inboxSearchTerms().length
@@ -1205,6 +1261,7 @@ export async function loadWarmupInbox() {
       inbox.threads = Array.isArray(payload.threads) ? payload.threads : [];
       inbox.accounts = Array.isArray(payload.accounts) ? payload.accounts : [];
       inbox.unread = Number.isFinite(payload.unread) ? payload.unread : 0;
+      inbox.aiLabels = payload.aiLabels || null;
       inbox.sync = payload.sync && typeof payload.sync === "object" ? payload.sync : null;
       inbox.available = true;
       inbox.ready = true;
@@ -1414,6 +1471,12 @@ document.getElementById("warmupInboxLayout")?.addEventListener("click", (event) 
     closeWarmupThread();
     return;
   }
+  const label = event.target.closest("[data-warmup-inbox-label]");
+  if (label) {
+    inboxLabelFilter = label.dataset.warmupInboxLabel || "";
+    renderWarmupInboxList();
+    return;
+  }
   const replied = event.target.closest("[data-warmup-inbox-replied]");
   if (replied) {
     inboxReplied = replied.dataset.warmupInboxReplied;
@@ -1488,3 +1551,25 @@ document.getElementById("warmupInboxSearch")?.addEventListener("input", (event) 
 // береться одразу, а не за дві хвилини. Приховану вкладку refreshWarmupBadge
 // сама не питає.
 document.addEventListener("visibilitychange", () => refreshWarmupBadge());
+
+
+// Мітку розмови міняє людина: AI її вже не переписує (warmup/inbox-labels.mjs).
+document.getElementById("warmupInboxThread")?.addEventListener("change", async (event) => {
+  const select = event.target.closest?.("[data-warmup-label-set]");
+  if (!select || !select.value) return;
+  const inbox = warmupState.inbox;
+  const accountId = inbox.openAccountId;
+  const threadKey = inbox.openThreadKey;
+  select.disabled = true;
+  try {
+    const { label } = await warmupApi("/inbox/label", { method: "POST", body: JSON.stringify({ accountId, threadKey, label: select.value }) });
+    const row = inbox.threads.find((thread) => thread.accountId === accountId && thread.threadKey === threadKey);
+    if (row) row.aiLabel = label;
+    inboxIndexedThreads = null;
+    renderWarmupInboxList();
+  } catch (error) {
+    window.alert(error?.message || "Мітка не збереглась.");
+  } finally {
+    select.disabled = false;
+  }
+});

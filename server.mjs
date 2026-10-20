@@ -30,6 +30,7 @@ import { knowledgeExcerptsForPrompt, knowledgeFilesForProduct, loadKnowledgeLibr
 import { handleWarmupApi } from "./warmup/api.mjs";
 import { networkStore } from "./warmup/network.mjs";
 import { adoptNetwork, networkFolderName } from "./warmup/network-contacts.mjs";
+import { inboxLabeler } from "./warmup/inbox-labels.mjs";
 import { adoptionFolderName } from "./warmup/people.mjs";
 import { handleEspApi } from "./esp/api.mjs";
 import { connectorFromEnv } from "./esp/gmail.mjs";
@@ -52,7 +53,7 @@ import { crmLeadSource } from "./esp/crm-leads.mjs";
 import { folderChecker } from "./esp/folder-check.mjs";
 import { anty as warmupAnty, crm as warmupCrm } from "./warmup/db.mjs";
 import { likeLiteral } from "./warmup/rest.mjs";
-import { listThreads, messagesForContact } from "./warmup/inbox.mjs";
+import { listThreads, messagesForContact, readThread as readInboxThread } from "./warmup/inbox.mjs";
 import { postponedDue, runTick, startSequence } from "./esp/sequence.mjs";
 import { pollInboxes } from "./esp/inbound.mjs";
 import { runWarmupTick, warmupMode } from "./esp/mail-warmup.mjs";
@@ -71,6 +72,19 @@ useJournal(process.env.ESP_JOURNAL_PATH || join(dirname(stateFilePath), "esp-jou
 useWorkLog(process.env.WORK_LOG_PATH || join(dirname(stateFilePath), "work-log.jsonl"));
 // Усі друзі LinkedIn по акаунтах (14.10) — знімок, який агент читає раз на кілька днів.
 const linkedinNetwork = networkStore(process.env.LINKEDIN_NETWORK_PATH || join(dirname(stateFilePath), "linkedin-network.json"));
+// «Вхідні» LinkedIn, розібрані AI (20.10): мітка кожної розмови — у стані робочого простору.
+const inboxLabels = inboxLabeler({
+  store: {
+    read: () => state.inboxLabels || {},
+    async write(value) {
+      state.inboxLabels = value;
+      await writePersistentWorkspaceState();
+    }
+  },
+  listThreads,
+  readThread: readInboxThread,
+  classify: (input) => classifyReply(input)
+});
 // The administrators' log (ESP 10) is the ESP journal: what an admin changes in
 // the workspace — roles, people, models, keys — is a line there, with who did it.
 // Never the key itself. A log that cannot be written costs the change nothing.
@@ -303,6 +317,8 @@ const state = {
   pingSteps: null,
   // Мітки відповідей у звіті кампаній (етап 6/6): { contactId: { label, by: ai|human, basis, at } }.
   replyLabels: {},
+  // «Вхідні» LinkedIn: мітка AI (чи людини) кожної розмови — warmup/inbox-labels.mjs (20.10).
+  inboxLabels: {},
   // Кампанії лідгенів (WorkSpace, 16.10): папки CRM, продукт, сценарій, кроки — triage/lead-campaigns.mjs.
   leadCampaigns: [],
   // Хребет LinkedIn-кампаній (WorkSpace, 16.10): драбина кваліфікації, маршрути, правила. null — як в артефакті.
@@ -797,6 +813,7 @@ server.listen(port, listenHost, () => {
     }
   });
   startReplyLabeler({ classify: classifyReply });
+  if (process.env.REPLY_LABELS !== "off" && warmupAnty.configured() && warmupCrm.configured()) inboxLabels.start();
   startPingReconciler();
   // ESP 15: the daily DNS and blocklist watch. Asked hourly, runs once a day
   // (the journal remembers); the first look is a few minutes after start, so a
@@ -1079,6 +1096,7 @@ async function handleApi(request, response, url) {
         }
       },
       network: linkedinNetwork,
+      inboxLabels,
       onReply: announceReply,
       onTrouble: announceTrouble,
       onNetwork: async (account, people) => {
@@ -5157,6 +5175,9 @@ function applyPersistentWorkspaceState(saved = {}) {
   if (Array.isArray(saved.pingSteps)) {
     state.pingSteps = saved.pingSteps;
   }
+  if (saved.inboxLabels && typeof saved.inboxLabels === "object" && !Array.isArray(saved.inboxLabels)) {
+    state.inboxLabels = saved.inboxLabels;
+  }
   if (saved.replyLabels && typeof saved.replyLabels === "object" && !Array.isArray(saved.replyLabels)) {
     state.replyLabels = saved.replyLabels;
   }
@@ -5433,6 +5454,7 @@ async function writeWorkspaceStateNow() {
       newContactPolicy: state.newContactPolicy,
       pingSteps: state.pingSteps,
       replyLabels: state.replyLabels,
+      inboxLabels: state.inboxLabels,
       campaignSpine: state.campaignSpine,
       leadCampaigns: state.leadCampaigns,
       warmupTargeting: state.warmupTargeting,

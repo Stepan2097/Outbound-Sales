@@ -116,6 +116,7 @@ const SAVED_AS = {
   newContactPolicy: "newContactPolicy",
   pingSteps: "pingSteps",
   replyLabels: "replyLabels",
+  inboxLabels: "inboxLabels",
   campaignSpine: "campaignSpine",
   leadCampaigns: "leadCampaigns",
   warmupTargeting: "warmupTargeting",
