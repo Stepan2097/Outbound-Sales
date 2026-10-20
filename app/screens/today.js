@@ -125,8 +125,67 @@ const today = {
   selected: "", detail: null, detailError: "", detailLoading: false,
   draftLoading: false, draftNote: "", sending: false, notice: "", tone: "", text: "", textFor: "",
   // Етап 2/6: відкриті діалоги з 01.08 (адмін).
-  imports: null, importOpen: false, importError: "", importPick: new Set(), importEdits: new Map(), importAssignee: "", importBusy: false, importTimer: null
+  imports: null, importOpen: false, importError: "", importPick: new Set(), importEdits: new Map(), importAssignee: "", importBusy: false, importTimer: null,
+  // Коли нагадувати тим, хто мовчить (власник 20.10: «зробити ці поля редагованими»).
+  stepsOpen: false, steps: null, stepsDraft: [], stepsLaterDays: 30, stepsSaving: false, stepsError: "", stepsNote: ""
 };
+
+const ORDINAL = ["Перший", "Другий", "Третій", "Четвертий", "П'ятий", "Шостий"];
+
+/** Кроки нагадувань: поле на кожен, «+» до шести, і що буде з «Невдалим часом». */
+function stepsHtml() {
+  if (!today.steps) return `<div class="today-steps"><p class="today-empty">${escapeHtml(today.stepsError || "Читаю…")}</p></div>`;
+  const draft = today.stepsDraft;
+  return `<form class="today-steps" data-today-steps>
+    <p class="today-steps-lead">Лід мовчить після нашого повідомлення — коли нагадати (робочих днів після попереднього):</p>
+    <div class="today-steps-row">
+      ${draft.map((days, index) => `<label class="today-step"><span>${ORDINAL[index]} пінг через</span>
+        <input type="number" min="1" max="30" step="1" inputmode="numeric" data-today-step="${index}" value="${escapeAttr(days)}" aria-label="${ORDINAL[index]} пінг через, робочих днів" />
+        <span>дн.</span>${draft.length > 1 ? `<button type="button" class="icon-button" data-today="step-remove" data-index="${index}" aria-label="Прибрати це нагадування" title="Прибрати"><i data-lucide="x"></i></button>` : ""}</label>`).join("")}
+      ${draft.length < 6 ? `<button type="button" data-today="step-add"><i data-lucide="plus"></i>Нагадування</button>` : ""}
+    </div>
+    <p class="today-steps-note">Після ${draft.length + 1} повідомлень без відповіді людину більше не пінгуємо. Статус «Невдалий час» — один пінг «Повернутись» через ${escapeHtml(today.stepsLaterDays)} днів. Кампанії мають свої кроки — у налаштуваннях кампанії.</p>
+    <div class="today-steps-actions">
+      <button type="submit" class="primary-button" ${today.stepsSaving ? "disabled" : ""}>${today.stepsSaving ? "Зберігаю…" : "Зберегти"}</button>
+      ${today.stepsError ? `<span class="today-notice is-error" role="alert">${escapeHtml(today.stepsError)}</span>` : today.stepsNote ? `<span class="today-notice" role="status">${escapeHtml(today.stepsNote)}</span>` : ""}
+    </div>
+  </form>`;
+}
+
+async function loadSteps() {
+  try {
+    const payload = await api("/api/today/ping-steps");
+    today.steps = payload.steps;
+    today.stepsDraft = [...payload.steps];
+    today.stepsLaterDays = payload.laterDays || 30;
+    today.stepsError = "";
+  } catch (error) {
+    today.stepsError = error.message || "Не вдалося прочитати.";
+  }
+  render();
+}
+
+async function saveSteps() {
+  const steps = today.stepsDraft.map(Number);
+  if (!steps.every((days) => Number.isInteger(days) && days >= 1 && days <= 30)) {
+    today.stepsError = "Кожне — ціле число від 1 до 30.";
+    return render();
+  }
+  today.stepsSaving = true;
+  today.stepsError = "";
+  render();
+  try {
+    const payload = await api("/api/today/ping-steps", { method: "POST", body: JSON.stringify({ steps }) });
+    today.steps = payload.steps;
+    today.stepsDraft = [...payload.steps];
+    today.stepsNote = "Збережено. Пінги перерахуються за хвилину.";
+  } catch (error) {
+    today.stepsError = error.message || "Не вдалося зберегти.";
+  } finally {
+    today.stepsSaving = false;
+    render();
+  }
+}
 
 function readScope() {
   try { return window.localStorage.getItem(SCOPE_KEY) === "all" ? "all" : "mine"; } catch { return "mine"; }
@@ -587,12 +646,14 @@ function render() {
             <button type="button" data-today="scope" data-scope="mine" class="${today.scope === "mine" ? "active" : ""}">Мої</button>
             <button type="button" data-today="scope" data-scope="all" class="${today.scope === "all" ? "active" : ""}">Усі</button>
           </div>` : ""}
+          ${data.canSeeAll ? `<button type="button" class="icon-button ${today.stepsOpen ? "active" : ""}" data-today="steps-toggle" title="Коли нагадувати тим, хто мовчить" aria-label="Коли нагадувати тим, хто мовчить" aria-expanded="${today.stepsOpen}"><i data-lucide="alarm-clock"></i></button>` : ""}
           ${data.canSeeAll ? (today.importOpen
             ? `<button type="button" data-today="import-toggle">До пінгів</button>`
             : `<button type="button" class="icon-button" data-today="import-toggle" title="Відкриті діалоги з 01.08 — підтягнути в пінги" aria-label="Відкриті діалоги з 01.08"><i data-lucide="history"></i></button>`) : ""}
           <button type="button" class="icon-button" data-today="reload" title="Оновити" aria-label="Оновити"><i data-lucide="refresh-cw"></i></button>
         </div>
       </header>
+      ${today.stepsOpen ? stepsHtml() : ""}
       ${today.importOpen || !allItems().length ? "" : `<div class="today-toolbar">
         ${accountChipsHtml()}
         <label class="warmup-inbox-search today-search"><i data-lucide="search"></i><input id="todaySearch" type="search" autocomplete="off" aria-label="Пошук у черзі" placeholder="Ім'я, компанія або слово з повідомлення" value="${escapeAttr(today.search)}" /></label>
@@ -610,6 +671,11 @@ function render() {
 /* ── дії ─────────────────────────────────────────────────────────────────── */
 
 document.addEventListener("input", (event) => {
+  if (event.target?.dataset?.todayStep !== undefined && event.target.closest?.("#todayRoot")) {
+    today.stepsDraft[Number(event.target.dataset.todayStep)] = event.target.value;
+    today.stepsNote = "";
+    return;
+  }
   if (event.target?.id === "todaySearch") {
     today.search = event.target.value;
     // Лише список: поле пошуку не перемальовується, курсор лишається на місці.
@@ -666,6 +732,21 @@ document.addEventListener("click", (event) => {
     // На вузькому екрані робоче місце під чергою — показуємо його, а не лишаємо внизу.
     if (window.matchMedia("(max-width: 900px)").matches) document.querySelector("#todayRoot .today-work")?.scrollIntoView({ block: "start" });
     return void loadDetail(today.selected);
+  }
+  if (act === "steps-toggle") {
+    today.stepsOpen = !today.stepsOpen;
+    today.stepsNote = "";
+    render();
+    if (today.stepsOpen) void loadSteps();
+    return;
+  }
+  if (act === "step-add") {
+    if (today.stepsDraft.length < 6) today.stepsDraft.push(today.stepsDraft.at(-1) || 3);
+    return render();
+  }
+  if (act === "step-remove") {
+    today.stepsDraft.splice(Number(target.dataset.index), 1);
+    return render();
   }
   if (act === "import-toggle") {
     today.importOpen = !today.importOpen;
@@ -752,4 +833,10 @@ document.addEventListener("change", (event) => {
   const changed = draft.status !== (item.status || "new") || (draft.exitReason || "") !== (item.exitReason || "");
   if (changed && (!closing || draft.exitReason)) return void saveStatus();
   render();
+});
+
+document.addEventListener("submit", (event) => {
+  if (!event.target?.matches?.("#todayRoot [data-today-steps]")) return;
+  event.preventDefault();
+  void saveSteps();
 });

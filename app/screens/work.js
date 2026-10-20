@@ -184,7 +184,7 @@ function plannedHtml(data) {
     </li>`).join("");
   return `<section class="work-plan">
     <header><h3>Заплановані на сьогодні <b>${planned.total}</b></h3>
-      <p>Кому ми написали в LinkedIn, а людина мовчить: наступного дня — написати знову. Хто не дочекався — переходить на наступний день. Після ${planned.limit} повідомлень поспіль без відповіді людина зі списку зникає.</p></header>
+      <p>Кому ми написали в LinkedIn, а людина мовчить: написати знову за графіком нагадувань (на «Сьогодні», кнопка з будильником). Хто не дочекався — переходить на наступний день. Після ${planned.limit} повідомлень поспіль без відповіді людина зі списку зникає.</p></header>
     ${planned.error ? `<p class="esp-notice is-bad">${escapeHtml(planned.error)}</p>` : ""}
     ${planned.items.length ? `<ol class="work-plan-list scroll-list">${rows}</ol>${planned.total > planned.items.length ? `<p class="work-muted">Показано ${planned.items.length} з ${planned.total}.</p>` : ""}` : planned.error ? "" : '<p class="work-muted">На сьогодні нікому не треба писати повторно.</p>'}
   </section>`;

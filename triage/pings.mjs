@@ -23,8 +23,34 @@ export const PING_QUEUE = "Outbound";
 export const TEAM_TZ = "Europe/Kyiv";
 /** Мовчання після нашого кроку: наступний дотик через 3 робочі дні (Марко 16.10). */
 export const SILENT_WORKING_DAYS = 3;
-/** Після п'яти наших повідомлень поспіль без відповіді пінгів більше немає (власник 20.10: «перевели на 5 пінгів»; було 3). */
-export const SILENT_LIMIT = 5;
+/**
+ * Кроки «мовчить» за замовчуванням (власник 20.10): перший пінг через 2 робочі
+ * дні, другий через 3, третій через 5, четвертий через 7 — п'ять наших
+ * повідомлень разом. Редагуються на «Сьогодні» (`usePingSteps`); кампанія може
+ * мати свої.
+ */
+export const DEFAULT_PING_STEPS = [2, 3, 5, 7];
+let pingSteps = [...DEFAULT_PING_STEPS];
+
+/** Кроки, які налаштовано в робочому просторі (власник 20.10: «зробити ці поля редагованими»). */
+export function usePingSteps(steps) {
+  pingSteps = isPingSteps(steps) ? [...steps] : [...DEFAULT_PING_STEPS];
+  return pingSteps;
+}
+
+export function currentPingSteps() {
+  return [...pingSteps];
+}
+
+export function isPingSteps(value) {
+  return Array.isArray(value) && value.length >= 1 && value.length <= 6 && value.every((days) => Number.isInteger(days) && days >= 1 && days <= 30);
+}
+
+/** Після стількох наших повідомлень поспіль без відповіді пінгів більше немає: усі кроки й перше. */
+export const SILENT_LIMIT = DEFAULT_PING_STEPS.length + 1;
+
+/** «Невдалий час» (власник 20.10: «написати через місяць»): дотик через стільки календарних днів після статусу. */
+export const LATER_DAYS = 30;
 /** Етап 1 веде діалоги, де щось сталося за ці дні; давніші — імпорт етапу 2. */
 export const WINDOW_DAYS = 14;
 /** О котрій годині дня пінгу стоїть задача в CRM — початок робочого дня. */
@@ -34,6 +60,7 @@ export const REASONS = {
   reply: { title: "Відповісти", line: "лід відповів — відповісти" },
   first: { title: "Перше повідомлення", line: "прийняв запит у друзі — написати перше повідомлення" },
   silent: { title: "Нагадати", line: "ми написали, лід мовчить — нагадати" },
+  later: { title: "Повернутись", line: "був невдалий час — написати знову через місяць" },
   call: { title: "Дзвінок", line: "дзвінок" },
   manual: { title: "Пінг", line: "поставлено вручну" }
 };
@@ -122,14 +149,14 @@ export function clearSuperseded(description) {
 
 export function reasonOfKey(key) {
   const [head, second] = String(key || "").split(":");
-  if (["reply", "first", "silent"].includes(head)) return head;
+  if (["reply", "first", "silent", "later"].includes(head)) return head;
   // Імпорт відкритих діалогів (етап 2): «import:<крок>:<контакт>» — крок, але задача
   // поводиться як поставлена людиною: нова подія в діалозі її замінює.
   if (head === "import" && ["reply", "silent", "call"].includes(second)) return second;
   return "manual";
 }
 
-const isSystemKey = (key) => ["reply", "first", "silent"].includes(String(key || "").split(":")[0]);
+const isSystemKey = (key) => ["reply", "first", "silent", "later"].includes(String(key || "").split(":")[0]);
 
 /** Причина задачі: дзвінок — за типом, решта — за ключем; чужа задача — «пінг». */
 export function taskReason(task) {
@@ -145,7 +172,21 @@ export function taskReason(task) {
  * більше трьох наших поспіль, як з етапу 1 ([3, 3]).
  */
 export function stepsOf(steps) {
-  return Array.isArray(steps) && steps.length ? steps : Array(SILENT_LIMIT - 1).fill(SILENT_WORKING_DAYS);
+  return Array.isArray(steps) && steps.length ? steps : currentPingSteps();
+}
+
+/**
+ * Статус «Невдалий час»: один дотик через місяць від дня, коли його поставили, —
+ * замість кроків «мовчить». Ключ — від цього дня, тож новий «Невдалий час»
+ * пізніше дає новий дотик.
+ */
+export function laterPing(contactId, { since, accountId = null, threadKey = null, outreachId = null }) {
+  const day = dayIn(since);
+  return {
+    key: `later:${contactId}:${day}`, reason: "later", basisAt: since,
+    due: dayIn(new Date(Date.parse(`${day}T12:00:00Z`) + LATER_DAYS * 86400000).toISOString()),
+    accountId, threadKey, outreachId
+  };
 }
 
 /** День наступного дотику після нашого `count`-го повідомлення поспіль, або null — кроки скінчились. */

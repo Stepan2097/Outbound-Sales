@@ -15,9 +15,9 @@ import { INVITE_ACCEPTED } from "../warmup/invites.mjs";
 import { accountName } from "../warmup/activities.mjs";
 import { acceptOpenDialogs, openDialogs, suggestOpenDialogs } from "./open-dialogs.mjs";
 import { OUTREACH_ACTIONS, dayOf, workEntries } from "./work-log.mjs";
-import { CLOSING, DEFAULT_EXIT, EXIT_REASONS, LEAD_STATUSES, ORIGIN, statusPatch } from "./statuses.mjs";
+import { CLOSING, DEFAULT_EXIT, EXIT_REASONS, LEAD_STATUSES, NOT_RELEVANT_FOLDER, ORIGIN, statusPatch } from "./statuses.mjs";
 import {
-  PING_QUEUE, REASONS, blockOf, compareItems, dayIn, desiredPing, manualDueDay,
+  DEFAULT_PING_STEPS, LATER_DAYS, PING_QUEUE, REASONS, blockOf, compareItems, currentPingSteps, dayIn, desiredPing, isPingSteps, laterPing, manualDueDay, usePingSteps,
   REPLIED_STATUS, leadReplied, newContactsAllowed, planPingChanges, reasonOfKey, repliedStatusDue, stripMarks, taskDescription, taskMarks, taskReason, zonedIso
 } from "./pings.mjs";
 
@@ -46,6 +46,13 @@ const leadgenOf = (accountId) => (accountId && leadgenStore.read()[accountId]) |
 // "gate" — як завжди (лише коли відповідей і прострочених нуль), "limit" — до `limit`
 // нових на день попри розмови, "open" — без обмеження. Ставить адміністратор.
 let policyStore = { read: () => ({}), write: async () => {} };
+
+/** Кроки нагадувань тим, хто мовчить (власник 20.10) — у стані робочого простору. */
+let pingStepsStore = { read: () => null, write: async () => {} };
+export function setPingStepsStore(store) {
+  if (store?.read && store?.write) pingStepsStore = store;
+  usePingSteps(pingStepsStore.read());
+}
 export function setNewContactPolicyStore(store) {
   if (store?.read && store?.write) policyStore = store;
 }
@@ -273,6 +280,19 @@ async function applyAction(action, { contactId, contact, owner, nowIso }) {
   return null;
 }
 
+/** Контакти зі статусом «Невдалий час» і день, коли його поставили (історія статусів CRM). */
+async function laterContacts() {
+  const ids = (await crm.from("contacts").select("id").eq("lead_status", "bad_timing").limit(1000).rows()).map((row) => String(row.id));
+  const since = new Map();
+  for (let at = 0; at < ids.length; at += 100) {
+    const rows = await crm.from("contact_status_history").select("contact_id,changed_at").eq("new_status", "bad_timing")
+      .in("contact_id", ids.slice(at, at + 100)).order("changed_at", { ascending: false }).limit(1000).rows();
+    for (const row of rows) if (!since.has(String(row.contact_id))) since.set(String(row.contact_id), row.changed_at);
+  }
+  // Без рядка історії дня не знаємо — такий контакт чекає, поки статус поставлять знову.
+  return ids.filter((id) => since.has(id)).map((contactId) => ({ contactId, since: since.get(contactId) }));
+}
+
 /**
  * Привести задачі CRM до наступних кроків діалогів. Одна звірка за раз: друга,
  * що прийшла посеред першої, отримує її результат.
@@ -287,6 +307,18 @@ export async function reconcilePings({ now = new Date() } = {}) {
     for (const [contactId, state] of gathered.states) {
       const next = desiredPing(contactId, state, { now });
       if (next) desired.set(contactId, next);
+    }
+    // «Невдалий час» (власник 20.10: «написати через місяць»): один дотик через
+    // місяць від статусу замість кроків «мовчить» — хіба людина відтоді написала сама.
+    for (const { contactId, since } of await laterContacts().catch((error) => { console.error(`[pings] later: ${error.message}`); return []; })) {
+      const now_ = desired.get(contactId);
+      if (now_?.reason === "reply" && Date.parse(now_.basisAt || "") > Date.parse(since)) continue;
+      const state = gathered.states.get(contactId);
+      const thread = (state?.threads || []).filter((row) => !row.moved).sort((left, right) => Date.parse(right.lastStoredAt || 0) - Date.parse(left.lastStoredAt || 0))[0] || null;
+      desired.set(contactId, laterPing(contactId, {
+        since, accountId: thread?.accountId ?? state?.accepted?.accountId ?? null,
+        threadKey: thread?.threadKey ?? null, outreachId: state?.accepted?.outreachId ?? null
+      }));
     }
     const ids = [...desired.keys()];
     const [tasks, contacts] = await Promise.all([tasksOf(ids), contactsOf(ids)]);
@@ -622,6 +654,19 @@ export async function setContactStatus({ contactId, status, exitReason = "", vie
       closed += 1;
     }
   }
+  // Відмовився — у папку «Не актуально» (власник 20.10), лишаючись у своїх.
+  let folder = null;
+  if (status === "not_interested") {
+    try {
+      folder = await notRelevantFolderId();
+      const insert = crm.from("contact_folder_memberships").insert({ contact_id: target, folder_id: folder });
+      insert.headers = { ...insert.headers, Prefer: "resolution=ignore-duplicates,return=minimal" };
+      await insert.rows();
+    } catch (error) {
+      console.error(`[status] «${NOT_RELEVANT_FOLDER}» for ${target}: ${error.message}`);
+      folder = null;
+    }
+  }
   let dealId = null;
   if (status === "booked_call") {
     const links = await crm.from("deal_contacts").select("deal_id").eq("contact_id", target).limit(1).rows();
@@ -636,7 +681,31 @@ export async function setContactStatus({ contactId, status, exitReason = "", vie
       }
     }
   }
-  return { status: checked.patch.lead_status, exitReason: checked.patch.exit_reason, closedPings: closed, dealId };
+  return { status: checked.patch.lead_status, exitReason: checked.patch.exit_reason, closedPings: closed, dealId, folderId: folder };
+}
+
+let notRelevantLookup = null;
+
+/** Папка «Не актуально»: жива з такою назвою, або нова — з власником, як в інших папок. */
+async function notRelevantFolderId() {
+  if (notRelevantLookup) return notRelevantLookup;
+  notRelevantLookup = (async () => {
+    const found = await crm.from("contact_folders").select("id,is_archived").eq("name", NOT_RELEVANT_FOLDER).rows();
+    const live = found.find((row) => !row.is_archived);
+    if (live) return live.id;
+    let owner = crm.config().ownerId;
+    if (!owner) owner = (await crm.from("contact_folders").select("owner_id").limit(1).maybeSingle())?.owner_id || "";
+    const [made] = await crm.from("contact_folders").insert({ name: NOT_RELEVANT_FOLDER, ...(owner ? { owner_id: owner } : {}) }).select("id").rows();
+    if (!made?.id) throw new Error(`CRM не сказала, яка папка «${NOT_RELEVANT_FOLDER}»`);
+    return made.id;
+  })();
+  notRelevantLookup.catch(() => { notRelevantLookup = null; });
+  return notRelevantLookup;
+}
+
+/** Для тестів. */
+export function forgetNotRelevantFolder() {
+  notRelevantLookup = null;
 }
 
 /* ── HTTP ────────────────────────────────────────────────────────────────── */
@@ -679,6 +748,22 @@ export async function handleTodayApi({ request, response, url, sendJson, readJso
       else next[email] = { ...rule, by: viewer.email || null, at: new Date().toISOString() };
       await policyStore.write(next);
       sendJson(response, 200, { policies: next });
+      return true;
+    }
+    // Коли нагадувати тим, хто мовчить: бачать усі, змінює адміністратор (власник 20.10: «зробити ці поля редагованими»).
+    if (request.method === "GET" && path === "/api/today/ping-steps") {
+      sendJson(response, 200, { steps: currentPingSteps(), defaults: DEFAULT_PING_STEPS, laterDays: LATER_DAYS, canEdit: isAdmin });
+      return true;
+    }
+    if (request.method === "POST" && path === "/api/today/ping-steps") {
+      if (!isAdmin) throw refuse("Коли нагадувати, вирішує адміністратор.", 403);
+      const body = await readJson(request);
+      const steps = Array.isArray(body?.steps) ? body.steps.map(Number) : null;
+      if (!isPingSteps(steps)) throw refuse("Від 1 до 6 нагадувань, кожне — від 1 до 30 робочих днів.", 400);
+      await pingStepsStore.write(steps);
+      usePingSteps(steps);
+      reconcileSoon(500);
+      sendJson(response, 200, { steps: currentPingSteps() });
       return true;
     }
     if (request.method === "GET" && path === "/api/today/item") {

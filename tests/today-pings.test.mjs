@@ -134,7 +134,7 @@ test("лід відповів → у CRM задача «Відповісти» �
   assert.equal(tasksOf("c1").length, 1, "повторна звірка не дублює задачу");
 });
 
-test("відповідь поставлена в чергу → пінг закрито, новий «Нагадати» на +3 робочі дні; скасували → «Відповісти» повертається", async () => {
+test("відповідь поставлена в чергу → пінг закрито, новий «Нагадати» на +2 робочі дні (перший крок з 20.10); скасували → «Відповісти» повертається", async () => {
   await reconcilePings();
   const [reply] = openOf("c1");
 
@@ -144,7 +144,7 @@ test("відповідь поставлена в чергу → пінг зак�
   assert.equal(rows.tasks.find((row) => row.id === reply.id).completed, true, "пінг відповіді закрито");
   const [silent] = openOf("c1");
   assert.equal(silent.title, "Нагадати: Lead One");
-  assert.equal(dayIn(silent.due_date), addWorkingDays(dayIn(new Date()), 3));
+  assert.equal(dayIn(silent.due_date), addWorkingDays(dayIn(new Date()), 2));
   const list = await todayList({ viewerId: "u-bohdan" });
   assert.equal(list.blocks.replies.length, 0);
   assert.equal(list.later[0]?.contactId, "c1", "наступний пінг — далі за планом");
@@ -374,4 +374,40 @@ test("звірка: лід відповів — «Новий» стає «Від
   const statusBefore = rows.contacts.find((row) => row.id === "c1").lead_status;
   await reconcilePings();
   assert.equal(rows.contacts.find((row) => row.id === "c1").lead_status, statusBefore, "повторна звірка нічого не змінює");
+});
+
+test("відмова — статус «Не актуально» і людина в папці CRM «Не актуально», у своїх папках лишається (власник 20.10)", async () => {
+  const { forgetNotRelevantFolder } = await import("../triage/today.mjs");
+  forgetNotRelevantFolder();
+  rows.contact_folders = [];
+  rows.contact_folder_memberships = [{ contact_id: "c1", folder_id: "f-work" }];
+  await reconcilePings();
+  const out = await setContactStatus({ contactId: "c1", status: "not_interested", exitReason: "other", viewer: BOHDAN });
+  const folder = rows.contact_folders.find((row) => row.name === "Не актуально");
+  assert.ok(folder, "папку створено");
+  assert.equal(out.folderId, folder.id);
+  assert.deepEqual(rows.contact_folder_memberships.map((row) => [row.contact_id, row.folder_id]).sort(), [["c1", "f-work"], ["c1", folder.id]].sort());
+  const { LEAD_STATUSES } = await import("../triage/statuses.mjs");
+  assert.equal(LEAD_STATUSES.find(([key]) => key === "not_interested")[1], "Не актуально");
+  // Друга відмова — та сама папка, без другої.
+  await setContactStatus({ contactId: "c2", status: "not_interested", exitReason: "other", viewer: { id: "u-admin", role: "admin" } });
+  assert.equal(rows.contact_folders.filter((row) => row.name === "Не актуально").length, 1);
+});
+
+test("«Невдалий час» — замість нагадувань один пінг «Повернутись» через місяць від дня статусу; написав сам — «Відповісти» (власник 20.10)", async () => {
+  rows.wl_events = [message("out", "Hi Lead", 60 * 24 * 3)];
+  const contact = rows.contacts.find((row) => row.id === "c1");
+  contact.lead_status = "bad_timing";
+  const since = new Date(Date.now() - 2 * 86400000).toISOString();
+  rows.contact_status_history = [{ id: "h1", contact_id: "c1", old_status: "responded", new_status: "bad_timing", changed_at: since }];
+  await reconcilePings();
+  const [later] = openOf("c1");
+  assert.equal(later.title, "Повернутись: Lead One");
+  assert.equal(dayIn(later.due_date), dayIn(new Date(Date.parse(`${dayIn(since)}T12:00:00Z`) + 30 * 86400000).toISOString()));
+  assert.match(taskMarks(later).key, /^later:c1:/);
+
+  rows.wl_events.push(message("in", "Ok, now is a good time", 1));
+  await reconcilePings();
+  const [reply] = openOf("c1");
+  assert.equal(reply.title, "Відповісти: Lead One", "людина написала після статусу — відповісти їй");
 });

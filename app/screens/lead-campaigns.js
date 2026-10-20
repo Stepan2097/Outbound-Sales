@@ -98,7 +98,7 @@ function formHtml(campaign) {
       <div class="campaign-form-section">
         <h3>Нагадування й привід</h3>
         <div class="lead-form-grid">
-          <label class="warmup-field"><span>Лід мовчить — нагадати через (робочих днів)</span><input id="leadCampaignSteps" type="text" value="${escapeAttr((campaign?.silentSteps || [3, 3, 3, 3]).join(", "))}" placeholder="3, 4, 7" /></label>
+          <label class="warmup-field"><span>Лід мовчить — нагадати через (робочих днів)</span><input id="leadCampaignSteps" type="text" value="${escapeAttr((campaign?.silentSteps || [2, 3, 5, 7]).join(", "))}" placeholder="3, 4, 7" /></label>
           <label class="warmup-field"><span>Привід хвилі, якщо є (конференція, акція)</span><input id="leadCampaignApproach" type="text" maxlength="2000" value="${escapeAttr(campaign?.approach || "")}" placeholder="Напр.: SiGMA World у Римі, 2–5.11" /></label>
         </div>
         <p class="campaign-form-hint">Після останнього нагадування й ще стількох днів тиші — статус CRM «Без відповіді».</p>

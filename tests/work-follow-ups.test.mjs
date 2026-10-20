@@ -11,26 +11,30 @@ import { deriveThreads } from "../warmup/inbox.mjs";
  * розмов LinkedIn, які читає агент.
  */
 
+// «Наступного дня» — кроки [1, 1, 1, 1]; графік за замовчуванням з 20.10 — окремий тест нижче.
+const NEXT_DAY = [1, 1, 1, 1];
+
 const thread = (over = {}) => ({
   accountId: "acc", threadKey: "t1", crmContactId: null, participant: { name: "Anna", headline: "CMO" },
   lastMessage: { direction: "out", body: "Hi Anna", at: "2026-10-13T09:00:00Z" }, trailingOut: 1, ...over
 });
 
 test("написали вчора, мовчить — сьогодні в плані; написали сьогодні — ще ні", () => {
-  const [item] = followUpsDue([thread()], { today: "2026-10-14", accounts: new Map([["acc", "Chloe"]]) });
+  const [item] = followUpsDue([thread()], { today: "2026-10-14", accounts: new Map([["acc", "Chloe"]]), steps: NEXT_DAY });
   assert.equal(item.name, "Anna");
   assert.equal(item.accountName, "Chloe");
   assert.equal(item.carriedDays, 0);
   assert.equal(item.key, "thread:acc:t1");
-  assert.deepEqual(followUpsDue([thread({ lastMessage: { direction: "out", at: "2026-10-14T06:00:00Z" } })], { today: "2026-10-14" }), []);
+  assert.deepEqual(followUpsDue([thread({ lastMessage: { direction: "out", at: "2026-10-14T06:00:00Z" } })], { today: "2026-10-14", steps: NEXT_DAY }), []);
 });
 
 test("не встигли — переноситься: чекає днів, старіші вгорі", () => {
   const due = followUpsDue([
     thread({ threadKey: "new" }),
     thread({ threadKey: "old", participant: { name: "Boris" }, lastMessage: { direction: "out", at: "2026-10-10T09:00:00Z" } })
-  ], { today: "2026-10-14" });
-  assert.deepEqual(due.map((item) => [item.threadKey, item.carriedDays]), [["old", 3], ["new", 0]]);
+  ], { today: "2026-10-14", steps: NEXT_DAY });
+  // Субота 10.10 + 1 робочий день — понеділок 12.10: до середи 14.10 чекає два дні.
+  assert.deepEqual(due.map((item) => [item.threadKey, item.carriedDays]), [["old", 2], ["new", 0]]);
 });
 
 test("відповіла, забагато повідомлень поспіль, давно мовчить — не в плані", () => {
@@ -62,7 +66,7 @@ test("заблокований акаунт пропускається, одна
     thread({ threadKey: "b", crmContactId: "c1", lastMessage: { direction: "out", at: "2026-10-12T09:00:00Z" } }),
     thread({ threadKey: "c", participant: { name: "Anna" } }),
     thread({ threadKey: "d", participant: { name: "anna" }, lastMessage: { direction: "out", at: "2026-10-13T10:00:00Z" } })
-  ], { today });
+  ], { today, steps: NEXT_DAY });
   assert.deepEqual(due.map((item) => [item.threadKey, item.name]), [["a", "Luke"], ["d", "anna"]]);
   assert.deepEqual(followUpsDue([thread({ lastMessage: { direction: "out", at: "2026-09-16T09:00:00Z" } })], { today }), [], "понад 14 днів тиші");
 });
@@ -73,4 +77,23 @@ test("сторінка: блок «Заплановані», кнопка «На
   assert.match(page, /showWarmupInboxThread\(write\.dataset\.workWrite, write\.dataset\.workThread\)/);
   const server = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
   assert.match(server, /const planned = date === today \? await plannedFollowUps\(today\) : null;/);
+});
+
+test("графік з 20.10: перший раз через 2 робочі дні, другий — через 3, третій — через 5, четвертий — через 7; після п'ятого — зі списку (власник 20.10)", async () => {
+  const { DEFAULT_PING_STEPS, usePingSteps } = await import("../triage/pings.mjs");
+  usePingSteps(null);
+  assert.deepEqual(DEFAULT_PING_STEPS, [2, 3, 5, 7]);
+  const today = "2026-10-14"; // середа
+  const sent = (at, trailingOut, key) => thread({ threadKey: key, crmContactId: key, trailingOut, lastMessage: { direction: "out", at } });
+  const due = followUpsDue([
+    sent("2026-10-12T09:00:00Z", 1, "first-due"),   // пн + 2 роб. — ср
+    sent("2026-10-12T09:00:00Z", 2, "second-not-yet"), // пн + 3 роб. — чт
+    sent("2026-10-05T09:00:00Z", 4, "fourth-due"),  // пн + 7 роб. — ср
+    sent("2026-10-05T09:00:00Z", 5, "done")          // п'ять наших — досить
+  ], { today });
+  assert.deepEqual(due.map((item) => [item.threadKey, item.dueDay, item.carriedDays]).sort(), [["first-due", "2026-10-14", 0], ["fourth-due", "2026-10-14", 0]]);
+  // Змінили кроки на «Сьогодні» — «По днях» іде за ними.
+  usePingSteps([1, 1]);
+  assert.deepEqual(followUpsDue([sent("2026-10-13T09:00:00Z", 1, "x"), sent("2026-10-13T09:00:00Z", 3, "y")], { today }).map((item) => item.threadKey), ["x"]);
+  usePingSteps(null);
 });

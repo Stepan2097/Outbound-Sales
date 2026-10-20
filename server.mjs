@@ -10,7 +10,8 @@ import { CHANNEL_RULES, LANGUAGES, buildFallbackDrafts, draftsPromptPayload, nor
 import { invalidateContactCaches, contactAsProspect, contactsConfigured, contactsMissingConfig, crmKeyKind, folderContactAt, listContactFolders, listFolderContacts, searchFolderContacts, readContact, supabaseKeyKind } from "./contacts/store.mjs";
 import { handleKnowledgeLibraryApi } from "./knowledge/api.mjs";
 import { handlePitchApi } from "./knowledge/pitch-api.mjs";
-import { handleTodayApi, reconcileSoon, setLeadgenStore, setNewContactPolicyStore, startPingReconciler } from "./triage/today.mjs";
+import { handleTodayApi, reconcileSoon, setLeadgenStore, setNewContactPolicyStore, setPingStepsStore, startPingReconciler } from "./triage/today.mjs";
+import { currentPingSteps } from "./triage/pings.mjs";
 import { campaignsByContact, handleLeadCampaignApi, leadCampaigns, setLeadCampaignStore } from "./triage/lead-campaigns.mjs";
 import { handleCampaignReportApi, setReportStores, startReplyLabeler } from "./triage/campaign-report.mjs";
 import { handleScenarioApi, scenarioForPrompt } from "./warmup/scenarios.mjs";
@@ -20,7 +21,7 @@ import { channelsFor as triageChannels, nextContact as nextTriageContact } from 
 import { AUTO_TACTIC, tacticData, tacticForPrompt, tacticLabel, tacticOptions } from "./triage/tactics.mjs";
 import { digestDue, digestText, freshReplies, leadgenTelegram, replyText, troubleText } from "./triage/leadgen-notify.mjs";
 import { firstMessageBoard } from "./warmup/first-messages.mjs";
-import { FOLLOW_UP_LIMIT, addSendsToDays, contactKeyOf, contactWork, dayActivity, dayOf, daysAround, followUpsDue, linkedinSends, logWork, useWorkLog, withLinkedinSends, workEntries, workUsers } from "./triage/work-log.mjs";
+import { addSendsToDays, contactKeyOf, contactWork, dayActivity, dayOf, daysAround, followUpsDue, linkedinSends, logWork, useWorkLog, withLinkedinSends, workEntries, workUsers } from "./triage/work-log.mjs";
 import { checkEmail } from "./contacts/email-check.mjs";
 import { contactEmails, crmPatch } from "./contacts/enrich-crm.mjs";
 import { logAdminAction } from "./esp/access.mjs";
@@ -297,6 +298,8 @@ const state = {
   // Скільки нових контактів лідген бере, коли в нього є живі розмови (Марко 19.10):
   // { email: { mode: "gate" | "limit" | "open", limit } }. Немає запису — правило як було.
   newContactPolicy: {},
+  // Кроки нагадувань тим, хто мовчить (власник 20.10); null — за замовчуванням [2, 3, 5, 7].
+  pingSteps: null,
   // Мітки відповідей у звіті кампаній (етап 6/6): { contactId: { label, by: ai|human, basis, at } }.
   replyLabels: {},
   // Кампанії лідгенів (WorkSpace, 16.10): папки CRM, продукт, сценарій, кроки — triage/lead-campaigns.mjs.
@@ -762,6 +765,13 @@ server.listen(port, listenHost, () => {
     read: () => state.newContactPolicy || {},
     async write(value) {
       state.newContactPolicy = value;
+      await writePersistentWorkspaceState();
+    }
+  });
+  setPingStepsStore({
+    read: () => state.pingSteps,
+    async write(value) {
+      state.pingSteps = value;
       await writePersistentWorkspaceState();
     }
   });
@@ -3499,9 +3509,9 @@ async function plannedFollowUps(today) {
     ]);
     const skipAccounts = new Set(accounts.filter((row) => row.health === "blocked" || row.status === "excluded").map((row) => row.id));
     const due = followUpsDue(threads, { today, accounts: new Map(accounts.map((row) => [row.id, row.label])), skipAccounts });
-    value = { items: due.slice(0, 200), total: due.length, limit: FOLLOW_UP_LIMIT, error: null };
+    value = { items: due.slice(0, 200), total: due.length, limit: currentPingSteps().length + 1, error: null };
   } catch (error) {
-    value = { items: [], total: 0, limit: FOLLOW_UP_LIMIT, error: "Не вдалося прочитати розмови LinkedIn." };
+    value = { items: [], total: 0, limit: currentPingSteps().length + 1, error: "Не вдалося прочитати розмови LinkedIn." };
   }
   plannedCache = { today, at: Date.now(), value };
   return value;
@@ -4947,11 +4957,11 @@ function moveCampaignsToFivePings() {
   // A literal here, not a module constant: this runs while the state loads, at
   // the top of the module, before any constant below that line exists (20.10:
   // a constant here stopped the load half-way).
-  const since = "2026-10-20T00:00:00.000Z";
+  const since = "2026-10-20T08:30:00.000Z";
   let moved = false;
   for (const campaign of [...(state.leadCampaigns || []), ...(state.warmupCampaigns || [])]) {
-    if (JSON.stringify(campaign?.silentSteps) === "[3,3]" && String(campaign.updatedAt || "") < since) {
-      campaign.silentSteps = [3, 3, 3, 3];
+    if (["[3,3]", "[3,3,3,3]"].includes(JSON.stringify(campaign?.silentSteps)) && String(campaign.updatedAt || "") < since) {
+      campaign.silentSteps = [2, 3, 5, 7];
       campaign.updatedAt = new Date().toISOString();
       moved = true;
     }
@@ -5141,6 +5151,9 @@ function applyPersistentWorkspaceState(saved = {}) {
   if (saved.newContactPolicy && typeof saved.newContactPolicy === "object" && !Array.isArray(saved.newContactPolicy)) {
     state.newContactPolicy = saved.newContactPolicy;
   }
+  if (Array.isArray(saved.pingSteps)) {
+    state.pingSteps = saved.pingSteps;
+  }
   if (saved.replyLabels && typeof saved.replyLabels === "object" && !Array.isArray(saved.replyLabels)) {
     state.replyLabels = saved.replyLabels;
   }
@@ -5153,10 +5166,10 @@ function applyPersistentWorkspaceState(saved = {}) {
   if (Array.isArray(saved.warmupCampaigns)) {
     state.warmupCampaigns = saved.warmupCampaigns;
   }
-  // П'ять повідомлень тому, хто мовчить, а не три (власник 20.10). Кампанії, що
-  // досі на старому [3, 3] і з того часу не мінялись, переходять на чотири
-  // нагадування — один раз: після цього вони змінені сьогодні, і [3, 3],
-  // поставлене людиною пізніше, лишається її вибором.
+  // П'ять повідомлень тому, хто мовчить, через 2, 3, 5 і 7 робочих днів (власник
+  // 20.10). Кампанії, що досі на старому [3, 3] і з того часу не мінялись,
+  // переходять на [2, 3, 5, 7] — один раз: після цього вони змінені сьогодні, і
+  // будь-що, поставлене людиною пізніше, лишається її вибором.
   try {
     if (moveCampaignsToFivePings()) setTimeout(() => void writePersistentWorkspaceState().catch(() => {}), 0);
   } catch (error) {
@@ -5415,6 +5428,7 @@ async function writeWorkspaceStateNow() {
       warmupCampaigns: state.warmupCampaigns,
       accountLeadgens: state.accountLeadgens,
       newContactPolicy: state.newContactPolicy,
+      pingSteps: state.pingSteps,
       replyLabels: state.replyLabels,
       campaignSpine: state.campaignSpine,
       leadCampaigns: state.leadCampaigns,

@@ -18,7 +18,8 @@ export const LEAD_STATUSES = [
   ["responded", "Відповів"],
   ["booked_call", "Дзвінок"],
   ["no_response", "Без відповіді"],
-  ["not_interested", "Відмова"],
+  // «Не актуально» (власник 20.10: «люди які відмовилися … статус "не актуально"»): той самий not_interested.
+  ["not_interested", "Не актуально"],
   ["not_icp", "Не ICP"],
   ["bad_timing", "Невдалий час"]
 ];
@@ -40,6 +41,9 @@ export const CLOSING = new Set(["no_response", "not_interested", "not_icp", "bad
 export const DEFAULT_EXIT = { not_icp: "not_icp", no_response: "no_reply", bad_timing: "not_now" };
 
 export const ORIGIN = "outbound";
+
+/** Папка CRM для тих, хто відмовився (власник 20.10): людина додається, з інших папок не зникає. */
+export const NOT_RELEVANT_FOLDER = "Не актуально";
 
 export function isStatus(value) {
   return LEAD_STATUSES.some(([key]) => key === value);

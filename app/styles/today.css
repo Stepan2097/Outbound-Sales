@@ -234,3 +234,12 @@
   .today-queue { max-height: 60vh; overflow-y: auto; }
   .today-queue-solo { max-height: none; }
 }
+
+/* Коли нагадувати тим, хто мовчить (власник 20.10): поле на кожен пінг. */
+.today-steps { display: grid; gap: 10px; margin: 0 0 14px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-strong); }
+.today-steps-lead, .today-steps-note { margin: 0; font-size: 13px; color: var(--muted); }
+.today-steps-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.today-step { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.today-step input { width: 56px; min-height: 32px; padding: 0 8px; text-align: center; }
+.today-step .icon-button { min-height: 26px; width: 26px; padding: 0; }
+.today-steps-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }

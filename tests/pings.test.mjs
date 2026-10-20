@@ -34,10 +34,10 @@ test("лід відповів, ми ні → «Відповісти» на де�
   assert.equal(next.due, "2026-10-16");
 });
 
-test("ми відповіли (у черзі) → «Нагадати» через 3 робочі дні, і ключ той самий, коли повідомлення з'явиться в треді", () => {
+test("ми відповіли (у черзі) → «Нагадати» через 2 робочі дні (перший крок з 20.10), і ключ той самий, коли повідомлення з'явиться в треді", () => {
   const queued = desiredPing("c1", { threads: [thread()], pending: [{ threadKey: "t1", queuedAt: "2026-10-16T09:00:00Z" }] }, { now: NOW });
   assert.equal(queued.reason, "silent");
-  assert.equal(queued.due, "2026-10-21");
+  assert.equal(queued.due, "2026-10-20", "пт 16.10 + 2 робочі дні — вт 20.10");
   const synced = desiredPing("c1", {
     threads: [thread({ trailingOut: 1, lastStoredAt: "2026-10-16T09:20:00Z", lastMessage: { direction: "out", at: "2026-10-16T09:05:00Z" } })]
   }, { now: NOW });

@@ -22,6 +22,8 @@
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
+import { addWorkingDays, currentPingSteps } from "./pings.mjs";
+
 export const WORK_ACTIONS = ["viewed", "skipped", "invalid", "enriched", "drafted", "invited", "wrote", "replied"];
 /** The actions that mean somebody was written to — what the day's list is made of. */
 export const OUTREACH_ACTIONS = new Set(["invited", "wrote", "replied"]);
@@ -198,12 +200,18 @@ export function contactWork(entries, { contactId, emails = [] }) {
  * than `maxDays` — a plan that grows forever is a plan nobody reads.
  */
 // П'ять наших повідомлень поспіль без відповіді — і людина зникає з «Запланованих» (власник 20.10; було 3).
+// Скільки саме — кроки нагадувань із «Сьогодні» плюс перше повідомлення (`currentPingSteps`).
 export const FOLLOW_UP_LIMIT = 5;
 export const FOLLOW_UP_MAX_DAYS = 14;
 // LinkedIn's link label sometimes comes through as the name: «Переглянути профіль Luke».
 const PROFILE_LABEL = /^(переглянути профіль|view profile( of)?|view|открыть профиль|посмотреть профиль)\s+/i;
 
-export function followUpsDue(threads, { today, accounts = new Map(), skipAccounts = new Set(), limit = FOLLOW_UP_LIMIT, maxDays = FOLLOW_UP_MAX_DAYS } = {}) {
+/**
+ * Коли писати знову — за кроками нагадувань (власник 20.10: перший через 2
+ * робочі дні, другий через 3, третій через 5, четвертий через 7; редагуються на
+ * «Сьогодні»), а не «наступного дня».
+ */
+export function followUpsDue(threads, { today, accounts = new Map(), skipAccounts = new Set(), steps = currentPingSteps(), limit = steps.length + 1, maxDays = FOLLOW_UP_MAX_DAYS } = {}) {
   const dayNumber = (date) => Math.round(Date.parse(`${date}T12:00:00Z`) / 86400000);
   const now = dayNumber(today);
   const due = [];
@@ -214,7 +222,8 @@ export function followUpsDue(threads, { today, accounts = new Map(), skipAccount
     // A blocked account cannot write anyone; its people are not today's work.
     if (skipAccounts.has(thread.accountId)) continue;
     const sentDay = dayOf(last.at);
-    const waited = now - dayNumber(sentDay);
+    const dueDay = addWorkingDays(sentDay, steps[Math.min(thread.trailingOut, steps.length) - 1] ?? 1);
+    const waited = now - dayNumber(dueDay) + 1;
     if (waited < 1 || waited > maxDays) continue;
     due.push({
       key: thread.crmContactId ? `id:${thread.crmContactId}` : `thread:${thread.accountId}:${thread.threadKey}`,
@@ -227,7 +236,8 @@ export function followUpsDue(threads, { today, accounts = new Map(), skipAccount
       lastAt: last.at,
       lastText: String(last.body || "").slice(0, 240),
       sentInRow: thread.trailingOut,
-      // Due the day after it was sent; every day past that it was carried over.
+      dueDay,
+      // Due on its step's day; every day past that it was carried over.
       carriedDays: waited - 1
     });
   }
