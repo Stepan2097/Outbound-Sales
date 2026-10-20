@@ -174,9 +174,13 @@ function warmupWhen(message) {
   const noon = Date.parse(`${day}T12:00:00Z`);
   const date = new Date(noon).toLocaleDateString("uk-UA", { day: "numeric", month: "short", ...(day.slice(0, 4) !== today.slice(0, 4) ? { year: "numeric" } : {}), timeZone: "UTC" });
   const clock = Number.isFinite(at) ? new Date(at).toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Kyiv" }) : "";
-  const text = day === today ? (clock || "сьогодні") : day === yesterday ? "вчора" : date;
+  // Час — і в давніх днях, коли він відомий (власник 20.10: «тут не вистарчає
+  // часу відправки повідомлення»): «8 жовт., 14:32», «вчора, 09:15».
+  const dayWord = day === today ? "" : day === yesterday ? "вчора" : date;
+  const text = dayWord ? (clock ? `${dayWord}, ${clock}` : dayWord) : (clock || "сьогодні");
   const full = new Date(noon).toLocaleDateString("uk-UA", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
-  return { text, title: `У LinkedIn: ${full}${clock ? `, ${clock}` : ""}`, datetime: Number.isFinite(at) ? message.linkedinAt : day };
+  const source = message?.sentByAccountAt ? "Надіслано акаунтом" : "У LinkedIn";
+  return { text, title: `${source}: ${full}${clock ? `, ${clock}` : ""}`, datetime: Number.isFinite(at) ? message.linkedinAt : day };
 }
 
 function warmupTimeHtml(message) {
@@ -628,8 +632,13 @@ export function warmupMessageHtml(message, participantName, accountName) {
  * відправляти») — за кілька хвилин окремою короткою сесією акаунта; пізніше,
  * лише коли денний ліміт повідомлень вичерпано або акаунт зараз не відкрити.
  */
+const clockOf = (iso) => {
+  const at = new Date(iso || "");
+  return Number.isFinite(at.getTime()) ? at.toLocaleTimeString("uk", { hour: "2-digit", minute: "2-digit" }) : "";
+};
+
 export function warmupGoesOutText(reply) {
-  if (reply?.goesOutNow) return "за кілька хвилин";
+  if (reply?.goesOutNow) return reply.goesOutAt && clockOf(reply.goesOutAt) ? `за кілька хвилин — близько ${clockOf(reply.goesOutAt)}` : "за кілька хвилин";
   if (!reply?.goesOutAt) return "у наступну сесію акаунта";
   if (reply.limitReached) {
     const next = new Date(reply.goesOutAt);
@@ -674,7 +683,7 @@ function warmupOutboxHtml(accountName) {
     return `<li class="warmup-message is-out is-reply is-reply-${state}" data-warmup-reply="${escapeAttr(reply.id)}">
       <div class="warmup-message-head">
         <strong>${escapeHtml(accountName)}</strong>
-        <span class="warmup-reply-state">${escapeHtml(WARMUP_REPLY_STATE[state])}</span>
+        <span class="warmup-reply-state">${escapeHtml(WARMUP_REPLY_STATE[state])}${state === "waiting" && open.reply?.goesOutAt && clockOf(open.reply.goesOutAt) ? ` · піде близько ${escapeHtml(clockOf(open.reply.goesOutAt))}` : state === "sent" && reply.at ? ` · ${escapeHtml(clockOf(reply.at))}` : ""}</span>
       </div>
       <div class="warmup-message-body">${escapeHtml(reply.body || "")}</div>
       <p class="warmup-reply-note">${line}</p>

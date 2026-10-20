@@ -40,7 +40,7 @@ import {
   FIRST_AUDIT_HIDDEN, FIRST_LIMIT, acceptedRow, dismissFirst, firstMarks, firstMessageBoard, firstThreadKey, saveDraft
 } from "./first-messages.mjs";
 import {
-  REPLY_LIMIT, cancelReply, markReplyFailed, markReplySent, prepareReply, queueReply, repliesOf, repliesToSend, visibleReplies
+  REPLY_LIMIT, cancelReply, markReplyFailed, markReplySent, prepareReply, queueReply, repliesOf, repliesToSend, sameText, visibleReplies
 } from "./outbox.mjs";
 import { URGENT_POLL_SECONDS, activeLease, decideNext, finishRun, leaseAccount, leaseOf, upkeepFor, viewsHeldBackFor } from "./scheduler.mjs";
 import {
@@ -3322,6 +3322,15 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       ]);
       const own = queue.filter((reply) => reply.threadKey === threadKey);
       const allowance = account && door.open ? await repliesToSend(account.id, { todayIso: today() }) : null;
+      // Our own message whose minute LinkedIn did not print (it shows only «8 жовт.»
+      // for older ones): sent from here, so we know when the account sent it
+      // (власник 20.10: «тут не вистарчає часу відправки повідомлення»).
+      const sentHere = own.filter((reply) => reply.state === "sent" && reply.at);
+      found.messages = found.messages.map((message) => {
+        if (message.direction !== "out" || message.linkedinAt) return message;
+        const reply = sentHere.find((row) => sameText(row.body, message.body));
+        return reply ? { ...message, linkedinAt: reply.at, sentByAccountAt: reply.at } : message;
+      });
 
       sendJson(response, 200, {
         success: true,
@@ -3339,6 +3348,9 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           goesOutAt: goesOut?.at ?? null,
           goesOutToday: goesOut?.today ?? null,
           goesOutSoon: goesOut?.soon ?? false,
+          // Позачергова сесія за кілька хвилин, або денний ліміт — сторінка каже час.
+          goesOutNow: goesOut?.now ?? false,
+          limitReached: goesOut?.limit ?? false,
           window: windowLabel(),
           sentToday: allowance?.sentToday ?? 0,
           perDay: allowance?.perDay ?? null
