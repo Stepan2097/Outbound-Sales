@@ -654,8 +654,27 @@ export async function contactBySlug(slug, { folderIds = [] } = {}) {
  * name without a surname, match nobody: a wrong guess files a private message
  * against a stranger.
  */
+/**
+ * The contact a member id was already found to be: the agent opened that
+ * person's profile once (warmup/profile-resolve.mjs, «profile.resolved») and
+ * the copy went into them. Without this every new message from somebody whose
+ * conversation gives only a first name made a fresh copy, and the next session
+ * merged it again (20.10: Stan, twice in an hour).
+ */
+async function contactByMemberId(memberId) {
+  if (!memberId) return null;
+  const [event] = await anty.from("wl_events").select("meta,created_at").eq("type", "profile.resolved")
+    .ilike("meta->>memberId", likeLiteral(memberId)).order("created_at", { ascending: false }).limit(1).rows();
+  const id = event?.meta?.mergedInto ?? event?.meta?.contactId ?? null;
+  if (!id) return null;
+  const [alive] = await crm.from("contacts").select("id").eq("id", id).rows();
+  return alive?.id ?? null;
+}
+
 export async function contactForParticipant(participant, { folderIds = [] } = {}) {
   if (!isMemberId(linkedinSlug(participant?.slug))) return contactBySlug(participant?.slug, { folderIds });
+  const remembered = await contactByMemberId(memberId(participant?.slug) || linkedinSlug(participant?.slug));
+  if (remembered) return remembered;
   // The name first: a contact made earlier under the member id is the copy, not the person.
   const name = personName(participant);
   if (name.split(" ").length >= 2) {

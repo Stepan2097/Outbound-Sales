@@ -828,3 +828,12 @@ test("стара невдача «немає посилання» (агент д
   const { profilesToResolve } = await import("../warmup/profile-resolve.mjs");
   assert.ok((await profilesToResolve("acc-1")).some((row) => row.contactId === "c-old"));
 });
+
+test("той, кого вже знайшли за id учасника, — нове повідомлення лягає на нього, а не на нову копію (20.10: Stan двічі за годину)", async () => {
+  rows.contacts.push({ id: "c-stan", name: "Stan Vax", linkedin: "https://www.linkedin.com/in/marketinglord/", created_at: "2026-10-12T00:00:00.000Z" });
+  rows.wl_events.push({ id: "r-stan", account_id: "acc-1", type: "profile.resolved", created_at: new Date(Date.now() - 3600000).toISOString(),
+    meta: { contactId: "c-copy-gone", mergedInto: "c-stan", memberId: "ACoAACxvQDgB3jpvs5to2Y5HV6TagwMsuEbdOD4", vanity: "marketinglord" } });
+  const result = await thread([{ ...THEIRS, body: "Hi Chloe, sounds good" }], { name: "Stan", slug: "https://www.linkedin.com/in/ACoAACxvQDgB3jpvs5to2Y5HV6TagwMsuEbdOD4" }, "t-stan");
+  assert.equal(result.payload.crmContactId, "c-stan");
+  assert.equal(added().length, 0, "копії немає");
+});
