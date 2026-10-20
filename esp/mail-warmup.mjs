@@ -144,6 +144,9 @@ export function warmupLedger(entries, { now = new Date(), plan = warmupPlan(entr
       if (failed.has(entry.seq)) continue;
       const target = row(data.from);
       target.sent += 1;
+      // A letter that went after the last refusal: the refusal is over (власник
+      // 20.10: «що за відмова?» — один Gmail 502 висів у рядку цілий день).
+      target.lastError = null;
       if (data.kind === "reply") {
         target.repliesSent += 1;
         // Attributed after the loop: the reply names the letter by the

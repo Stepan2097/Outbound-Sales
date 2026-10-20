@@ -34,3 +34,17 @@ test("по днях: перші, відповіді, холодні; спам �
   assert.deepEqual([d16.sent, d16.rescued, d16.repliesReceived], [0, 1, 1]);
   assert.deepEqual([total.sent, total.inSpam, total.cold], [4, 1, 1]);
 });
+
+test("«остання відмова» зникає з рядка, щойно після неї пошта відправила лист", async () => {
+  const { warmupLedger } = await import("../esp/mail-warmup.mjs");
+  const base = [
+    e("warmup.started", at("2026-10-19", "08:00"), { mailbox: "l@x.com" }),
+    e("warmup.sending", at("2026-10-19", "12:12"), { from: "l@x.com", kind: "first" })
+  ];
+  const failedSeq = base[1].seq;
+  const failedOnly = [...base, e("warmup.failed", at("2026-10-19", "12:13"), { sendingSeq: failedSeq, error: "Gmail API відповів 502", code: "gmail_error" })];
+  const now = new Date("2026-10-19T18:00:00+03:00");
+  assert.match(warmupLedger(failedOnly, { now }).rows.get("l@x.com").lastError.error, /502/);
+  const recovered = [...failedOnly, e("warmup.sending", at("2026-10-19", "13:00"), { from: "l@x.com", kind: "first" })];
+  assert.equal(warmupLedger(recovered, { now }).rows.get("l@x.com").lastError, null);
+});
