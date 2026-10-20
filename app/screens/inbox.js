@@ -789,7 +789,7 @@ function warmupThreadViewHtml() {
           ? `<button class="text-button" type="button" data-warmup-contact="${escapeAttr(contactId)}"><i data-lucide="contact"></i><span>Відкрити в CRM</span></button>`
           : '<span class="warmup-subtle">цієї людини ще нема в CRM</span>'}
         ${link
-          ? `<a href="${escapeAttr(link)}" target="_blank" rel="noreferrer noopener"><i data-lucide="external-link"></i><span>їхній LinkedIn</span></a>`
+          ? `<a href="${escapeAttr(link)}" target="_blank" rel="noreferrer noopener"><i data-lucide="external-link"></i><span>LinkedIn</span></a>`
           : ""}
         ${warmupThreadLabelHtml(thread)}
         ${ping

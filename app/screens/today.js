@@ -539,7 +539,7 @@ function workHtml() {
         <strong>${escapeHtml(item.name)}</strong>
         ${item.position || item.company ? `<span class="warmup-subtle">${escapeHtml([item.position, item.company].filter(Boolean).join(" · "))}</span>` : ""}
         ${item.contactId ? `<button class="text-button" type="button" data-today="contact" title="Картка людини в «Контактах»"><i data-lucide="contact"></i><span>Відкрити в CRM</span></button>` : ""}
-        ${warmupProfileUrl(detail.participant?.slug) ? `<a href="${escapeAttr(warmupProfileUrl(detail.participant.slug))}" target="_blank" rel="noreferrer noopener"><i data-lucide="external-link"></i><span>їхній LinkedIn</span></a>` : ""}
+        ${warmupProfileUrl(detail.participant?.slug) ? `<a href="${escapeAttr(warmupProfileUrl(detail.participant.slug))}" target="_blank" rel="noreferrer noopener"><i data-lucide="external-link"></i><span>LinkedIn</span></a>` : ""}
         ${item.channel === "thread" && item.threadKey ? `<button type="button" class="text-button today-to-thread" data-today="thread" title="Ця розмова в «Усіх розмовах»: ручна відповідь, уся історія"><i data-lucide="messages-square"></i><span>Уся розмова</span></button>` : ""}
       </div>
       <div class="warmup-thread-head-meta">

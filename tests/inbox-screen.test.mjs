@@ -450,7 +450,7 @@ test("розмова: з неї є хід в CRM, коли контакт від
   assert.match(html, /data-warmup-contact="4412"/);
   assert.match(html, /Відкрити в CRM/);
   assert.doesNotMatch(html, /Картка контакту/);
-  assert.match(html, /їхній LinkedIn/);
+  assert.match(html, /<span>LinkedIn<\/span>/);
   assert.match(html, /надійшло на Anna Kovalenko/);
 
   const without = screen();
