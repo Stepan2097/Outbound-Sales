@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
+import { readSavedState } from "./saved-state.mjs";
 import { listeningOrigin } from "./server-origin.mjs";
 
 /**
@@ -39,7 +40,7 @@ test("стан завантажується повністю, а кампані�
   let saved = null;
   for (let attempt = 0; attempt < 40; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 100));
-    saved = JSON.parse(await readFile(statePath, "utf8"));
+    saved = await readSavedState(statePath);
     if (saved.savedAt) break;
   }
   assert.ok(saved.savedAt, "стан записано після переходу кампаній");
