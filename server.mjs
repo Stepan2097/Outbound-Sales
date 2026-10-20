@@ -4943,12 +4943,14 @@ let persistTimer = null;
 // Throttles the workspace write a heartbeat asks for; see recordUserHeartbeat.
 let lastActivityPersistMs = 0;
 
-const FIVE_PINGS_SINCE = "2026-10-20T00:00:00.000Z";
-
 function moveCampaignsToFivePings() {
+  // A literal here, not a module constant: this runs while the state loads, at
+  // the top of the module, before any constant below that line exists (20.10:
+  // a constant here stopped the load half-way).
+  const since = "2026-10-20T00:00:00.000Z";
   let moved = false;
   for (const campaign of [...(state.leadCampaigns || []), ...(state.warmupCampaigns || [])]) {
-    if (JSON.stringify(campaign?.silentSteps) === "[3,3]" && String(campaign.updatedAt || "") < FIVE_PINGS_SINCE) {
+    if (JSON.stringify(campaign?.silentSteps) === "[3,3]" && String(campaign.updatedAt || "") < since) {
       campaign.silentSteps = [3, 3, 3, 3];
       campaign.updatedAt = new Date().toISOString();
       moved = true;
@@ -5155,7 +5157,11 @@ function applyPersistentWorkspaceState(saved = {}) {
   // досі на старому [3, 3] і з того часу не мінялись, переходять на чотири
   // нагадування — один раз: після цього вони змінені сьогодні, і [3, 3],
   // поставлене людиною пізніше, лишається її вибором.
-  if (moveCampaignsToFivePings()) setTimeout(() => void writePersistentWorkspaceState().catch(() => {}), 0);
+  try {
+    if (moveCampaignsToFivePings()) setTimeout(() => void writePersistentWorkspaceState().catch(() => {}), 0);
+  } catch (error) {
+    console.warn(`[state] campaign steps: ${error.message}`);
+  }
   if (saved.espSenderPauses && typeof saved.espSenderPauses === "object" && !Array.isArray(saved.espSenderPauses)) {
     state.espSenderPauses = saved.espSenderPauses;
   }
