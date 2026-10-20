@@ -4943,6 +4943,20 @@ let persistTimer = null;
 // Throttles the workspace write a heartbeat asks for; see recordUserHeartbeat.
 let lastActivityPersistMs = 0;
 
+const FIVE_PINGS_SINCE = "2026-10-20T00:00:00.000Z";
+
+function moveCampaignsToFivePings() {
+  let moved = false;
+  for (const campaign of [...(state.leadCampaigns || []), ...(state.warmupCampaigns || [])]) {
+    if (JSON.stringify(campaign?.silentSteps) === "[3,3]" && String(campaign.updatedAt || "") < FIVE_PINGS_SINCE) {
+      campaign.silentSteps = [3, 3, 3, 3];
+      campaign.updatedAt = new Date().toISOString();
+      moved = true;
+    }
+  }
+  return moved;
+}
+
 async function loadPersistentWorkspaceState() {
   if (!existsSync(stateFilePath)) return;
   try {
@@ -5137,6 +5151,11 @@ function applyPersistentWorkspaceState(saved = {}) {
   if (Array.isArray(saved.warmupCampaigns)) {
     state.warmupCampaigns = saved.warmupCampaigns;
   }
+  // П'ять повідомлень тому, хто мовчить, а не три (власник 20.10). Кампанії, що
+  // досі на старому [3, 3] і з того часу не мінялись, переходять на чотири
+  // нагадування — один раз: після цього вони змінені сьогодні, і [3, 3],
+  // поставлене людиною пізніше, лишається її вибором.
+  if (moveCampaignsToFivePings()) setTimeout(() => void writePersistentWorkspaceState().catch(() => {}), 0);
   if (saved.espSenderPauses && typeof saved.espSenderPauses === "object" && !Array.isArray(saved.espSenderPauses)) {
     state.espSenderPauses = saved.espSenderPauses;
   }

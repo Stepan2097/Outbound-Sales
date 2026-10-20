@@ -44,7 +44,8 @@ test("ми відповіли (у черзі) → «Нагадати» чере�
   assert.equal(synced.key, queued.key, "черга → тред не плодить нову задачу");
 });
 
-test("три наших повідомлення поспіль без відповіді → пінгу більше немає", () => {
+test("п'ять наших повідомлень поспіль без відповіді → пінгу більше немає", () => {
+  assert.equal(SILENT_LIMIT, 5, "власник 20.10: «перевели на 5 пінгів»");
   const next = desiredPing("c1", {
     threads: [thread({ trailingOut: SILENT_LIMIT, lastStoredAt: "2026-10-15T09:00:00Z", lastMessage: { direction: "out", at: "2026-10-15T09:00:00Z" } })]
   }, { now: NOW });

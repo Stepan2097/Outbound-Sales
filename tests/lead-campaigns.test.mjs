@@ -19,7 +19,7 @@ test("людина в першій живій кампанії за порядк
 test("кампанія не має полів прогріву: акаунтів, дня прогріву, межі людей", () => {
   const campaign = normalizeLeadCampaign({ name: "X", folderIds: ["f1"], accountIds: ["acc"], fromDay: 7, maxPeople: 200 });
   for (const field of ["accountIds", "fromDay", "maxPeople"]) assert.equal(field in campaign, false, field);
-  assert.deepEqual(campaign.silentSteps, [3, 3]);
+  assert.deepEqual(campaign.silentSteps, [3, 3, 3, 3], "п'ять повідомлень тому, хто мовчить (власник 20.10)");
 });
 
 test("API: створити, змінити, поставити на паузу, видалити; без папки чи з чужим продуктом — 400", async () => {

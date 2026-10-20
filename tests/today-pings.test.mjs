@@ -205,11 +205,11 @@ test("прийняв запит і ми мовчимо → «Перше пові
   assert.equal(list.blocks.first[0]?.contactId, "c2");
 });
 
-test("три наших повідомлення поспіль без відповіді → пінг закрито, нового немає", async () => {
-  rows.wl_events = [message("in", "ok", 600), message("out", "one", 500), message("out", "two", 400)];
+test("п'ять наших повідомлень поспіль без відповіді → пінг закрито, нового немає (власник 20.10; було три)", async () => {
+  rows.wl_events = [message("in", "ok", 600), message("out", "one", 500), message("out", "two", 400), message("out", "three", 350), message("out", "four", 320)];
   await reconcilePings();
-  assert.equal(openOf("c1")[0]?.title, "Нагадати: Lead One");
-  rows.wl_events.push(message("out", "three", 300));
+  assert.equal(openOf("c1")[0]?.title, "Нагадати: Lead One", "після четвертого — ще нагадати");
+  rows.wl_events.push(message("out", "five", 300));
   await reconcilePings();
   assert.equal(openOf("c1").length, 0);
 });

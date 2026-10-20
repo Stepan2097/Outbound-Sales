@@ -97,7 +97,8 @@ export function parseFromDay(value) {
  * замовчуванням 200), порівну між своїми акаунтами; кампанія, збережена до цього
  * поля, межі не має — її робота не змінюється.
  */
-export const DEFAULT_SILENT_STEPS = [3, 3];
+// Чотири нагадування через 3 робочі дні — п'ять повідомлень разом (власник 20.10; було [3, 3]).
+export const DEFAULT_SILENT_STEPS = [3, 3, 3, 3];
 export const DEFAULT_MAX_PEOPLE = 200;
 export const MAX_SILENT_STEPS = 6;
 

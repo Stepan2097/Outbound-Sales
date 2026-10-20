@@ -197,7 +197,8 @@ export function contactWork(entries, { contactId, emails = [] }) {
  * answer the person leaves the list, and so does a thread silent for longer
  * than `maxDays` — a plan that grows forever is a plan nobody reads.
  */
-export const FOLLOW_UP_LIMIT = 3;
+// П'ять наших повідомлень поспіль без відповіді — і людина зникає з «Запланованих» (власник 20.10; було 3).
+export const FOLLOW_UP_LIMIT = 5;
 export const FOLLOW_UP_MAX_DAYS = 14;
 // LinkedIn's link label sometimes comes through as the name: «Переглянути профіль Luke».
 const PROFILE_LABEL = /^(переглянути профіль|view profile( of)?|view|открыть профиль|посмотреть профиль)\s+/i;
