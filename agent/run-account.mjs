@@ -269,7 +269,9 @@ log(`сесію відкрито (${session.sessionId}${session.resumed ? ', п�
     const slug = link?.href.match(/\/in\/([^/?#]+)/)?.[1] ?? null;
     const alt = [...document.querySelectorAll('img[alt]')]
       .map((img) => (img.getAttribute('alt') || '').trim())
-      .find((text) => text && text.length > 2 && !/linkedin|logo|banner|background|icon/i.test(text));
+      // Not a picture's own words: «Переглянути зображення», «View image», a post's
+      // photo — read as the name on 20.10 (Chloe's account).
+      .find((text) => text && text.length > 2 && !/linkedin|logo|banner|background|icon|переглянути|переглянуть|зображення|обкладинк|аватар|фото|\b(?:view|show|image|picture|photo|cover|avatar)\b/i.test(text));
     const card = link?.innerText?.trim().split('\n')[0] || null;
     return { slug, name: alt || card || null };
   }).catch(() => ({ slug: null, name: null }));

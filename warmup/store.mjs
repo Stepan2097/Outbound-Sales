@@ -217,8 +217,13 @@ export async function loadAccount(id) {
  * different login. `slug` is not written by the current agent build, so an
  * identity is a name with a slug missing rather than nothing at all.
  */
+// LinkedIn's words on a picture, read as the account's name (20.10: Chloe's
+// account showed as «Переглянути зображення» — the alt of an image in a post).
+export const NOT_A_NAME = /^(?:переглянути|переглянуть|view|show|відкрити|open|фото|photo|зображення|image|picture|аватар|avatar|обкладинк|cover)(?:\s|$)|зображення|\bimage\b|фото профілю|\bprofile (?:photo|picture)\b/i;
+
 function toIdentity(event) {
-  const who = typeof event?.meta?.who === "string" ? event.meta.who.trim() : "";
+  const raw = typeof event?.meta?.who === "string" ? event.meta.who.trim() : "";
+  const who = NOT_A_NAME.test(raw) ? "" : raw;
   const slug = typeof event?.meta?.slug === "string" ? event.meta.slug.trim() : "";
   if (!who && !slug) return null;
   return { name: who || null, slug: slug || null, seenAt: event.created_at };
