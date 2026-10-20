@@ -248,7 +248,7 @@
    екрану вниз… щоб більше всього помістилось»): черга й розмова гортаються кожна в собі. */
 @media (min-width: 901px) {
   .today-layout { height: max(480px, calc(100vh - 250px)); align-items: stretch; }
-  .today-queue { max-height: none; height: 100%; }
+  .today-queue { max-height: none; height: 100%; align-content: start; }
   /* Гортається лише розмова; шапка, поле відповіді, статус і перенесення стоять (Марко 20.10). */
   .today-work { height: 100%; display: flex; flex-direction: column; overflow: hidden; }
   .today-work > * { flex: none; }
