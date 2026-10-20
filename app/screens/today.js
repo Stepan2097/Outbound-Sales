@@ -103,6 +103,12 @@ export function openAllConversations() {
 }
 
 /** З Головної-пульту: «До роботи» з одним блоком (відповіді, прострочені…) або всі — у тих самих «Мої / Усі». */
+/** З Головної: Вхідні → «Нові» (кнопка «Нові контакти» під пультом, таск ca978070). */
+export function openNewTab() {
+  setInboxMode("new");
+  document.querySelector('.nav-item[data-view="inbox"]')?.click();
+}
+
 export function openTodayBlock(block = "", { scope = "" } = {}) {
   setInboxMode("work");
   today.blockFilter = BLOCKS.some(([key]) => key === block) ? block : "";

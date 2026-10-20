@@ -67,3 +67,11 @@ test("«Потребує уваги» names only real problems, and is empty whe
 test("WorkSpace — лише кампанії", () => {
   assert.doesNotMatch(workspace, /openTriage|today\/gate|data-ws-tab/);
 });
+
+test("суддя 19.10 (ca978070): «Нові контакти» — окрема кнопка під смугою дня, веде у Вхідні → «Нові»", () => {
+  assert.match(home, /\$\{newContactsHtml\(\)\}/);
+  assert.match(home, /data-home-go="new"><i data-lucide="user-plus"><\/i><span>Нові контакти<\/span>/);
+  assert.match(home, /if \(go === "new"\) return void openNewTab\(\);/);
+  const today = readFileSync(new URL("../app/screens/today.js", import.meta.url), "utf8");
+  assert.match(today, /export function openNewTab\(\) \{\n  setInboxMode\("new"\);/);
+});

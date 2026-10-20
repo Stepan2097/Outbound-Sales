@@ -11,7 +11,7 @@
 // Нові контакти — у Вхідні → «Нові»; історія за дні — у «По днях».
 
 import { api, authState, escapeAttr, escapeHtml, onScreen, refreshIcons, uaPlural } from "../core.js";
-import { openTodayBlock } from "./today.js";
+import { openNewTab, openTodayBlock } from "./today.js";
 import { warmupApi } from "./warmup-accounts.js";
 
 onScreen("home", { open: () => void openHome() });
@@ -27,7 +27,7 @@ const PLAN = [
 ];
 const START_LABEL = { replies: "Почати з відповідей", overdue: "Почати з прострочених", today: "Почати з нагадувань", first: "Почати з перших повідомлень" };
 
-const home = { today: null, warmup: null, day: null, errors: [], loading: false };
+const home = { today: null, warmup: null, day: null, gate: null, errors: [], loading: false };
 
 const isAdmin = () => authState?.user?.role === "admin";
 const scope = () => (isAdmin() ? "all" : "mine");
@@ -37,12 +37,13 @@ async function openHome() {
   render();
   const errors = [];
   const read = (promise, what) => promise.catch((error) => { if (error?.name !== "AbortError") errors.push(`${what}: ${error.message || "не прочиталось"}`); return null; });
-  const [today, warmup, day] = await Promise.all([
+  const [today, warmup, day, gate] = await Promise.all([
     read(api(`/api/today?scope=${scope()}`), "пінги"),
     read(warmupApi("/home"), "прогрів"),
-    isAdmin() ? read(api("/api/work/day?user=all"), "робота команди") : Promise.resolve(null)
+    isAdmin() ? read(api("/api/work/day?user=all"), "робота команди") : Promise.resolve(null),
+    read(api("/api/today/gate"), "нові контакти")
   ]);
-  Object.assign(home, { today, warmup, day, errors, loading: false });
+  Object.assign(home, { today, warmup, day, gate, errors, loading: false });
   render();
 }
 
@@ -65,7 +66,21 @@ function planHtml() {
     </div>
     ${bar}
     <div class="home-legend">${legend}</div>
+    ${newContactsHtml()}
   </section>`;
+}
+
+/**
+ * «Нові контакти» — окрема кнопка під смугою дня, а не плитка (Марко 19.10, таск ca978070).
+ * Веде у Вхідні → «Нові»; поруч — стан своїх воріт: відкрито, норма чи «після розмов».
+ */
+function newContactsHtml() {
+  const gate = home.gate;
+  const state = !gate ? "" : gate.allowed === false ? "після розмов" : gate.busy && gate.mode === "limit" ? `нових сьогодні ${gate.used} з ${gate.limit}` : "відкрито";
+  return `<div class="home-new">
+    <button type="button" class="home-new-button" data-home-go="new"><i data-lucide="user-plus"></i><span>Нові контакти</span><i data-lucide="arrow-right"></i></button>
+    ${state ? `<span class="home-new-state">${escapeHtml(state)}</span>` : ""}
+  </div>`;
 }
 
 /* ── потребує уваги ─────────────────────────────────────────────────────── */
@@ -159,5 +174,6 @@ document.getElementById("homeRoot")?.addEventListener("click", (event) => {
   const go = event.target.closest("[data-home-go]")?.dataset.homeGo;
   if (!go) return;
   if (PLAN.some(([key]) => key === go)) return void openTodayBlock(go, { scope: scope() });
+  if (go === "new") return void openNewTab();
   if (go === "warmup") document.querySelector('.nav-item[data-view="warmup"]')?.click();
 });
