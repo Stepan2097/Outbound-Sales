@@ -79,6 +79,33 @@ export async function campaignsByContact(contactIds) {
   return found;
 }
 
+/**
+ * Кампанія людини серед усіх — і на паузі теж (таск 207ffbc1, Марко 20.10: лід, якого взяли
+ * з LinkedIn повз базу, обов'язково відносять до кампанії перед відповіддю). Людина в папці
+ * кампанії на паузі вже віднесена — вимагати вибір ще раз не треба.
+ */
+export async function anyCampaignOf(contactId) {
+  const campaigns = leadCampaigns().filter((campaign) => campaign.folderIds.length);
+  if (!contactId || !campaigns.length) return null;
+  const folders = [...new Set(campaigns.flatMap((campaign) => campaign.folderIds))];
+  const rows = await crm.from("contact_folder_memberships").select("folder_id").eq("contact_id", String(contactId)).in("folder_id", folders).rows();
+  const mine = new Set(rows.map((row) => String(row.folder_id)));
+  const found = campaigns.find((campaign) => campaign.folderIds.some((id) => mine.has(id)));
+  return found ? { id: found.id, name: found.name, state: found.state } : null;
+}
+
+/** Віднести людину до кампанії: додати в першу папку CRM кампанії (якщо її там ще немає). */
+export async function assignToCampaign({ contactId, campaignId }) {
+  const campaign = leadCampaignById(String(campaignId || ""));
+  if (!campaign) throw refuse("Цієї кампанії вже немає.", 404);
+  if (!campaign.folderIds.length) throw refuse("У кампанії немає папки CRM — додайте її у WorkSpace.");
+  const id = String(contactId || "").trim();
+  if (!id) throw refuse("Потрібен контакт.");
+  const present = await crm.from("contact_folder_memberships").select("folder_id").eq("contact_id", id).in("folder_id", campaign.folderIds).rows();
+  if (!present.length) await crm.from("contact_folder_memberships").insert({ contact_id: id, folder_id: campaign.folderIds[0] }).rows();
+  return { id: campaign.id, name: campaign.name, state: campaign.state, added: !present.length };
+}
+
 /* ── HTTP ────────────────────────────────────────────────────────────────── */
 
 function refuse(message, statusCode = 400) {
@@ -113,8 +140,14 @@ function parseInput(body, { products }) {
 }
 
 export async function handleLeadCampaignApi({ request, response, url, sendJson, readJson, products = () => [] }) {
-  if (url.pathname !== "/api/lead-campaigns") return false;
+  if (url.pathname !== "/api/lead-campaigns" && url.pathname !== "/api/lead-campaigns/assign") return false;
   try {
+    if (url.pathname === "/api/lead-campaigns/assign") {
+      if (request.method !== "POST") throw refuse("Невідомий метод.", 405);
+      const body = (await readJson(request)) || {};
+      sendJson(response, 200, { campaign: await assignToCampaign({ contactId: body.contactId, campaignId: body.campaignId }) });
+      return true;
+    }
     const list = leadCampaigns();
     if (request.method === "GET") {
       sendJson(response, 200, { campaigns: list });

@@ -1197,7 +1197,7 @@ async function handleApi(request, response, url) {
   }
 
   // WorkSpace: кампанії лідгенів — папки CRM, продукт зі «Смислів», сценарій.
-  if (url.pathname === "/api/lead-campaigns") {
+  if (url.pathname === "/api/lead-campaigns" || url.pathname === "/api/lead-campaigns/assign") {
     const handled = await handleLeadCampaignApi({ request, response, url, sendJson, readJson, products: () => pitchProductList() });
     if (handled) return;
   }

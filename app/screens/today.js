@@ -517,6 +517,58 @@ function messagesHtml(messages, name, accountName) {
   return `<ol class="warmup-messages today-thread">${messages.map((message) => warmupMessageHtml(message, name, accountName || "Ми")).join("")}</ol>`;
 }
 
+/* ── лід без кампанії (таск 207ffbc1, Марко 20.10, К1) ─────────────────────
+   Лід, якого взяли прямо з LinkedIn повз базу, кампанії не має. Перед відповіддю його
+   обов'язково відносять до кампанії (людина додається в папку CRM кампанії) — або
+   позначають «Не лід». Кампанії на паузі теж у списку: людина в них уже віднесена. */
+
+function needsCampaign(detail = today.detail) {
+  return Boolean(detail && !detail.campaignAny && (detail.campaigns || []).length && detail.item?.contactId);
+}
+
+function canSend() {
+  return !today.sending && Boolean(today.text.trim()) && !needsCampaign();
+}
+
+function campaignPickHtml(detail) {
+  if (!needsCampaign(detail)) return "";
+  return `<div class="today-campaign-pick" role="group" aria-label="До якої кампанії цей лід">
+    <p><b>Без кампанії</b> — лід узяли не з бази. Спершу оберіть кампанію: AI писатиме за її продуктом і сценарієм, нагадування підуть за її кроками.</p>
+    <div class="today-campaign-row">
+      <select id="todayCampaignPick" aria-label="Кампанія">
+        <option value="">— до якої кампанії? —</option>
+        ${detail.campaigns.map((campaign) => `<option value="${escapeAttr(campaign.id)}">${escapeHtml(campaign.name || "без назви")}${campaign.state === "paused" ? " (на паузі)" : ""}</option>`).join("")}
+      </select>
+      <button type="button" class="primary-button" data-today="campaign-assign" ${today.assigning ? "disabled" : ""}>${today.assigning ? "Відношу…" : "Віднести"}</button>
+      <button type="button" class="text-button" data-today="not-lead" title="Знайомий, рекрутер, не наш ICP — статус «Не ICP», пінги закриються">Не лід</button>
+    </div>
+  </div>`;
+}
+
+async function assignCampaign() {
+  const item = today.detail?.item;
+  const campaignId = document.getElementById("todayCampaignPick")?.value || "";
+  if (!item?.contactId) return;
+  if (!campaignId) { say("Оберіть кампанію зі списку.", "is-error"); return render(); }
+  today.assigning = true;
+  render();
+  try {
+    const { campaign } = await api("/api/lead-campaigns/assign", { method: "POST", body: JSON.stringify({ contactId: item.contactId, campaignId }) });
+    // Кампанію людини сервер бачить після звірки; потім — чернетка під її продукт і сценарій.
+    await api("/api/today/refresh", { method: "POST", body: "{}" }).catch(() => {});
+    say(`${item.name}: тепер у кампанії «${campaign.name}». Чернетку переписую під неї.`);
+    today.text = "";
+    today.textFor = "";
+    await loadDetail(item.pingId);
+    void writeDraft(true);
+  } catch (error) {
+    if (error?.name !== "AbortError") say(error.message || "Не вдалося віднести до кампанії.", "is-error");
+  } finally {
+    today.assigning = false;
+    render();
+  }
+}
+
 /** Що стоїть у черзі на відправку — як в «Усіх розмовах», зі «Скасувати». */
 function pendingHtml(detail) {
   const waiting = (detail.pending || []).filter((entry) => entry.state === "waiting");
@@ -559,6 +611,7 @@ function workHtml() {
     ${messagesHtml(detail.messages, item.name, item.accountName)}
     ${pendingHtml(detail)}
     ${today.notice ? `<p class="today-notice ${today.tone}" role="status">${escapeHtml(today.notice)}</p>` : ""}
+    ${canWrite ? campaignPickHtml(detail) : ""}
     ${canWrite ? `
       <div class="today-draft">
         <div class="today-draft-head">
@@ -571,7 +624,7 @@ function workHtml() {
         ${today.draftNote ? `<p class="today-draft-note">${escapeHtml(today.draftNote)}</p>` : ""}
         <textarea id="todayText" rows="6" placeholder="${today.draftLoading ? "Модель пише чернетку…" : "Текст повідомлення"}">${escapeHtml(today.text)}</textarea>
         <div class="today-actions">
-          <button type="button" class="primary-button" data-today="send" title="Піде з цього акаунта в найближчу сесію. Наступний пінг — через 3 робочі дні." ${today.sending || !today.text.trim() ? "disabled" : ""}><i data-lucide="send"></i><span>${today.sending ? "Ставлю в чергу…" : "Погодити й надіслати"}</span></button>
+          <button type="button" class="primary-button" data-today="send" title="Піде з цього акаунта в найближчу сесію. Наступний пінг — через 3 робочі дні." ${canSend() ? "" : "disabled"}><i data-lucide="send"></i><span>${today.sending ? "Ставлю в чергу…" : "Погодити й надіслати"}</span></button>
         </div>
       </div>` : item.channel === "moved" ? "" : `<p class="today-note">Переписки з цим контактом тут немає — відкрийте його в CRM або перенесіть пінг.</p>`}
     <footer class="today-work-foot">
@@ -705,7 +758,7 @@ document.addEventListener("input", (event) => {
   if (event.target?.id === "todayText") {
     today.text = event.target.value;
     const sendButton = document.querySelector('#todayRoot [data-today="send"]');
-    if (sendButton) sendButton.disabled = today.sending || !today.text.trim();
+    if (sendButton) sendButton.disabled = !canSend();
   }
 });
 
@@ -805,6 +858,13 @@ document.addEventListener("click", (event) => {
     return void showWarmupInboxThread(item.accountId, item.threadKey);
   }
   if (act === "rewrite") return void writeDraft(true);
+  if (act === "campaign-assign") return void assignCampaign();
+  if (act === "not-lead") {
+    const item = today.detail?.item;
+    if (!item) return;
+    today.statusDraft = { pingId: item.pingId, status: "not_icp", exitReason: today.data?.defaultExit?.not_icp || "not_icp" };
+    return void saveStatus();
+  }
   // Свій текст замість чернетки (Марко 20.10: «як взяти згенеровану відповідь, так і написати свою»).
   if (act === "own-text") {
     today.text = "";

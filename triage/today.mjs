@@ -6,7 +6,7 @@
 // Звірка йде сама кожні дві хвилини, одразу після відповіді ліда і після
 // відправки з «Сьогодні». Звірка лише з'ясовує й вирівнює — нічого не надсилає.
 
-import { campaignsByContact, leadCampaignById } from "./lead-campaigns.mjs";
+import { anyCampaignOf, campaignsByContact, leadCampaignById, leadCampaigns } from "./lead-campaigns.mjs";
 import { anty, crm } from "../warmup/db.mjs";
 import { listThreads, readThread } from "../warmup/inbox.mjs";
 import { repliesOf, sameText } from "../warmup/outbox.mjs";
@@ -557,6 +557,10 @@ export async function todayItem({ pingId, viewer, now = new Date() }) {
     contact,
     messages,
     participant,
+    // Лід без кампанії (узятий з LinkedIn повз базу) — обов'язково віднести перед відповіддю
+    // (таск 207ffbc1). Кампанія на паузі теж рахується: людина вже віднесена.
+    campaignAny: item.campaign || (contactId ? await anyCampaignOf(contactId).catch(() => null) : null),
+    campaigns: leadCampaigns().filter((campaign) => campaign.folderIds.length).map(({ id, name, state }) => ({ id, name, state })),
     pending: (state?.pending || []).map(({ id, state: status, body, queuedAt }) => ({ id, state: status, body, queuedAt })),
     acceptedAt: state?.accepted?.acceptedAt || null,
     draft: drafts.get(`${pingId}|${key}`) || (firstDraft?.text ? { text: firstDraft.text, model: firstDraft.model, kind: "first" } : null)

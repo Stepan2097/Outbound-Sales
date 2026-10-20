@@ -258,3 +258,10 @@
 }
 .today-draft-tools { display: inline-flex; flex-wrap: wrap; gap: 6px; font-weight: 400; }
 .today-work { position: relative; }
+
+/* Лід без кампанії (таск 207ffbc1): вибір перед відповіддю. */
+.today-campaign-pick { display: grid; gap: var(--sp-2); padding: var(--sp-3); border: 1px dashed var(--state-warn); border-radius: 10px; background: color-mix(in srgb, var(--state-warn) 8%, transparent); }
+.today-campaign-pick p { margin: 0; font-size: 13px; }
+.today-campaign-pick b { color: var(--state-warn); }
+.today-campaign-row { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
+.today-campaign-row select { min-width: 220px; max-width: 100%; }
