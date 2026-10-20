@@ -243,3 +243,14 @@
 .today-step input { width: 56px; min-height: 32px; padding: 0 8px; text-align: center; }
 .today-step .icon-button { min-height: 26px; width: 26px; padding: 0; }
 .today-steps-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* «В роботі» на всю висоту екрана (Марко 20.10: «інтерфейс розтягнутий повністю до кінця
+   екрану вниз… щоб більше всього помістилось»): черга й розмова гортаються кожна в собі. */
+@media (min-width: 901px) {
+  .today-layout { height: max(480px, calc(100vh - 290px)); align-items: stretch; }
+  .today-queue { max-height: none; height: 100%; }
+  .today-work { height: 100%; overflow-y: auto; align-content: start; }
+  .today-thread { max-height: none; overflow: visible; }
+}
+.today-draft-tools { display: inline-flex; flex-wrap: wrap; gap: 6px; font-weight: 400; }
+.today-work { position: relative; }

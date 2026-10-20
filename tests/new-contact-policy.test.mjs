@@ -84,7 +84,7 @@ test("the conveyor's sends say where they come from, and WorkSpace rechecks the 
     const at = triage.indexOf(`api("${route}"`);
     assert.ok(at > -1 && triage.slice(at, at + 400).includes('source: "triage"'), `${route}: source triage`);
   }
-  const workspace = readFileSync(new URL("../app/screens/workspace.js", import.meta.url), "utf8");
+  const workspace = readFileSync(new URL("../app/screens/new-contacts.js", import.meta.url), "utf8");
   assert.match(workspace, /addEventListener\("triage:outreach"/);
   assert.match(workspace, /Нових сьогодні: <b>\$\{data\.used\} з \$\{data\.limit\}<\/b>/);
 });

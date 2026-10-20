@@ -84,7 +84,8 @@ test("no removed screen's code is back anywhere under app/", () => {
 
 test("the workspace opens on «Головна»", () => {
   const all = sources().map(({ text }) => text).join("\n");
-  assert.match(all, /setView\(saved \|\| "home"\)/, "a first visit lands on Головна");
+  // З 20.10: адмін — на Головну, лідген — у Вхідні.
+  assert.match(all, /setView\(saved \|\| \(authState\?\.user\?\.role === "admin" \? "home" : "inbox"\)\)/, "a first visit lands on Головна for an admin, on Вхідні for a seller");
   assert.match(html, /<button class="nav-item active" data-view="home"/);
 });
 
@@ -99,10 +100,10 @@ const SCREEN_FILES = {
   home: ["screens/home.js"],
   work: ["screens/work.js"],
   // WorkSpace (16.10): кампанії лідгенів, порівняння й хребет — окремо від прогріву.
-  // З 19.10 — і конвеєр нових контактів (home-triage.js), вкладка «Нові контакти».
-  workspace: ["screens/workspace.js", "screens/lead-campaigns.js", "screens/campaign-plan.js", "screens/campaign-report.js", "screens/home-triage.js"],
+  workspace: ["screens/workspace.js", "screens/lead-campaigns.js", "screens/campaign-plan.js", "screens/campaign-report.js"],
   warmup: ["screens/warmup-accounts.js", "screens/warmup-campaign.js"],
-  inbox: ["screens/inbox.js", "screens/today.js"],
+  // З 20.10 «Вхідні» — «В роботі» (today.js + inbox.js) і «Нові» (new-contacts.js + home-triage.js).
+  inbox: ["screens/inbox.js", "screens/today.js", "screens/new-contacts.js", "screens/home-triage.js"],
   pitch: ["screens/pitch.js"],
   contacts: ["screens/contacts.js"],
   account: ["screens/settings.js"]

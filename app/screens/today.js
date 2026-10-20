@@ -1,13 +1,12 @@
 // «Сьогодні» — черга пінгів лідгена (етап 1/6 плану кампаній і пінгів, 16.10.2026).
-// З 19.10 (Марко: «поточний функціонал вкладки Головна перенести в Вхідні і грамотно
-// поєднати») живе у LinkedIn → Вхідні як вкладка «До роботи»; поруч — «Усі розмови»
-// (месенджер, inbox.js). Між ними — переходи: пінг → «Уся розмова», розмова з пінгом →
-// «До роботи» (connectInboxWork). Головна тепер — пульт (home.js).
+// Живе у LinkedIn → Вхідні → «В роботі» (Марко 20.10: одна вкладка розмов замість двох):
+// фільтри черги — тут, фільтр «Усі розмови» — месенджер (inbox.js). Між ними — переходи:
+// пінг → «Уся розмова», розмова з пінгом → «До роботи» (connectInboxWork).
 //
 // Кожен живий діалог має пінг — задачу CRM з датою наступного дотику. Тут вони в
 // тому порядку, в якому їх робити: відповіді → прострочені → на сьогодні →
-// перші повідомлення. Нові контакти з папки — у WorkSpace → «Нові контакти» (19.10),
-// і лише коли відповідей і прострочених немає.
+// перші повідомлення. Нові контакти з папки — у Вхідні → «Нові» (20.10), з правилом
+// «спершу розмови».
 //
 // Робоче місце — один лід за раз: хто це, уся переписка, чернетка, «Погодити й
 // надіслати» → наступний. Пінг можна перенести (+1 день, +3, тиждень, дата) чи
@@ -18,36 +17,40 @@
 import { api, escapeAttr, escapeHtml, keepScroll, onScreen, refreshIcons } from "../core.js";
 import { connectInboxWork, renderWarmupInbox, showWarmupInboxThread, warmupGoesOutText, warmupMessageHtml, warmupProfileUrl } from "./inbox.js";
 import { showContactCard } from "./contacts.js";
+import { leaveNewContacts, openNewContacts } from "./new-contacts.js";
 
 onScreen("inbox", { open: () => applyInboxMode() });
 
-/* ── дві частини «Вхідних»: «До роботи» і «Усі розмови» ─────────────────── */
+/* ── «Вхідні» (Марко 20.10, таск f50d24e9): вкладки «В роботі» і «Нові» ────────────
+   «В роботі» — одна вкладка розмов: фільтри «Відповіді / Прострочені / На сьогодні /
+   Перші» — черга пінгів (цей файл), фільтр «Усі розмови» — месенджер усіх акаунтів
+   (inbox.js), зокрема розмови без пінга. «Нові» — конвеєр нових контактів (new-contacts.js).
+   Стан: "work" — черга, "all" — усі розмови (обидва — вкладка «В роботі»), "new" — «Нові». */
 
 const MODE_KEY = "outbound.inbox.mode";
+const MODES = ["work", "all", "new"];
 let inboxMode = readMode();
 
 function readMode() {
-  try { return window.localStorage.getItem(MODE_KEY) === "all" ? "all" : "work"; } catch { return "work"; }
+  try { const saved = window.localStorage.getItem(MODE_KEY); return MODES.includes(saved) ? saved : "work"; } catch { return "work"; }
 }
 
 function setInboxMode(mode) {
-  inboxMode = mode === "all" ? "all" : "work";
+  inboxMode = MODES.includes(mode) ? mode : "work";
   try { window.localStorage.setItem(MODE_KEY, inboxMode); } catch {}
 }
 
-/** Показати вибрану частину; «До роботи» читає пінги, «Усі розмови» малює inbox.js. */
+/** Показати вибране: черга чи всі розмови (вкладка «В роботі») або «Нові». */
 function applyInboxMode() {
-  for (const button of document.querySelectorAll("[data-inbox-mode]")) {
-    const on = button.dataset.inboxMode === inboxMode;
+  const tab = inboxMode === "new" ? "new" : "work";
+  for (const button of document.querySelectorAll("[data-inbox-tab]")) {
+    const on = button.dataset.inboxTab === tab;
     button.classList.toggle("is-active", on);
     button.setAttribute("aria-selected", String(on));
   }
-  for (const pane of document.querySelectorAll("[data-inbox-pane]")) pane.hidden = pane.dataset.inboxPane !== inboxMode;
-  // Один каркас — різне призначення (Марко 19.10, В1): рядком під вкладками.
-  const purpose = document.getElementById("inboxPurpose");
-  if (purpose) purpose.textContent = inboxMode === "work"
-    ? "Кому написати сьогодні — з готовою чернеткою AI, статусом у CRM і перенесенням."
-    : "Усі переписки акаунтів — знайти, перечитати, відповісти вручну.";
+  for (const pane of document.querySelectorAll("[data-inbox-pane]")) pane.hidden = !pane.dataset.inboxPane.split(" ").includes(inboxMode);
+  if (inboxMode === "new") return void openNewContacts();
+  leaveNewContacts();
   // Пінги потрібні й «Усім розмовам»: розмова з пінгом має кнопку «До роботи».
   void openToday({ keepSelection: true });
 }
@@ -55,15 +58,14 @@ function applyInboxMode() {
 function renderModeCounts() {
   const work = document.getElementById("inboxWorkCount");
   if (work) work.textContent = today.data?.configured ? String(allItems().length || "") : "";
-  const all = document.getElementById("inboxAllCount");
-  const unread = document.getElementById("warmupNavBadge");
-  if (all) all.textContent = unread && !unread.hidden ? unread.textContent : "";
 }
 
 document.addEventListener("click", (event) => {
-  const tab = event.target.closest?.("[data-inbox-mode]");
-  if (tab && tab.dataset.inboxMode !== inboxMode) {
-    setInboxMode(tab.dataset.inboxMode);
+  const tab = event.target.closest?.("[data-inbox-tab]");
+  if (tab) {
+    const next = tab.dataset.inboxTab === "new" ? "new" : "work";
+    if ((next === "new") === (inboxMode === "new")) return;
+    setInboxMode(next);
     return void applyInboxMode();
   }
   const toWork = event.target.closest?.("[data-inbox-to-work]");
@@ -254,6 +256,10 @@ async function loadDetail(pingId) {
   } finally {
     today.detailLoading = false;
     render();
+    // Розмова на всю висоту (20.10): одразу видно останні повідомлення й поле відповіді.
+    const work = document.querySelector("#todayRoot .today-work");
+    const thread = work?.querySelector(".today-thread");
+    if (work && thread && work.scrollHeight > work.clientHeight) work.scrollTop = Math.max(0, thread.offsetTop + thread.offsetHeight - work.clientHeight * 0.55);
   }
 }
 
@@ -551,8 +557,11 @@ function workHtml() {
     ${canWrite ? `
       <div class="today-draft">
         <div class="today-draft-head">
-          <span>${DRAFT_LABEL[kind]}</span>
-          <button type="button" data-today="rewrite" ${today.draftLoading ? "disabled" : ""}><i data-lucide="refresh-cw"></i><span>${today.draftLoading ? "Пишу…" : "Переписати"}</span></button>
+          <span>${DRAFT_LABEL[kind]} — AI написав, можна правити</span>
+          <span class="today-draft-tools">
+            <button type="button" data-today="rewrite" ${today.draftLoading ? "disabled" : ""} title="Попросити AI написати інакше"><i data-lucide="refresh-cw"></i><span>${today.draftLoading ? "Пишу…" : "Переписати AI"}</span></button>
+            <button type="button" data-today="own-text" ${today.text ? "" : "disabled"} title="Стерти чернетку й написати свій текст"><i data-lucide="eraser"></i><span>Напишу сам</span></button>
+          </span>
         </div>
         ${today.draftNote ? `<p class="today-draft-note">${escapeHtml(today.draftNote)}</p>` : ""}
         <textarea id="todayText" rows="6" placeholder="${today.draftLoading ? "Модель пише чернетку…" : "Текст повідомлення"}">${escapeHtml(today.text)}</textarea>
@@ -626,23 +635,25 @@ function render() {
   }
   const counts = BLOCKS.map(([key, title]) => [key, title, (data.blocks[key] || []).length]).filter(([, , count]) => count);
   if (today.blockFilter && !counts.some(([key]) => key === today.blockFilter)) today.blockFilter = "";
-  // Лічильники — це й фільтри: клік показує лише цей блок (аудит 16.10, P2).
-  const chips = counts.length > 1
-    ? `<div class="today-chips" role="group" aria-label="Який блок показати">
-        <button type="button" data-today="block" data-block="" class="${today.blockFilter ? "" : "active"}">Усі ${counts.reduce((sum, [, , count]) => sum + count, 0)}</button>
-        ${counts.map(([key, title, count]) => `<button type="button" data-today="block" data-block="${escapeAttr(key)}" class="${today.blockFilter === key ? "active" : ""}">${escapeHtml(title)} ${count}</button>`).join("")}
-      </div>`
-    : "";
+  const threads = inboxMode === "all";
+  // Лічильники — це й фільтри: клік показує лише цей блок (аудит 16.10, P2). Останній —
+  // «Усі розмови»: усі переписки акаунтів, і ті, де пінга немає (Марко 20.10).
+  const unread = document.getElementById("warmupNavBadge");
+  const unreadCount = unread && !unread.hidden ? unread.textContent : "";
+  const chips = `<div class="today-chips" role="group" aria-label="Що показати">
+        <button type="button" data-today="block" data-block="" class="${!threads && !today.blockFilter ? "active" : ""}">До роботи ${counts.reduce((sum, [, , count]) => sum + count, 0)}</button>
+        ${counts.map(([key, title, count]) => `<button type="button" data-today="block" data-block="${escapeAttr(key)}" class="${!threads && today.blockFilter === key ? "active" : ""}">${escapeHtml(title)} ${count}</button>`).join("")}
+        <button type="button" data-today="threads" class="${threads ? "active" : ""}" title="Усі переписки акаунтів — і ті, де пінга немає: люди не з CRM, старі, закриті статусом">Усі розмови${unreadCount ? ` · ${escapeHtml(unreadCount)} нових` : ""}</button>
+      </div>`;
   const restoreScroll = keepScroll(host, [".today-queue"]);
   host.innerHTML = `
     <section class="panel blk-queue today">
       <header class="today-head">
         <div>
-          <h2>Сьогодні</h2>
-          ${chips || `<p>${counts.length ? counts.map(([, title, count]) => `${escapeHtml(title)}: ${count}`).join(" · ") : "Живих діалогів, що чекають, немає"}</p>`}
+          ${chips}
         </div>
         <div class="today-head-actions">
-          ${data.canSeeAll ? `<div class="today-scope" role="group" aria-label="Чиї пінги">
+          ${data.canSeeAll && !threads ? `<div class="today-scope" role="group" aria-label="Чиї пінги">
             <button type="button" data-today="scope" data-scope="mine" class="${today.scope === "mine" ? "active" : ""}">Мої</button>
             <button type="button" data-today="scope" data-scope="all" class="${today.scope === "all" ? "active" : ""}">Усі</button>
           </div>` : ""}
@@ -654,7 +665,7 @@ function render() {
         </div>
       </header>
       ${today.stepsOpen ? stepsHtml() : ""}
-      ${today.importOpen || !allItems().length ? "" : `<div class="today-toolbar">
+      ${threads ? "" : `${today.importOpen || !allItems().length ? "" : `<div class="today-toolbar">
         ${accountChipsHtml()}
         <label class="warmup-inbox-search today-search"><i data-lucide="search"></i><input id="todaySearch" type="search" autocomplete="off" aria-label="Пошук у черзі" placeholder="Ім'я, компанія або слово з повідомлення" value="${escapeAttr(today.search)}" /></label>
       </div>`}
@@ -662,7 +673,7 @@ function render() {
         <aside class="today-queue">${queueHtml()}</aside>
         <article class="today-work">${workHtml()}</article>
       </div>` : `${today.notice ? `<p class="today-notice ${today.tone}" role="status">${escapeHtml(today.notice)}</p>` : ""}<div class="today-queue today-queue-solo">${queueHtml()}</div>`}
-      ${data.newContactsAllowed ? "" : `<p class="today-gate">Нові контакти з папки (WorkSpace → «Нові контакти») — коли розберете відповіді й прострочені.</p>`}
+      ${data.newContactsAllowed ? "" : `<p class="today-gate">Нові контакти (вкладка «Нові») — коли розберете відповіді й прострочені.</p>`}`}
     </section>`;
   restoreScroll();
   refreshIcons(host);
@@ -711,7 +722,13 @@ document.addEventListener("click", (event) => {
   if (act === "cancel-reply") return void cancelReply(target.dataset.reply);
   if (act === "block") {
     today.blockFilter = target.dataset.block || "";
+    if (inboxMode !== "work") { setInboxMode("work"); return void applyInboxMode(); }
     return render();
+  }
+  if (act === "threads") {
+    if (inboxMode === "all") return;
+    setInboxMode("all");
+    return void applyInboxMode();
   }
   if (act === "scope") {
     today.scope = target.dataset.scope === "all" ? "all" : "mine";
@@ -777,6 +794,13 @@ document.addEventListener("click", (event) => {
     return void showWarmupInboxThread(item.accountId, item.threadKey);
   }
   if (act === "rewrite") return void writeDraft(true);
+  // Свій текст замість чернетки (Марко 20.10: «як взяти згенеровану відповідь, так і написати свою»).
+  if (act === "own-text") {
+    today.text = "";
+    today.draftNote = "";
+    render();
+    return void document.getElementById("todayText")?.focus();
+  }
   if (act === "send") return void send();
   if (act === "move") return void movePing(target.dataset.when);
   if (act === "call") {

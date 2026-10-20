@@ -10,7 +10,7 @@ import { newContactsGate } from "../triage/today.mjs";
  */
 
 const html = readFileSync(new URL("../app/index.html", import.meta.url), "utf8");
-const workspace = readFileSync(new URL("../app/screens/workspace.js", import.meta.url), "utf8");
+const workspace = readFileSync(new URL("../app/screens/new-contacts.js", import.meta.url), "utf8");
 const today = readFileSync(new URL("../app/screens/today.js", import.meta.url), "utf8");
 
 function viewOf(id) {
@@ -19,14 +19,15 @@ function viewOf(id) {
   return html.slice(start, end === -1 ? undefined : end);
 }
 
-test("the conveyor's root sits in WorkSpace, behind its own tab, and no longer on Головна", () => {
-  assert.match(viewOf("workspace"), /id="triageRoot"/);
-  assert.match(viewOf("workspace"), /data-ws-tab="contacts"[^>]*>Нові контакти</);
-  assert.match(viewOf("workspace"), /data-ws-tab="campaigns"[^>]*>Кампанії</);
+// З 20.10 (Марко, таск f50d24e9) конвеєр — у Вхідні → «Нові», з правилом «спершу розмови».
+test("the conveyor's root sits in Вхідні → «Нові», not in WorkSpace and not on Головна", () => {
+  assert.match(viewOf("inbox"), /data-inbox-tab="new"[^>]*>Нові</);
+  assert.match(viewOf("inbox"), /<div data-inbox-pane="new" hidden>\s*<div id="triageGate"><\/div>\s*<div class="triage-page" id="triageRoot"><\/div>/);
+  assert.doesNotMatch(viewOf("workspace"), /triageRoot|data-ws-tab/);
   assert.doesNotMatch(viewOf("home"), /triageRoot/);
 });
 
-test("WorkSpace opens the conveyor only through the gate, and the queue no longer does", () => {
+test("«Нові» open the conveyor only through the gate, and the queue itself never does", () => {
   assert.match(workspace, /import \{ openTriage \} from "\.\/home-triage\.js"/);
   assert.match(workspace, /api\("\/api\/today\/gate"\)/);
   assert.match(workspace, /if \(allowed && !\(recheck && wasAllowed\)\) await openTriage\(\)/);

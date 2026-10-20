@@ -141,7 +141,9 @@ async function enterWorkspace() {
   // second of empty page before the screen had even asked for its data.
   // A link to a screen wins over the tab somebody last left.
   const saved = linkedView() || rememberedView();
-  setView(saved || "home");
+  // Перший вхід (Марко 20.10): адмін — на Головну (нагляд за командою), лідген — у
+  // Вхідні (там його робота). Далі відкривається та вкладка, на якій людина була.
+  setView(saved || (authState?.user?.role === "admin" ? "home" : "inbox"));
   await refresh();
   startActivityHeartbeat();
   for (const hook of enterHooks) {

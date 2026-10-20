@@ -1,21 +1,20 @@
-// Головна (Марко 19.10, таск ca978070): «Пульт зверху, конвеєр під ним».
+// Головна — для адміна й менеджера (Марко 20.10, таск f50d24e9: «Головна все таки більше
+// для адмінів і менеджерів, щоб слідкувати за робочим процесом лідгенів»).
 //
-//   · Пульт — «До роботи сьогодні»: смуга прогресу дня з чотирьох частин (відповісти,
-//     прострочені, нагадати, перші повідомлення; Г2) — кожна частина й підпис відкривають
-//     Вхідні → «До роботи» з цим блоком, — і одна головна кнопка «Почати з відповідей» (Г1).
-//   · «Потребує уваги» — лише справжні проблеми, рядками на м'якому тлі: увага прогріву,
-//     вхідні не читались понад 36 год, пінги прострочені понад 2 робочі дні.
-//   · Під пультом — «Нові контакти»: конвеєр Павла (workspace.js → openNewContactsOnHome,
-//     на Головній без умови «спершу розмови» — власник 19.10, 86b69f3).
+//   · «До роботи сьогодні»: смуга дня з чотирьох частин (відповісти, прострочені, нагадати,
+//     перші повідомлення) — кожна частина й підпис відкривають Вхідні → «В роботі» з цим
+//     фільтром, — і кнопка «Почати з відповідей». Адмін бачить команду, лідген — себе.
+//   · «По лідгенах — зараз» (адмін): у кого скільки відповідей чекає, прострочених, кому
+//     сьогодні написав і скільки відповів у розмовах.
+//   · «Потребує уваги» — лише справжні проблеми, рядками на м'якому тлі.
 //
-// Воронки й кампаній тут немає: їхні числа — на «Прогріві» й у WorkSpace.
+// Нові контакти — у Вхідні → «Нові»; історія за дні — у «По днях».
 
 import { api, authState, escapeAttr, escapeHtml, onScreen, refreshIcons, uaPlural } from "../core.js";
 import { openTodayBlock } from "./today.js";
-import { openNewContactsOnHome } from "./workspace.js";
 import { warmupApi } from "./warmup-accounts.js";
 
-onScreen("home", { open: () => { void openHome(); void openNewContactsOnHome({ gate: false }); } });
+onScreen("home", { open: () => void openHome() });
 
 const SYNC_STALE_HOURS = 36;
 const OLD_PING_WORKING_DAYS = 2;
@@ -28,7 +27,7 @@ const PLAN = [
 ];
 const START_LABEL = { replies: "Почати з відповідей", overdue: "Почати з прострочених", today: "Почати з нагадувань", first: "Почати з перших повідомлень" };
 
-const home = { today: null, warmup: null, errors: [], loading: false };
+const home = { today: null, warmup: null, day: null, errors: [], loading: false };
 
 const isAdmin = () => authState?.user?.role === "admin";
 const scope = () => (isAdmin() ? "all" : "mine");
@@ -38,11 +37,12 @@ async function openHome() {
   render();
   const errors = [];
   const read = (promise, what) => promise.catch((error) => { if (error?.name !== "AbortError") errors.push(`${what}: ${error.message || "не прочиталось"}`); return null; });
-  const [today, warmup] = await Promise.all([
+  const [today, warmup, day] = await Promise.all([
     read(api(`/api/today?scope=${scope()}`), "пінги"),
-    read(warmupApi("/home"), "прогрів")
+    read(warmupApi("/home"), "прогрів"),
+    isAdmin() ? read(api("/api/work/day?user=all"), "робота команди") : Promise.resolve(null)
   ]);
-  Object.assign(home, { today, warmup, errors, loading: false });
+  Object.assign(home, { today, warmup, day, errors, loading: false });
   render();
 }
 
@@ -106,6 +106,43 @@ function attentionHtml() {
   </section>`;
 }
 
+/* ── по лідгенах — зараз (адмін) ───────────────────────────────────────── */
+
+/** Пінги команди по виконавцях і що кожен зробив сьогодні (журнал роботи «По днях»). */
+export function teamRows(today, day) {
+  const rows = new Map();
+  const row = (email) => {
+    const key = String(email || "").toLowerCase();
+    if (!rows.has(key)) rows.set(key, { email: key, name: "", replies: 0, overdue: 0, people: 0, answered: 0 });
+    return rows.get(key);
+  };
+  for (const block of ["replies", "overdue"]) for (const item of today?.blocks?.[block] || []) if (item.assignee) row(item.assignee)[block] += 1;
+  for (const person of day?.byUser || []) {
+    const entry = row(person.user);
+    entry.name = person.name || "";
+    entry.people = Number(person.counts?.contacts) || 0;
+    entry.answered = Number(person.counts?.replied) || 0;
+  }
+  return [...rows.values()].filter((entry) => entry.email)
+    .sort((left, right) => (right.replies + right.overdue) - (left.replies + left.overdue) || left.email.localeCompare(right.email));
+}
+
+function teamHtml() {
+  if (!isAdmin()) return "";
+  const rows = teamRows(home.today, home.day);
+  if (!rows.length) return "";
+  return `<section class="panel blk-list home-team">
+    <div class="panel-heading"><div><h2>По лідгенах — зараз</h2><p>Що чекає на кожного і що він зробив сьогодні. Історія — у «По днях».</p></div></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Хто</th><th title="Лід написав — чекає відповіді">Відповісти</th><th title="Дата пінгу минула">Прострочені</th><th title="Унікальні люди, яким сьогодні написав чи надіслав запит">Людям сьогодні</th><th title="Відповідей у розмовах сьогодні">Відповів у розмовах</th></tr></thead>
+      <tbody>${rows.map((entry) => `<tr>
+        <td><b>${escapeHtml(entry.name || entry.email.split("@")[0])}</b>${entry.name ? `<small>${escapeHtml(entry.email)}</small>` : ""}</td>
+        <td class="${entry.replies ? "is-hot" : ""}">${entry.replies}</td><td class="${entry.overdue ? "is-warn" : ""}">${entry.overdue}</td><td>${entry.people}</td><td>${entry.answered}</td>
+      </tr>`).join("")}</tbody>
+    </table></div>
+  </section>`;
+}
+
 function render() {
   const root = document.getElementById("homeRoot");
   if (!root) return;
@@ -113,9 +150,8 @@ function render() {
     root.innerHTML = `<section class="panel blk-metrics home-plan"><p class="home-subtle">Збираю план дня…</p></section>`;
     return;
   }
-  root.innerHTML = `${planHtml()}${attentionHtml()}
-    ${home.errors.length ? `<p class="home-subtle">Не все прочиталось: ${escapeHtml(home.errors.join("; "))}.</p>` : ""}
-    <div class="home-contacts-head"><span class="eyebrow">Нові контакти</span><p>Люди з папки CRM, яким ще ніхто не писав: по одному, з готовим листом чи повідомленням.</p></div>`;
+  root.innerHTML = `${planHtml()}${teamHtml()}${attentionHtml()}
+    ${home.errors.length ? `<p class="home-subtle">Не все прочиталось: ${escapeHtml(home.errors.join("; "))}.</p>` : ""}`;
   refreshIcons(root);
 }
 

@@ -14,6 +14,7 @@
     <link rel="stylesheet" href="/styles/today.css" />
     <link rel="stylesheet" href="/styles/campaign-report.css" />
     <link rel="stylesheet" href="/styles/workspace.css" />
+    <link rel="stylesheet" href="/styles/new-contacts.css" />
     <link rel="stylesheet" href="/styles/lead-campaigns.css" />
     <link rel="stylesheet" href="/styles/campaign-plan.css" />
     <link rel="stylesheet" href="/styles/work.css" />
@@ -110,12 +111,10 @@
           </div>
         </header>
 
-        <!-- Головна (Марко 19.10, таск ca978070: «Пульт зверху, конвеєр під ним»): план дня смугою
-             й «Почати з відповідей», «Потребує уваги» — app/screens/home.js; під ними «Нові контакти» —
-             той самий конвеєр, що у WorkSpace (app/screens/workspace.js), тут без умови «спершу розмови». -->
+        <!-- Головна — для адміна й менеджера (Марко 20.10, таск f50d24e9): смуга дня команди, «по лідгенах —
+             зараз», «Потребує уваги» — app/screens/home.js. Нові контакти — у Вхідні → «Нові». -->
         <section class="view" id="view-home">
           <div class="home-page" id="homeRoot"></div>
-          <div id="homeContacts"></div>
         </section>
 
         <!-- «По днях» (12.10): кому писали за день, хто відповів, діалог — app/screens/work.js. -->
@@ -271,17 +270,17 @@
         <!-- Налаштування пошти: підключення Gmail, домени й відправники, доступи й журнал дій
              (esp-mailboxes.js, esp-registry.js, esp-access.js). У «Налаштуваннях» — лише профіль і команда. -->
         <section class="view" id="view-inbox">
-          <!-- LinkedIn → «Вхідні» (19.10) — дві частини: «До роботи» — черга пінгів, що була на Головній
-               (відповіді → прострочені → на сьогодні → перші повідомлення, app/screens/today.js), і
-               «Усі розмови» — месенджер усіх акаунтів (app/screens/inbox.js). Між ними — переходи
-               (connectInboxWork у inbox.js). Пошта має свої «Вхідні» в папці «Пошта» (view-mail-inbox). -->
+          <!-- LinkedIn → «Вхідні» (Марко 20.10, таск f50d24e9) — дві вкладки:
+               «В роботі» — усі розмови з лідами в одному місці: фільтри «Відповіді / Прострочені / На сьогодні /
+               Перші» — черга пінгів (app/screens/today.js), фільтр «Усі розмови» — месенджер усіх акаунтів,
+               зокрема розмови без пінга (app/screens/inbox.js);
+               «Нові» — люди з папки CRM, яким ще ніхто не писав (app/screens/new-contacts.js + home-triage.js).
+               Пошта має свої «Вхідні» в папці «Пошта» (view-mail-inbox). -->
           <div class="view-tabs" role="tablist" aria-label="Вхідні LinkedIn">
-            <button type="button" role="tab" data-inbox-mode="work" title="Пінги: кому відповісти, нагадати, написати першим — з чернеткою">До роботи <b id="inboxWorkCount"></b></button>
-            <button type="button" role="tab" data-inbox-mode="all" title="Усі розмови всіх акаунтів, як у месенджері">Усі розмови <b id="inboxAllCount"></b></button>
+            <button type="button" role="tab" data-inbox-tab="work" title="Розмови з лідами: кому відповісти, нагадати, написати першим — і всі переписки">В роботі <b id="inboxWorkCount"></b></button>
+            <button type="button" role="tab" data-inbox-tab="new" title="Люди з папки CRM, яким ще ніхто не писав">Нові</button>
           </div>
-          <!-- Для чого відкрита вкладка — одним рядком (Марко 19.10, В1: «чітка різниця, що призначення різне»). -->
-          <p class="inbox-purpose" id="inboxPurpose"></p>
-          <div class="today-page" id="todayRoot" data-inbox-pane="work"></div>
+          <div class="today-page" id="todayRoot" data-inbox-pane="work all"></div>
           <div class="warmup-layout" data-inbox-pane="all">
             <section class="panel blk-queue warmup-inbox-panel span-2">
               <div class="panel-heading">
@@ -320,6 +319,13 @@
               </div>
             </section>
           </div>
+          <!-- «Нові»: папка CRM → людина за людиною, кому ще ніхто не писав — app/screens/home-triage.js.
+               Поки є свої відповіді чи прострочені пінги — замість конвеєра рядок «Спершу розмови»
+               (правило з налаштуванням норми для лідгена, Марко 20.10: «з правилом»). -->
+          <div data-inbox-pane="new" hidden>
+            <div id="triageGate"></div>
+            <div class="triage-page" id="triageRoot"></div>
+          </div>
         </section>
 
         <section class="view" id="view-mail-inbox">
@@ -349,18 +355,8 @@
 
         <!-- WorkSpace (16.10): кампанії лідгенів — стратегія аутріч, з прогрівом не пов'язана. -->
         <section class="view" id="view-workspace">
-          <!-- Дві частини WorkSpace (Марко 19.10): кампанії лідгенів і конвеєр нових контактів — app/screens/workspace.js. -->
-          <div class="view-tabs" role="tablist" aria-label="WorkSpace">
-            <button type="button" role="tab" data-ws-tab="campaigns">Кампанії</button>
-            <button type="button" role="tab" data-ws-tab="contacts">Нові контакти</button>
-          </div>
-          <!-- Нові контакти: папка CRM → людина за людиною, кому ще ніхто не писав — app/screens/home-triage.js.
-               Поки є свої відповіді чи прострочені пінги — замість конвеєра рядок, що спершу розмови. -->
-          <div class="ws-pane" data-ws-pane="contacts" hidden>
-            <div id="triageGate"></div>
-            <div class="triage-page" id="triageRoot"></div>
-          </div>
-          <div class="warmup-layout ws-pane" data-ws-pane="campaigns">
+          <!-- WorkSpace — стратегія аутріч (Марко 20.10: лише кампанії; нові контакти — у Вхідні → «Нові»). -->
+          <div class="warmup-layout">
             <!-- Кампанії лідгенів: папки CRM, продукт, сценарій — app/screens/lead-campaigns.js. -->
             <section class="panel blk-settings span-2" id="leadCampaignPanel"></section>
             <!-- Порівняння кампаній: кваліфіковані на 100 написаних — app/screens/campaign-report.js. -->

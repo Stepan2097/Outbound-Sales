@@ -18,12 +18,16 @@ function viewOf(id) {
   return html.slice(start, end === -1 ? undefined : end);
 }
 
-test("«Вхідні» hold both parts: the ping queue and the messenger, behind two tabs", () => {
+// 20.10 (Марко, таск f50d24e9): одна вкладка розмов «В роботі» (черга + фільтр «Усі розмови»)
+// і «Нові» — конвеєр нових контактів.
+test("«Вхідні» — «В роботі» (черга й усі розмови фільтром) і «Нові»", () => {
   const view = viewOf("inbox");
-  assert.match(view, /data-inbox-mode="work"[^>]*>До роботи/);
-  assert.match(view, /data-inbox-mode="all"[^>]*>Усі розмови/);
-  assert.match(view, /id="todayRoot" data-inbox-pane="work"/);
+  assert.match(view, /data-inbox-tab="work"[^>]*>В роботі/);
+  assert.match(view, /data-inbox-tab="new"[^>]*>Нові/);
+  assert.doesNotMatch(view, /data-inbox-mode=/);
+  assert.match(view, /id="todayRoot" data-inbox-pane="work all"/);
   assert.match(view, /data-inbox-pane="all"/);
+  assert.match(today, /data-today="threads"[^>]*>Усі розмови/);
   for (const id of ["warmupInboxBody", "warmupInboxThread", "warmupInboxReply", "warmupInboxSearch"]) assert.match(view, new RegExp(`id="${id}"`));
   assert.doesNotMatch(viewOf("home"), /todayRoot/, "Головна більше не показує чергу пінгів");
 });
@@ -63,7 +67,7 @@ test("В1 (Марко 19.10): «До роботи» на компонентах 
   assert.match(today, /chip\("", "Усі акаунти", allItems\(\)\.length\)/);
   assert.match(today, /id="todaySearch"/);
   assert.match(inbox, /const INBOX_ALL_ACCOUNTS = "\*";/);
-  assert.match(html, /id="inboxPurpose"/);
-  assert.match(today, /Кому написати сьогодні — з готовою чернеткою AI/);
-  assert.match(today, /Усі переписки акаунтів — знайти, перечитати, відповісти вручну/);
+  // 20.10: AI-чернетку можна взяти, переписати або стерти й написати своє.
+  assert.match(today, /data-today="own-text"/);
+  assert.match(today, /Переписати AI/);
 });
