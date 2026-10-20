@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import test from "node:test";
 
 import { handleWarmupApi } from "../warmup/api.mjs";
-import { CRM_COPIED, CRM_FAILED, CRM_RETRY_DAYS, outstandingCopies } from "../warmup/activities.mjs";
+import { CRM_COPIED, CRM_FAILED, CRM_RETRY_DAYS, outstandingCopies, setActivityAuthor } from "../warmup/activities.mjs";
 import { requestLine } from "../warmup/invites.mjs";
 import { DEFAULT_STRATEGY } from "../warmup/strategy.mjs";
 
@@ -320,6 +320,20 @@ test("both sides of a conversation reach the contact, each message once however 
   assert.deepEqual(events(CRM_COPIED).flatMap((row) => row.meta.eventIds).length, 3);
   const log = await call({ method: "GET", path: "/api/warmup/events?accountId=acc-1" });
   assert.equal(log.payload.events.filter((row) => row.type === CRM_COPIED).length, 0);
+});
+
+test("наше повідомлення в CRM — дія лідгена, що веде акаунт: автор і рядок у журналі дій; їхнє — нічиє (власник 20.10)", async (t) => {
+  rows.user_activity_log = [];
+  setActivityAuthor(async (accountId) => (accountId === "acc-1" ? "u-bohdan" : null));
+  t.after(() => setActivityAuthor(null));
+  const result = await thread([THEIRS, OURS]);
+  assert.equal(result.payload.crmWritten, 2);
+  const ours = rows.activities.find((row) => row.direction === "outgoing");
+  const theirs = rows.activities.find((row) => row.direction === "incoming");
+  assert.equal(ours.user_id, "u-bohdan");
+  assert.equal(theirs.user_id, undefined, "їхня відповідь — не дія нашої людини");
+  assert.deepEqual(rows.user_activity_log.map((row) => [row.user_id, row.action_type, row.entity_type, row.entity_id, row.metadata.direction]),
+    [["u-bohdan", "linkedin", "activity", ours.id, "outgoing"]]);
 });
 
 test("ESP-UI 5: a cold-email lead's card asks by address — the CRM contact with that email leads to the same LinkedIn story", async () => {

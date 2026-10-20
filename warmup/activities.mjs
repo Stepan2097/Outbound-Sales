@@ -97,6 +97,26 @@ export function clampContent(text) {
  * who the person is. The lines are owed exactly as though the insert had
  * failed, and the next sync asks again.
  */
+/**
+ * Хто в CRM автор нашого повідомлення (власник 20.10: «вчора жодних дій не
+ * записало в срм чому?»): лідген, який веде акаунт (позначка на «Прогріві»).
+ * Без автора повідомлення лягало в історію контакту, але не в дії людини — у
+ * CRM їх рахують за `activities.user_id` і `user_activity_log`, як і внесене
+ * вручну. Їхні повідомлення — без автора: це не дія нашої людини.
+ */
+let authorOf = async () => null;
+export function setActivityAuthor(resolve) {
+  authorOf = typeof resolve === "function" ? resolve : async () => null;
+}
+
+/** Рядок журналу дій CRM — такий самий, як пише CRM, коли людина вносить повідомлення сама. */
+async function logUserAction(userId, activityId, contactId, direction) {
+  await crm.from("user_activity_log").insert({
+    user_id: userId, action_type: "linkedin", entity_type: "activity", entity_id: activityId,
+    metadata: { direction, contact_id: contactId, activity_type: "linkedin", origin: "outbound" }
+  }).rows();
+}
+
 export async function copyToCrm({ accountId, contactId, entries, error = null, now = new Date() }) {
   if (!entries?.length) return { written: 0, failed: 0 };
 
@@ -105,11 +125,13 @@ export async function copyToCrm({ accountId, contactId, entries, error = null, n
   let failure = error || (contactId ? null : new Error("no CRM contact to write to"));
   if (failure) stoppedAt = 0;
   const copied = failure ? null : copiedLedger(accountId, entries, now);
+  const author = failure ? null : await Promise.resolve(authorOf(accountId)).catch(() => null);
   if (!failure) {
     for (const [index, entry] of entries.entries()) {
       try {
         if (await copied.has(entry.eventId)) continue;
-        await crm.from("activities").insert({
+        const outgoing = entry.direction !== "incoming";
+        const [row] = await crm.from("activities").insert({
           contact_id: contactId,
           type: "linkedin",
           content: clampContent(entry.content),
@@ -117,13 +139,15 @@ export async function copyToCrm({ accountId, contactId, entries, error = null, n
           // відповіді лідів у CRM рахувались як наші (виправлено 16.10, етап 1/6).
           direction: entry.direction === "incoming" ? "incoming" : "outgoing",
           // Мітка джерела (етап 5/6): цей рядок записав Outbound Sales, а не людина в CRM.
-          origin: "outbound"
-          // `user_id` is left to the column's own default, which a service-role
-          // insert resolves to null. That is right: nobody on the sales team
-          // wrote this, and attributing it to whoever holds the key would be a
-          // lie in a column people filter by.
-        }).rows();
+          origin: "outbound",
+          // Наше повідомлення — дія лідгена, що веде акаунт (20.10); їхнє — нічия.
+          ...(outgoing && author ? { user_id: author } : {})
+        }).select("id").rows();
         written.push(String(entry.eventId));
+        // Журнал дій — після рядка: не записався журнал — повідомлення однаково в історії.
+        if (outgoing && author && row?.id) {
+          await logUserAction(author, row.id, contactId, "outgoing").catch((logError) => console.warn(`[warmup] CRM action log: ${logError.message}`));
+        }
       } catch (caught) {
         failure = caught;
         stoppedAt = index;

@@ -12,6 +12,7 @@ import { handleKnowledgeLibraryApi } from "./knowledge/api.mjs";
 import { handlePitchApi } from "./knowledge/pitch-api.mjs";
 import { handleTodayApi, reconcileSoon, setLeadgenStore, setNewContactPolicyStore, setPingStepsStore, startPingReconciler } from "./triage/today.mjs";
 import { currentPingSteps } from "./triage/pings.mjs";
+import { setActivityAuthor } from "./warmup/activities.mjs";
 import { campaignsByContact, handleLeadCampaignApi, leadCampaigns, setLeadCampaignStore } from "./triage/lead-campaigns.mjs";
 import { handleCampaignReportApi, setReportStores, startReplyLabeler } from "./triage/campaign-report.mjs";
 import { handleScenarioApi, scenarioForPrompt } from "./warmup/scenarios.mjs";
@@ -768,6 +769,8 @@ server.listen(port, listenHost, () => {
       await writePersistentWorkspaceState();
     }
   });
+  // Автор наших повідомлень у CRM — лідген акаунта (20.10).
+  setActivityAuthor(async (accountId) => (accountId && state.accountLeadgens?.[accountId]) || null);
   setPingStepsStore({
     read: () => state.pingSteps,
     async write(value) {
