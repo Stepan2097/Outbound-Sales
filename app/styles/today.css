@@ -247,10 +247,14 @@
 /* «В роботі» на всю висоту екрана (Марко 20.10: «інтерфейс розтягнутий повністю до кінця
    екрану вниз… щоб більше всього помістилось»): черга й розмова гортаються кожна в собі. */
 @media (min-width: 901px) {
-  .today-layout { height: max(480px, calc(100vh - 290px)); align-items: stretch; }
+  .today-layout { height: max(480px, calc(100vh - 250px)); align-items: stretch; }
   .today-queue { max-height: none; height: 100%; }
-  .today-work { height: 100%; overflow-y: auto; align-content: start; }
-  .today-thread { max-height: none; overflow: visible; }
+  /* Гортається лише розмова; шапка, поле відповіді, статус і перенесення стоять (Марко 20.10). */
+  .today-work { height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+  .today-work > * { flex: none; }
+  .today-work > .today-thread { flex: 1 1 auto; min-height: 80px; max-height: none; overflow-y: auto; }
+  .today-work > .warmup-outbox { max-height: 30%; overflow-y: auto; }
+  .today-work .today-draft textarea { min-height: 88px; }
 }
 .today-draft-tools { display: inline-flex; flex-wrap: wrap; gap: 6px; font-weight: 400; }
 .today-work { position: relative; }

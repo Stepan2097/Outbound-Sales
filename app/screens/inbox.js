@@ -54,7 +54,12 @@ onWorkspaceEnter(() => refreshWarmupBadge());
  * ці «Усі розмови». today.js імпортує цей модуль і підключає сюди свої функції — так
  * немає кола імпортів. Доки не підключив, розмови просто без кнопки «До роботи».
  */
-let inboxWork = { showAll: () => {}, pingFor: () => null };
+let inboxWork = { showAll: () => {}, pingFor: () => null, loaded: () => {} };
+
+/** Скільки розмов на робочих акаунтах — для фільтра «Усі розмови» у «В роботі» (20.10). */
+export function warmupThreadTotal() {
+  return warmupState.inbox.ready ? inboxThreadsOf(INBOX_ALL_ACCOUNTS).length : null;
+}
 
 export function connectInboxWork(parts) {
   inboxWork = { ...inboxWork, ...parts };
@@ -1284,6 +1289,7 @@ export async function loadWarmupInbox() {
       }
     }
     renderWarmupInbox();
+    inboxWork.loaded?.();
     if (warmupState.profiles.length) renderWarmupProfiles();
   })();
   inboxLoadPromise = request;

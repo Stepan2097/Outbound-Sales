@@ -793,3 +793,24 @@
 @media (max-width: 900px) {
   .inbox-list { max-height: 65vh; overflow-y: auto; }
 }
+
+/* «В роботі» (Марко 20.10): «До роботи» і «Усі розмови» — одна панель, різна аудиторія.
+   У режимі «Усі розмови» шапка з фільтрами й месенджер зливаються в один блок. */
+#view-inbox .view-tabs { margin-bottom: var(--sp-2); }
+.view-tab-hint { font-weight: 400; font-size: 11px; color: var(--muted); opacity: .8; }
+#view-inbox[data-mode="all"] #todayRoot .today {
+  margin-bottom: 0;
+  padding-bottom: var(--sp-2);
+  border-bottom: 0;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+#view-inbox[data-mode="all"] [data-inbox-pane="all"] { margin-top: 0; }
+#view-inbox[data-mode="all"] .warmup-inbox-panel {
+  border-top: 0;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  box-shadow: none;
+  padding-top: 0;
+}
+#view-inbox[data-mode="all"] .warmup-inbox-panel > .panel-heading { display: none; }

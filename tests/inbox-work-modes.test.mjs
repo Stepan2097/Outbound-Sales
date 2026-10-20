@@ -49,7 +49,7 @@ test("a ping leads to its whole conversation, and a conversation with a ping lea
   assert.match(today, /data-today="thread"[^`]*>Уся розмова</);
   assert.match(today, /showWarmupInboxThread\(item\.accountId, item\.threadKey\)/);
   assert.match(inbox, /data-inbox-to-work="\$\{escapeAttr\(ping\.pingId\)\}"/);
-  assert.match(today, /connectInboxWork\(\{ showAll: \(\) => setInboxMode\("all"\), pingFor \}\)/);
+  assert.match(today, /connectInboxWork\(\{ showAll: \(\) => setInboxMode\("all"\), pingFor, loaded: \(\) => render\(\) \}\)/);
 });
 
 test("links from other screens to one conversation land on «Усі розмови», not on the queue", () => {
@@ -70,4 +70,15 @@ test("В1 (Марко 19.10): «До роботи» на компонентах 
   // 20.10: AI-чернетку можна взяти, переписати або стерти й написати своє.
   assert.match(today, /data-today="own-text"/);
   assert.match(today, /Переписати AI/);
+});
+
+test("правка Марка 20.10: без рядка про нові під чергою, «Усі розмови» з числом розмов, низ розмови стоїть", () => {
+  assert.doesNotMatch(today, /today-gate/);
+  assert.match(html, /id="inboxNewHint"/);
+  assert.match(today, /hint\.textContent = today\.data\?\.configured && today\.data\.newContactsAllowed === false \? "після розмов" : ""/);
+  assert.match(today, /Усі розмови\$\{totalThreads !== null \? ` \$\{totalThreads\}` : ""\}/);
+  const css = readFileSync(new URL("../app/styles/today.css", import.meta.url), "utf8");
+  assert.match(css, /\.today-work > \.today-thread \{ flex: 1 1 auto; min-height: 80px; max-height: none; overflow-y: auto; \}/);
+  const inboxCss = readFileSync(new URL("../app/styles/inbox.css", import.meta.url), "utf8");
+  assert.match(inboxCss, /#view-inbox\[data-mode="all"\] \.warmup-inbox-panel > \.panel-heading \{ display: none; \}/);
 });

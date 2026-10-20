@@ -21,7 +21,7 @@ function viewOf(id) {
 
 // З 20.10 (Марко, таск f50d24e9) конвеєр — у Вхідні → «Нові», з правилом «спершу розмови».
 test("the conveyor's root sits in Вхідні → «Нові», not in WorkSpace and not on Головна", () => {
-  assert.match(viewOf("inbox"), /data-inbox-tab="new"[^>]*>Нові</);
+  assert.match(viewOf("inbox"), /data-inbox-tab="new"[^>]*>Нові <small/);
   assert.match(viewOf("inbox"), /<div data-inbox-pane="new" hidden>\s*<div id="triageGate"><\/div>\s*<div class="triage-page" id="triageRoot"><\/div>/);
   assert.doesNotMatch(viewOf("workspace"), /triageRoot|data-ws-tab/);
   assert.doesNotMatch(viewOf("home"), /triageRoot/);

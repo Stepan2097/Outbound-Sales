@@ -15,7 +15,7 @@
 // закриває цей і ставить наступний (через 3 робочі дні).
 
 import { api, escapeAttr, escapeHtml, keepScroll, onScreen, refreshIcons } from "../core.js";
-import { connectInboxWork, renderWarmupInbox, showWarmupInboxThread, warmupGoesOutText, warmupMessageHtml, warmupProfileUrl } from "./inbox.js";
+import { connectInboxWork, renderWarmupInbox, warmupThreadTotal, showWarmupInboxThread, warmupGoesOutText, warmupMessageHtml, warmupProfileUrl } from "./inbox.js";
 import { showContactCard } from "./contacts.js";
 import { leaveNewContacts, openNewContacts } from "./new-contacts.js";
 
@@ -49,6 +49,8 @@ function applyInboxMode() {
     button.setAttribute("aria-selected", String(on));
   }
   for (const pane of document.querySelectorAll("[data-inbox-pane]")) pane.hidden = !pane.dataset.inboxPane.split(" ").includes(inboxMode);
+  // «До роботи» і «Усі розмови» — одна панель, різна аудиторія (Марко 20.10): стиль за режимом.
+  document.getElementById("view-inbox")?.setAttribute("data-mode", inboxMode);
   if (inboxMode === "new") return void openNewContacts();
   leaveNewContacts();
   // Пінги потрібні й «Усім розмовам»: розмова з пінгом має кнопку «До роботи».
@@ -58,6 +60,9 @@ function applyInboxMode() {
 function renderModeCounts() {
   const work = document.getElementById("inboxWorkCount");
   if (work) work.textContent = today.data?.configured ? String(allItems().length || "") : "";
+  // Ледь помітний коментар біля «Нові» замість рядка під чергою (Марко 20.10).
+  const hint = document.getElementById("inboxNewHint");
+  if (hint) hint.textContent = today.data?.configured && today.data.newContactsAllowed === false ? "після розмов" : "";
 }
 
 document.addEventListener("click", (event) => {
@@ -106,7 +111,7 @@ export function openTodayBlock(block = "", { scope = "" } = {}) {
   document.querySelector('.nav-item[data-view="inbox"]')?.click();
 }
 
-connectInboxWork({ showAll: () => setInboxMode("all"), pingFor });
+connectInboxWork({ showAll: () => setInboxMode("all"), pingFor, loaded: () => render() });
 
 const SCOPE_KEY = "outbound.today.scope";
 const BLOCKS = [
@@ -256,10 +261,10 @@ async function loadDetail(pingId) {
   } finally {
     today.detailLoading = false;
     render();
-    // Розмова на всю висоту (20.10): одразу видно останні повідомлення й поле відповіді.
-    const work = document.querySelector("#todayRoot .today-work");
-    const thread = work?.querySelector(".today-thread");
-    if (work && thread && work.scrollHeight > work.clientHeight) work.scrollTop = Math.max(0, thread.offsetTop + thread.offsetHeight - work.clientHeight * 0.55);
+    // Гортається лише розмова, поле відповіді й кнопки стоять унизу (Марко 20.10): одразу —
+    // до останнього повідомлення.
+    const thread = document.querySelector("#todayRoot .today-thread");
+    if (thread) thread.scrollTop = thread.scrollHeight;
   }
 }
 
@@ -640,12 +645,15 @@ function render() {
   // «Усі розмови»: усі переписки акаунтів, і ті, де пінга немає (Марко 20.10).
   const unread = document.getElementById("warmupNavBadge");
   const unreadCount = unread && !unread.hidden ? unread.textContent : "";
+  // «Усі розмови» — скільки їх усього (Марко 20.10: «чому всіх розмов менше ніж в до роботи?»
+  // — бо раніше тут стояло число непрочитаних, а не розмов).
+  const totalThreads = warmupThreadTotal();
   const chips = `<div class="today-chips" role="group" aria-label="Що показати">
         <button type="button" data-today="block" data-block="" class="${!threads && !today.blockFilter ? "active" : ""}">До роботи ${counts.reduce((sum, [, , count]) => sum + count, 0)}</button>
         ${counts.map(([key, title, count]) => `<button type="button" data-today="block" data-block="${escapeAttr(key)}" class="${!threads && today.blockFilter === key ? "active" : ""}">${escapeHtml(title)} ${count}</button>`).join("")}
-        <button type="button" data-today="threads" class="${threads ? "active" : ""}" title="Усі переписки акаунтів — і ті, де пінга немає: люди не з CRM, старі, закриті статусом">Усі розмови${unreadCount ? ` · ${escapeHtml(unreadCount)} нових` : ""}</button>
+        <button type="button" data-today="threads" class="${threads ? "active" : ""}" title="Усі переписки акаунтів — і ті, де пінга немає: люди не з CRM, старі, закриті статусом${unreadCount ? `. Непрочитаних: ${escapeAttr(unreadCount)}` : ""}">Усі розмови${totalThreads !== null ? ` ${totalThreads}` : ""}</button>
       </div>`;
-  const restoreScroll = keepScroll(host, [".today-queue"]);
+  const restoreScroll = keepScroll(host, [".today-queue", ".today-thread"]);
   host.innerHTML = `
     <section class="panel blk-queue today">
       <header class="today-head">
@@ -673,7 +681,7 @@ function render() {
         <aside class="today-queue">${queueHtml()}</aside>
         <article class="today-work">${workHtml()}</article>
       </div>` : `${today.notice ? `<p class="today-notice ${today.tone}" role="status">${escapeHtml(today.notice)}</p>` : ""}<div class="today-queue today-queue-solo">${queueHtml()}</div>`}
-      ${data.newContactsAllowed ? "" : `<p class="today-gate">Нові контакти (вкладка «Нові») — коли розберете відповіді й прострочені.</p>`}`}
+`}
     </section>`;
   restoreScroll();
   refreshIcons(host);
@@ -705,7 +713,10 @@ document.addEventListener("click", (event) => {
   const target = event.target.closest?.("#todayRoot [data-today]");
   if (!target) return;
   const act = target.dataset.today;
-  if (act === "reload") return void openToday({ keepSelection: true });
+  if (act === "reload") {
+    if (inboxMode === "all") document.getElementById("warmupInboxRefreshBtn")?.click();
+    return void openToday({ keepSelection: true });
+  }
   if (act === "account") {
     today.account = target.dataset.account || "";
     return render();

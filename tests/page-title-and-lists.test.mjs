@@ -46,9 +46,9 @@ test("По днях, ліди пошти і черга «До роботи» п�
   assert.match(work, /const restore = keepScroll\(root, \[".work-rows", ".work-plan-list"\]\);\n  root\.innerHTML = [^\n]+\n  restore\(\);/);
   assert.match(leads, /const restore = keepScroll\(main, \[".leads-table-wrap"\]\);/);
   const today = readFileSync(new URL("../app/screens/today.js", import.meta.url), "utf8");
-  assert.match(today, /const restoreScroll = keepScroll\(host, \[".today-queue"\]\);/);
+  assert.match(today, /const restoreScroll = keepScroll\(host, \[".today-queue", ".today-thread"\]\);/);
   const todayCss = readFileSync(new URL("../app/styles/today.css", import.meta.url), "utf8");
   const inboxCss = readFileSync(new URL("../app/styles/inbox.css", import.meta.url), "utf8");
   assert.match(todayCss, /@media \(max-width: 900px\) \{\n  \.today-queue \{ max-height: 60vh; overflow-y: auto; \}/);
-  assert.match(inboxCss, /@media \(max-width: 900px\) \{\n  \.inbox-list \{ max-height: 65vh; overflow-y: auto; \}\n\}\s*$/);
+  assert.match(inboxCss, /@media \(max-width: 900px\) \{\n  \.inbox-list \{ max-height: 65vh; overflow-y: auto; \}\n\}/);
 });
