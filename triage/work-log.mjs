@@ -268,6 +268,17 @@ export function followUpsDue(threads, { today, accounts = new Map(), skipAccount
  */
 export const LINKEDIN_DIRECT = "linkedin";
 
+// Ім'я з рядка LinkedIn часом приходить разом зі статусом і заголовком профілю:
+// «Ako Gurjinyan Статус «офлайн» Founder | …» (Марко 21.10: текст налазить у журналі дня).
+const PARTICIPANT_TAIL = /\s+(статус\s*«|status is\b|активн(ий|а) зараз|active now|mobile\s*•|•)/i;
+/** Лише ім'я людини: без «Переглянути профіль», статусу «онлайн» і заголовка після нього. */
+export function participantName(raw) {
+  let name = String(raw || "").replace(/^(переглянути профіль|view profile( of)?)\s+/i, "").replace(/\s+/g, " ").trim();
+  const tail = name.search(PARTICIPANT_TAIL);
+  if (tail > 0) name = name.slice(0, tail).trim();
+  return name || null;
+}
+
 export function linkedinSends(events, { accounts = new Map(), entries = [] } = {}) {
   const queuedBy = new Map();
   for (const row of entries) {
@@ -287,7 +298,7 @@ export function linkedinSends(events, { accounts = new Map(), entries = [] } = {
       at,
       key: contactId ? `id:${contactId}` : `thread:${event.account_id}:${meta.threadKey}`,
       contactId,
-      name: String(meta.participant?.name || "").replace(/^(переглянути профіль|view profile( of)?)\s+/i, "").trim() || null,
+      name: participantName(meta.participant?.name),
       accountId: event.account_id,
       accountName: accounts.get(event.account_id) || null,
       user: queued?.user || LINKEDIN_DIRECT,

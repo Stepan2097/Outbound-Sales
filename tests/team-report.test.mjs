@@ -132,3 +132,17 @@ test("a week still going is compared with the same days of the week before, not 
   assert.equal(done.partial, undefined);
   assert.equal(done.total.written, 2);
 });
+
+test("journal of the day: a LinkedIn name loses the status and headline glued to it; rows are as tall as their content", async () => {
+  const { participantName } = await import("../triage/work-log.mjs");
+  assert.equal(participantName("Ako Gurjinyan Статус «офлайн» Founder | Entrepreneur | Investor-Ready Leader"), "Ako Gurjinyan");
+  assert.equal(participantName("André Vinícius de Alencar Alves Статус «онлайн» Активний зараз"), "André Vinícius de Alencar Alves");
+  assert.equal(participantName("Переглянути профіль Luke Status is online"), "Luke");
+  assert.equal(participantName("Bar Afuta"), "Bar Afuta");
+  assert.equal(participantName(""), null);
+  const { readFileSync } = await import("node:fs");
+  const grammar = readFileSync(new URL("../app/styles/grammar.css", import.meta.url), "utf8");
+  const work = readFileSync(new URL("../app/styles/work.css", import.meta.url), "utf8");
+  assert.match(grammar, /\.work-rows \{[^}]*grid-auto-rows: max-content;/, "a button's min-height must not let the list squeeze rows");
+  assert.match(work, /\.work-row \{[^}]*grid-template-columns: minmax\(0, 1fr\);[^}]*padding: var\(--sp-3\) var\(--sp-4\);/);
+});

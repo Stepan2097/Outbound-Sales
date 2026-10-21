@@ -218,7 +218,9 @@
   z-index: 1;
   background: var(--surface);
 }
-.work-rows { display: grid; gap: 8px; padding-right: 2px; }
+/* Рядок списку — заввишки зі свій вміст: кнопка має min-height, і без max-content сітка
+   з висотою списку стискала рядки, а текст налазив на сусідні (Марко 21.10). */
+.work-rows { display: grid; grid-auto-rows: max-content; align-content: start; gap: var(--sp-2); padding-right: 2px; }
 
 /* Рядок призначення під вкладками «Вхідних» (19.10, В1). */
 .inbox-purpose { margin: calc(-1 * var(--sp-2)) 0 var(--sp-3); color: var(--muted); font-size: 13px; }

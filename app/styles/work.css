@@ -238,11 +238,13 @@
   display: grid;
   justify-content: stretch;
   justify-items: stretch;
-  gap: 4px;
+  gap: var(--sp-1);
   white-space: normal;
   width: 100%;
   min-width: 0;
-  padding: 12px 14px;
+  min-height: max-content;
+  grid-template-columns: minmax(0, 1fr);
+  padding: var(--sp-3) var(--sp-4);
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--surface);
@@ -273,7 +275,20 @@
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--sp-2);
+}
+
+/* Довге ім'я чи посада — в один рядок з трикрапкою; повністю — у картці праворуч. */
+.work-row-head b,
+.work-row-sub {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.work-row-head b {
+  flex: 1 1 0;
 }
 
 .work-row-sub,
@@ -294,7 +309,8 @@
 .work-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--sp-1) var(--sp-2);
+  margin-top: var(--sp-1);
 }
 
 .work-chip {
