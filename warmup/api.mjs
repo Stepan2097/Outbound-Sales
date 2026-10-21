@@ -3334,7 +3334,10 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       // somebody who wrote, from an account the agent will open — and the
       // screen is told which, and why not, rather than left to find out.
       const door = await replyDoor(account);
-      const answerable = found.messages.some((message) => message.direction === "in");
+      // A conversation with our message in it can be written to — an answer, or a
+      // reminder when they have not answered (власник 21.10: «такого бути не повинно»).
+      // Only a conversation with nothing in it is a first message, through «Прогрів».
+      const answerable = found.messages.some((message) => message.direction === "in" || message.direction === "out");
       const [queue, goesOut] = await Promise.all([
         account ? repliesOf(account.id) : [],
         door.open && account ? replyGoesOut(account) : null
@@ -3398,7 +3401,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       // Нагадування з «Сьогодні» (пінг «Нагадати», 16.10): лід ще не відповідав, але
       // розмова вже є — наше повідомлення в ній. Без жодного повідомлення це досі
       // перше, і воно йде через «Прогрів».
-      const isFollowUp = body.followUp === true && found.messages.some((message) => message.direction === "out");
+      const isFollowUp = found.messages.some((message) => message.direction === "out");
       if (!isFollowUp && !found.messages.some((message) => message.direction === "in")) {
         return fail(response, sendJson, 409, "Тут ще ніхто не відповів — це не відповідь, а перше повідомлення, і воно йде через «Прогрів».");
       }

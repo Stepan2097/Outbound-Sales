@@ -248,13 +248,12 @@ test("відповісти можна тому, хто написав: відп�
   assert.equal(events("message.out").length, 1, "повідомлень, окрім прочитаного агентом, не додалось");
 });
 
-test("тому, хто нічого не написав, відповісти не можна: це перше повідомлення, а не відповідь", async () => {
+test("розмова з нашим повідомленням, де людина ще мовчить, — нагадування можна написати й звідси (власник 21.10)", async () => {
   await store([OURS]);
+  assert.equal((await openThread()).reply.canWrite, true);
   const answer = await reply("Нагадую про себе");
-  assert.equal(answer.status, 409);
-  assert.match(answer.payload.error, /не відповідь/);
-  assert.equal(events("outbox.queued").length, 0);
-  assert.equal((await openThread()).reply.canWrite, false);
+  assert.equal(answer.status, 201);
+  assert.equal(events("outbox.queued").length, 1);
 });
 
 test("порожня й задовга відповіді відхиляються", async () => {
