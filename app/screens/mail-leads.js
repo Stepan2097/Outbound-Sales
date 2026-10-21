@@ -118,6 +118,11 @@ async function loadPage() {
   try {
     leadsState.page = await api(`/api/esp/leads?${params}`);
     leadsState.offset = leadsState.page.offset;
+    // A company folder's people are being gathered on the server: ask again shortly.
+    if (leadsState.page.loading) {
+      const view = leadsState.view;
+      window.setTimeout(() => { if (leadsState.view === view && !leadsState.card) void loadPage(); }, 4000);
+    }
   } catch (error) {
     leadsState.notice = error?.message || "Список не прочитався.";
     leadsState.page = { rows: [], total: 0, offset: 0, limit: 50, verification: null };
@@ -157,10 +162,13 @@ function sideHtml() {
   };
   const lists = (meta?.lists || []).map((list) => item(list.id, "folder", list.name, list.count)).join("");
   // The CRM's folders, each counted by the people in it who have an address.
-  const crm = (meta?.crmFolders || []).map((folder) => item(`crm:${folder.id}`, "folder-open", folder.name, folder.withEmail ?? "—")).join("");
+  const crm = (meta?.crmFolders || []).filter((folder) => folder.kind !== "company").map((folder) => item(`crm:${folder.id}`, "folder-open", folder.name, folder.withEmail ?? "—")).join("");
+  // Папки компаній CRM (21.10): люди — контакти компаній папки; лічильник — коли їх зібрано.
+  const companies = (meta?.crmFolders || []).filter((folder) => folder.kind === "company").map((folder) => item(`crm:${folder.id}`, "building-2", folder.name, folder.withEmail ?? "…")).join("");
   return `
     <div class="mail-side-head"><span class="mail-side-title">Папки CRM</span></div>
     ${crm || (meta ? `<p class="leads-side-empty">${escapeHtml(meta.crmError || "У CRM немає папок.")}</p>` : "")}
+    ${companies ? `<div class="mail-side-sep"></div><div class="mail-side-head"><span class="mail-side-title">Папки компаній CRM</span></div>${companies}` : ""}
     <div class="mail-side-sep"></div>
     <div class="mail-side-head">
       <span class="mail-side-title">Списки з вставки</span>
@@ -213,7 +221,7 @@ function checkHtml(crmFolder) {
 }
 
 function folderAddHtml(crmFolder, count) {
-  const others = (leadsState.meta?.crmFolders || []).filter((row) => row.id !== crmFolder.id);
+  const others = (leadsState.meta?.crmFolders || []).filter((row) => row.id !== crmFolder.id && row.kind !== "company");
   return `
     <form class="leads-send" id="leadsToFolder">
       <select name="folderId" aria-label="Папка CRM"${count ? "" : " disabled"}>
@@ -240,7 +248,7 @@ function listHtml() {
     <div class="leads-head">
       ${leadsState.renaming && list
         ? `<form class="leads-rename" id="leadsRename"><input name="name" value="${escapeAttr(list.name)}" maxlength="80" required autofocus /><button type="submit" class="primary-button">Зберегти</button><button type="button" class="text-button" data-leads-rename-cancel>Скасувати</button></form>`
-        : `<h2>${escapeHtml(title)}</h2>${crmFolder ? `<span class="leads-crm-note">папка CRM · з поштою ${crmFolder.withEmail ?? "—"} із ${crmFolder.contacts ?? "—"} контактів</span>` : ""}${list ? `<button type="button" class="icon-button" data-leads-rename aria-label="Перейменувати" title="Перейменувати"><i data-lucide="pencil"></i></button><button type="button" class="icon-button" data-leads-delete aria-label="Видалити список" title="Видалити список"><i data-lucide="trash-2"></i></button>` : ""}`}
+        : `<h2>${escapeHtml(title)}</h2>${crmFolder ? `<span class="leads-crm-note">${crmFolder.kind === "company" ? `папка компаній CRM · контактів цих компаній з поштою ${page?.total ?? crmFolder.withEmail ?? "…"}` : `папка CRM · з поштою ${crmFolder.withEmail ?? "—"} із ${crmFolder.contacts ?? "—"} контактів`}</span>` : ""}${list ? `<button type="button" class="icon-button" data-leads-rename aria-label="Перейменувати" title="Перейменувати"><i data-lucide="pencil"></i></button><button type="button" class="icon-button" data-leads-delete aria-label="Видалити список" title="Видалити список"><i data-lucide="trash-2"></i></button>` : ""}`}
     </div>`;
   const pickedCount = crmFolder && leadsState.allInFolder ? page?.total || 0 : picked.length;
   const providerOptions = Object.entries(leadsState.check?.providers || {}).filter(([key]) => key !== "unknown");
@@ -290,6 +298,7 @@ function listHtml() {
       ? `Вибрано всіх ${page.total.toLocaleString("uk-UA")}${leadsState.q ? ", кого знайшов пошук" : " у папці"}. <button type="button" class="text-button" data-leads-all-folder="0">Лише цю сторінку</button>`
       : `Вибрано ${rows.length} на цій сторінці. <button type="button" class="text-button" data-leads-all-folder="1">Вибрати всіх ${page.total.toLocaleString("uk-UA")}${leadsState.q ? ", кого знайшов пошук" : " у папці"}</button>`}</div>` : "";
   const empty = !page ? '<div class="empty-state">Читаємо список...</div>'
+    : page.loading ? '<div class="empty-state">Збираю контакти компаній цієї папки — до хвилини, сторінка оновиться сама.</div>'
     : !rows.length ? `<div class="empty-state">${leadsState.q ? "Нікого не знайдено." : crmFolder ? "У цій папці CRM немає людей з поштою." : list ? "У списку нікого немає — «Додати лідів»." : meta?.lists.length ? "Лідів ще немає." : "Виберіть папку CRM ліворуч — або створіть список і вставте лідів."}</div>` : "";
   const table = rows.length ? `
     <div class="table-wrap leads-table-wrap"><table class="leads-table">

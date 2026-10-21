@@ -51,6 +51,7 @@ import { campaignStore } from "./esp/campaigns.mjs";
 import { leadStore } from "./esp/leads.mjs";
 import { crmLeadSource } from "./esp/crm-leads.mjs";
 import { folderChecker } from "./esp/folder-check.mjs";
+import { companyFolderSource, isCompanyFolder } from "./esp/crm-company-leads.mjs";
 import { anty as warmupAnty, crm as warmupCrm } from "./warmup/db.mjs";
 import { likeLiteral } from "./warmup/rest.mjs";
 import { listThreads, messagesForContact, readThread as readInboxThread } from "./warmup/inbox.mjs";
@@ -639,8 +640,10 @@ const esp = (() => {
     return runWarmupTick({ journal: { allEntries, append: espAppend }, senders, connector, gate, now: new Date(), writer: state.vault ? writeWarmupLetter : null });
   };
   // «Ліди»: the CRM's folders, read through the same cached folder list «Контакти» uses.
-  const crmLeads = crmLeadSource({ crm: warmupCrm, listFolders: () => listContactFolders() });
-  const folderCheck = folderChecker({ crm: warmupCrm });
+  // Папки компаній CRM — теж папки «Лідів» (21.10): контакти компаній папки.
+  const companyFolders = companyFolderSource({ crm: warmupCrm });
+  const crmLeads = crmLeadSource({ crm: warmupCrm, listFolders: () => listContactFolders(), companies: companyFolders });
+  const folderCheck = folderChecker({ crm: warmupCrm, idsOf: (folderId) => (isCompanyFolder(folderId) ? companyFolders.ids(folderId) : null) });
   return { connector, oauth, keyError, gate, templates, signature, unsubscribe, campaigns, leads, crmLeads, folderCheck, halt, halted, tick, filters, pollInbox, checkAlerts, runMonitor, warmupTick, alertsTelegram: telegram.configured, sequenceOn: process.env.ESP_SEQUENCE === "on" };
 })();
 

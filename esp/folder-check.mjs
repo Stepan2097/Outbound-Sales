@@ -253,7 +253,7 @@ export function defaultDeep() {
  * The folder runs, one at a time per folder, kept in memory with their counts.
  * `crm` — the CRM REST client; `deep` — millionVerifier() or null.
  */
-export function folderChecker({ crm, deep = defaultDeep, domainOf = domainChecker(), now = () => new Date(), concurrency = 8 }) {
+export function folderChecker({ crm, deep = defaultDeep, domainOf = domainChecker(), now = () => new Date(), concurrency = 8, idsOf = null }) {
   const runs = new Map();
   const IN_FOLDER = "m:contact_folder_memberships!inner(folder_id)";
 
@@ -316,13 +316,24 @@ export function folderChecker({ crm, deep = defaultDeep, domainOf = domainChecke
   async function go(run) {
     const verifier = run.deep ? deep() : null;
     try {
-      run.total = await crm.from("contacts").select(`id,${IN_FOLDER}`).eq("m.folder_id", run.folderId).notNull("email").neq("email", "").count();
+      // A company folder (21.10) is a list of contact ids, not a membership.
+      const listed = idsOf ? await idsOf(run.folderId) : null;
+      run.total = listed ? listed.length : await crm.from("contacts").select(`id,${IN_FOLDER}`).eq("m.folder_id", run.folderId).notNull("email").neq("email", "").count();
       let after = "";
+      let from = 0;
       for (;;) {
         if (run.stopRequested) { run.state = "stopped"; break; }
-        let query = crm.from("contacts").select(`id,email,custom_fields,${IN_FOLDER}`).eq("m.folder_id", run.folderId).notNull("email").neq("email", "");
-        if (after) query = query.gt("id", after);
-        const rows = await query.order("id").limit(BATCH).rows();
+        let rows;
+        if (listed) {
+          const slice = listed.slice(from, from + BATCH);
+          from += BATCH;
+          rows = slice.length ? await crm.from("contacts").select("id,email,custom_fields").in("id", slice).rows() : [];
+          if (!slice.length) { run.state = run.stopRequested ? "stopped" : "done"; break; }
+        } else {
+          let query = crm.from("contacts").select(`id,email,custom_fields,${IN_FOLDER}`).eq("m.folder_id", run.folderId).notNull("email").neq("email", "");
+          if (after) query = query.gt("id", after);
+          rows = await query.order("id").limit(BATCH).rows();
+        }
         let next = 0;
         const worker = async () => {
           while (next < rows.length && !run.stopRequested) {
@@ -341,6 +352,7 @@ export function folderChecker({ crm, deep = defaultDeep, domainOf = domainChecke
         // (Google, Microsoft) count them per sending address.
         const lanes = verifier ? Math.min(concurrency, 4) : concurrency;
         await Promise.all(Array.from({ length: Math.min(lanes, rows.length) }, worker));
+        if (listed) { if (from >= listed.length) { run.state = run.stopRequested ? "stopped" : "done"; break; } continue; }
         if (rows.length < BATCH) { run.state = run.stopRequested ? "stopped" : "done"; break; }
         after = rows.at(-1).id;
       }

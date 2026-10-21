@@ -524,7 +524,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
       if (method === "POST" && path === "/leads/crm/check") {
         if (!esp.folderCheck) return badRequest(sendJson, response, "Перевірку папок на цьому сервері не підключено.");
         const folderId = String(body.folderId || "");
-        if (!/^[0-9a-f-]{36}$/i.test(folderId)) return badRequest(sendJson, response, "Такої папки CRM немає.");
+        if (!/^(c:)?[0-9a-f-]{36}$/i.test(folderId)) return badRequest(sendJson, response, "Такої папки CRM немає.");
         const run = body.stop ? esp.folderCheck.stop(folderId) : esp.folderCheck.start(folderId);
         if (!body.stop) await logged("crm_folder_check", { folderId, deep: run?.deep || false });
         sendJson(response, 200, { success: true, run, deep: esp.folderCheck.deepAvailable() });

@@ -8,6 +8,8 @@
  * сервер передає їх сюди, тож тести обходяться без мережі.
  */
 
+import { isCompanyFolder } from "./crm-company-leads.mjs";
+
 const COLUMNS = "id,name,company,position,country,email,linkedin,folder_id,created_at,custom_fields";
 const COUNT_TTL = 5 * 60_000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -72,7 +74,7 @@ async function twice(read) {
 const IN_FOLDER = "m:contact_folder_memberships!inner(folder_id)";
 const MEMBERSHIP_BATCH = 500;
 
-export function crmLeadSource({ crm, listFolders, now = () => Date.now() }) {
+export function crmLeadSource({ crm, listFolders, companies = null, now = () => Date.now() }) {
   let counts = null;
   const withEmail = (query) => query.notNull("email").neq("email", "");
   const inFolder = (columns, folderId) => withEmail(crm.from("contacts").select(`${columns},${IN_FOLDER}`).eq("m.folder_id", folderId));
@@ -95,7 +97,21 @@ export function crmLeadSource({ crm, listFolders, now = () => Date.now() }) {
       const pairs = await Promise.all(list.map(async (folder) => [folder.id, await inFolder("id", folder.id).count().catch(() => null)]));
       counts = { at: now(), map: new Map(pairs) };
     }
-    return list.map((folder) => ({ id: folder.id, name: folder.name, color: folder.color || null, contacts: folder.contactCount ?? null, withEmail: counts.map.get(folder.id) ?? null }));
+    const own = list.map((folder) => ({ id: folder.id, name: folder.name, color: folder.color || null, contacts: folder.contactCount ?? null, withEmail: counts.map.get(folder.id) ?? null }));
+    // Папки компаній (21.10): люди — контакти компаній папки (esp/crm-company-leads.mjs).
+    const ofCompanies = companies ? await companies.folders().catch(() => []) : [];
+    return [...own, ...ofCompanies];
+  }
+
+  /** A page of a company folder: its people's ids from the cache, the rows read fresh. */
+  async function companyPage({ folderId, q, offset, limit, provider }) {
+    const name = await companies.name(folderId);
+    if (!companies.ready(folderId)) return { folder: { id: folderId, name }, loading: true, total: null, offset: 0, limit, rows: [] };
+    const ids = await companies.ids(folderId, q, provider);
+    const slice = ids.slice(offset, offset + limit);
+    const rows = slice.length ? await twice(() => crm.from("contacts").select(COLUMNS).in("id", slice).rows()) : [];
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    return { folder: { id: folderId, name }, total: ids.length, offset, limit, rows: slice.map((id) => byId.get(id)).filter(Boolean).map((row) => leadFromContact(row, name)) };
   }
 
   return {
@@ -104,6 +120,9 @@ export function crmLeadSource({ crm, listFolders, now = () => Date.now() }) {
 
     /** A page of one folder: only people with an address; search by name, company, position, address. */
     async page({ folderId, q = "", offset = 0, limit = 50, provider = "" }) {
+      if (companies && isCompanyFolder(folderId)) {
+        return companyPage({ folderId, q, provider, offset: Math.max(0, Number(offset) || 0), limit: Math.max(1, Math.min(100, Number(limit) || 50)) });
+      }
       mustFolder(folderId);
       const name = (await listFolders()).find((folder) => folder.id === folderId)?.name || "";
       const term = String(q || "").trim();
@@ -136,6 +155,7 @@ export function crmLeadSource({ crm, listFolders, now = () => Date.now() }) {
      * thousand at a time, so a folder of twenty thousand is twenty-two reads.
      */
     async idsInFolder(folderId, q = "", provider = "") {
+      if (companies && isCompanyFolder(folderId)) return companies.ids(folderId, q, provider);
       mustFolder(folderId);
       const ids = [];
       let after = "";
