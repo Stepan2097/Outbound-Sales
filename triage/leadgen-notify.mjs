@@ -87,7 +87,8 @@ export function digestText({ unread = [], planned = { total: 0, carried: 0 }, ac
     const names = unread.slice(0, 5).map((row) => cleanName(row.name)).join(", ");
     lines.push(`💬 Чекають відповіді: ${unread.length} — ${names}${unread.length > 5 ? "…" : ""}`);
   }
-  if (planned.total) lines.push(`🔁 Написати повторно: ${planned.total}${planned.carried ? ` (з них перенесено з минулих днів: ${planned.carried})` : ""}`);
+  // З 21.10 — з пінгів «В роботі»: нагадати сьогодні, з них прострочені (таск cd1b118c).
+  if (planned.total) lines.push(`🔁 Нагадати: ${planned.total}${planned.carried ? ` (з них прострочених: ${planned.carried})` : ""}`);
   if (accepted) lines.push(`🤝 Прийняли запит, чекають першого повідомлення: ${accepted}`);
   if (lines.length === 1) lines.push("Нічого не чекає — можна брати нових людей на «Головній».");
   lines.push(`Вчора написали ${yesterday.written} ${plural(yesterday.written, "людині", "людям", "людям")}, відповідей прийшло: ${yesterday.replies}.`);

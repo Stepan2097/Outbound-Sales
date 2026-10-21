@@ -164,31 +164,8 @@ function rowHtml(item, data) {
   </button>`;
 }
 
-// Заплановані (власник 14.10): кому ми написали в LinkedIn і хто мовчить — завтра
-// написати знову; що не встигли — лишається на наступний день, старіші вгорі.
-function plannedHtml(data) {
-  const planned = data.planned;
-  if (!planned) return "";
-  const days = (count) => `${count} ${count % 10 === 1 && count % 100 !== 11 ? "день" : [2, 3, 4].includes(count % 10) && ![12, 13, 14].includes(count % 100) ? "дні" : "днів"}`;
-  const rows = planned.items.map((item) => `<li class="work-plan-row ${item.carriedDays ? "is-carried" : ""}">
-      <div class="work-plan-who">
-        <b>${escapeHtml(item.name)}</b>
-        ${item.headline ? `<small>${escapeHtml(item.headline)}</small>` : ""}
-        <span class="work-plan-last">Ми написали ${escapeHtml(when(item.lastAt))}${item.accountName ? ` · ${escapeHtml(item.accountName)}` : ""}${item.lastText ? `: «${escapeHtml(item.lastText)}»` : ""}</span>
-      </div>
-      <div class="work-plan-tags">
-        ${item.carriedDays ? `<span class="work-status is-bad">перенесено · чекає ${escapeHtml(days(item.carriedDays))}</span>` : '<span class="work-status is-silent">на сьогодні</span>'}
-        <span class="work-plan-count">${item.sentInRow} з ${planned.limit} без відповіді</span>
-      </div>
-      <button type="button" class="primary-button" data-work-write="${escapeAttr(item.accountId)}" data-work-thread="${escapeAttr(item.threadKey)}"><i data-lucide="message-square"></i><span>Написати</span></button>
-    </li>`).join("");
-  return `<section class="work-plan">
-    <header><h3>Заплановані на сьогодні <b>${planned.total}</b></h3>
-      <p>Кому ми написали в LinkedIn, а людина мовчить: написати знову за графіком нагадувань (на «Сьогодні», кнопка з будильником). Хто не дочекався — переходить на наступний день. Після ${planned.limit} повідомлень поспіль без відповіді людина зі списку зникає.</p></header>
-    ${planned.error ? `<p class="esp-notice is-bad">${escapeHtml(planned.error)}</p>` : ""}
-    ${planned.items.length ? `<ol class="work-plan-list scroll-list">${rows}</ol>${planned.total > planned.items.length ? `<p class="work-muted">Показано ${planned.items.length} з ${planned.total}.</p>` : ""}` : planned.error ? "" : '<p class="work-muted">На сьогодні нікому не треба писати повторно.</p>'}
-  </section>`;
-}
+// Блок «Заплановані» прибрано (таск cd1b118c, 21.10): нагадування тим, хто мовчить,
+// живуть за одним правилом — пінгами у Вхідні → «В роботі». «По днях» — історія дня.
 
 function listHtml(data) {
   const contacts = data.contacts || [];
@@ -313,10 +290,9 @@ function render() {
       <h2 class="work-title">${escapeHtml(dayWord(data.date))}${data.user === "all" ? " · уся команда" : data.user !== data.viewer ? ` · ${escapeHtml((data.users || []).find((row) => row.user === data.user)?.name || data.user)}` : ""}</h2>
       ${statsHtml(data.total)}
       ${teamHtml(data)}
-      ${plannedHtml(data)}
       <div class="work-body">${listHtml(data)}${dialogHtml()}</div>`;
   }
-  const restore = keepScroll(root, [".work-rows", ".work-plan-list"]);
+  const restore = keepScroll(root, [".work-rows"]);
   root.innerHTML = `${toolbarHtml(data)}${body}`;
   restore();
   refreshIcons(root);

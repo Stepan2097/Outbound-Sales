@@ -71,12 +71,17 @@ test("заблокований акаунт пропускається, одна
   assert.deepEqual(followUpsDue([thread({ lastMessage: { direction: "out", at: "2026-09-16T09:00:00Z" } })], { today }), [], "понад 14 днів тиші");
 });
 
-test("сторінка: блок «Заплановані», кнопка «Написати» веде в розмову; сервер дає план лише на сьогодні", async () => {
+// 21.10 (таск cd1b118c): блок «Заплановані на сьогодні» з «По днях» прибрано — нагадування
+// живуть за одним правилом, пінгами «В роботі»; дайджест рахує з тих самих пінгів.
+test("«По днях» без «Заплановані»; дайджест — з пінгів «В роботі»", async () => {
   const page = await readFile(new URL("../app/screens/work.js", import.meta.url), "utf8");
-  assert.match(page, /Заплановані на сьогодні/);
-  assert.match(page, /showWarmupInboxThread\(write\.dataset\.workWrite, write\.dataset\.workThread\)/);
+  assert.doesNotMatch(page, /Заплановані на сьогодні|plannedHtml/);
   const server = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
-  assert.match(server, /const planned = date === today \? await plannedFollowUps\(today\) : null;/);
+  assert.doesNotMatch(server, /plannedFollowUps/);
+  assert.match(server, /todayList\(\{ viewerId: "", scope: "all", now \}\)/);
+  assert.match(server, /unread: \(blocks\.replies \|\| \[\]\)\.map/);
+  assert.match(server, /planned: \{ total: \(blocks\.overdue \|\| \[\]\)\.length \+ \(blocks\.today \|\| \[\]\)\.length, carried: \(blocks\.overdue \|\| \[\]\)\.length \}/);
+  assert.match(server, /accepted: \(blocks\.first \|\| \[\]\)\.length/);
 });
 
 test("графік з 20.10: перший раз через 2 робочі дні, другий — через 3, третій — через 5, четвертий — через 7; після п'ятого — зі списку (власник 20.10)", async () => {

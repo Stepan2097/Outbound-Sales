@@ -20,7 +20,6 @@ test("long lists scroll inside their block instead of stretching the page", () =
   const rule = grammar.slice(grammar.indexOf(".scroll-list,"), grammar.indexOf("}", grammar.indexOf(".scroll-list,")));
   for (const selector of [".work-plan-list", ".work-rows", ".warmup-list-panel .table-wrap", ".leads-table-wrap", ".unibox-list", ".pitch-list"]) assert.ok(rule.includes(selector), selector);
   assert.match(rule, /max-height: min\(560px, 62vh\);\n  overflow-y: auto;/);
-  assert.match(work, /<ol class="work-plan-list scroll-list">/);
   assert.match(work, /<div class="work-rows scroll-list">/);
   assert.match(leads, /class="table-wrap leads-table-wrap"/);
 });
@@ -43,7 +42,7 @@ test("a list that is redrawn keeps where it was scrolled to", () => {
 });
 
 test("По днях, ліди пошти і черга «До роботи» перемальовуються з keepScroll; на телефоні списки мають свою висоту", () => {
-  assert.match(work, /const restore = keepScroll\(root, \[".work-rows", ".work-plan-list"\]\);\n  root\.innerHTML = [^\n]+\n  restore\(\);/);
+  assert.match(work, /const restore = keepScroll\(root, \[".work-rows"\]\);\n  root\.innerHTML = [^\n]+\n  restore\(\);/);
   assert.match(leads, /const restore = keepScroll\(main, \[".leads-table-wrap"\]\);/);
   const today = readFileSync(new URL("../app/screens/today.js", import.meta.url), "utf8");
   assert.match(today, /const restoreScroll = keepScroll\(host, \[".today-queue", ".today-thread"\]\);/);

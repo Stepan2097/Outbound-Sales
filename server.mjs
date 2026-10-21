@@ -10,8 +10,7 @@ import { CHANNEL_RULES, LANGUAGES, buildFallbackDrafts, draftsPromptPayload, nor
 import { invalidateContactCaches, contactAsProspect, contactsConfigured, contactsMissingConfig, crmKeyKind, folderContactAt, listContactFolders, listFolderContacts, searchFolderContacts, readContact, supabaseKeyKind } from "./contacts/store.mjs";
 import { handleKnowledgeLibraryApi } from "./knowledge/api.mjs";
 import { handlePitchApi } from "./knowledge/pitch-api.mjs";
-import { handleTodayApi, reconcileSoon, setLeadgenStore, setNewContactPolicyStore, setPingStepsStore, startPingReconciler } from "./triage/today.mjs";
-import { currentPingSteps } from "./triage/pings.mjs";
+import { handleTodayApi, todayList, reconcileSoon, setLeadgenStore, setNewContactPolicyStore, setPingStepsStore, startPingReconciler } from "./triage/today.mjs";
 import { setActivityAuthor } from "./warmup/activities.mjs";
 import { campaignsByContact, handleLeadCampaignApi, leadCampaigns, setLeadCampaignStore } from "./triage/lead-campaigns.mjs";
 import { handleCampaignReportApi, setReportStores, startReplyLabeler } from "./triage/campaign-report.mjs";
@@ -21,8 +20,7 @@ import { allEntries, append as espAppend, useJournal } from "./esp/journal.mjs";
 import { channelsFor as triageChannels, nextContact as nextTriageContact } from "./triage/queue.mjs";
 import { AUTO_TACTIC, tacticData, tacticForPrompt, tacticLabel, tacticOptions } from "./triage/tactics.mjs";
 import { digestDue, digestText, freshReplies, leadgenTelegram, replyText, troubleText } from "./triage/leadgen-notify.mjs";
-import { firstMessageBoard } from "./warmup/first-messages.mjs";
-import { addSendsToDays, contactKeyOf, contactWork, dayActivity, dayOf, daysAround, followUpsDue, linkedinSends, logWork, useWorkLog, withLinkedinSends, workEntries, workUsers } from "./triage/work-log.mjs";
+import { addSendsToDays, contactKeyOf, contactWork, dayActivity, dayOf, daysAround, linkedinSends, logWork, useWorkLog, withLinkedinSends, workEntries, workUsers } from "./triage/work-log.mjs";
 import { checkEmail } from "./contacts/email-check.mjs";
 import { contactEmails, crmPatch } from "./contacts/enrich-crm.mjs";
 import { logAdminAction } from "./esp/access.mjs";
@@ -1599,9 +1597,6 @@ async function handleApi(request, response, url) {
         });
         const answeredBy = new Map();
         for (const item of contacts) if (item.answer) for (const person of item.users) answeredBy.set(person, (answeredBy.get(person) || 0) + 1);
-        // Заплановані: лише на сьогодні — на минулий день план уже нічого не скаже.
-        const today = dayOf(new Date());
-        const planned = date === today ? await plannedFollowUps(today) : null;
         sendJson(response, 200, {
           date, user, admin, viewer,
           today: dayOf(new Date()),
@@ -1609,8 +1604,7 @@ async function handleApi(request, response, url) {
           days: user === "all" ? addSendsToDays(daysAround(entries, { user, date, today: dayOf(new Date()) }), sends, entries) : daysAround(entries, { user, date, today: dayOf(new Date()) }),
           total: { ...activity.total, answered: contacts.filter((item) => item.answer).length, fresh: contacts.filter((item) => item.fresh).length },
           byUser: activity.users.map((person) => ({ ...person, counts: { ...person.counts, answered: answeredBy.get(person.user) || 0 } })),
-          contacts,
-          planned
+          contacts
         });
         return;
       }
@@ -3467,24 +3461,23 @@ async function announceTrouble({ account, failures, reason, recovered }) {
 async function leadgenDigest(now = new Date()) {
   const today = dayOf(now);
   const yesterday = dayOf(new Date(now.getTime() - 86400000));
-  const [unread, planned, board, accounts, entries, replies] = await Promise.all([
-    listThreads({ unreadOnly: true }).catch(() => []),
-    plannedFollowUps(today).catch(() => ({ items: [], total: 0 })),
-    firstMessageBoard(null, { limit: 2000 }).catch(() => ({ toWrite: [] })),
-    warmupAnty.from("wl_accounts").select("id,status,health").rows().catch(() => []),
+  // Що чекає — з тих самих пінгів, що у Вхідні → «В роботі» (таск cd1b118c, 21.10): відповісти,
+  // нагадати (з них прострочені), перші повідомлення. Одне правило — одні числа.
+  const [pings, entries, replies] = await Promise.all([
+    todayList({ viewerId: "", scope: "all", now }).catch(() => null),
     workEntries(),
     // Read a little wider than the day and cut by the Kyiv calendar (dayOf): the offset changes in late October.
     warmupAnty.from("wl_events").select("created_at").eq("type", "message.in")
       .gte("created_at", `${yesterday}T00:00:00-04:00`).lt("created_at", `${today}T00:00:00+04:00`).limit(4000).rows()
       .then((rows) => rows.filter((row) => dayOf(row.created_at) === yesterday).length).catch(() => 0)
   ]);
-  const retired = new Set(accounts.filter((row) => row.health === "blocked" || row.status === "excluded").map((row) => row.id));
+  const blocks = pings?.blocks || {};
   const sends = await linkedinSendsAround(yesterday, entries);
   const written = withLinkedinSends(dayActivity(entries, { date: yesterday, user: "all" }), sends, { date: yesterday }).total.contacts;
   return digestText({
-    unread: unread.map((thread) => ({ name: thread.participant?.name })),
-    planned: { total: planned.total, carried: planned.items.filter((item) => item.carriedDays > 0).length },
-    accepted: (board.toWrite || []).filter((row) => !retired.has(row.accountId)).length,
+    unread: (blocks.replies || []).map((item) => ({ name: item.name })),
+    planned: { total: (blocks.overdue || []).length + (blocks.today || []).length, carried: (blocks.overdue || []).length },
+    accepted: (blocks.first || []).length,
     yesterday: { written, replies: Number(replies) || 0 },
     url: appUrl()
   });
@@ -3515,30 +3508,6 @@ async function linkedinSendsAround(date, entries) {
     console.warn(`[work] LinkedIn sends: ${error.message}`);
     return [];
   }
-}
-
-/**
- * «Заплановані» на сьогодні з розмов LinkedIn, які читає агент: кому ми
- * написали останніми і хто мовчить (triage/work-log.mjs followUpsDue). Хвилину
- * в кеші — сторінка перечитує день щохвилини.
- */
-let plannedCache = null;
-async function plannedFollowUps(today) {
-  if (plannedCache && plannedCache.today === today && Date.now() - plannedCache.at < 60000) return plannedCache.value;
-  let value;
-  try {
-    const [threads, accounts] = await Promise.all([
-      listThreads(),
-      warmupAnty.from("wl_accounts").select("id,label,status,health").rows()
-    ]);
-    const skipAccounts = new Set(accounts.filter((row) => row.health === "blocked" || row.status === "excluded").map((row) => row.id));
-    const due = followUpsDue(threads, { today, accounts: new Map(accounts.map((row) => [row.id, row.label])), skipAccounts });
-    value = { items: due.slice(0, 200), total: due.length, limit: currentPingSteps().length + 1, error: null };
-  } catch (error) {
-    value = { items: [], total: 0, limit: currentPingSteps().length + 1, error: "Не вдалося прочитати розмови LinkedIn." };
-  }
-  plannedCache = { today, at: Date.now(), value };
-  return value;
 }
 
 async function baseContacts(ids) {

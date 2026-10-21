@@ -42,7 +42,7 @@ test("стара історія при першому читанні акаун�
 test("ранковий рядок: лише те, що чекає, з числами; порожній день — так і сказано", () => {
   const full = digestText({ unread: [{ name: "Ana" }, { name: "Bo" }], planned: { total: 16, carried: 7 }, accepted: 21, yesterday: { written: 10, replies: 3 }, url: "https://x" });
   assert.match(full, /Чекають відповіді: 2 — Ana, Bo/);
-  assert.match(full, /Написати повторно: 16 \(з них перенесено з минулих днів: 7\)/);
+  assert.match(full, /Нагадати: 16 \(з них прострочених: 7\)/);
   assert.match(full, /чекають першого повідомлення: 21/);
   assert.match(full, /Вчора написали 10 людям, відповідей прийшло: 3/);
   const empty = digestText({ yesterday: { written: 1, replies: 0 } });
