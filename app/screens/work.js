@@ -1,10 +1,13 @@
-// «По днях» (власник 12.10): за день — кому я написав, і підсвічено тих, хто
-// відповів після цього; клік — уся історія діалогу (LinkedIn і пошта) та хто з
-// нас що робив. Хто писав — це логін платформи, під яким зайшли. Над списком —
-// цифри дня по кожному працівнику: адміністратор бачить будь-кого або всіх.
+// «Звіт команди» (Марко 21.10, таск 3bc6830a; був «По днях», власник 12.10): хто що
+// зробив і з яким результатом — за день чи тиждень, з порівнянням з таким самим
+// періодом раніше. Головна — «зараз»; тут — підсумок періоду, нічого з «зараз».
 //
-// Сервер: /api/work/day і /api/work/contact (triage/work-log.mjs); сама розмова
-// — з /api/warmup/history і /api/esp/contacts/timeline, як у картках лідів.
+// Зверху — зведення (написали → відповіли → кваліфіковані → дзвінки, швидкість
+// відповіді) і таблиця по лідгенах (/api/work/report, triage/team-report.mjs).
+// У режимі «День» нижче — журнал дня: кому писали, хто відповів; клік — уся історія
+// діалогу (LinkedIn і пошта), «Шлях» і хто з нас що робив (/api/work/day і
+// /api/work/contact, triage/work-log.mjs; розмова — з /api/warmup/history і
+// /api/esp/contacts/timeline, як у картках лідів).
 
 import { api, escapeAttr, escapeHtml, keepScroll, onScreen, refreshIcons } from "../core.js";
 import { pathTracks } from "./work-path.js";
@@ -22,7 +25,9 @@ const WORK_LABEL = {
 };
 const FILTERS = [["all", "Усі"], ["fresh", "Нові відповіді"], ["answered", "Відповіли"], ["silent", "Без відповіді"]];
 
-const work = { date: "", user: "", data: null, loading: false, error: "", filter: "all", open: "", dialog: null, timer: null };
+const PERIOD_KEY = "outbound.work.period";
+const readPeriod = () => { try { return localStorage.getItem(PERIOD_KEY) === "week" ? "week" : "day"; } catch { return "day"; } };
+const work = { period: readPeriod(), date: "", user: "", data: null, report: null, loading: false, error: "", filter: "all", open: "", dialog: null, timer: null };
 
 const rootEl = () => document.getElementById("workRoot");
 const visible = () => document.getElementById("view-work")?.classList.contains("active");
@@ -43,7 +48,9 @@ async function openWork() {
   // New answers show up while the page is open: today's list is read again every minute.
   work.timer = setInterval(() => {
     if (!visible()) return clearInterval(work.timer);
-    if (!work.date || work.date === work.data?.today) void load({ quiet: true });
+    const today = work.report?.today || work.data?.today;
+    const live = work.period === "week" ? work.report && today >= work.report.from && today <= work.report.to : !work.date || work.date === today;
+    if (live) void load({ quiet: true });
   }, 60000);
 }
 
@@ -53,9 +60,16 @@ async function load({ quiet = false } = {}) {
     const query = new URLSearchParams();
     if (work.date) query.set("date", work.date);
     if (work.user) query.set("user", work.user);
-    const data = await api(`/api/work/day?${query}`);
+    const asked = new URLSearchParams({ period: work.period });
+    if (work.date) asked.set("date", work.date);
+    // Тиждень — лише звіт; день — звіт і журнал дня.
+    const [report, data] = await Promise.all([
+      api(`/api/work/report?${asked}`),
+      work.period === "day" || !work.data ? api(`/api/work/day?${query}`) : Promise.resolve(work.data)
+    ]);
+    work.report = report;
     work.data = data;
-    work.date = data.date;
+    work.date = work.date || data.date;
     work.user = data.user;
     work.error = "";
   } catch (error) {
@@ -72,7 +86,23 @@ function toolbarHtml(data) {
       <option value="${escapeAttr(data.viewer)}" ${work.user === data.viewer ? "selected" : ""}>Моя</option>
       ${(data.users || []).filter((row) => row.user !== data.viewer).map((row) => `<option value="${escapeAttr(row.user)}" ${work.user === row.user ? "selected" : ""}>${escapeHtml(row.name || row.user)}</option>`).join("")}
     </select></label>` : "";
+  const periods = `<div class="work-periods" role="tablist" aria-label="Період">${[["day", "День"], ["week", "Тиждень"]].map(([key, label]) => `<button type="button" role="tab" aria-selected="${work.period === key}" class="${work.period === key ? "is-on" : ""}" data-work-period="${key}">${label}</button>`).join("")}</div>`;
+  if (work.period === "week") {
+    const report = work.report;
+    const thisWeek = report && data?.today >= report.from && data?.today <= report.to;
+    return `<div class="work-toolbar">
+      ${periods}
+      <div class="work-dates">
+        <button type="button" class="icon-button" data-work="prev" title="Попередній тиждень" aria-label="Попередній тиждень"><i data-lucide="chevron-left"></i></button>
+        <button type="button" class="${thisWeek ? "is-on" : ""}" data-work="today">Цей тиждень</button>
+        <button type="button" class="${report && data?.today && shiftDay(data.today, -7) >= report.from && shiftDay(data.today, -7) <= report.to ? "is-on" : ""}" data-work="yesterday">Минулий</button>
+        <button type="button" class="icon-button" data-work="next" title="Наступний тиждень" aria-label="Наступний тиждень" ${!report || thisWeek ? "disabled" : ""}><i data-lucide="chevron-right"></i></button>
+      </div>
+      <button type="button" data-work="reload" ${work.loading ? "disabled" : ""}><i data-lucide="refresh-cw"></i><span>${work.loading ? "Оновлюю…" : "Оновити"}</span></button>
+    </div>`;
+  }
   return `<div class="work-toolbar">
+    ${periods}
     <div class="work-dates">
       <button type="button" class="icon-button" data-work="prev" title="Попередній день" aria-label="Попередній день"><i data-lucide="chevron-left"></i></button>
       <button type="button" class="${date === data?.today ? "is-on" : ""}" data-work="today">Сьогодні</button>
@@ -98,42 +128,98 @@ function daysHtml(data) {
     </button>`).join("")}</div>`;
 }
 
-function statsHtml(total) {
-  const cards = [
-    ["users", "Написали людям", total.contacts, ""],
-    ["message-circle-reply", "Відповіли", total.answered, total.fresh ? `${total.fresh} нових` : ""],
-    ["message-square", "LinkedIn-повідомлень", total.wroteLinkedin, ""],
-    ["mail", "Листів", total.wroteEmail, ""],
-    ["user-plus", "Запитів у друзі", total.invited, ""],
-    ["reply", "Відповідей у розмовах", total.replied, ""],
-    ["eye", "Переглянуто карток", total.viewed, ""],
-    ["sparkles", "Збагачено", total.enriched, ""],
-    ["file-pen", "Тексти згенеровано", total.drafted, ""],
-    ["ban", "Не валідні", total.invalid, ""],
-    ["skip-forward", "Пропущено", total.skipped, ""]
-  ];
-  // Розвантаження (аудит 16.10, D10): плитка з нулем не показується — крім двох головних.
-  const core = new Set(["users", "message-circle-reply"]);
-  return `<div class="work-stats">${cards.filter(([icon, , value]) => core.has(icon) || Number(value) > 0).map(([icon, label, value, note]) => `<div class="work-stat ${icon === "message-circle-reply" && total.fresh ? "is-fresh" : ""}">
-    <i data-lucide="${icon}"></i><b>${value || 0}</b><span>${label}</span>${note ? `<em>${escapeHtml(note)}</em>` : ""}</div>`).join("")}</div>`;
+const shortDay = (date) => new Date(`${date}T12:00:00Z`).toLocaleDateString("uk-UA", { weekday: "short", day: "numeric", month: "numeric" });
+const rangeWord = (report) => {
+  const from = new Date(`${report.from}T12:00:00Z`);
+  const to = new Date(`${report.to}T12:00:00Z`);
+  const dayMonth = (date) => date.toLocaleDateString("uk-UA", { day: "numeric", month: "long", timeZone: "UTC" }); // «25 жовтня»
+  return from.getUTCMonth() === to.getUTCMonth() ? `${from.getUTCDate()}–${dayMonth(to)}` : `${dayMonth(from)} – ${dayMonth(to)}`;
+};
+/** Час відповіді: хвилини, години чи дні — як людина сказала б. */
+export function durationWord(minutes) {
+  if (minutes == null) return "—";
+  if (minutes < 60) return `${minutes} хв`;
+  if (minutes < 48 * 60) return `${Math.round(minutes / 6) / 10} год`.replace(".", ",");
+  return `${Math.round(minutes / 144) / 10} дн`.replace(".", ",");
 }
 
-function teamHtml(data) {
-  if (!data.admin || data.user !== "all" || !data.byUser?.length) return "";
-  const rate = (counts) => (counts.contacts ? `${Math.round((counts.answered / counts.contacts) * 100)}%` : "—");
-  // Розвантаження (аудит 16.10, D10): колонка, де в усіх нуль, не показується; люди, відповіли й % — завжди.
+const weekdayWord = (date) => new Date(`${date}T12:00:00Z`).toLocaleDateString("uk-UA", { weekday: "short" });
+/** З чим порівнюємо: день — той самий день тиждень тому; тиждень, що ще йде, — ті самі дні минулого. */
+function againstWord(report) {
+  if (report.period !== "week") return shortDay(report.prevFrom);
+  if (!report.partial) return "мин. тиждень";
+  return report.prevFrom === report.prevTo ? `${weekdayWord(report.prevFrom)} мин. тижня` : `${weekdayWord(report.prevFrom)}–${weekdayWord(report.prevTo)} мин. тижня`;
+}
+
+/** Порівняння з таким самим періодом раніше: тиждень — з минулим, день — з тим самим днем тиждень тому. */
+function deltaHtml(now, before, { lowerBetter = false, minutes = false } = {}) {
+  const report = work.report;
+  if (!report || now == null || before == null) return "";
+  const against = againstWord(report);
+  const was = minutes ? durationWord(before) : before;
+  const diff = now - before;
+  if (!diff) return `<em class="work-delta" title="${escapeAttr(`${against}: ${was}`)}">як ${escapeHtml(against)}</em>`;
+  const good = lowerBetter ? diff < 0 : diff > 0;
+  const size = minutes ? durationWord(Math.abs(diff)) : Math.abs(diff);
+  return `<em class="work-delta ${good ? "is-good" : "is-bad"}" title="${escapeAttr(`${against}: ${was}`)}">${diff > 0 ? "+" : "−"}${escapeHtml(String(size))} до ${escapeHtml(against)}</em>`;
+}
+
+function summaryHtml(report) {
+  const now = report.total;
+  const was = report.previous || {};
+  const cards = [
+    ["users", "Написали людям", now.written, deltaHtml(now.written, was.written), "Людей, кому за період пішло наше повідомлення в LinkedIn чи лист"],
+    ["message-circle-reply", `Відповіли${now.rate != null ? ` · ${now.rate}%` : ""}`, now.replied, deltaHtml(now.replied, was.replied), "Людей, які за період написали нам у LinkedIn чи відповіли на лист"],
+    ["badge-check", "Кваліфіковані", now.qualified, deltaHtml(now.qualified, was.qualified), "Відповіді з міткою «Кваліфікована» у Вхідних (AI або лідген)"],
+    ["phone", "Дзвінки", now.calls, deltaHtml(now.calls, was.calls), "Статус «Дзвінок» поставлено в CRM за період"],
+    ["timer", "Медіана нашої відповіді", durationWord(now.responseMedianMinutes), deltaHtml(now.responseMedianMinutes, was.responseMedianMinutes, { lowerBetter: true, minutes: true }), "Від повідомлення людини до нашої відповіді в тій самій розмові. Містить паузу агента, що читає LinkedIn раз на кілька хвилин"],
+    ["hourglass", "Відповіли пізніше 24 год", now.slow, deltaHtml(now.slow, was.slow, { lowerBetter: true }), "Повідомлення людей за період, на які ми відповіли пізніше ніж за добу або ще не відповіли"]
+  ];
+  return `<div class="work-stats work-summary">${cards.map(([icon, label, value, note, title]) => `<div class="work-stat" title="${escapeAttr(title)}">
+    <i data-lucide="${icon}"></i><b>${escapeHtml(String(value ?? 0))}</b><span>${escapeHtml(label)}</span>${note}</div>`).join("")}</div>`;
+}
+
+/** Тиждень: скільком людям писали кожного дня; клік — журнал цього дня. */
+function weekDaysHtml(report) {
+  if (report.period !== "week" || !report.days?.length) return "";
+  const most = Math.max(1, ...report.days.map((day) => day.written));
+  const today = report.today;
+  return `<div class="work-days is-week" aria-label="Скільком людям писали по днях тижня">${report.days.map((day) => `
+    <button type="button" class="work-day ${day.date > today ? "is-future" : ""}" data-work-open-day="${escapeAttr(day.date)}" title="${escapeAttr(day.date > today ? "ще попереду" : `${shortDay(day.date)}: ${day.written} — відкрити журнал дня`)}" ${day.date > today ? "disabled" : ""}>
+      <span class="work-day-bar"><span style="height:${Math.round((day.written / most) * 100)}%"></span></span>
+      <b>${day.written || ""}</b>
+      <small>${escapeHtml(weekdayWord(day.date))}</small>
+      <small>${escapeHtml(new Date(`${day.date}T12:00:00Z`).toLocaleDateString("uk-UA", { day: "numeric", month: "numeric" }))}</small>
+    </button>`).join("")}</div>`;
+}
+
+/** По лідгенах: результат періоду, у підказці клітинки — той самий показник раніше. */
+function leadgensHtml(report) {
+  if (!report.admin || !report.rows?.length) return "";
   const columns = [
-    ["contacts", "Людей", true, "Унікальних людей, яким написали або надіслали запит"], ["answered", "Відповіли", true], ["rate", "% відповідей", true],
-    ["wroteLinkedin", "LinkedIn"], ["wroteEmail", "Листів"], ["invited", "Запитів"], ["replied", "Відп. у розмовах"],
-    ["viewed", "Переглянуто"], ["enriched", "Збагачено"], ["invalid", "Не валідні"], ["skipped", "Пропущено"]
-  ].filter(([key, , always]) => always || data.byUser.some((row) => Number(row.counts[key]) > 0));
-  const cell = (row, key) => (key === "rate" ? rate(row.counts) : row.counts[key]);
+    ["written", "Написали", (row) => row.written],
+    ["replied", "Відповіли", (row) => row.replied],
+    ["rate", "% відповідей", (row) => (row.rate == null ? "—" : `${row.rate}%`)],
+    ["qualified", "Кваліфіковані", (row) => row.qualified],
+    ["calls", "Дзвінки", (row) => row.calls],
+    ["responseMedianMinutes", "Медіана відповіді", (row) => durationWord(row.responseMedianMinutes)],
+    ["slow", "Пізніше 24 год", (row) => row.slow]
+  ];
+  const against = againstWord(report);
+  const hint = (row, [key, , show]) => (row.previous ? ` title="${escapeAttr(`${against}: ${show(row.previous)}`)}"` : "");
   return `<div class="work-team"><table>
-    <thead><tr><th>Хто</th>${columns.map(([, label, , title]) => `<th${title ? ` title="${escapeAttr(title)}"` : ""}>${escapeHtml(label)}</th>`).join("")}</tr></thead>
-    <tbody>${data.byUser.map((row) => `<tr data-work-user="${escapeAttr(row.user)}">
-      <td><b>${escapeHtml(row.name || row.user)}</b>${row.name ? `<small>${escapeHtml(row.user)}</small>` : ""}</td>
-      ${columns.map(([key]) => `<td>${cell(row, key)}</td>`).join("")}
+    <thead><tr><th>Хто</th>${columns.map(([, label]) => `<th>${escapeHtml(label)}</th>`).join("")}</tr></thead>
+    <tbody>${report.rows.map((row) => `<tr ${report.period === "day" && row.key.includes("@") ? `data-work-user="${escapeAttr(row.key)}"` : ""}>
+      <td><b>${escapeHtml(row.name || row.key)}</b>${row.name && row.name !== row.key && row.key.includes("@") ? `<small>${escapeHtml(row.key)}</small>` : ""}${row.writtenEmail ? `<small>з них листів: ${row.writtenEmail}</small>` : ""}</td>
+      ${columns.map((column) => `<td${hint(row, column)}>${escapeHtml(String(column[2](row)))}</td>`).join("")}
     </tr>`).join("")}</tbody></table></div>`;
+}
+
+/** Що зроблено кнопками порталу за день — одним рядком під зведенням, лише ненульове. */
+function buttonsLine(total) {
+  const parts = [["viewed", "переглянуто карток"], ["enriched", "збагачено"], ["drafted", "згенеровано текстів"], ["invited", "запитів у друзі"], ["invalid", "не валідних"], ["skipped", "пропущено"]]
+    .filter(([key]) => Number(total?.[key]) > 0).map(([key, label]) => `${label} ${total[key]}`);
+  return parts.length ? `<p class="work-muted work-buttons">Кнопками в порталі: ${escapeHtml(parts.join(" · "))}.</p>` : "";
 }
 
 function actionWord(action) {
@@ -247,6 +333,7 @@ function pathHtml(dialog) {
 
 /** From another screen (Головна → «Щойно написали»): today, this person's card open. */
 export function openWorkContact(key) {
+  setPeriod("day", { quiet: true });
   document.querySelector('.nav-item[data-view="work"]')?.click();
   const today = work.data?.today;
   if (today && work.date !== today) { work.date = today; void load().then(() => openDialog(key)); return; }
@@ -286,11 +373,20 @@ function render() {
   if (work.error) body = `<p class="esp-notice is-bad">${escapeHtml(work.error)}</p>`;
   else if (!data) body = '<p class="work-muted">Читаю день…</p>';
   else {
-    body = `${daysHtml(data)}
-      <h2 class="work-title">${escapeHtml(dayWord(data.date))}${data.user === "all" ? " · уся команда" : data.user !== data.viewer ? ` · ${escapeHtml((data.users || []).find((row) => row.user === data.user)?.name || data.user)}` : ""}</h2>
-      ${statsHtml(data.total)}
-      ${teamHtml(data)}
-      <div class="work-body">${listHtml(data)}${dialogHtml()}</div>`;
+    const report = work.report;
+    const who = data.user === "all" ? " · уся команда" : data.user !== data.viewer ? ` · ${escapeHtml((data.users || []).find((row) => row.user === data.user)?.name || data.user)}` : "";
+    const results = report ? `${summaryHtml(report)}${leadgensHtml(report)}` : "";
+    body = work.period === "week" && report
+      ? `<h2 class="work-title">Тиждень · ${escapeHtml(rangeWord(report))}${report.admin ? " · уся команда" : ""}</h2>
+        ${weekDaysHtml(report)}
+        ${results}
+        <p class="work-muted">Журнал людей — по днях: натисніть день у смузі вище.</p>`
+      : `${daysHtml(data)}
+        <h2 class="work-title">${escapeHtml(dayWord(work.date))}${report?.admin ? " · уся команда" : ""}</h2>
+        ${results}
+        ${buttonsLine(data.total)}
+        <h3 class="work-subtitle">Журнал дня${who}</h3>
+        <div class="work-body">${listHtml(data)}${dialogHtml()}</div>`;
   }
   const restore = keepScroll(root, [".work-rows"]);
   root.innerHTML = `${toolbarHtml(data)}${body}`;
@@ -298,8 +394,16 @@ function render() {
   refreshIcons(root);
 }
 
+/** День чи тиждень — запам'ятовується в цьому браузері. */
+function setPeriod(period, { quiet = false } = {}) {
+  if (period === work.period || !["day", "week"].includes(period)) return;
+  work.period = period;
+  try { localStorage.setItem(PERIOD_KEY, period); } catch { /* приватне вікно: просто не запам'ятається */ }
+  if (!quiet) void load();
+}
+
 function pickDate(date) {
-  if (!date || date === work.date) return;
+  if (!date || (date === work.date && work.report && work.report.period === work.period)) return;
   work.date = date;
   work.open = "";
   work.dialog = null;
@@ -314,18 +418,26 @@ document.addEventListener("click", (event) => {
     void import("./inbox.js").then((module) => module.showWarmupInboxThread(write.dataset.workWrite, write.dataset.workThread));
     return;
   }
-  const control = event.target.closest("[data-work], [data-work-day], [data-work-filter], [data-work-open], [data-work-user]");
+  const control = event.target.closest("[data-work], [data-work-day], [data-work-open-day], [data-work-period], [data-work-filter], [data-work-open], [data-work-user]");
   if (!control) return;
+  if (control.dataset.workPeriod) return setPeriod(control.dataset.workPeriod);
+  if (control.dataset.workOpenDay) { setPeriod("day", { quiet: true }); return pickDate(control.dataset.workOpenDay); }
   if (control.dataset.workDay) return pickDate(control.dataset.workDay);
   if (control.dataset.workFilter) { work.filter = control.dataset.workFilter; return render(); }
   if (control.dataset.workOpen) return void openDialog(control.dataset.workOpen);
   if (control.dataset.workUser) { work.user = control.dataset.workUser; work.open = ""; work.dialog = null; return void load(); }
   const today = work.data?.today;
   const action = control.dataset.work;
-  if (action === "prev") pickDate(shiftDay(work.date || today, -1));
-  if (action === "next" && work.date < today) pickDate(shiftDay(work.date, 1));
+  // Тиждень гортається на 7 днів, день — на один.
+  const step = work.period === "week" ? 7 : 1;
+  if (action === "prev") pickDate(shiftDay(work.date || today, -step));
+  if (action === "next") {
+    const next = shiftDay(work.date, step);
+    const open = step === 7 ? work.report?.to < today : next <= today;
+    if (open) pickDate(next > today ? today : next);
+  }
   if (action === "today") pickDate(today);
-  if (action === "yesterday") pickDate(shiftDay(today, -1));
+  if (action === "yesterday") pickDate(shiftDay(today, -step));
   if (action === "reload") void load();
 });
 

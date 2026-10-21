@@ -20,6 +20,7 @@ import { allEntries, append as espAppend, useJournal } from "./esp/journal.mjs";
 import { channelsFor as triageChannels, nextContact as nextTriageContact } from "./triage/queue.mjs";
 import { AUTO_TACTIC, tacticData, tacticForPrompt, tacticLabel, tacticOptions } from "./triage/tactics.mjs";
 import { digestDue, digestText, freshReplies, leadgenTelegram, replyText, troubleText } from "./triage/leadgen-notify.mjs";
+import { readWindow, reportRange, REPORT_PERIODS, teamReport } from "./triage/team-report.mjs";
 import { addSendsToDays, contactKeyOf, contactWork, dayActivity, dayOf, daysAround, linkedinSends, logWork, useWorkLog, withLinkedinSends, workEntries, workUsers } from "./triage/work-log.mjs";
 import { checkEmail } from "./contacts/email-check.mjs";
 import { contactEmails, crmPatch } from "./contacts/enrich-crm.mjs";
@@ -1606,6 +1607,17 @@ async function handleApi(request, response, url) {
           byUser: activity.users.map((person) => ({ ...person, counts: { ...person.counts, answered: answeredBy.get(person.user) || 0 } })),
           contacts
         });
+        return;
+      }
+
+      // «Звіт команди» (таск 3bc6830a): період (день / тиждень) і такий самий період
+      // раніше — по лідгенах (triage/team-report.mjs). Продавець бачить лише свій рядок.
+      if (request.method === "GET" && url.pathname === "/api/work/report") {
+        const asked = cleanText(url.searchParams.get("date") || "");
+        const date = /^\d{4}-\d{2}-\d{2}$/.test(asked) ? asked : dayOf(new Date());
+        const period = REPORT_PERIODS.includes(url.searchParams.get("period")) ? url.searchParams.get("period") : "day";
+        const facts = await teamReportFacts(reportRange({ period, date }));
+        sendJson(response, 200, { ...teamReport(facts, { period, date, only: admin ? "" : viewer }), admin, today: dayOf(new Date()) });
         return;
       }
 
@@ -3388,6 +3400,50 @@ async function workFromRoute(profile, path, body, payload) {
     const contactId = body.lead?.crmContactId || (await baseContactByEmail(email))?.id || null;
     await logWork(profile, { action: "wrote", channel: "email", contactId, email, name: body.lead?.name, mailbox: payload.mailbox || body.mailbox, detail: String(body.subject || "").slice(0, 300), source: body.source });
   }
+}
+
+/**
+ * Факти для «Звіту команди» (triage/team-report.mjs): повідомлення LinkedIn, хто веде
+ * акаунти, мітки Вхідних, «Дзвінок» з історії статусів CRM, журнал ESP і журнал
+ * роботи. Тримаються хвилину на період — сторінку відкривають кілька людей.
+ */
+const reportFactsCache = new Map();
+async function teamReportFacts(range) {
+  const cacheKey = `${range.period}|${range.from}`;
+  const cached = reportFactsCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < 60000) return cached.value;
+  const { since, until } = readWindow(range);
+  const events = [];
+  if (warmupAnty.configured()) {
+    try {
+      // База віддає щонайбільше 1000 рядків за раз — читаємо сторінками.
+      for (let offset = 0; offset < 30000; offset += 1000) {
+        const rows = await warmupAnty.from("wl_events").select("type,account_id,created_at,meta").in("type", ["message.in", "message.out"])
+          .gte("created_at", since).lt("created_at", until).order("created_at").limit(1000).offset(offset).rows();
+        events.push(...rows);
+        if (rows.length < 1000) break;
+      }
+    } catch (error) { console.warn(`[report] LinkedIn: ${error.message}`); }
+  }
+  let people = new Map();
+  let calls = [];
+  if (warmupCrm.configured()) {
+    [people, calls] = await Promise.all([
+      warmupCrm.from("profiles").select("id,email").rows().then((rows) => new Map(rows.map((row) => [row.id, String(row.email || "").toLowerCase()]))).catch(() => new Map()),
+      warmupCrm.from("contact_status_history").select("changed_at,changed_by").eq("new_status", "booked_call").gte("changed_at", since).limit(5000).rows().catch(() => [])
+    ]);
+  }
+  const entries = await workEntries();
+  const value = {
+    events, people, calls, entries,
+    leadgens: state.accountLeadgens || {},
+    labels: state.inboxLabels || {},
+    names: new Map(workUsers(entries).filter((row) => row.name).map((row) => [row.user, row.name])),
+    journal: (await allEntries().catch(() => [])).filter((entry) => String(entry.at) >= since && ["message.sent", "message.replied"].includes(entry.type))
+  };
+  reportFactsCache.set(cacheKey, { at: Date.now(), value });
+  if (reportFactsCache.size > 50) reportFactsCache.clear();
+  return value;
 }
 
 const answerCache = new Map();

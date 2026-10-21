@@ -8,7 +8,7 @@
 //     сьогодні написав і скільки відповів у розмовах.
 //   · «Потребує уваги» — лише справжні проблеми, рядками на м'якому тлі.
 //
-// Нові контакти — у Вхідні → «Нові»; історія за дні — у «По днях».
+// Нові контакти — у Вхідні → «Нові»; історія за дні й тижні — у «Звіт команди».
 
 import { api, authState, escapeAttr, escapeHtml, onScreen, refreshIcons, uaPlural } from "../core.js";
 import { openNewTab, openTodayBlock } from "./today.js";
@@ -147,7 +147,7 @@ function teamHtml() {
   const rows = teamRows(home.today, home.day);
   if (!rows.length) return "";
   return `<section class="panel blk-list home-team">
-    <div class="panel-heading"><div><h2>По лідгенах — зараз</h2><p>Що чекає на кожного і що він зробив сьогодні. Історія — у «По днях».</p></div></div>
+    <div class="panel-heading"><div><h2>По лідгенах — зараз</h2><p>Що чекає на кожного і що він зробив сьогодні. Результат за день і тиждень — у «Звіт команди».</p></div></div>
     <div class="table-wrap"><table>
       <thead><tr><th>Хто</th><th title="Лід написав — чекає відповіді">Відповісти</th><th title="Дата пінгу минула">Прострочені</th><th title="Унікальні люди, яким сьогодні написав чи надіслав запит">Людям сьогодні</th><th title="Відповідей у розмовах сьогодні">Відповів у розмовах</th></tr></thead>
       <tbody>${rows.map((entry) => `<tr>

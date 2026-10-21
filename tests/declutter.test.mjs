@@ -30,10 +30,10 @@ test("Смисли: форми додавання — за кнопками «+ 
   assert.match(pitch, /if \(act === "reveal"\)/);
 });
 
-test("По днях: нульові плитки й колонки не показуються, головні — завжди", () => {
+test("Звіт команди: дії кнопками — одним рядком і лише ненульові; старих плиток і таблиці журналу немає", () => {
   const work = read("screens/work.js");
-  assert.match(work, /core\.has\(icon\) \|\| Number\(value\) > 0/);
-  assert.match(work, /always \|\| data\.byUser\.some/);
+  assert.match(work, /\.filter\(\(\[key\]\) => Number\(total\?\.\[key\]\) > 0\)/);
+  assert.doesNotMatch(work, /function statsHtml|function teamHtml/, "плитки й таблиця журналу замінені зведенням і таблицею по лідгенах");
 });
 
 test("Налаштування: домени й відправники згорнуті з лічильником; прогрів пошт — пояснення згорнуто", () => {

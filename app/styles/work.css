@@ -1,4 +1,4 @@
-/* «По днях» (12.10): кому писали за день, хто відповів, розмова. */
+/* «Звіт команди» (21.10, був «По днях» 12.10): результат дня чи тижня, журнал дня, розмова. */
 
 .work-page {
   display: grid;
@@ -654,4 +654,42 @@
 
 .work-path-track li.is-bad {
   border-color: var(--red);
+}
+
+/* «Звіт команди» (таск 3bc6830a): перемикач періоду, порівняння з минулим, тиждень по днях. */
+.work-periods {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.work-periods button.is-on {
+  border-color: var(--teal);
+  background: var(--teal-weak);
+  color: var(--ink);
+}
+
+.work-stat em.work-delta {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.work-stat em.work-delta.is-good {
+  color: var(--teal);
+}
+
+.work-stat em.work-delta.is-bad {
+  color: var(--amber);
+}
+
+.work-days.is-week {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.work-subtitle {
+  margin: 6px 0 0;
+  font-size: 16px;
+}
+
+.work-buttons {
+  margin: 0;
 }

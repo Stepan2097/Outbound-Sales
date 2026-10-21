@@ -325,7 +325,7 @@ function setView(viewName) {
   document.getElementById("pageTitle").textContent =
     {
       home: "Головна",
-      work: "По днях",
+      work: "Звіт команди",
       workspace: "WorkSpace LinkedIn",
       warmup: "Прогрів LinkedIn",
       "mail-warmup": "Прогрів пошт",

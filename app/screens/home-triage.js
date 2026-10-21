@@ -118,7 +118,7 @@ function recentHtml() {
   const rows = triage.recent || [];
   if (!rows.length) return "";
   return `<section class="triage-recent">
-    <header><h3><i data-lucide="history"></i>Щойно написали сьогодні <b>${rows.length}</b></h3><span class="triage-muted">Повна історія й шлях кожного — у «По днях»</span></header>
+    <header><h3><i data-lucide="history"></i>Щойно написали сьогодні <b>${rows.length}</b></h3><span class="triage-muted">Повна історія й шлях кожного — у «Звіт команди»</span></header>
     <ul>${rows.map((row) => {
       const last = row.actions.at(-1) || {};
       const what = last.action === "wrote" ? (last.channel === "email" ? "лист" : "повідомлення в LinkedIn") : RECENT_WORD[last.action] || last.action;
