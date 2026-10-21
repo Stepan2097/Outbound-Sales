@@ -806,6 +806,10 @@
   border-bottom-right-radius: 0;
 }
 #view-inbox[data-mode="all"] [data-inbox-pane="all"] { margin-top: 0; }
+/* Між шапкою й месенджером не лишається смуги (власник 21.10: «що тут за відступ»):
+   свій нижній відступ блоку «До роботи» (14px) знято, а крок сітки сторінки
+   (.view.active, gap 18px) знято від'ємним полем. */
+#view-inbox[data-mode="all"] #todayRoot { margin-bottom: -18px; }
 #view-inbox[data-mode="all"] .warmup-inbox-panel {
   border-top: 0;
   border-top-left-radius: 0;
