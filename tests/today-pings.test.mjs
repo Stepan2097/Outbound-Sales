@@ -411,3 +411,15 @@ test("«Невдалий час» — замість нагадувань оди
   const [reply] = openOf("c1");
   assert.equal(reply.title, "Відповісти: Lead One", "людина написала після статусу — відповісти їй");
 });
+
+test("написав прямо в LinkedIn, не через платформу: агент прочитав наше повідомлення — «Відповісти» закрито, далі «Нагадати» (таск a18af9d6)", async () => {
+  await reconcilePings();
+  const [reply] = openOf("c1");
+  assert.equal(reply.title, "Відповісти: Lead One");
+  // Нічого не ставилось у чергу платформи — лише повідомлення, яке агент прочитав у розмові.
+  rows.wl_events.push(message("out", "Sure, here is what we do", 5));
+  await reconcilePings();
+  assert.equal(rows.tasks.find((row) => row.id === reply.id).completed, true, "завдання закрито за фактом нашого повідомлення");
+  const [next] = openOf("c1");
+  assert.equal(next.title, "Нагадати: Lead One");
+});

@@ -9,7 +9,7 @@ import {
   CRM_COPIED, CRM_FAILED, accountName, clampContent, copyToCrm, crmStamp, oneCopyAtATime, outstandingCopies, sourceEvents
 } from "./activities.mjs";
 import { OUTBOX_AUDIT_HIDDEN } from "./outbox.mjs";
-import { adoptable, adoptionEnabled, createContact, hasProfileWords, once, personName } from "./people.mjs";
+import { adoptable, adoptionEnabled, createContact, hasProfileWords, once } from "./people.mjs";
 import { likeLiteral } from "./rest.mjs";
 
 /**
@@ -646,46 +646,36 @@ export async function contactBySlug(slug, { folderIds = [] } = {}) {
 }
 
 /**
- * The CRM contact for a participant: by their profile, and — when all the
- * conversation gave is LinkedIn's member id, which no CRM row holds — by their
- * full name, but only when every contact of that name with a real profile link
- * is one profile (owner 16.10: Miloš Marković was two rows of one vanity link
- * and a third, made here, under his member id). Two people of one name, or a
- * name without a surname, match nobody: a wrong guess files a private message
- * against a stranger.
- */
-/**
  * The contact a member id was already found to be: the agent opened that
  * person's profile once (warmup/profile-resolve.mjs, «profile.resolved») and
  * the copy went into them. Without this every new message from somebody whose
  * conversation gives only a first name made a fresh copy, and the next session
  * merged it again (20.10: Stan, twice in an hour).
  */
-async function contactByMemberId(memberId) {
-  if (!memberId) return null;
-  const [event] = await anty.from("wl_events").select("meta,created_at").eq("type", "profile.resolved")
-    .ilike("meta->>memberId", likeLiteral(memberId)).order("created_at", { ascending: false }).limit(1).rows();
-  const id = event?.meta?.mergedInto ?? event?.meta?.contactId ?? null;
+async function contactByMemberId(id) {
   if (!id) return null;
-  const [alive] = await crm.from("contacts").select("id").eq("id", id).rows();
+  const [event] = await anty.from("wl_events").select("meta,created_at").eq("type", "profile.resolved")
+    .ilike("meta->>memberId", likeLiteral(id)).order("created_at", { ascending: false }).limit(1).rows();
+  const found = event?.meta?.mergedInto ?? event?.meta?.contactId ?? null;
+  if (!found) return null;
+  const [alive] = await crm.from("contacts").select("id").eq("id", found).rows();
   return alive?.id ?? null;
 }
 
+/**
+ * The CRM contact for a participant — by their profile, never by their name
+ * (21.10, таск a18af9d6: a thread with Gabriel was read under the name
+ * «Flávio Mendes de Oliveira», and matching that name tied Gabriel's
+ * conversation to Flávio's contact). A member id the agent has already opened
+ * the profile of is the contact it was found to be (`contactByMemberId`); a
+ * new one becomes a contact of its own, and the agent opens that profile and
+ * folds it into the person if they are already in the base
+ * (warmup/profile-resolve.mjs).
+ */
 export async function contactForParticipant(participant, { folderIds = [] } = {}) {
   if (!isMemberId(linkedinSlug(participant?.slug))) return contactBySlug(participant?.slug, { folderIds });
   const remembered = await contactByMemberId(memberId(participant?.slug) || linkedinSlug(participant?.slug));
   if (remembered) return remembered;
-  // The name first: a contact made earlier under the member id is the copy, not the person.
-  const name = personName(participant);
-  if (name.split(" ").length >= 2) {
-    const rows = await crm.from("contacts").select("id,linkedin").ilike("name", likeLiteral(name)).limit(50).rows();
-    const slugs = new Set(rows.map((row) => linkedinSlug(row.linkedin))
-      .filter((slug) => slug && !slug.includes(":") && !isMemberId(slug)));
-    if (slugs.size === 1) {
-      const found = await contactBySlug([...slugs][0], { folderIds });
-      if (found) return found;
-    }
-  }
   return contactBySlug(participant?.slug, { folderIds });
 }
 

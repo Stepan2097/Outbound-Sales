@@ -523,3 +523,24 @@ describe('service cards', () => {
     assert.equal(built.cards, 0);
   });
 });
+
+test('розмова, де писали лише ми: ім\'я — з посилання вгорі розмови, а не з рядка списку, по якому клікнули (таск a18af9d6, 21.10)', () => {
+  const built = buildThread({
+    threadKey: '2-YzQ5ZThjZjEt',
+    harvest: {
+      items: [{ index: 0, slug: 'mary-lindsay-0a12b3', linkText: 'Mary Lindsay', alts: [], paragraphs: ['Hi Gabriel! I liked your point about LATAM'], text: 'Hi Gabriel! I liked your point about LATAM' }],
+      header: [{ slug: 'ACoAABytt0UBbN_DvZMBM_oAlO180iWMOj-UHWc', text: 'Gabriel Martins' }]
+    },
+    self: SELF_BY_SLUG,
+    listRow: { name: 'Flávio Mendes de Oliveira', slug: null },
+    nowMs: NOW,
+  });
+  assert.equal(built.payload.participant.slug, 'ACoAABytt0UBbN_DvZMBM_oAlO180iWMOj-UHWc');
+  assert.equal(built.payload.participant.name, 'Gabriel Martins');
+  // Той самий рядок, коли його посилання — посилання розмови: ім'я з рядка годиться.
+  const same = buildThread({
+    threadKey: 'k2', harvest: { items: [{ index: 0, slug: 'mary-lindsay-0a12b3', linkText: 'Mary Lindsay', alts: [], paragraphs: ['Hi'], text: 'Hi' }], header: [{ slug: 'flavio-m', text: '' }] },
+    self: SELF_BY_SLUG, listRow: { name: 'Flávio Mendes de Oliveira', slug: 'flavio-m' }, nowMs: NOW,
+  });
+  assert.equal(same.payload.participant.name, 'Flávio Mendes de Oliveira');
+});

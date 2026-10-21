@@ -718,15 +718,14 @@ test("«Вхідні»: робочий акаунт без жодної розм
 const MILOS_ID = "ACoAAC3a0tSbSMXZnrsyp1eAo9VTYVkSqPA44m8";
 const MILOS = { name: "Miloš Marković", slug: `https://www.linkedin.com/in/${MILOS_ID}`, headline: "" };
 
-test("у розмові лише id LinkedIn: людина з таким повним ім'ям і одним профілем у CRM — це вона, нової копії немає", async () => {
-  rows.contacts.push(
-    { id: "c-milos-1", name: "Miloš Marković", linkedin: "https://www.linkedin.com/in/milo%C5%A1-markovi%C4%87-1990/", created_at: "2026-08-16T13:02:13.000Z" },
-    { id: "c-milos-2", name: "Miloš Marković", linkedin: "https://www.linkedin.com/in/milo%C5%A1-markovi%C4%87-1990", created_at: "2026-09-18T13:39:31.000Z" }
-  );
-  const result = await thread([{ ...THEIRS, body: "Hi Mary!" }], MILOS, "t-milos");
+test("у розмові лише id LinkedIn: за ім'ям не прив'язується ніколи — навіть коли в CRM є людина з таким самим іменем; новий контакт чекає, поки агент відкриє профіль (таск a18af9d6, 21.10)", async () => {
+  // 21.10: розмову з Gabriel прочитано під іменем «Flávio Mendes de Oliveira»
+  // (рядок списку), і за цим іменем її прив'язало до контакту Flávio.
+  rows.contacts.push({ id: "c-flavio", name: "Flávio Mendes de Oliveira", linkedin: "https://www.linkedin.com/in/fl%C3%A1vio-mendes-de-oliveira-5b72a358", created_at: "2026-10-19T00:00:00.000Z" });
+  const result = await thread([{ ...OURS, body: "Hi Gabriel! I liked your point about LATAM" }], { name: "Flávio Mendes de Oliveira", slug: "https://www.linkedin.com/in/ACoAABytt0UBbN_DvZMBM_oAlO180iWMOj-UHWc" }, "t-gabriel");
   assert.equal(result.status, 200);
-  assert.equal(result.payload.crmContactId, "c-milos-1", "дві копії одного профілю — найстаріша");
-  assert.equal(added().length, 0, "третьої копії немає");
+  assert.notEqual(result.payload.crmContactId, "c-flavio", "не за іменем");
+  assert.equal(rows.activities.filter((row) => row.contact_id === "c-flavio").length, 0, "у історію Flávio нічого не потрапило");
 });
 
 test("id LinkedIn і двоє різних людей з одним ім'ям (або нікого): новий контакт, і посилання з id у його власному написанні — робоче", async () => {

@@ -656,10 +656,19 @@ export function buildThread({ threadKey, harvest, self, listRow = null, nowMs = 
     return { skip: `лише службові картки (${cards}), жодного повідомлення — це не розмова`, notes, cards };
   }
 
+  // The list row names whoever was clicked, and the thread on screen can be a
+  // different conversation: on 21.10 a thread with Gabriel was filed under
+  // «Flávio Mendes de Oliveira», the row's name, with Gabriel's own link from
+  // the top of the page. So the thread's own words come first — an author in
+  // it, then the name on its link at the top — and the row's name only when
+  // the thread says nothing, or the row's link is the thread's.
+  const threadSlug = ranked[0]?.slug ?? fromHeader?.slug ?? null;
+  const rowIsThread = !threadSlug || (listRow?.slug && String(listRow.slug).toLowerCase() === String(threadSlug).toLowerCase());
+  const rowName = rowIsThread ? listRow?.name : null;
   const participant = {
-    name: [ranked[0]?.name, listRow?.name, personNameFrom(fromHeader?.text)].find(Boolean) ?? 'Unknown',
-    slug: ranked[0]?.slug ?? fromHeader?.slug ?? listRow?.slug ?? null,
-    headline: headlineFrom(harvest, ranked[0]?.name ?? listRow?.name ?? null),
+    name: [ranked[0]?.name, personNameFrom(fromHeader?.text), rowName].find(Boolean) ?? 'Unknown',
+    slug: threadSlug ?? listRow?.slug ?? null,
+    headline: headlineFrom(harvest, ranked[0]?.name ?? rowName ?? null),
   };
 
   const capped = messages.length > maxMessages ? messages.slice(-maxMessages) : messages;
