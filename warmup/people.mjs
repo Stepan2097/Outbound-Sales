@@ -1,4 +1,4 @@
-import { crm } from "./db.mjs";
+import { crm, leadsByLinkedin } from "./db.mjs";
 import { linkedinSlug, memberId } from "./outreach.mjs";
 import { nameFromSeenLine } from "./receipts.mjs";
 
@@ -176,7 +176,35 @@ export async function createContact({ participant, accountName = "", accountId =
     description: `Додано автоматично: ${accountName ? `написав(ла) на акаунт ${accountName}` : "з'явився(лась) у розмові LinkedIn"}.`,
     custom_fields: { source: ADOPT_SOURCE }
   };
-  const [made] = await crm.from("contacts").insert(row).select("id").rows();
-  if (!made?.id) throw new Error("The CRM did not say which contact it made");
-  return made.id;
+  return insertContact(row);
+}
+
+/**
+ * A new contact, or the one the CRM already has with this LinkedIn (22.10: the
+ * CRM refuses a second contact with the same profile — 23505 on its unique
+ * index). Then the existing one is the person, and nothing is duplicated.
+ */
+export async function insertContact(row, { find = existingByLink, client = crm } = {}) {
+  try {
+    const [made] = await client.from("contacts").insert(row).select("id").rows();
+    if (!made?.id) throw new Error("The CRM did not say which contact it made");
+    return made.id;
+  } catch (error) {
+    if (String(error?.code) !== "23505") throw error;
+    const existing = await find(row.linkedin);
+    if (existing) return existing;
+    throw error;
+  }
+}
+
+/** The contact holding this profile link: same slug first, the oldest of them. */
+export async function existingByLink(link) {
+  const slug = linkedinSlug(link);
+  if (!slug) return null;
+  for (const prefix of [false, true]) {
+    const rows = await leadsByLinkedin(slug, { prefix });
+    const same = rows.find((row) => linkedinSlug(row.linkedin) === slug);
+    if (same) return same.id;
+  }
+  return null;
 }

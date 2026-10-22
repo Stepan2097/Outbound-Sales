@@ -1,7 +1,7 @@
 import { accountName } from "./activities.mjs";
 import { crm } from "./db.mjs";
 import { contactBySlug } from "./inbox.mjs";
-import { adoptable, adoptionEnabled, once, personName, profileLink } from "./people.mjs";
+import { adoptable, adoptionEnabled, insertContact, once, personName, profileLink } from "./people.mjs";
 
 /**
  * Друзі LinkedIn-акаунтів — у базу (власник 16.10: «на лінкедин акаунтах є купа
@@ -62,9 +62,7 @@ async function createFriend(person, accountLabel, folderId) {
     description: `Додано автоматично: у друзях LinkedIn акаунта ${accountLabel}${person.connectedAt ? ` з ${person.connectedAt}` : ""}.`,
     custom_fields: { source: NETWORK_SOURCE, linkedin_account: accountLabel, ...(person.connectedAt ? { connected_at: person.connectedAt } : {}) }
   };
-  const [made] = await crm.from("contacts").insert(row).select("id").rows();
-  if (!made?.id) throw new Error("The CRM did not say which contact it made");
-  return made.id;
+  return insertContact(row);
 }
 
 /**
