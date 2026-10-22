@@ -118,7 +118,7 @@ export function openTodayBlock(block = "", { scope = "" } = {}) {
   document.querySelector('.nav-item[data-view="inbox"]')?.click();
 }
 
-connectInboxWork({ showAll: () => setInboxMode("all"), pingFor, loaded: () => render() });
+connectInboxWork({ showAll: () => setInboxMode("all"), pingFor, loaded: () => render(), opened: (open) => void openThreadSide(open) });
 
 const SCOPE_KEY = "outbound.today.scope";
 const BLOCKS = [
@@ -1045,4 +1045,159 @@ document.addEventListener("submit", (event) => {
   if (!event.target?.matches?.("#todayRoot [data-today-steps]")) return;
   event.preventDefault();
   void saveSteps();
+});
+
+/* ── Колонка дій у «Усіх розмовах» (Марко 22.10, таск 4c945837) ──────────────────────────
+   Та сама, що в картці «До роботи»: статус у CRM, наступний пінг, кампанія, посилання. Пінга
+   в розмови може й не бути — тоді «+1 / +3 / +7 / дата» ставлять новий (/api/today/ping за контактом). */
+
+const side = { key: "", contactId: "", thread: null, data: null, loading: false, error: "", saving: false, callMode: false, notice: "", pendingStatus: "" };
+const sideRoot = () => document.getElementById("warmupInboxSide");
+
+async function openThreadSide(open) {
+  const host = sideRoot();
+  if (!host) return;
+  const key = open ? `${open.accountId}|${open.threadKey}` : "";
+  if (key === side.key && open) return;
+  Object.assign(side, { key, thread: open?.thread || null, contactId: open?.thread?.crmContactId ? String(open.thread.crmContactId) : "", data: null, error: "", notice: "", callMode: false, pendingStatus: "" });
+  host.hidden = !open;
+  document.getElementById("warmupInboxLayout")?.classList.toggle("has-side", Boolean(open));
+  if (!open) return;
+  await loadThreadSide();
+}
+
+async function loadThreadSide() {
+  if (!side.contactId) return renderThreadSide();
+  side.loading = true;
+  renderThreadSide();
+  const asked = side.key;
+  try {
+    const data = await api(`/api/today/contact?contactId=${encodeURIComponent(side.contactId)}`);
+    if (asked === side.key) { side.data = data; side.error = ""; }
+  } catch (error) {
+    if (asked === side.key && error?.name !== "AbortError") side.error = error.message || "Не вдалося прочитати контакт у CRM.";
+  }
+  side.loading = false;
+  renderThreadSide();
+}
+
+function renderThreadSide() {
+  const host = sideRoot();
+  if (!host || !side.key) return;
+  const linkedin = warmupProfileUrl(side.thread?.participant?.slug);
+  const linkedinLink = linkedin ? `<a href="${escapeAttr(linkedin)}" target="_blank" rel="noreferrer noopener">LinkedIn <i data-lucide="arrow-up-right"></i></a>` : "";
+  if (!side.contactId) {
+    host.innerHTML = `${sideBox("У CRM", `<p class="today-side-text is-muted">Цієї людини ще немає в CRM — статус і пінг з'являться, щойно її додадуть (сама додається, коли напише).</p>`)}${sideBox("Посилання", linkedinLink ? `<div class="today-side-links">${linkedinLink}</div>` : "")}`;
+    return refreshIcons(host);
+  }
+  if (side.loading && !side.data) { host.innerHTML = sideBox("Дії з лідом", `<p class="today-side-text is-muted">Читаю CRM…</p>`); return; }
+  if (side.error && !side.data) { host.innerHTML = sideBox("Дії з лідом", `<p class="today-side-text is-muted">${escapeHtml(side.error)}</p>`); return; }
+  const data = side.data;
+  const statuses = today.data?.statuses || [];
+  const shownStatus = side.pendingStatus || data.status;
+  const status = statuses.length ? `<select data-side-status aria-label="Статус у CRM" title="Зберігається в CRM одразу при виборі" ${side.saving ? "disabled" : ""}>${statuses.map(([key, label]) => `<option value="${escapeAttr(key)}"${key === shownStatus ? " selected" : ""}>${escapeHtml(label)}</option>`).join("")}</select>
+      ${side.pendingStatus ? `<select data-side-exit aria-label="Причина виходу"><option value="">— причина виходу —</option>${(today.data?.exitReasons || []).map(([key, label]) => `<option value="${escapeAttr(key)}">${escapeHtml(label)}</option>`).join("")}</select>
+      <span class="today-hint">Оберіть причину — статус збережеться, пінги контакту закриються.</span>` : ""}` : `<p class="today-side-text">${escapeHtml(data.status)}</p>`;
+  const due = data.ping?.dueDay ? `<p class="today-side-text is-muted">Зараз: ${escapeHtml(data.ping.title || "пінг")} · ${escapeHtml(dayLabel(data.ping.dueDay, today.data?.today || data.ping.dueDay))}</p>` : `<p class="today-side-text is-muted">Пінга немає — кнопка поставить новий.</p>`;
+  const ping = `${due}
+      <div class="today-side-row">
+        <button type="button" data-side-when="+1" title="На завтра (робочий день)">+1</button>
+        <button type="button" data-side-when="+3" title="Через 3 робочі дні">+3</button>
+        <button type="button" data-side-when="+7" title="Через тиждень">+7</button>
+        <input type="date" id="inboxSideDate" aria-label="Пінг на дату" title="Вибір дати одразу ставить пінг" min="${escapeAttr(today.data?.today || "")}" />
+      </div>
+      <button type="button" class="today-side-wide ${side.callMode ? "active" : ""}" data-side="call" aria-pressed="${side.callMode}" title="Дзвінок: натисніть і оберіть дату"><i data-lucide="phone"></i><span>${side.callMode ? "Дзвінок — оберіть дату" : "Дзвінок"}</span></button>
+      <button type="button" class="today-side-wide today-later-button" data-side="bad-timing" title="Статус «Невдалий час»: пінги закриються, через місяць прийде пінг «Повернутись»">Невдалий час · через місяць</button>`;
+  const campaign = data.campaignAny
+    ? `<p class="today-side-text">${escapeHtml(data.campaignAny.name || "кампанія без назви")}</p>`
+    : data.campaigns?.length
+      ? `<select id="inboxSideCampaign" aria-label="Кампанія"><option value="">— обрати —</option>${data.campaigns.map((entry) => `<option value="${escapeAttr(entry.id)}">${escapeHtml(entry.name || "без назви")}${entry.state === "paused" ? " (на паузі)" : ""}</option>`).join("")}</select>
+        <div class="today-side-row"><button type="button" class="primary-button" data-side="campaign" ${side.saving ? "disabled" : ""}>Віднести</button><button type="button" class="text-button" data-side="not-lead" title="Знайомий, рекрутер, не наш ICP — статус «Не ICP», пінги закриються">Не лід</button></div>`
+      : `<p class="today-side-text is-muted">без кампанії</p>`;
+  const links = [linkedinLink, `<a href="${escapeAttr(data.crmUrl)}" target="_blank" rel="noreferrer noopener" title="Контакт у CRM — нова вкладка">CRM <i data-lucide="arrow-up-right"></i></a>`,
+    `<button type="button" class="text-button" data-side="card" title="Картка людини в «Контактах» порталу">Картка контакту</button>`].filter(Boolean).join("");
+  host.innerHTML = `${side.notice ? `<p class="today-notice" role="status">${escapeHtml(side.notice)}</p>` : ""}
+    ${sideBox("Статус у CRM", status)}
+    ${sideBox("Наступний пінг", ping)}
+    ${sideBox("Кампанія", campaign)}
+    ${sideBox("Посилання", `<div class="today-side-links">${links}</div>`)}`;
+  refreshIcons(host);
+}
+
+async function sideAction(label, work) {
+  if (side.saving) return;
+  side.saving = true;
+  side.notice = "";
+  renderThreadSide();
+  try {
+    side.notice = await work();
+    // Пінги й черга «До роботи» — з тих самих даних: перечитати.
+    void openToday({ keepSelection: true });
+  } catch (error) {
+    if (error?.name !== "AbortError") side.notice = error.message || `Не вдалося: ${label}.`;
+  } finally {
+    side.saving = false;
+  }
+  await loadThreadSide();
+}
+
+/** Закриваючий статус без причини за замовчуванням («Не актуально») спершу питає причину. */
+function pickSideStatus(status) {
+  const closing = (today.data?.closing || []).includes(status);
+  if (closing && !today.data?.defaultExit?.[status]) { side.pendingStatus = status; return renderThreadSide(); }
+  side.pendingStatus = "";
+  return void sideStatus(status);
+}
+
+const sideStatus = (status, chosenExit = "") => sideAction("змінити статус", async () => {
+  side.pendingStatus = "";
+  const exitReason = chosenExit || ((today.data?.closing || []).includes(status) ? (today.data?.defaultExit?.[status] || "") : "");
+  const result = await api("/api/today/status", { method: "POST", body: JSON.stringify({ contactId: side.contactId, status, exitReason }) });
+  const label = (today.data?.statuses || []).find(([key]) => key === result.status)?.[1] || result.status;
+  return `Статус «${label}» у CRM${result.closedPings ? `, пінгів закрито: ${result.closedPings}` : ""}.`;
+});
+
+const sidePing = (when, call = false) => sideAction("поставити пінг", async () => {
+  const result = await api("/api/today/ping", { method: "POST", body: JSON.stringify({ pingId: side.data?.ping?.mine ? side.data.ping.pingId : "", contactId: side.contactId, when, call }) });
+  return `${call ? "Дзвінок" : "Пінг"} на ${dayLabel(result.dueDay, today.data?.today || result.dueDay)}.`;
+});
+
+document.addEventListener("click", (event) => {
+  const target = event.target.closest?.("#warmupInboxSide [data-side], #warmupInboxSide [data-side-when]");
+  if (!target) return;
+  if (target.dataset.sideWhen) return void sidePing(target.dataset.sideWhen);
+  const act = target.dataset.side;
+  if (act === "card") return void (side.contactId && showContactCard(side.contactId));
+  if (act === "bad-timing") return void sideStatus("bad_timing");
+  if (act === "not-lead") return void sideStatus("not_icp");
+  if (act === "call") {
+    side.callMode = !side.callMode;
+    renderThreadSide();
+    const input = document.getElementById("inboxSideDate");
+    input?.focus();
+    try { if (side.callMode) input?.showPicker?.(); } catch {}
+    return;
+  }
+  if (act === "campaign") {
+    const campaignId = document.getElementById("inboxSideCampaign")?.value || "";
+    if (!campaignId) { side.notice = "Оберіть кампанію зі списку."; return renderThreadSide(); }
+    return void sideAction("віднести до кампанії", async () => {
+      const { campaign } = await api("/api/lead-campaigns/assign", { method: "POST", body: JSON.stringify({ contactId: side.contactId, campaignId }) });
+      await api("/api/today/refresh", { method: "POST", body: "{}" }).catch(() => {});
+      return `Тепер у кампанії «${campaign.name}».`;
+    });
+  }
+});
+
+document.addEventListener("change", (event) => {
+  if (event.target?.matches?.("#warmupInboxSide [data-side-status]")) return void pickSideStatus(event.target.value);
+  if (event.target?.matches?.("#warmupInboxSide [data-side-exit]") && event.target.value && side.pendingStatus) return void sideStatus(side.pendingStatus, event.target.value);
+  if (event.target?.id !== "inboxSideDate" || !event.target.value) return;
+  const value = event.target.value;
+  const first = today.data?.today || "";
+  const year = Number(value.slice(0, 4));
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || (first && value < first) || year > Number(first.slice(0, 4) || year) + 1) return;
+  const call = side.callMode;
+  side.callMode = false;
+  void sidePing(value, call);
 });

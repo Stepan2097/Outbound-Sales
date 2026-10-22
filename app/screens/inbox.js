@@ -54,7 +54,7 @@ onWorkspaceEnter(() => refreshWarmupBadge());
  * ці «Усі розмови». today.js імпортує цей модуль і підключає сюди свої функції — так
  * немає кола імпортів. Доки не підключив, розмови просто без кнопки «До роботи».
  */
-let inboxWork = { showAll: () => {}, pingFor: () => null, loaded: () => {} };
+let inboxWork = { showAll: () => {}, pingFor: () => null, loaded: () => {}, opened: () => {} };
 
 /** Скільки розмов на робочих акаунтах — для фільтра «Усі розмови» у «В роботі» (20.10). */
 export function warmupThreadTotal() {
@@ -792,7 +792,7 @@ function warmupThreadViewHtml() {
         ${participant.headline ? `<span class="warmup-subtle">${escapeHtml(participant.headline)}</span>` : ""}
         <div class="warmup-thread-head-links">
         ${contactId
-          ? `<button class="text-button" type="button" data-warmup-contact="${escapeAttr(contactId)}"><i data-lucide="contact"></i><span>Відкрити в CRM</span></button>`
+          ? `<button class="text-button" type="button" data-warmup-contact="${escapeAttr(contactId)}"><i data-lucide="contact"></i><span>Картка контакту</span></button>`
           : '<span class="warmup-subtle">цієї людини ще нема в CRM</span>'}
         ${link
           ? `<a href="${escapeAttr(link)}" target="_blank" rel="noreferrer noopener"><i data-lucide="external-link"></i><span>LinkedIn</span></a>`
@@ -1014,6 +1014,8 @@ export function renderWarmupInbox() {
       refreshIcons(pane);
     }
     inboxPaneKey = paneKey;
+    // Колонка дій праворуч (таск 4c945837) — та сама, що в картці «До роботи»; малює today.js.
+    inboxWork.opened?.(open && inbox.open ? { thread: inbox.open.thread || {}, accountId: inbox.openAccountId, threadKey: inbox.openThreadKey } : null);
   }
   renderWarmupReply();
 }

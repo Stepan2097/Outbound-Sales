@@ -448,8 +448,9 @@ test("розмова: з неї є хід в CRM, коли контакт від
   withContact.warmupState.inbox.open = { thread: thread({ crmContactId: 4412, outreachStatus: "accepted" }), messages: [{ direction: "in", body: "Привіт", sentAt: minutesAgo(5) }] };
   const html = withContact.get("warmupThreadViewHtml")();
   assert.match(html, /data-warmup-contact="4412"/);
-  assert.match(html, /Відкрити в CRM/);
-  assert.doesNotMatch(html, /Картка контакту/);
+  // Марко 22.10 (таск 4c945837): кнопка веде в «Контакти» порталу — і називається так; у CRM веде «CRM ↗» у колонці дій.
+  assert.match(html, /Картка контакту/);
+  assert.doesNotMatch(html, /Відкрити в CRM/);
   assert.match(html, /<span>LinkedIn<\/span>/);
   assert.match(html, /надійшло на Anna Kovalenko/);
 

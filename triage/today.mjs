@@ -590,6 +590,29 @@ export async function todayDraft({ pingId, viewer, force = false, writer }) {
  * Пінг, поставлений людиною: перенести наявний або поставити новий — «+1»,
  * «+3», «+7» днів чи конкретний день; `call` — це дзвінок.
  */
+/**
+ * Колонка дій для розмови в «Усіх розмовах» (Марко 22.10, таск 4c945837): статус у CRM,
+ * відкритий пінг, кампанія, посилання — те саме, що в картці «До роботи», але за контактом,
+ * бо в розмови пінга може й не бути.
+ */
+export async function contactSide({ contactId, viewer }) {
+  const id = String(contactId || "");
+  if (!id) throw refuse("Потрібен контакт.", 400);
+  const contact = (await contactsOf([id])).get(id) || null;
+  if (!contact) throw refuse("Контакт не знайдено.", 404);
+  const [task] = await crm.from("tasks").select(TASK_COLUMNS).eq("queue", PING_QUEUE).eq("contact_id", id).eq("completed", false)
+    .order("created_at", { ascending: false }).limit(1).rows();
+  return {
+    contactId: id,
+    status: contact.lead_status || "new",
+    exitReason: contact.exit_reason || "",
+    crmUrl: `${CRM_CONTACT_URL}/contacts/${id}`,
+    ping: task ? { pingId: task.id, title: task.title || "", dueDay: task.due_date ? dayIn(task.due_date) : null, mine: mayTouch(task, viewer) } : null,
+    campaignAny: await anyCampaignOf(id).catch(() => null),
+    campaigns: leadCampaigns().filter((campaign) => campaign.folderIds.length).map(({ id: campaignId, name, state }) => ({ id: campaignId, name, state }))
+  };
+}
+
 export async function setManualPing({ pingId = "", contactId = "", when, call = false, viewer, now = new Date() }) {
   const dueDay = manualDueDay(when, dayIn(now));
   if (!dueDay) throw refuse("Оберіть, на коли пінг: дата від сьогодні до року вперед.", 400);
@@ -768,6 +791,10 @@ export async function handleTodayApi({ request, response, url, sendJson, readJso
       usePingSteps(steps);
       reconcileSoon(500);
       sendJson(response, 200, { steps: currentPingSteps() });
+      return true;
+    }
+    if (request.method === "GET" && path === "/api/today/contact") {
+      sendJson(response, 200, await contactSide({ contactId: url.searchParams.get("contactId"), viewer }));
       return true;
     }
     if (request.method === "GET" && path === "/api/today/item") {

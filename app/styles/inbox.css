@@ -832,3 +832,28 @@
   align-items: center;
   gap: 6px;
 }
+
+/* «Усі розмови» = «До роботи» на вигляд (Марко 22.10, таск 4c945837): ті самі ширини колонок
+   (список 250–320 px · розмова · дії 200–230 px), та сама висота, картка й поле відповіді. */
+#view-inbox[data-mode="all"] .inbox-split { grid-template-columns: minmax(250px, 320px) minmax(0, 1fr); gap: 12px; }
+#view-inbox[data-mode="all"] .inbox-split.has-side { grid-template-columns: minmax(250px, 320px) minmax(0, 1fr) 200px; }
+#view-inbox[data-mode="all"] .inbox-thread-col { border-radius: 10px; background: var(--surface-sunk); }
+#view-inbox[data-mode="all"] .inbox-thread-pane { padding: 14px; }
+#view-inbox[data-mode="all"] .inbox-reply { gap: 6px; padding: 12px 14px 14px; background: transparent; }
+#view-inbox[data-mode="all"] .inbox-reply textarea { min-height: 88px; }
+.inbox-side[hidden] { display: none; }
+@media (min-width: 901px) {
+  #view-inbox[data-mode="all"] .inbox-split { height: max(480px, calc(100vh - 250px)); align-items: stretch; }
+  #view-inbox[data-mode="all"] .inbox-list-pane { height: 100%; grid-template-rows: auto minmax(0, 1fr); }
+  #view-inbox[data-mode="all"] .inbox-list,
+  #view-inbox[data-mode="all"] .inbox-thread-col { max-height: none; height: 100%; }
+  #view-inbox[data-mode="all"] .inbox-side { height: 100%; overflow-y: auto; }
+}
+@media (min-width: 1360px) {
+  #view-inbox[data-mode="all"] .inbox-split.has-side { grid-template-columns: minmax(250px, 320px) minmax(0, 1fr) 230px; }
+}
+@media (max-width: 900px) {
+  #view-inbox[data-mode="all"] .inbox-split.has-side { grid-template-columns: minmax(0, 1fr); }
+  #view-inbox[data-mode="all"] .inbox-split:not(.has-thread) .inbox-side { display: none; }
+  .inbox-side { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+}

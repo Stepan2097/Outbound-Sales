@@ -50,7 +50,7 @@ test("a ping leads to its whole conversation, and a conversation with a ping lea
   assert.match(today, /data-today="thread"[^`]*>Уся розмова</);
   assert.match(today, /showWarmupInboxThread\(item\.accountId, item\.threadKey\)/);
   assert.match(inbox, /data-inbox-to-work="\$\{escapeAttr\(ping\.pingId\)\}"/);
-  assert.match(today, /connectInboxWork\(\{ showAll: \(\) => setInboxMode\("all"\), pingFor, loaded: \(\) => render\(\) \}\)/);
+  assert.match(today, /connectInboxWork\(\{ showAll: \(\) => setInboxMode\("all"\), pingFor, loaded: \(\) => render\(\), opened: \(open\) => void openThreadSide\(open\) \}\)/);
 });
 
 test("links from other screens to one conversation land on «Усі розмови», not on the queue", () => {
@@ -96,4 +96,16 @@ test("Марко 22.10 (таск 4c945837, варіант A): фільтри о�
   assert.match(today, /item\.crmUrl \? `<a href=/, "«CRM» веде в CRM");
   assert.match(today, />Картка контакту</);
   assert.doesNotMatch(today, /<span>Відкрити в CRM<\/span>/, "кнопка, що вела в «Контакти» порталу, більше так не називається");
+});
+
+test("Марко 22.10 (таск 4c945837): «Усі розмови» мають ту саму колонку дій — за контактом, і з пінгом, і без", () => {
+  assert.match(html, /<aside class="today-side inbox-side" id="warmupInboxSide" aria-label="Дії з лідом" hidden><\/aside>/);
+  assert.match(inbox, /inboxWork\.opened\?\.\(open && inbox\.open \?/);
+  assert.match(today, /api\(`\/api\/today\/contact\?contactId=\$\{encodeURIComponent\(side\.contactId\)\}`\)/);
+  assert.match(today, /pingId: side\.data\?\.ping\?\.mine \? side\.data\.ping\.pingId : "", contactId: side\.contactId/, "немає пінга — ставиться новий за контактом");
+  assert.match(today, /data-side="bad-timing"/);
+  const api = readFileSync(new URL("../triage/today.mjs", import.meta.url), "utf8");
+  assert.match(api, /path === "\/api\/today\/contact"/);
+  const css = readFileSync(new URL("../app/styles/inbox.css", import.meta.url), "utf8");
+  assert.match(css, /#view-inbox\[data-mode="all"\] \.inbox-split\.has-side \{ grid-template-columns: minmax\(250px, 320px\) minmax\(0, 1fr\) 200px; \}/);
 });
