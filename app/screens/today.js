@@ -42,8 +42,13 @@ function setInboxMode(mode) {
   try { window.localStorage.setItem(MODE_KEY, inboxMode); } catch {}
 }
 
+const onInboxView = () => Boolean(document.getElementById("view-inbox")?.classList.contains("active"));
+// Пінги свіжі хвилину: перемикання «Уся розмова» ↔ «До роботи» на тому самому екрані їх не перечитує
+// (Марко 22.10, таск de18b7b2: «працює баговано» — кожен перехід тягнув усе заново, картка блимала).
+const FRESH_MS = 60000;
+
 /** Показати вибране: черга чи всі розмови (вкладка «В роботі») або «Нові». */
-function applyInboxMode() {
+function applyInboxMode({ refresh = true } = {}) {
   const tab = inboxMode === "new" ? "new" : "work";
   for (const button of document.querySelectorAll("[data-inbox-tab]")) {
     const on = button.dataset.inboxTab === tab;
@@ -56,7 +61,23 @@ function applyInboxMode() {
   if (inboxMode === "new") return void openNewContacts();
   leaveNewContacts();
   // Пінги потрібні й «Усім розмовам»: розмова з пінгом має кнопку «До роботи».
-  void openToday({ keepSelection: true });
+  if (refresh || !today.data || Date.now() - (today.loadedAt || 0) > FRESH_MS) return void openToday({ keepSelection: true });
+  render();
+  if (inboxMode === "all") return void renderWarmupInbox();
+  if (today.selected && today.detail?.item?.pingId !== today.selected) void loadDetail(today.selected);
+}
+
+/** Перемкнути «До роботи» ↔ «Усі розмови»: на Workspace — на місці, з іншого екрана — через меню. */
+function switchInboxMode(mode) {
+  setInboxMode(mode);
+  if (onInboxView()) return applyInboxMode({ refresh: false });
+  document.querySelector('.nav-item[data-view="inbox"]')?.click();
+}
+
+/** «Усі розмови» з inbox.js: на Workspace — на місці; перехід з іншого екрана робить сам inbox.js. */
+function showAllConversations() {
+  setInboxMode("all");
+  if (onInboxView()) applyInboxMode({ refresh: false });
 }
 
 function renderModeCounts() {
@@ -88,14 +109,17 @@ function pingFor(accountId, threadKey) {
 /** Відкрити пінг у «До роботи» — з розмови в «Усіх розмовах» чи з Головної. */
 export function openPing(pingId) {
   if (!pingId) return;
-  setInboxMode("work");
   today.blockFilter = "";
+  // Той самий лід, що вже відкритий, — картка лишається як є: без «Оберіть пінг» і «Відкриваю…».
+  if (today.detail?.item?.pingId !== pingId) {
+    today.detail = null;
+    today.detailLoading = true;
+    today.text = "";
+    today.textFor = "";
+    today.draftNote = "";
+  }
   today.selected = pingId;
-  today.detail = null;
-  today.text = "";
-  today.textFor = "";
-  today.draftNote = "";
-  document.querySelector('.nav-item[data-view="inbox"]')?.click();
+  switchInboxMode("work");
 }
 
 /** З Головної-пульту: «Усі розмови» (коли вхідні давно не читались — глянути, що там). */
@@ -119,7 +143,7 @@ export function openTodayBlock(block = "", { scope = "" } = {}) {
   document.querySelector('.nav-item[data-view="inbox"]')?.click();
 }
 
-connectInboxWork({ showAll: () => setInboxMode("all"), pingFor, loaded: () => render(), opened: (open) => void openThreadSide(open) });
+connectInboxWork({ showAll: showAllConversations, pingFor, loaded: () => render(), opened: (open) => void openThreadSide(open) });
 
 const SCOPE_KEY = "outbound.today.scope";
 const BLOCKS = [
@@ -243,6 +267,7 @@ async function openToday({ keepSelection = false } = {}) {
   render();
   try {
     today.data = await api(`/api/today?scope=${today.scope}`);
+    today.loadedAt = Date.now();
     today.error = "";
   } catch (error) {
     if (error?.name === "AbortError") return;
@@ -942,8 +967,7 @@ document.addEventListener("click", (event) => {
   if (act === "threads") {
     today.filterOpen = false;
     if (inboxMode === "all") return render();
-    setInboxMode("all");
-    return void applyInboxMode();
+    return switchInboxMode("all");
   }
   if (act === "scope") {
     today.scope = target.dataset.scope === "all" ? "all" : "mine";
@@ -1005,7 +1029,6 @@ document.addEventListener("click", (event) => {
   if (act === "thread") {
     const item = today.detail?.item;
     if (!item?.threadKey) return;
-    setInboxMode("all");
     return void showWarmupInboxThread(item.accountId, item.threadKey);
   }
   if (act === "rewrite") return void writeDraft(true);

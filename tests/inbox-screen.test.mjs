@@ -32,7 +32,7 @@ const NAMES = [
   "renderWarmupReply", "submitWarmupReply", "removeWarmupReply",
   "renderWarmupInbox", "renderWarmupNavBadge", "setWarmupUnread", "refreshWarmupBadge", "stopWarmupBadgePoll",
   "warmupInboxListOnScreen", "loadWarmupInbox", "warmupThreadIsOpen", "markWarmupThreadRead", "openWarmupThread",
-  "closeWarmupThread", "pendingUnreadAccount", "openPendingUnread", "showWarmupInboxAccount",
+  "closeWarmupThread", "pendingUnreadAccount", "openPendingUnread", "goToWorkspace", "showWarmupInboxAccount", "showWarmupInboxThread",
   // Міст до «До роботи» (19.10): у тестах — заглушка з inbox.js, без пінгів.
   "inboxWork",
   // «Усі акаунти» (19.10, В1).
@@ -125,7 +125,8 @@ function screen({ threads = threeThreads(), accounts = [], sync = null, api, ext
       visibilityState: "visible",
       addEventListener: (type, fn) => { listeners[`document:${type}`] = fn; },
       getElementById: (id) => els[id] || null,
-      querySelector: (selector) => ({ click: () => clicks.push(selector) })
+      // Меню відкриває екран — як setView у застосунку: після кліку «Workspace» активний.
+      querySelector: (selector) => ({ click: () => { clicks.push(selector); if (selector === '.nav-item[data-view="inbox"]') viewClasses.add("active"); } })
     },
     authState: { authenticated: true },
     renderWarmupProfiles: () => calls.push("renderWarmupProfiles"),
@@ -312,7 +313,8 @@ test("з одним акаунтом кнопка теж є — видно, чи
 });
 
 test("перехід із бейджа акаунта у «Прогріві» відкриває «Вхідні» з цим акаунтом і одразу його нову розмову, а не розмову іншого акаунта", () => {
-  const { els, clicks, get, warmupState, main } = screen({ accounts: [{ accountId: "acc-a", identity: "Anna Kovalenko", unread: 1 }, { accountId: "acc-b", label: "Profile 7", unread: 1 }] });
+  // Перехід з «Прогріву» — з іншого екрана: Workspace ще не відкрито (таск de18b7b2: меню — лише тоді).
+  const { els, clicks, get, warmupState, main } = screen({ active: false, accounts: [{ accountId: "acc-a", identity: "Anna Kovalenko", unread: 1 }, { accountId: "acc-b", label: "Profile 7", unread: 1 }] });
   warmupState.inbox.openAccountId = "acc-a";
   warmupState.inbox.openThreadKey = "t-read";
   get("showWarmupInboxAccount")("acc-b");
@@ -1175,4 +1177,10 @@ test("«Усі акаунти»: розмови всіх робочих акау
   assert.equal(order.length, accountsThreads().length);
   assert.match(els.warmupInboxBody.innerHTML, /warmup-thread-account/);
   assert.match(els.warmupInboxAccounts.innerHTML, /is-active[^>]*data-warmup-account="\*"/);
+});
+
+test("на самому Workspace перехід до розмови не натискає меню знову — нічого не перечитується (таск de18b7b2)", () => {
+  const { clicks, get } = screen({ accounts: [{ accountId: "acc-a", identity: "Anna Kovalenko", unread: 1 }, { accountId: "acc-b", label: "Profile 7", unread: 1 }] });
+  get("showWarmupInboxThread")("acc-a", "t-read");
+  assert.deepEqual(clicks, []);
 });

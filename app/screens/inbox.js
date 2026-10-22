@@ -1416,12 +1416,21 @@ function closeWarmupThread() {
  * screen narrowed to that account, with a line saying so and the way back to all
  * of them. Opening the screen loads the list, and the narrowing is applied to it.
  */
+/**
+ * Через меню — лише з іншого екрана. На Workspace повторне натискання меню перечитувало весь
+ * список розмов і пінги, і картка блимала (Марко 22.10, таск de18b7b2: «працює баговано»).
+ */
+function goToWorkspace() {
+  if (document.getElementById("view-inbox")?.classList?.contains("active")) return;
+  document.querySelector('.nav-item[data-view="inbox"]')?.click();
+}
+
 export function showWarmupInboxAccount(accountId) {
   if (!accountId) return;
   pendingUnreadAccount = accountId;
   openWarmupInboxAccount(accountId);
   inboxWork.showAll();
-  document.querySelector('.nav-item[data-view="inbox"]')?.click();
+  goToWorkspace();
   renderWarmupInbox();
   globalThis.scrollTo?.(0, 0);
   // Already read before: no need to wait for the screen's own read.
@@ -1436,8 +1445,11 @@ export function showWarmupInboxThread(accountId, threadKey) {
   if (!accountId || !threadKey) return;
   openWarmupInboxAccount(accountId);
   inboxWork.showAll();
-  document.querySelector('.nav-item[data-view="inbox"]')?.click();
-  openWarmupThread(accountId, threadKey);
+  goToWorkspace();
+  // Та сама розмова вже відкрита — лишається на екрані, поки перечитується (без порожньої панелі).
+  const inbox = warmupState.inbox;
+  const same = Boolean(inbox.open) && inbox.openAccountId === accountId && inbox.openThreadKey === threadKey;
+  openWarmupThread(accountId, threadKey, { refresh: same });
   globalThis.scrollTo?.(0, 0);
 }
 

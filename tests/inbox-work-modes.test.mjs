@@ -50,13 +50,13 @@ test("a ping leads to its whole conversation, and a conversation with a ping lea
   assert.match(today, /data-today="thread"[^`]*>Уся розмова</);
   assert.match(today, /showWarmupInboxThread\(item\.accountId, item\.threadKey\)/);
   assert.match(inbox, /data-inbox-to-work="\$\{escapeAttr\(ping\.pingId\)\}"/);
-  assert.match(today, /connectInboxWork\(\{ showAll: \(\) => setInboxMode\("all"\), pingFor, loaded: \(\) => render\(\), opened: \(open\) => void openThreadSide\(open\) \}\)/);
+  assert.match(today, /connectInboxWork\(\{ showAll: showAllConversations, pingFor, loaded: \(\) => render\(\), opened: \(open\) => void openThreadSide\(open\) \}\)/);
 });
 
 test("links from other screens to one conversation land on «Усі розмови», not on the queue", () => {
   for (const name of ["showWarmupInboxAccount", "showWarmupInboxThread"]) {
     const body = inbox.slice(inbox.indexOf(`export function ${name}`), inbox.indexOf("\n}\n", inbox.indexOf(`export function ${name}`)));
-    assert.ok(body.indexOf("inboxWork.showAll()") > -1 && body.indexOf("inboxWork.showAll()") < body.indexOf('data-view="inbox"'), `${name}: спершу «Усі розмови», потім перехід`);
+    assert.ok(body.indexOf("inboxWork.showAll()") > -1 && body.indexOf("inboxWork.showAll()") < body.indexOf("goToWorkspace()"), `${name}: спершу «Усі розмови», потім перехід`);
   }
 });
 
@@ -108,4 +108,11 @@ test("Марко 22.10 (таск 4c945837): «Усі розмови» мають
   assert.match(api, /path === "\/api\/today\/contact"/);
   const css = readFileSync(new URL("../app/styles/inbox.css", import.meta.url), "utf8");
   assert.match(css, /#view-inbox\[data-mode="all"\] \.inbox-split\.has-side \{ grid-template-columns: minmax\(250px, 320px\) minmax\(0, 1fr\) 200px; \}/);
+});
+
+test("Марко 22.10 (таск de18b7b2): «Уся розмова» ↔ «До роботи» на Workspace — на місці, без перечитування й блимання", () => {
+  assert.match(inbox, /function goToWorkspace\(\) \{\n  if \(document\.getElementById\("view-inbox"\)\?\.classList\?\.contains\("active"\)\) return;/);
+  assert.match(today, /if \(onInboxView\(\)\) return applyInboxMode\(\{ refresh: false \}\);/);
+  assert.match(today, /if \(refresh \|\| !today\.data \|\| Date\.now\(\) - \(today\.loadedAt \|\| 0\) > FRESH_MS\) return void openToday/);
+  assert.match(today, /if \(today\.detail\?\.item\?\.pingId !== pingId\) \{\n    today\.detail = null;\n    today\.detailLoading = true;/, "той самий лід — картка лишається");
 });
