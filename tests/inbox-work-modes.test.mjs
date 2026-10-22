@@ -27,7 +27,8 @@ test("«Вхідні» — «В роботі» (черга й усі розмо�
   assert.doesNotMatch(view, /data-inbox-mode=/);
   assert.match(view, /id="todayRoot" data-inbox-pane="work all"/);
   assert.match(view, /data-inbox-pane="all"/);
-  assert.match(today, /data-today="threads"[^>]*>Усі розмови/);
+  // Марко 22.10 (таск 4c945837): фільтри — один список; «Усі розмови» — пункт «Перевіряти».
+  assert.match(today, /item\("threads", "Усі розмови", totalThreads, "threads"\)/);
   for (const id of ["warmupInboxBody", "warmupInboxThread", "warmupInboxReply", "warmupInboxSearch"]) assert.match(view, new RegExp(`id="${id}"`));
   assert.doesNotMatch(viewOf("home"), /todayRoot/, "Головна більше не показує чергу пінгів");
 });
@@ -76,9 +77,23 @@ test("правка Марка 20.10: без рядка про нові під ч
   assert.doesNotMatch(today, /today-gate/);
   assert.match(html, /id="inboxNewHint"/);
   assert.match(today, /hint\.textContent = today\.data\?\.configured && today\.data\.newContactsAllowed === false \? "після розмов" : ""/);
-  assert.match(today, /Усі розмови\$\{totalThreads !== null \? ` \$\{totalThreads\}` : ""\}/);
+  assert.match(today, /threads: totalThreads \}\[key\]/, "«Усі розмови» з числом розмов, а не непрочитаних");
   const css = readFileSync(new URL("../app/styles/today.css", import.meta.url), "utf8");
-  assert.match(css, /\.today-work > \.today-thread \{ flex: 1 1 auto; min-height: 80px; max-height: none; overflow-y: auto; \}/);
+  assert.match(css, /\.today-main > \.today-thread \{ flex: 1 1 auto; min-height: 80px; max-height: none; overflow-y: auto; \}/);
   const inboxCss = readFileSync(new URL("../app/styles/inbox.css", import.meta.url), "utf8");
   assert.match(inboxCss, /#view-inbox\[data-mode="all"\] \.warmup-inbox-panel > \.panel-heading \{ display: none; \}/);
+});
+
+test("Марко 22.10 (таск 4c945837, варіант A): фільтри одним списком з поясненнями, «?», «Без відповіді», колонка дій", () => {
+  for (const key of ['""', "replies", "overdue", "today", "first", "silent", "threads"]) assert.match(today, new RegExp(`\\n  ${key === '""' ? '""' : key}: \\["`), `пояснення фільтра ${key}`);
+  assert.match(today, /Щодня — по черзі/);
+  assert.match(today, /Перевіряти час від часу/);
+  assert.match(today, /data-today="help-toggle"/);
+  assert.match(today, /\.filter\(\(item\) => item\.reason === "silent"\)/, "«Без відповіді» — усі «Нагадати», і далі за планом");
+  for (const title of ["Статус у CRM", "Наступний пінг", "Кампанія", "Посилання"]) assert.match(today, new RegExp(`sideBox\\("${title}"`));
+  assert.match(today, /data-today="bad-timing"/);
+  assert.match(today, /status: "bad_timing", exitReason: today\.data\?\.defaultExit\?\.bad_timing \|\| "not_now"/);
+  assert.match(today, /item\.crmUrl \? `<a href=/, "«CRM» веде в CRM");
+  assert.match(today, />Картка контакту</);
+  assert.doesNotMatch(today, /<span>Відкрити в CRM<\/span>/, "кнопка, що вела в «Контакти» порталу, більше так не називається");
 });

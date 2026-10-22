@@ -127,13 +127,31 @@ const BLOCKS = [
   ["today", "На сьогодні", "Пінги на сьогодні"],
   ["first", "Перші повідомлення", "Прийняли запит — написати першими"]
 ];
+
+// Фільтри «В роботі» — один список (Марко 22.10, таск 4c945837, варіант A): «Щодня» — по черзі,
+// «Перевіряти» — час від часу. Пояснення три: рядок у пункті, підказка при наведенні, «?».
+const FILTER_TEXT = {
+  "": ["Усе нижче разом", "Усе, що чекає на вас, разом: відповіді, прострочені, на сьогодні й перші повідомлення. Не окремий список, а сума."],
+  replies: ["Лід написав — відповісти. Першими", "Лід написав останнім і чекає відповіді — з будь-якого дня, не лише сьогодні. Робити першими."],
+  overdue: ["Дата пінга минула — нагадати, написати, подзвонити", "Дата пінга минула, а ми не написали: нагадати мовчуну, перше повідомлення чи дзвінок. Друге за пріоритетом."],
+  today: ["Нагадування з датою на сьогодні", "Нагадування тим, хто мовчить, з датою на сьогодні."],
+  first: ["Прийняв запит — написати першим", "Людина прийняла запит у друзі — написати першими."],
+  silent: ["Ми написали останніми — людина мовчить", "Ми написали останніми, людина мовчить. Нагадування саме прийде в «На сьогодні» в свій день — тут лише перевірити, хто чекає."],
+  threads: ["Усі переписки, і без пінга", "Усі переписки акаунтів, і ті, де пінга немає: люди не з CRM, старі, закриті статусом. Перевіряти час від часу."]
+};
+
+/** «Без відповіді»: усі «Нагадати» — і ті, що вже настали, і «далі за планом»; ближчі — вище. */
+function silentItems() {
+  return [...allItems(), ...(today.data?.later || [])].filter((item) => item.reason === "silent")
+    .sort((left, right) => String(left.dueDay || "").localeCompare(String(right.dueDay || "")));
+}
 const DRAFT_LABEL = { reply: "Чернетка відповіді", "follow-up": "Нагадування", first: "Перше повідомлення" };
 
 const today = {
   data: null, error: "", loading: false,
   scope: readScope(),
   // Чіп блоку в шапці (аудит 16.10): показати лише «Прострочені», «На сьогодні»… — порожньо = усі.
-  blockFilter: "", statusSaving: false,
+  blockFilter: "", statusSaving: false, filterOpen: false, helpOpen: false,
   // Акаунт і пошук — так само, як в «Усіх розмовах» (19.10, В1). Порожньо — усі акаунти.
   account: "", search: "",
   selected: "", detail: null, detailError: "", detailLoading: false,
@@ -234,7 +252,7 @@ async function openToday({ keepSelection = false } = {}) {
   const items = allItems();
   // Вибраним лишається пінг, відкритий з розмови чи з Головної, — навіть «далі за планом».
   const known = [...items, ...(today.data?.later || [])];
-  const first = (today.blockFilter && today.data?.blocks?.[today.blockFilter]?.[0]) || items[0];
+  const first = (today.blockFilter === "silent" ? silentItems()[0] : today.blockFilter && today.data?.blocks?.[today.blockFilter]?.[0]) || items[0];
   if (!keepSelection || !known.some((item) => item.pingId === today.selected)) today.selected = first?.pingId || "";
   render();
   // «Усі розмови» читають пінги лише заради кнопки «До роботи»: картку не відкриваємо —
@@ -496,6 +514,12 @@ function accountChipsHtml() {
 
 function queueHtml() {
   const data = today.data;
+  if (today.blockFilter === "silent") {
+    const items = visible(silentItems());
+    return items.length
+      ? `<section class="today-block today-block-silent"><h3 title="${escapeAttr(FILTER_TEXT.silent[1])}">Без відповіді</h3>${items.map(queueItem).join("")}</section>`
+      : `<p class="today-empty">Тих, хто мовчить після нашого повідомлення, зараз немає.</p>`;
+  }
   const blocks = BLOCKS.map(([key, title, hint]) => {
     const items = visible(data.blocks[key] || []);
     if (!items.length || (today.blockFilter && today.blockFilter !== key)) return "";
@@ -535,21 +559,6 @@ function needsCampaign(detail = today.detail) {
 
 function canSend() {
   return !today.sending && Boolean(today.text.trim()) && !needsCampaign();
-}
-
-function campaignPickHtml(detail) {
-  if (!needsCampaign(detail)) return "";
-  return `<div class="today-campaign-pick" role="group" aria-label="До якої кампанії цей лід">
-    <p><b>Без кампанії</b> — лід узяли не з бази. Спершу оберіть кампанію: AI писатиме за її продуктом і сценарієм, нагадування підуть за її кроками.</p>
-    <div class="today-campaign-row">
-      <select id="todayCampaignPick" aria-label="Кампанія">
-        <option value="">— до якої кампанії? —</option>
-        ${detail.campaigns.map((campaign) => `<option value="${escapeAttr(campaign.id)}">${escapeHtml(campaign.name || "без назви")}${campaign.state === "paused" ? " (на паузі)" : ""}</option>`).join("")}
-      </select>
-      <button type="button" class="primary-button" data-today="campaign-assign" ${today.assigning ? "disabled" : ""}>${today.assigning ? "Відношу…" : "Віднести"}</button>
-      <button type="button" class="text-button" data-today="not-lead" title="Знайомий, рекрутер, не наш ICP — статус «Не ICP», пінги закриються">Не лід</button>
-    </div>
-  </div>`;
 }
 
 async function assignCampaign() {
@@ -597,15 +606,11 @@ function workHtml() {
   const item = detail.item;
   const kind = item.channel === "first" ? "first" : detail.messages.at(-1)?.direction === "in" ? "reply" : "follow-up";
   const canWrite = item.channel === "thread" || item.channel === "first";
-  return `
+  return `<div class="today-main">
     <div class="warmup-thread-head today-work-head">
       <div class="warmup-thread-head-who">
         <strong>${escapeHtml(item.name)}</strong>
         ${item.position || item.company ? `<span class="warmup-subtle">${escapeHtml([item.position, item.company].filter(Boolean).join(" · "))}</span>` : ""}
-        <div class="warmup-thread-head-links">
-        ${item.contactId ? `<button class="text-button" type="button" data-today="contact" title="Картка людини в «Контактах»"><i data-lucide="contact"></i><span>Відкрити в CRM</span></button>` : ""}
-        ${warmupProfileUrl(detail.participant?.slug) ? `<a href="${escapeAttr(warmupProfileUrl(detail.participant.slug))}" target="_blank" rel="noreferrer noopener"><i data-lucide="external-link"></i><span>LinkedIn</span></a>` : ""}
-        </div>
         ${item.channel === "thread" && item.threadKey ? `<button type="button" class="text-button today-to-thread" data-today="thread" title="Ця розмова в «Усіх розмовах»: ручна відповідь, уся історія"><i data-lucide="messages-square"></i><span>Уся розмова</span></button>` : ""}
       </div>
       <div class="warmup-thread-head-meta">
@@ -620,7 +625,6 @@ function workHtml() {
     ${messagesHtml(detail.messages, item.name, item.accountName)}
     ${pendingHtml(detail)}
     ${today.notice ? `<p class="today-notice ${today.tone}" role="status">${escapeHtml(today.notice)}</p>` : ""}
-    ${canWrite ? campaignPickHtml(detail) : ""}
     ${canWrite ? `
       <div class="today-draft">
         <div class="today-draft-head">
@@ -631,22 +635,57 @@ function workHtml() {
           </span>
         </div>
         ${today.draftNote ? `<p class="today-draft-note">${escapeHtml(today.draftNote)}</p>` : ""}
+        ${needsCampaign(detail) ? `<p class="today-draft-note">Спершу оберіть кампанію праворуч — без неї надіслати не можна.</p>` : ""}
         <textarea id="todayText" rows="6" placeholder="${today.draftLoading ? "Модель пише чернетку…" : "Текст повідомлення"}">${escapeHtml(today.text)}</textarea>
         <div class="today-actions">
           <button type="button" class="primary-button" data-today="send" title="Піде з цього акаунта в найближчу сесію. Наступний пінг — через 3 робочі дні." ${canSend() ? "" : "disabled"}><i data-lucide="send"></i><span>${today.sending ? "Ставлю в чергу…" : "Погодити й надіслати"}</span></button>
         </div>
       </div>` : item.channel === "moved" ? "" : `<p class="today-note">Переписки з цим контактом тут немає — відкрийте його в CRM або перенесіть пінг.</p>`}
-    <footer class="today-work-foot">
-    ${statusHtml(item)}
-    <div class="today-move">
-      <span>Перенести:</span>
-      <button type="button" data-today="move" data-when="+1" title="На завтра (робочий день)">+1</button>
-      <button type="button" data-today="move" data-when="+3" title="Через 3 робочі дні">+3</button>
-      <button type="button" data-today="move" data-when="+7" title="Через тиждень">+7</button>
-      <input type="date" id="todayMoveDate" aria-label="Перенести на дату" title="Вибір дати одразу переносить пінг" min="${escapeAttr(today.data?.today || "")}" />
-      <button type="button" data-today="call" class="${today.callMode ? "active" : ""}" aria-pressed="${Boolean(today.callMode)}" title="Дзвінок: натисніть і оберіть дату"><i data-lucide="phone"></i><span>${today.callMode ? "Дзвінок — оберіть дату" : "Дзвінок"}</span></button>
     </div>
-    </footer>`;
+    ${sideHtml(item, detail)}`;
+}
+
+/* ── колонка дій (Марко 22.10, таск 4c945837: «так виглядає більш компактно») ──────────
+   Статус у CRM, наступний пінг, кампанія, посилання — праворуч від розмови, завжди на виду:
+   Богдан не бачив статусу й перенесення під полем відповіді і йшов ставити їх у CRM. */
+
+function sideBox(title, body) {
+  return body ? `<section class="today-side-box"><h4>${escapeHtml(title)}</h4>${body}</section>` : "";
+}
+
+function sideHtml(item, detail) {
+  const linkedin = warmupProfileUrl(detail.participant?.slug);
+  const campaignName = item.campaign?.name || detail.campaignAny?.name || "";
+  const campaign = needsCampaign(detail)
+    ? `<select id="todayCampaignPick" aria-label="Кампанія" title="Лід узяли не з бази: AI писатиме за продуктом і сценарієм кампанії, нагадування підуть за її кроками">
+        <option value="">— обрати —</option>
+        ${detail.campaigns.map((entry) => `<option value="${escapeAttr(entry.id)}">${escapeHtml(entry.name || "без назви")}${entry.state === "paused" ? " (на паузі)" : ""}</option>`).join("")}
+      </select>
+      <div class="today-side-row">
+        <button type="button" class="primary-button" data-today="campaign-assign" ${today.assigning ? "disabled" : ""}>${today.assigning ? "Відношу…" : "Віднести"}</button>
+        <button type="button" class="text-button" data-today="not-lead" title="Знайомий, рекрутер, не наш ICP — статус «Не ICP», пінги закриються">Не лід</button>
+      </div>`
+    : campaignName ? `<p class="today-side-text">${escapeHtml(campaignName)}</p>` : `<p class="today-side-text is-muted">без кампанії</p>`;
+  const ping = item.pingId ? `
+      <div class="today-side-row">
+        <button type="button" data-today="move" data-when="+1" title="На завтра (робочий день)">+1</button>
+        <button type="button" data-today="move" data-when="+3" title="Через 3 робочі дні">+3</button>
+        <button type="button" data-today="move" data-when="+7" title="Через тиждень">+7</button>
+        <input type="date" id="todayMoveDate" aria-label="Перенести на дату" title="Вибір дати одразу переносить пінг" min="${escapeAttr(today.data?.today || "")}" />
+      </div>
+      <button type="button" class="today-side-wide ${today.callMode ? "active" : ""}" data-today="call" aria-pressed="${Boolean(today.callMode)}" title="Дзвінок: натисніть і оберіть дату"><i data-lucide="phone"></i><span>${today.callMode ? "Дзвінок — оберіть дату" : "Дзвінок"}</span></button>
+      ${item.contactId ? `<button type="button" class="today-side-wide today-later-button" data-today="bad-timing" title="Статус «Невдалий час»: пінги закриються, через місяць прийде пінг «Повернутись»">Невдалий час · через місяць</button>` : ""}` : "";
+  const links = [
+    linkedin ? `<a href="${escapeAttr(linkedin)}" target="_blank" rel="noreferrer noopener">LinkedIn <i data-lucide="arrow-up-right"></i></a>` : "",
+    item.crmUrl ? `<a href="${escapeAttr(item.crmUrl)}" target="_blank" rel="noreferrer noopener" title="Контакт у CRM — нова вкладка">CRM <i data-lucide="arrow-up-right"></i></a>` : "",
+    item.contactId ? `<button type="button" class="text-button" data-today="contact" title="Картка людини в «Контактах» порталу">Картка контакту</button>` : ""
+  ].filter(Boolean).join("");
+  return `<aside class="today-side" aria-label="Дії з лідом">
+    ${sideBox("Статус у CRM", statusHtml(item))}
+    ${sideBox("Наступний пінг", ping)}
+    ${sideBox("Кампанія", item.contactId ? campaign : "")}
+    ${sideBox("Посилання", links ? `<div class="today-side-links">${links}</div>` : "")}
+  </aside>`;
 }
 
 /** Статус і причина виходу — ті самі, що в CRM, і записуються в CRM (етап 5/6). */
@@ -656,7 +695,7 @@ function statusHtml(item) {
   const current = today.statusDraft?.pingId === item.pingId ? today.statusDraft : { status: item.status || "new", exitReason: item.exitReason || "" };
   const closing = (data.closing || []).includes(current.status);
   return `<div class="today-status">
-    <label title="Зберігається в CRM одразу при виборі"><span>Статус у CRM</span><select data-today-status="status">${data.statuses.map(([key, label]) => `<option value="${escapeAttr(key)}"${key === current.status ? " selected" : ""}>${escapeHtml(label)}</option>`).join("")}</select></label>
+    <label title="Зберігається в CRM одразу при виборі"><select data-today-status="status" aria-label="Статус у CRM">${data.statuses.map(([key, label]) => `<option value="${escapeAttr(key)}"${key === current.status ? " selected" : ""}>${escapeHtml(label)}</option>`).join("")}</select></label>
     ${closing ? `<label><span>Причина виходу</span><select data-today-status="exit"><option value="">— оберіть —</option>${data.exitReasons.map(([key, label]) => `<option value="${escapeAttr(key)}"${key === current.exitReason ? " selected" : ""}>${escapeHtml(label)}</option>`).join("")}</select></label>` : ""}
     ${today.statusSaving ? `<span class="today-hint">Зберігаю в CRM…</span>` : closing && !current.exitReason ? `<span class="today-hint">Оберіть причину — статус збережеться одразу, пінги контакту закриються.</span>` : closing ? `<span class="today-hint">Вихід із воронки — пінги цього контакту закриються.</span>` : current.status === "booked_call" ? `<span class="today-hint">«Дзвінок» — у CRM з'явиться угода, якщо її ще немає.</span>` : ""}
   </div>`;
@@ -701,7 +740,7 @@ function render() {
     return;
   }
   const counts = BLOCKS.map(([key, title]) => [key, title, (data.blocks[key] || []).length]).filter(([, , count]) => count);
-  if (today.blockFilter && !counts.some(([key]) => key === today.blockFilter)) today.blockFilter = "";
+  if (today.blockFilter && today.blockFilter !== "silent" && !counts.some(([key]) => key === today.blockFilter)) today.blockFilter = "";
   const threads = inboxMode === "all";
   // Лічильники — це й фільтри: клік показує лише цей блок (аудит 16.10, P2). Останній —
   // «Усі розмови»: усі переписки акаунтів, і ті, де пінга немає (Марко 20.10).
@@ -710,11 +749,7 @@ function render() {
   // «Усі розмови» — скільки їх усього (Марко 20.10: «чому всіх розмов менше ніж в до роботи?»
   // — бо раніше тут стояло число непрочитаних, а не розмов).
   const totalThreads = warmupThreadTotal();
-  const chips = `<div class="today-chips" role="group" aria-label="Що показати">
-        <button type="button" data-today="block" data-block="" class="${!threads && !today.blockFilter ? "active" : ""}">До роботи ${counts.reduce((sum, [, , count]) => sum + count, 0)}</button>
-        ${counts.map(([key, title, count]) => `<button type="button" data-today="block" data-block="${escapeAttr(key)}" class="${!threads && today.blockFilter === key ? "active" : ""}">${escapeHtml(title)} ${count}</button>`).join("")}
-        <button type="button" data-today="threads" class="${threads ? "active" : ""}" title="Усі переписки акаунтів — і ті, де пінга немає: люди не з CRM, старі, закриті статусом${unreadCount ? `. Непрочитаних: ${escapeAttr(unreadCount)}` : ""}">Усі розмови${totalThreads !== null ? ` ${totalThreads}` : ""}</button>
-      </div>`;
+  const chips = filterHtml(counts, threads, totalThreads, unreadCount);
   const restoreScroll = keepScroll(host, [".today-queue", ".today-thread"]);
   host.innerHTML = `
     <section class="panel blk-queue today">
@@ -734,6 +769,7 @@ function render() {
           <button type="button" class="icon-button" data-today="reload" title="Оновити" aria-label="Оновити"><i data-lucide="refresh-cw"></i></button>
         </div>
       </header>
+      ${today.helpOpen ? helpHtml() : ""}
       ${today.stepsOpen ? stepsHtml() : ""}
       ${threads ? "" : `${today.importOpen || !allItems().length ? "" : `<div class="today-toolbar">
         ${accountChipsHtml()}
@@ -747,6 +783,43 @@ function render() {
     </section>`;
   restoreScroll();
   refreshIcons(host);
+}
+
+/** Один список фільтрів: кнопка з назвою й числом, під нею — «Щодня» і «Перевіряти». */
+function filterHtml(counts, threads, totalThreads, unreadCount) {
+  const total = counts.reduce((sum, [, , count]) => sum + count, 0);
+  const silent = silentItems().length;
+  const key = threads ? "threads" : today.blockFilter;
+  const label = { "": "До роботи", silent: "Без відповіді", threads: "Усі розмови" }[key] ?? BLOCKS.find(([block]) => block === key)?.[1] ?? "До роботи";
+  const count = { "": total, silent, threads: totalThreads }[key] ?? counts.find(([block]) => block === key)?.[2];
+  const item = (value, title, number, act = "block") => `<button type="button" role="menuitemradio" aria-checked="${key === value}" class="today-filter-item${key === value ? " is-on" : ""}${["replies", "overdue"].includes(value) && number ? " is-hot" : ""}" data-today="${act}" data-block="${escapeAttr(value)}" title="${escapeAttr(FILTER_TEXT[value][1])}">
+      <span>${escapeHtml(title)}</span><b>${number ?? ""}</b><small>${escapeHtml(FILTER_TEXT[value][0])}</small>
+    </button>`;
+  return `<div class="today-filter">
+    <button type="button" class="today-filter-button" data-today="filter-toggle" aria-haspopup="menu" aria-expanded="${today.filterOpen}" title="${escapeAttr(FILTER_TEXT[key]?.[1] || "")}">
+      <span>${escapeHtml(label)}</span>${count != null ? `<b>${count}</b>` : ""}<i data-lucide="chevron-down"></i>
+    </button>
+    <button type="button" class="today-help-button${today.helpOpen ? " active" : ""}" data-today="help-toggle" aria-expanded="${today.helpOpen}" title="Як працювати з фільтрами" aria-label="Як працювати з фільтрами">?</button>
+    ${today.filterOpen ? `<div class="today-filter-menu" role="menu" aria-label="Що показати">
+      <p class="today-filter-group">Щодня — по черзі</p>
+      ${item("", "До роботи", total)}
+      ${counts.map(([block, title, number]) => item(block, title, number)).join("")}
+      <p class="today-filter-group">Перевіряти час від часу</p>
+      ${item("silent", "Без відповіді", silent)}
+      ${item("threads", "Усі розмови", totalThreads, "threads")}
+      ${unreadCount ? `<p class="today-filter-foot">Непрочитаних у розмовах: ${escapeHtml(unreadCount)}</p>` : ""}
+    </div>` : ""}
+  </div>`;
+}
+
+/** «?» — коротко, де працювати щодня, а що лише перевіряти (Марко 22.10: «лідгенам потрібне пояснення»). */
+function helpHtml() {
+  const rows = [["До роботи", ""], ["Відповіді", "replies"], ["Прострочені", "overdue"], ["На сьогодні", "today"], ["Перші повідомлення", "first"], ["Без відповіді", "silent"], ["Усі розмови", "threads"]];
+  return `<section class="today-help" aria-label="Як працювати з фільтрами">
+    <p><b>Порядок дня:</b> Відповіді → Прострочені → На сьогодні → Перші повідомлення. «Без відповіді» й «Усі розмови» — перевіряти час від часу.</p>
+    <dl>${rows.map(([title, key]) => `<dt>${escapeHtml(title)}</dt><dd>${escapeHtml(FILTER_TEXT[key][1])}</dd>`).join("")}</dl>
+    <p>Праворуч від розмови — дії з лідом: статус у CRM, наступний пінг (+1 і +3 — робочі дні, +7 — тиждень, дата, дзвінок), «Невдалий час» — пінг «Повернутись» через місяць, і кампанія. У CRM для цього заходити не треба.</p>
+  </section>`;
 }
 
 /* ── дії ─────────────────────────────────────────────────────────────────── */
@@ -793,13 +866,30 @@ document.addEventListener("click", (event) => {
     return void (contactId && showContactCard(contactId));
   }
   if (act === "cancel-reply") return void cancelReply(target.dataset.reply);
+  if (act === "filter-toggle") {
+    today.filterOpen = !today.filterOpen;
+    return render();
+  }
+  if (act === "help-toggle") {
+    today.helpOpen = !today.helpOpen;
+    today.filterOpen = false;
+    return render();
+  }
+  if (act === "bad-timing") {
+    const item = today.detail?.item;
+    if (!item?.contactId) return;
+    today.statusDraft = { pingId: item.pingId, status: "bad_timing", exitReason: today.data?.defaultExit?.bad_timing || "not_now" };
+    return void saveStatus();
+  }
   if (act === "block") {
+    today.filterOpen = false;
     today.blockFilter = target.dataset.block || "";
     if (inboxMode !== "work") { setInboxMode("work"); return void applyInboxMode(); }
     return render();
   }
   if (act === "threads") {
-    if (inboxMode === "all") return;
+    today.filterOpen = false;
+    if (inboxMode === "all") return render();
     setInboxMode("all");
     return void applyInboxMode();
   }
@@ -892,6 +982,18 @@ document.addEventListener("click", (event) => {
     try { if (today.callMode) input?.showPicker?.(); } catch {}
     return;
   }
+});
+
+// Список фільтрів закривається кліком повз нього й клавішею Escape.
+document.addEventListener("click", (event) => {
+  if (!today.filterOpen || event.target.closest?.(".today-filter")) return;
+  today.filterOpen = false;
+  render();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || !today.filterOpen) return;
+  today.filterOpen = false;
+  render();
 });
 
 // D5: вибір дати сам переносить пінг — без окремої кнопки «На дату».

@@ -10,7 +10,7 @@ const TODAY = readFileSync(new URL("../app/screens/today.js", import.meta.url), 
 const API = readFileSync(new URL("../triage/today.mjs", import.meta.url), "utf8");
 
 test("лічильники блоків — кнопки-фільтри, а не текст", () => {
-  assert.match(TODAY, /data-today="block" data-block="\$\{escapeAttr\(key\)\}"/);
+  assert.match(TODAY, /data-today="\$\{act\}" data-block="\$\{escapeAttr\(value\)\}"/);
   assert.match(TODAY, /if \(act === "block"\)/);
   assert.match(TODAY, /today\.blockFilter && today\.blockFilter !== key/, "черга показує лише вибраний блок");
 });

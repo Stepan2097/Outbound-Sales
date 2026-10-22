@@ -16,7 +16,7 @@ test("«Надіслати» недоступне, доки лід без кам
   assert.match(today, /function canSend\(\) \{\n  return !today\.sending && Boolean\(today\.text\.trim\(\)\) && !needsCampaign\(\);/);
   assert.match(today, /\$\{canSend\(\) \? "" : "disabled"\}/);
   assert.match(today, /sendButton\.disabled = !canSend\(\)/);
-  assert.match(today, /campaign\.state === "paused" \? " \(на паузі\)" : ""/);
+  assert.match(today, /entry\.state === "paused" \? " \(на паузі\)" : ""/);
   assert.match(api, /campaignAny: item\.campaign \|\| \(contactId \? await anyCampaignOf\(contactId\)/);
 });
 
