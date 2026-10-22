@@ -316,3 +316,14 @@
 /* Кампанія: створити з картки / пропустити на 3 дні (таск a0c0820f). */
 .today-side-row button svg { width: 14px; height: 14px; }
 .today-side-remind { color: var(--amber); }
+
+/* Переклад чернетки українською (таск 532076ec): до трьох рядків, своя прокрутка, розмову не зменшує. */
+.today-draft-tools button.active { background: var(--teal-weak); border-color: var(--teal); color: var(--ink); }
+.today-translation { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-left: 3px solid var(--teal); border-radius: 0 8px 8px 0; background: var(--surface-strong); font-size: 12.5px; }
+.today-translation p { margin: 0; max-height: calc(1.45em * 2); overflow-y: auto; line-height: 1.45; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+.today-translation-tag { padding: 0 6px; border-radius: 6px; background: var(--teal-weak); color: var(--teal); font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em; line-height: 1.6; }
+.today-translation .text-button { min-height: 0; padding: 0; font-size: 12px; }
+.today-translation.is-error p { color: var(--amber); }
+/* Відкритий переклад не зменшує розмову (Марко: «не повинно перекривати вікно чату»): поле відповіді
+   на цей час нижче рівно на висоту перекладу, разом вони займають те саме місце. */
+@media (min-width: 901px) { .today-main .today-draft:has(.today-translation) textarea { min-height: 56px; height: 56px; } }

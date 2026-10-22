@@ -114,5 +114,5 @@ test("Марко 22.10 (таск de18b7b2): «Уся розмова» ↔ «До
   assert.match(inbox, /function goToWorkspace\(\) \{\n  if \(document\.getElementById\("view-inbox"\)\?\.classList\?\.contains\("active"\)\) return;/);
   assert.match(today, /if \(onInboxView\(\)\) return applyInboxMode\(\{ refresh: false \}\);/);
   assert.match(today, /if \(refresh \|\| !today\.data \|\| Date\.now\(\) - \(today\.loadedAt \|\| 0\) > FRESH_MS\) return void openToday/);
-  assert.match(today, /if \(today\.detail\?\.item\?\.pingId !== pingId\) \{\n    today\.detail = null;\n    today\.detailLoading = true;/, "той самий лід — картка лишається");
+  assert.match(today, /if \(today\.detail\?\.item\?\.pingId !== pingId\) \{\n[\s\S]{0,200}?today\.detail = null;\n    today\.detailLoading = true;/, "той самий лід — картка лишається");
 });

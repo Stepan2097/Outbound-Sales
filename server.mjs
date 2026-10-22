@@ -1196,7 +1196,7 @@ async function handleApi(request, response, url) {
     const handled = await handleTodayApi({
       request, response, url, sendJson, readJson,
       viewer: { id: profile?.id || "", role: profile?.role || "seller", email: String(profile?.email || "").toLowerCase() },
-      writer: { write: writeTodayDraft, classify: classifyOpenDialog }
+      writer: { write: writeTodayDraft, classify: classifyOpenDialog, translate: translateToUkrainian }
     });
     if (handled) return;
   }
@@ -15302,6 +15302,22 @@ async function generateContactDrafts(contact, product, { language = "en", instru
  * Повертає { reason: reply|silent|call, priority: high|normal|low, why }. Дату не
  * вигадує: дати розкладає triage/open-dialogs.mjs. Без моделі — null (правило).
  */
+/** Переклад чернетки українською для лідгена (таск 532076ec) — лише прочитати, не надіслати. */
+async function translateToUkrainian(text) {
+  if (!state.vault || state.providerHealth.status !== "healthy") return "";
+  const { data } = await callOpenRouterJson({
+    model: outreachModelForProfile("balanced"),
+    taskType: "SEQUENCE_GENERATION",
+    profile: "balanced",
+    maxTokens: 900,
+    messages: [
+      { role: "system", content: "Translate the sales message into natural Ukrainian so a colleague understands exactly what it says. Keep names, companies, product terms and links as they are. Do not add, explain or soften anything. Return only strict JSON {\"uk\": \"...\"}." },
+      { role: "user", content: String(text) }
+    ]
+  });
+  return data && typeof data.uk === "string" ? data.uk : "";
+}
+
 async function classifyOpenDialog(candidate) {
   if (!state.vault || state.providerHealth.status !== "healthy") return null;
   const { data } = await callOpenRouterJson({

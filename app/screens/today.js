@@ -112,6 +112,7 @@ export function openPing(pingId) {
   today.blockFilter = "";
   // Той самий лід, що вже відкритий, — картка лишається як є: без «Оберіть пінг» і «Відкриваю…».
   if (today.detail?.item?.pingId !== pingId) {
+    today.translation = { open: false, for: "", text: "", loading: false, error: "" };
     today.detail = null;
     today.detailLoading = true;
     today.text = "";
@@ -177,6 +178,8 @@ const today = {
   scope: readScope(),
   // Чіп блоку в шапці (аудит 16.10): показати лише «Прострочені», «На сьогодні»… — порожньо = усі.
   blockFilter: "", statusSaving: false, filterOpen: false, helpOpen: false,
+  // Переклад чернетки українською (таск 532076ec): { open, for, text, loading, error }.
+  translation: { open: false, for: "", text: "", loading: false, error: "" },
   // Акаунт і пошук — так само, як в «Усіх розмовах» (19.10, В1). Порожньо — усі акаунти.
   account: "", search: "",
   selected: "", detail: null, detailError: "", detailLoading: false,
@@ -610,6 +613,40 @@ function campaignChoiceHtml({ campaigns, skippedUntil, attr, busy }) {
       </div>`;
 }
 
+/* ── Переклад чернетки українською (Марко 22.10, таск 532076ec) ─────────────────────────
+   Компактно: до двох рядків під полем, своя прокрутка; поле на цей час нижче, тож розмова не
+   зменшується. Лише прочитати. */
+
+function translationHtml() {
+  const tr = today.translation;
+  if (!tr.open) return "";
+  const stale = tr.for && tr.for !== today.text.trim();
+  const body = tr.loading ? "Перекладаю…" : tr.error ? tr.error : tr.text;
+  return `<div class="today-translation${tr.error ? " is-error" : ""}" role="note" aria-live="polite">
+    <span class="today-translation-tag">UA</span>
+    <p>${escapeHtml(body)}</p>
+    ${stale && !tr.loading ? `<button type="button" class="text-button" data-today="translate-refresh" title="Текст змінено — перекласти ще раз">Оновити</button>` : ""}
+  </div>`;
+}
+
+async function translateDraft() {
+  const source = today.text.trim();
+  const tr = today.translation;
+  if (!source) return;
+  if (tr.for === source && tr.text && !tr.error) return render();
+  Object.assign(tr, { loading: true, error: "", for: source });
+  render();
+  try {
+    const { text } = await api("/api/today/translate", { method: "POST", body: JSON.stringify({ text: source }) });
+    if (tr.for === source) tr.text = text;
+  } catch (error) {
+    if (error?.name !== "AbortError" && tr.for === source) tr.error = error.message || "Не вдалося перекласти.";
+  } finally {
+    if (tr.for === source) tr.loading = false;
+    render();
+  }
+}
+
 /** З картки «До роботи» у форму нової кампанії — і назад до цього ж пінга. */
 function createCampaignFromWork() {
   const item = today.detail?.item;
@@ -716,11 +753,13 @@ function workHtml() {
           <span class="today-draft-tools">
             <button type="button" data-today="rewrite" ${today.draftLoading ? "disabled" : ""} title="Попросити AI написати інакше"><i data-lucide="refresh-cw"></i><span>${today.draftLoading ? "Пишу…" : "Переписати AI"}</span></button>
             <button type="button" data-today="own-text" ${today.text ? "" : "disabled"} title="Стерти чернетку й написати свій текст"><i data-lucide="eraser"></i><span>Напишу сам</span></button>
+            <button type="button" class="${today.translation.open ? "active" : ""}" data-today="translate" aria-pressed="${today.translation.open}" ${today.text.trim() ? "" : "disabled"} title="Переклад українською — лише щоб прочитати; надсилається текст як є"><i data-lucide="languages"></i><span>Переклад</span></button>
           </span>
         </div>
         ${today.draftNote ? `<p class="today-draft-note">${escapeHtml(today.draftNote)}</p>` : ""}
         ${needsCampaign(detail) ? `<p class="today-draft-note">Спершу оберіть, створіть або пропустіть кампанію праворуч — без цього надіслати не можна.</p>` : ""}
         <textarea id="todayText" rows="6" placeholder="${today.draftLoading ? "Модель пише чернетку…" : "Текст повідомлення"}">${escapeHtml(today.text)}</textarea>
+        ${translationHtml()}
         <div class="today-actions">
           <button type="button" class="primary-button" data-today="send" title="Піде з цього акаунта в найближчу сесію. Наступний пінг — через 3 робочі дні." ${canSend() ? "" : "disabled"}><i data-lucide="send"></i><span>${today.sending ? "Ставлю в чергу…" : "Погодити й надіслати"}</span></button>
         </div>
@@ -918,6 +957,9 @@ document.addEventListener("input", (event) => {
     today.text = event.target.value;
     const sendButton = document.querySelector('#todayRoot [data-today="send"]');
     if (sendButton) sendButton.disabled = !canSend();
+    // Переклад відкритий — лише його блок: «Оновити», коли текст змінено (поле не перемальовується).
+    const block = document.querySelector("#todayRoot .today-translation");
+    if (block) block.outerHTML = translationHtml();
   }
 });
 
@@ -979,6 +1021,7 @@ document.addEventListener("click", (event) => {
       && !window.confirm("Текст ще не надіслано. Перейти до іншого ліда?")) return;
     today.selected = target.dataset.id;
     today.callMode = false;
+    today.translation = { open: false, for: "", text: "", loading: false, error: "" };
     today.detail = null;
     today.text = "";
     today.textFor = "";
@@ -1048,6 +1091,11 @@ document.addEventListener("click", (event) => {
     render();
     return void document.getElementById("todayText")?.focus();
   }
+  if (act === "translate") {
+    today.translation.open = !today.translation.open;
+    return today.translation.open ? void translateDraft() : render();
+  }
+  if (act === "translate-refresh") return void translateDraft();
   if (act === "send") return void send();
   if (act === "move") return void movePing(target.dataset.when);
   if (act === "call") {

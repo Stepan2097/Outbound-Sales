@@ -761,6 +761,26 @@ export function forgetNotRelevantFolder() {
  * кладе повідомлення в чергу акаунта тими самими маршрутами прогріву, що й
  * «Вхідні» та Головна, а потім просить звірку (`/api/today/refresh`).
  */
+/**
+ * Переклад чернетки українською (Марко 22.10, таск 532076ec: «щоб лідгену було легше зрозуміти,
+ * про що мова»). Лише для читання — надсилається текст мовою ліда. Той самий текст до моделі вдруге
+ * не йде: переклад тримається в пам'яті сервера (до 500 текстів).
+ */
+const translations = new Map();
+export const TRANSLATE_MAX = 4000;
+export async function translateDraft({ text, writer }) {
+  const source = String(text || "").trim();
+  if (!source) throw refuse("Немає тексту для перекладу.", 400);
+  if (source.length > TRANSLATE_MAX) throw refuse(`Задовгий текст: до ${TRANSLATE_MAX} знаків.`, 400);
+  if (translations.has(source)) return { text: translations.get(source), cached: true };
+  if (!writer?.translate) throw refuse("На цьому сервері немає моделі для перекладу.", 503);
+  const translated = String(await writer.translate(source) || "").trim();
+  if (!translated) throw refuse("Модель зараз не переклала — спробуйте ще раз.", 502);
+  if (translations.size >= 500) translations.delete(translations.keys().next().value);
+  translations.set(source, translated);
+  return { text: translated, cached: false };
+}
+
 export async function handleTodayApi({ request, response, url, sendJson, readJson, viewer, writer }) {
   const path = url.pathname;
   if (path !== "/api/today" && !path.startsWith("/api/today/")) return false;
@@ -809,6 +829,11 @@ export async function handleTodayApi({ request, response, url, sendJson, readJso
       usePingSteps(steps);
       reconcileSoon(500);
       sendJson(response, 200, { steps: currentPingSteps() });
+      return true;
+    }
+    if (request.method === "POST" && path === "/api/today/translate") {
+      const body = await readJson(request);
+      sendJson(response, 200, await translateDraft({ text: body?.text, writer }));
       return true;
     }
     if (request.method === "GET" && path === "/api/today/contact") {

@@ -433,3 +433,16 @@ test("власник контакта переходить до лідгена �
   assert.equal(ownerHandover({ owner_id: "stepan" }, null, "stepan"), null, "акаунт без лідгена — як було");
   assert.equal(ownerHandover({ owner_id: "stepan" }, "bogdan", ""), null, "власника за замовчуванням не задано — не вгадуємо");
 });
+
+test("переклад чернетки українською: той самий текст до моделі вдруге не йде; без моделі — чесне 503 (таск 532076ec)", async () => {
+  const { translateDraft } = await import("../triage/today.mjs");
+  let calls = 0;
+  const writer = { translate: async (text) => { calls += 1; return `UA: ${text}`; } };
+  const first = await translateDraft({ text: "Hi Lynn, quick question", writer });
+  const again = await translateDraft({ text: "  Hi Lynn, quick question ", writer });
+  assert.equal(first.text, "UA: Hi Lynn, quick question");
+  assert.equal(again.cached, true);
+  assert.equal(calls, 1);
+  await assert.rejects(translateDraft({ text: "Another text", writer: {} }), (error) => error.statusCode === 503);
+  await assert.rejects(translateDraft({ text: "   ", writer }), (error) => error.statusCode === 400);
+});
