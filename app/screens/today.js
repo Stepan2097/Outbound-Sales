@@ -732,7 +732,6 @@ function workHtml() {
       <div class="warmup-thread-head-who">
         <strong>${escapeHtml(item.name)}</strong>
         ${item.position || item.company ? `<span class="warmup-subtle">${escapeHtml([item.position, item.company].filter(Boolean).join(" · "))}</span>` : ""}
-        ${item.channel === "thread" && item.threadKey ? `<button type="button" class="text-button today-to-thread" data-today="thread" title="Ця розмова в «Усіх розмовах»: ручна відповідь, уся історія"><i data-lucide="messages-square"></i><span>Уся розмова</span></button>` : ""}
       </div>
       <div class="warmup-thread-head-meta">
         <span class="warmup-identity" title="Акаунт LinkedIn, з якого йде розмова"><i data-lucide="badge-check"></i><span>${item.accountName ? `через ${escapeHtml(item.accountName)}` : "LinkedIn"}</span></span>
@@ -1069,11 +1068,6 @@ document.addEventListener("click", (event) => {
     return render();
   }
   if (act === "import-accept") return void acceptImports();
-  if (act === "thread") {
-    const item = today.detail?.item;
-    if (!item?.threadKey) return;
-    return void showWarmupInboxThread(item.accountId, item.threadKey);
-  }
   if (act === "rewrite") return void writeDraft(true);
   if (act === "campaign-assign") return void assignCampaign();
   if (act === "campaign-create") return createCampaignFromWork();

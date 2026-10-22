@@ -46,9 +46,10 @@ test("«Усі розмови» never opens a ping card: opening a reply would m
   assert.match(today, /if \(inboxMode !== "work"\) return void renderWarmupInbox\(\);\n  if \(today\.selected\) void loadDetail/);
 });
 
-test("a ping leads to its whole conversation, and a conversation with a ping leads back to work", () => {
-  assert.match(today, /data-today="thread"[^`]*>Уся розмова</);
-  assert.match(today, /showWarmupInboxThread\(item\.accountId, item\.threadKey\)/);
+test("one full dialogue in the card (Марко 22.10, таск 56123f07: «лишимо лише один повний діалог»); a conversation with a ping leads to work", () => {
+  assert.doesNotMatch(today, /data-today="thread"/, "кнопки «Уся розмова» в картці немає");
+  assert.doesNotMatch(today, />Уся розмова</);
+  assert.doesNotMatch(today, /act === "thread"/);
   assert.match(inbox, /data-inbox-to-work="\$\{escapeAttr\(ping\.pingId\)\}"/);
   assert.match(today, /connectInboxWork\(\{ showAll: showAllConversations, pingFor, loaded: \(\) => render\(\), opened: \(open\) => void openThreadSide\(open\) \}\)/);
 });
