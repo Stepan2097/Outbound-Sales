@@ -146,3 +146,11 @@ test("journal of the day: a LinkedIn name loses the status and headline glued to
   assert.match(grammar, /\.work-rows \{[^}]*grid-auto-rows: max-content;/, "a button's min-height must not let the list squeeze rows");
   assert.match(work, /\.work-row \{[^}]*grid-template-columns: minmax\(0, 1fr\);[^}]*padding: var\(--sp-3\) var\(--sp-4\);/);
 });
+
+test("a lead-gen's day journal: the sends from the accounts they run, not only the portal's buttons (таск 556679b0)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const server = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+  assert.match(server, /const led = user === "all" \? null : await accountsLedBy\(user, user === viewer \? profile\?\.id : ""\);/);
+  assert.match(server, /const shown = led \? sends\.filter\(\(send\) => led\.has\(send\.accountId\)\) : sends;/);
+  assert.match(server, /async function accountsLedBy\(email, knownId = ""\)/);
+});

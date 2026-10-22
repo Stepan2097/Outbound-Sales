@@ -1576,8 +1576,12 @@ async function handleApi(request, response, url) {
         const user = !admin || wanted === "me" ? viewer : wanted || "all";
         const entries = await workEntries();
         // The team view also counts what was really sent in LinkedIn (triage/work-log.mjs linkedinSends).
-        const sends = user === "all" ? await linkedinSendsAround(date, entries) : [];
-        const activity = user === "all" ? withLinkedinSends(dayActivity(entries, { date, user }), sends, { date }) : dayActivity(entries, { date, user });
+        // Одна людина — відправки з акаунтів, які вона веде (Марко 22.10, таск 556679b0: у Богдана,
+        // що пише прямо з LinkedIn, журнал дня був порожній — у ньому були лише кнопки порталу).
+        const sends = await linkedinSendsAround(date, entries);
+        const led = user === "all" ? null : await accountsLedBy(user, user === viewer ? profile?.id : "");
+        const shown = led ? sends.filter((send) => led.has(send.accountId)) : sends;
+        const activity = withLinkedinSends(dayActivity(entries, { date, user }), shown, { date });
         const listed = activity.contacts.slice(0, 300);
         const bases = await baseContacts([...new Set(listed.map((item) => item.contactId).filter(Boolean))]);
         const journal = await allEntries().catch(() => []);
@@ -1602,7 +1606,7 @@ async function handleApi(request, response, url) {
           date, user, admin, viewer,
           today: dayOf(new Date()),
           users: admin ? workUsers(entries) : [],
-          days: user === "all" ? addSendsToDays(daysAround(entries, { user, date, today: dayOf(new Date()) }), sends, entries) : daysAround(entries, { user, date, today: dayOf(new Date()) }),
+          days: addSendsToDays(daysAround(entries, { user, date, today: dayOf(new Date()) }), shown, user === "all" ? entries : entries.filter((row) => row.user === user)),
           total: { ...activity.total, answered: contacts.filter((item) => item.answer).length, fresh: contacts.filter((item) => item.fresh).length },
           byUser: activity.users.map((person) => ({ ...person, counts: { ...person.counts, answered: answeredBy.get(person.user) || 0 } })),
           contacts
@@ -3564,6 +3568,15 @@ async function linkedinSendsAround(date, entries) {
     console.warn(`[work] LinkedIn sends: ${error.message}`);
     return [];
   }
+}
+
+/** Акаунти LinkedIn, які веде людина (Налаштування → акаунти): за її id у CRM або за поштою. */
+async function accountsLedBy(email, knownId = "") {
+  let id = knownId;
+  if (!id && email && warmupCrm.configured()) {
+    try { [{ id } = {}] = await warmupCrm.from("profiles").select("id").eq("email", email).limit(1).rows(); } catch { id = ""; }
+  }
+  return new Set(Object.entries(state.accountLeadgens || {}).filter(([, leadgen]) => id && leadgen === id).map(([accountId]) => accountId));
 }
 
 async function baseContacts(ids) {
