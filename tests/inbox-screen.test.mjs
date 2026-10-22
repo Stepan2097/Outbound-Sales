@@ -381,14 +381,14 @@ test("порожня вхідна каже, читали її чи ні, і не
 
   const unknown = screen({ threads: [], sync: null });
   unknown.get("renderWarmupInbox")();
-  assert.match(unknown.els.warmupInboxNotice.innerHTML, /невідомо, коли вхідні читали востаннє/);
+  assert.match(unknown.els.warmupInboxNotice.innerHTML, /невідомо, коли розмови LinkedIn читали востаннє/);
 });
 
 test("сервер без вхідних, помилка читання і завантаження кажуть це одним повідомленням на всю панель", () => {
   const off = screen();
   off.warmupState.inbox.available = false;
   off.get("renderWarmupInbox")();
-  assert.match(off.els.warmupInboxNotice.innerHTML, /немає ендпоїнта вхідних/);
+  assert.match(off.els.warmupInboxNotice.innerHTML, /немає ендпоїнта розмов LinkedIn/);
   assert.equal(off.els.warmupInboxLayout.hidden, true);
   assert.equal(off.els.warmupInboxPill.textContent, "немає на цьому сервері");
 
@@ -403,7 +403,7 @@ test("сервер без вхідних, помилка читання і за�
   const loading = screen();
   loading.warmupState.inbox.ready = false;
   loading.get("renderWarmupInbox")();
-  assert.match(loading.els.warmupInboxNotice.innerHTML, /Завантажуємо вхідні/);
+  assert.match(loading.els.warmupInboxNotice.innerHTML, /Завантажуємо розмови/);
   assert.equal(loading.els.warmupInboxLayout.hidden, true);
 });
 

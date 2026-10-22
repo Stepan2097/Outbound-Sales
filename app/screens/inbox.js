@@ -436,7 +436,7 @@ function warmupInboxEmptyHtml(sync) {
   if (note) return note;
   if (!sync.known) {
     return `<div class="warmup-inbox-note is-warn">
-      <strong>Відповідей немає, але невідомо, коли вхідні читали востаннє.</strong>
+      <strong>Відповідей немає, але невідомо, коли розмови LinkedIn читали востаннє.</strong>
     </div>`;
   }
   return `<div class="warmup-inbox-note is-calm">
@@ -933,8 +933,8 @@ export function renderWarmupInbox() {
 
   if (!inbox.available) {
     alone(`<div class="warmup-inbox-note is-warn">
-      <strong>На цьому сервері немає ендпоїнта вхідних.</strong>
-      <span>З акаунтами все гаразд — просто цей портал старший за вхідні. Нічия відповідь не губиться, але й ніхто її не читає.</span>
+      <strong>На цьому сервері немає ендпоїнта розмов LinkedIn.</strong>
+      <span>З акаунтами все гаразд — просто цей портал старший за розмови LinkedIn. Нічия відповідь не губиться, але й ніхто її не читає.</span>
     </div>`, "Розмов LinkedIn на цьому сервері ще немає");
     return;
   }
@@ -942,13 +942,13 @@ export function renderWarmupInbox() {
   if (inbox.error) {
     alone(`<div class="warmup-inbox-note is-bad">
       <strong>${escapeHtml(inbox.error)}</strong>
-      <span>«Вхідні не відповідають» і «ніхто не написав» — це різні відповіді; тут перша.</span>
+      <span>«Розмови не читаються» і «ніхто не написав» — це різні відповіді; тут перша.</span>
     </div>`, "Розмови LinkedIn не вдалося прочитати");
     return;
   }
 
   if (!inbox.ready) {
-    alone('<div class="empty-state">Завантажуємо вхідні...</div>', "Читаємо, що прийшло");
+    alone('<div class="empty-state">Завантажуємо розмови...</div>', "Читаємо, що прийшло");
     return;
   }
 

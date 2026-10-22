@@ -156,3 +156,12 @@ test("every import in the page's modules is exported by its target", () => {
     }
   }
 });
+
+test("після перейменування «Вхідні» → «Workspace» (таск 485bbc8d) людина не бачить «вхідні» на екрані розмов LinkedIn", async () => {
+  const { readFileSync } = await import("node:fs");
+  for (const file of ["screens/inbox.js", "screens/warmup-accounts.js"]) {
+    const visible = readFileSync(new URL(`../app/${file}`, import.meta.url), "utf8").split("\n")
+      .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line) && /[«"'`>][^\n]*вхідн/i.test(line));
+    assert.deepEqual(visible, [], `${file}: тексти для людей без «вхідні»`);
+  }
+});

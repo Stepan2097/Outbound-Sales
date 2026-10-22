@@ -426,7 +426,7 @@ function warmupAccountUnreadHtml(accountId) {
   if (!unread) return "";
   const label = `${warmupCount(unread)} ${uaPlural(unread, "нова відповідь", "нові відповіді", "нових відповідей")}`;
   return `<button class="warmup-account-unread" type="button" data-warmup-inbox-jump="${escapeAttr(accountId)}"
-    title="${escapeAttr(`${label} на цьому акаунті — показати їх у вхідних`)}"><i data-lucide="mail"></i><span>${escapeHtml(label)}</span></button>`;
+    title="${escapeAttr(`${label} на цьому акаунті — показати їх у Workspace`)}"><i data-lucide="mail"></i><span>${escapeHtml(label)}</span></button>`;
 }
 
 // ── теги профілю Anty (власник 16.10: «додай в табличці статуси tags … і
