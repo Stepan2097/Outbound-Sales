@@ -235,9 +235,25 @@ function taskTitle(reason, contact) {
   return `${REASONS[reason]?.title || REASONS.manual.title}: ${contact?.name || "контакт"}`;
 }
 
+/**
+ * Хто має бути власником контакта в CRM (Марко 22.10, таск 9cb73a5f: «там стоїть Степан як
+ * власник, хоча працює з ним Богдан»). Розмова йде з акаунта лідгена, а контакт записаний на
+ * власника за замовчуванням (WARMUP_CRM_LEADS_OWNER_ID — на нього імпортували базу) або ні на
+ * кого — він переходить до лідгена. Контакт іншої людини не чіпаємо. `null` — нічого не міняти.
+ */
+export function ownerHandover(contact, leadgen, defaultOwner) {
+  if (!contact || !leadgen || contact.owner_id === leadgen) return null;
+  return !contact.owner_id || (defaultOwner && contact.owner_id === defaultOwner) ? leadgen : null;
+}
+
 async function applyAction(action, { contactId, contact, owner, nowIso }) {
   if (action.op === "create") {
     const desired = action.desired;
+    const handover = ownerHandover(contact, leadgenOf(desired.accountId), crm.config().ownerId);
+    if (handover) {
+      await crm.from("contacts").update({ owner_id: handover }).eq("id", contactId).rows()
+        .catch((error) => console.warn(`[today] власник контакта ${contactId}: ${error.message}`));
+    }
     const assignee = leadgenOf(desired.accountId) || contact?.owner_id || owner;
     if (!assignee) throw new Error("немає кому призначити пінг");
     await crm.from("tasks").insert({

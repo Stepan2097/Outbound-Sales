@@ -423,3 +423,13 @@ test("написав прямо в LinkedIn, не через платформу:
   const [next] = openOf("c1");
   assert.equal(next.title, "Нагадати: Lead One");
 });
+
+test("власник контакта переходить до лідгена акаунта, лише якщо він за замовчуванням або порожній (таск 9cb73a5f)", async () => {
+  const { ownerHandover } = await import("../triage/today.mjs");
+  assert.equal(ownerHandover({ owner_id: "stepan" }, "bogdan", "stepan"), "bogdan", "імпорт на Степана — до Богдана");
+  assert.equal(ownerHandover({ owner_id: null }, "bogdan", "stepan"), "bogdan", "без власника — до Богдана");
+  assert.equal(ownerHandover({ owner_id: "lilia" }, "bogdan", "stepan"), null, "контакт іншої людини не чіпаємо");
+  assert.equal(ownerHandover({ owner_id: "bogdan" }, "bogdan", "stepan"), null);
+  assert.equal(ownerHandover({ owner_id: "stepan" }, null, "stepan"), null, "акаунт без лідгена — як було");
+  assert.equal(ownerHandover({ owner_id: "stepan" }, "bogdan", ""), null, "власника за замовчуванням не задано — не вгадуємо");
+});
