@@ -15,7 +15,7 @@
 // закриває цей і ставить наступний (через 3 робочі дні).
 
 import { api, escapeAttr, escapeHtml, keepScroll, onScreen, refreshIcons } from "../core.js";
-import { connectInboxWork, renderWarmupInbox, warmupThreadTotal, showWarmupInboxThread, warmupGoesOutText, warmupMessageHtml, warmupProfileUrl } from "./inbox.js";
+import { connectInboxWork, renderWarmupInbox, warmupAccountsNeedingPerson, warmupThreadTotal, showWarmupInboxThread, warmupGoesOutText, warmupMessageHtml, warmupProfileUrl } from "./inbox.js";
 import { showContactCard } from "./contacts.js";
 import { createCampaignFor } from "./lead-campaigns.js";
 import { leaveNewContacts, openNewContacts } from "./new-contacts.js";
@@ -884,6 +884,7 @@ function render() {
           <button type="button" class="icon-button" data-today="reload" title="Оновити" aria-label="Оновити"><i data-lucide="refresh-cw"></i></button>
         </div>
       </header>
+      ${accountAlertsHtml()}
       ${today.helpOpen ? helpHtml() : ""}
       ${today.stepsOpen ? stepsHtml() : ""}
       ${threads ? "" : `${today.importOpen || !allItems().length ? "" : `<div class="today-toolbar">
@@ -925,6 +926,18 @@ function filterHtml(counts, threads, totalThreads, unreadCount) {
       ${unreadCount ? `<p class="today-filter-foot">Непрочитаних у розмовах: ${escapeHtml(unreadCount)}</p>` : ""}
     </div>` : ""}
   </div>`;
+}
+
+/** Акаунт не читається (потрібен вхід чи капча) — лідген бачить це тут, а не лише адмін на Головній. */
+function accountAlertsHtml() {
+  const stuck = warmupAccountsNeedingPerson();
+  if (!stuck.length) return "";
+  return `<div class="today-account-alerts" role="alert">${stuck.map((account) => {
+    const name = account.identity || account.label || "акаунт";
+    const since = account.healthSince ? ` з ${new Date(account.healthSince).toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit" })}` : "";
+    const why = account.health === "captcha" ? "LinkedIn показав капчу" : "LinkedIn просить увійти";
+    return `<p><i data-lucide="triangle-alert"></i><span><b>${escapeHtml(name)}</b>${escapeHtml(account.label && account.identity ? ` (${account.label})` : "")} не читається${escapeHtml(since)}: ${why}. Нові повідомлення з нього не підтягуються, відповіді з нього не підуть, доки хтось не увійде в LinkedIn у профілі AnyBrowser цього акаунта.</span></p>`;
+  }).join("")}</div>`;
 }
 
 /** «?» — коротко, де працювати щодня, а що лише перевіряти (Марко 22.10: «лідгенам потрібне пояснення»). */

@@ -3272,8 +3272,9 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       const held = await listThreads({ accountId });
       const threads = unreadOnly ? held.filter((thread) => thread.unread) : held;
 
-      const accounts = await anty.from("wl_accounts").select("id,label,status,health").rows();
+      const accounts = await anty.from("wl_accounts").select("id,label,status,health,health_changed_at").rows();
       const [identities, outreach] = await Promise.all([loginIdentities(), outreachFor(threads)]);
+      const healthOf = new Map(accounts.map((account) => [account.id, account]));
       const labels = new Map(accounts.map((account) => [account.id, account.label]));
       const retired = new Set(accounts.filter(retiredAccount).map((account) => account.id));
 
@@ -3289,7 +3290,10 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           label: labels.get(account.accountId) ?? null,
           identity: identities.get(account.accountId)?.name ?? null,
           // Blocked or excluded: shown apart, quietly, at the end.
-          retired: retired.has(account.accountId)
+          retired: retired.has(account.accountId),
+          // «Потрібен вхід» чи капча (таск b0eb7c3a): Workspace попереджає лідгена, що акаунт не читається.
+          health: healthOf.get(account.accountId)?.health || null,
+          healthSince: healthOf.get(account.accountId)?.health_changed_at || null
         })),
         // Top level as well as per thread: the one case this value decides —
         // an empty inbox — is the case with no thread to carry it, and

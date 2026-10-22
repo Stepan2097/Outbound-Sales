@@ -117,3 +117,13 @@ test("Марко 22.10 (таск de18b7b2): «Уся розмова» ↔ «До
   assert.match(today, /if \(refresh \|\| !today\.data \|\| Date\.now\(\) - \(today\.loadedAt \|\| 0\) > FRESH_MS\) return void openToday/);
   assert.match(today, /if \(today\.detail\?\.item\?\.pingId !== pingId\) \{\n[\s\S]{0,200}?today\.detail = null;\n    today\.detailLoading = true;/, "той самий лід — картка лишається");
 });
+
+test("Богдан 22.10 (таск b0eb7c3a): акаунт, що просить увійти чи капчу, попереджає у Workspace; заблокований — ні", () => {
+  assert.match(inbox, /filter\(\(account\) => !account\.retired && \["needs_login", "captcha"\]\.includes\(account\.health\)\)/);
+  assert.match(today, /\$\{accountAlertsHtml\(\)\}/);
+  assert.match(today, /не читається\$\{escapeHtml\(since\)\}/);
+  assert.match(today, /доки хтось не увійде в LinkedIn у профілі AnyBrowser цього акаунта/);
+  const api = readFileSync(new URL("../warmup/api.mjs", import.meta.url), "utf8");
+  assert.match(api, /health: healthOf\.get\(account\.accountId\)\?\.health \|\| null,/);
+  assert.match(api, /select\("id,label,status,health,health_changed_at"\)/);
+});

@@ -718,7 +718,7 @@ test("«Вхідні»: робочий акаунт без жодної розм
   const list = await call({ method: "GET", path: "/api/warmup/inbox" });
   const accounts = list.payload.accounts;
   assert.deepEqual(accounts.map((row) => row.accountId), ["acc-1", "acc-2", "acc-3"]);
-  assert.deepEqual(accounts.find((row) => row.accountId === "acc-3"), { accountId: "acc-3", threads: 0, unread: 0, newestAt: null, label: "Profile 48", identity: null, retired: false });
+  assert.deepEqual(accounts.find((row) => row.accountId === "acc-3"), { accountId: "acc-3", threads: 0, unread: 0, newestAt: null, label: "Profile 48", identity: null, retired: false, health: "ok", healthSince: null });
 
   const one = await call({ method: "GET", path: "/api/warmup/inbox?accountId=acc-1" });
   assert.deepEqual(one.payload.accounts.map((row) => row.accountId), ["acc-1"], "відфільтрований список не домальовує нулі");

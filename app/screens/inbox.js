@@ -61,6 +61,14 @@ export function warmupThreadTotal() {
   return warmupState.inbox.ready ? inboxThreadsOf(INBOX_ALL_ACCOUNTS).length : null;
 }
 
+/**
+ * Акаунти, які агент зараз не може читати: LinkedIn просить увійти або капча (таск b0eb7c3a,
+ * Богдан 22.10: «не оновлюється діалоги»). Заблоковані сюди не входять — вони вже поза роботою.
+ */
+export function warmupAccountsNeedingPerson() {
+  return (warmupState.inbox.accounts || []).filter((account) => !account.retired && ["needs_login", "captcha"].includes(account.health));
+}
+
 export function connectInboxWork(parts) {
   inboxWork = { ...inboxWork, ...parts };
 }

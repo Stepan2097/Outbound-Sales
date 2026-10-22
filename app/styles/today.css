@@ -327,3 +327,8 @@
 /* Відкритий переклад не зменшує розмову (Марко: «не повинно перекривати вікно чату»): поле відповіді
    на цей час нижче рівно на висоту перекладу, разом вони займають те саме місце. */
 @media (min-width: 901px) { .today-main .today-draft:has(.today-translation) textarea { min-height: 56px; height: 56px; } }
+
+/* Акаунт не читається (таск b0eb7c3a): помітно, але одним рядком на акаунт. */
+.today-account-alerts { display: grid; gap: var(--sp-1); }
+.today-account-alerts p { display: flex; align-items: flex-start; gap: var(--sp-2); margin: 0; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--amber); border-radius: 8px; background: rgba(224, 178, 94, 0.1); color: var(--ink); font-size: 13px; }
+.today-account-alerts svg { flex: none; width: 16px; height: 16px; margin-top: 2px; color: var(--amber); }
