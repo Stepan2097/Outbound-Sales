@@ -30,7 +30,7 @@ import { handleWarmupApi } from "./warmup/api.mjs";
 import { networkStore } from "./warmup/network.mjs";
 import { adoptNetwork, networkFolderName } from "./warmup/network-contacts.mjs";
 import { inboxLabeler } from "./warmup/inbox-labels.mjs";
-import { adoptionFolderName } from "./warmup/people.mjs";
+import { adoptionFolderName, setContactOwnerOf } from "./warmup/people.mjs";
 import { handleEspApi } from "./esp/api.mjs";
 import { connectorFromEnv } from "./esp/gmail.mjs";
 import { GmailOAuthConnector, NotConnectedConnector, googleSignIn, grantStore, oauthConfigFromEnv, redirectUriFor } from "./esp/google-oauth.mjs";
@@ -789,6 +789,7 @@ server.listen(port, listenHost, () => {
   });
   // Автор наших повідомлень у CRM — лідген акаунта (20.10).
   setActivityAuthor(async (accountId) => (accountId && state.accountLeadgens?.[accountId]) || null);
+  setContactOwnerOf(async (accountId) => (accountId && state.accountLeadgens?.[accountId]) || null);
   setPingStepsStore({
     read: () => state.pingSteps,
     async write(value) {

@@ -691,7 +691,7 @@ async function tieToContact(participant, { folderIds = [], account = null } = {}
   return once(`profile:${linkedinSlug(participant.slug)}`, async () => {
     const existing = await contactForParticipant(participant, { folderIds });
     if (existing) return { contactId: existing, created: false };
-    const contactId = await createContact({ participant, accountName: account ? accountName(account) : "" });
+    const contactId = await createContact({ participant, accountName: account ? accountName(account) : "", accountId: account?.id || "" });
     return { contactId, created: true };
   });
 }

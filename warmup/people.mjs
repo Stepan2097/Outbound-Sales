@@ -150,15 +150,23 @@ export function once(key, work) {
   return run;
 }
 
+let ownerOfAccount = async () => null;
+/** Хто веде акаунт LinkedIn — server.mjs підставляє читання «Налаштування → акаунти». */
+export function setContactOwnerOf(resolve) {
+  if (typeof resolve === "function") ownerOfAccount = resolve;
+}
+
 /**
  * Make the contact. Only what is known goes in: a name, the profile link, the
  * headline as the position, the folder, and a note saying where the person came
  * from. Nothing the CRM may have its own opinion about — status, stage, owner
  * unless the workspace names one — is invented here.
  */
-export async function createContact({ participant, accountName = "" }) {
+export async function createContact({ participant, accountName = "", accountId = "" }) {
   const folderId = await adoptionFolderId();
-  const owner = crm.config().ownerId;
+  // Власник — лідген, що веде акаунт (Марко 22.10, таск 9cb73a5f: «в срм воно трекає на Степана все»);
+  // акаунт нікому не закріплено — як було, власник із налаштування сервера.
+  const owner = (accountId && await ownerOfAccount(accountId).catch(() => null)) || crm.config().ownerId;
   const row = {
     name: personName(participant),
     linkedin: profileLink(participant),

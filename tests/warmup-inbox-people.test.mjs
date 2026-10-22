@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import test from "node:test";
 
 import { handleWarmupApi } from "../warmup/api.mjs";
-import { ADOPT_FOLDER_DEFAULT, adoptable, forgetAdoptionFolder, hasProfileWords, personName, profileLink } from "../warmup/people.mjs";
+import { ADOPT_FOLDER_DEFAULT, adoptable, forgetAdoptionFolder, hasProfileWords, personName, profileLink, setContactOwnerOf } from "../warmup/people.mjs";
 import { ADOPT_PER_SYNC, CONTACT_TYPE, SERVICE_CARD_BODY, isServiceCard, normalizeParticipant, normalizeThreadInput } from "../warmup/inbox.mjs";
 import { DEFAULT_STRATEGY } from "../warmup/strategy.mjs";
 
@@ -322,6 +322,17 @@ test("назву папки й власника можна задати нала
   assert.equal(rows.contact_folders[0].name, "Хто писав");
   assert.equal(rows.contact_folders[0].owner_id, "owner-7");
   assert.equal(added()[0].owner_id, "owner-7");
+});
+
+test("власник нового контакту — лідген, що веде акаунт; акаунт нікому не закріплено — з налаштувань (таск 9cb73a5f)", async (t) => {
+  process.env.WARMUP_CRM_LEADS_OWNER_ID = "owner-7";
+  setContactOwnerOf(async (accountId) => (accountId ? "leadgen-bogdan" : null));
+  t.after(() => setContactOwnerOf(async () => null));
+  await thread([THEIRS], IVAN, "t-ivan");
+  assert.equal(added()[0].owner_id, "leadgen-bogdan");
+  setContactOwnerOf(async () => null);
+  await thread([{ ...THEIRS, externalId: "m-free" }], { name: "Petro Free", slug: "petro-free" }, "t-petro");
+  assert.equal(added().at(-1).owner_id, "owner-7");
 });
 
 test("хто вже є в CRM за посиланням на профіль, того не додають вдруге", async () => {
