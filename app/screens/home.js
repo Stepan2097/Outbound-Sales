@@ -103,7 +103,7 @@ export function attentionItems({ today, warmup, now = Date.now() }) {
   for (const entry of warmup?.attention || []) items.push({ text: entry.text, go: entry.kind === "account" || entry.kind === "campaign" ? "warmup" : "" });
   const synced = Date.parse(warmup?.inbox?.lastSyncedAt || "");
   if (Number.isFinite(synced) && (now - synced) / 3600000 > SYNC_STALE_HOURS) {
-    items.push({ text: `Вхідні LinkedIn не оновлювались ${Math.floor((now - synced) / 3600000)} год — агент не читає акаунти.`, go: "warmup" });
+    items.push({ text: `Розмови LinkedIn не оновлювались ${Math.floor((now - synced) / 3600000)} год — агент не читає акаунти.`, go: "warmup" });
   }
   const old = (today?.blocks?.overdue || []).filter((item) => workingDaysBetween(item.dueDay, today.today) > OLD_PING_WORKING_DAYS);
   if (old.length) items.push({ text: `${old.length} ${uaPlural(old.length, "пінг прострочено", "пінги прострочено", "пінгів прострочено")} понад ${OLD_PING_WORKING_DAYS} робочі дні.`, go: "overdue" });

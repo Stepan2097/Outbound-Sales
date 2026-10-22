@@ -99,7 +99,7 @@ function teamRowHtml(person, selfEmail) {
 function policyHtml(email) {
   const key = String(email || "").toLowerCase();
   const rule = contactPolicies[key] || { mode: "gate" };
-  return `<label class="team-policy" title="Нові контакти з конвеєра (WorkSpace), поки в людини є відповіді чи прострочені пінги">
+  return `<label class="team-policy" title="Нові контакти з конвеєра (Workspace → «Нові»), поки в людини є відповіді чи прострочені пінги">
     <span>Нові, коли є розмови</span>
     <span class="team-policy-row">
       <select data-policy-email="${escapeAttr(key)}">${Object.entries(POLICY_LABEL).map(([mode, label]) => `<option value="${mode}"${mode === rule.mode ? " selected" : ""}>${label}</option>`).join("")}</select>

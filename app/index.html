@@ -76,8 +76,8 @@
             <button class="nav-group-toggle" type="button" aria-expanded="true"><i data-lucide="folder-open"></i><span>LinkedIn</span><i data-lucide="chevron-down" class="nav-group-chevron"></i></button>
             <div class="nav-group-items">
               <!-- Від щоденного до технічного (аудит 16.10): кампанії → відповіді → смисли → прогрів акаунтів. -->
-              <button class="nav-item" data-view="workspace" aria-label="WorkSpace LinkedIn" title="WorkSpace: кампанії лідгенів, сценарії, порівняння"><i data-lucide="layout-dashboard"></i><span>WorkSpace</span></button>
-              <button class="nav-item" data-view="inbox" aria-label="Вхідні LinkedIn" title="Вхідні LinkedIn: непрочитані розмови акаунтів"><i data-lucide="inbox"></i><span>Вхідні</span><span class="nav-badge" id="warmupNavBadge" hidden></span></button>
+              <button class="nav-item" data-view="workspace" aria-label="Campaign — кампанії LinkedIn" title="Campaign: кампанії лідгенів, сценарії, порівняння"><i data-lucide="megaphone"></i><span>Campaign</span></button>
+              <button class="nav-item" data-view="inbox" aria-label="Workspace — робочий простір лідгена" title="Workspace: розмови LinkedIn у роботі й нові контакти"><i data-lucide="layout-dashboard"></i><span>Workspace</span><span class="nav-badge" id="warmupNavBadge" hidden></span></button>
               <button class="nav-item" data-view="pitch" aria-label="Смисли продуктів" title="Смисли продуктів: що продаємо і як про це говорити"><i data-lucide="book-open-text"></i><span>Смисли</span></button>
               <button class="nav-item" data-view="warmup" aria-label="Прогрів LinkedIn" title="Прогрів LinkedIn: акаунти, розклад і ліміти"><i data-lucide="flame"></i><span>Прогрів</span></button>
             </div>
@@ -276,7 +276,7 @@
                зокрема розмови без пінга (app/screens/inbox.js);
                «Нові» — люди з папки CRM, яким ще ніхто не писав (app/screens/new-contacts.js + home-triage.js).
                Пошта має свої «Вхідні» в папці «Пошта» (view-mail-inbox). -->
-          <div class="view-tabs" role="tablist" aria-label="Вхідні LinkedIn">
+          <div class="view-tabs" role="tablist" aria-label="Workspace">
             <button type="button" role="tab" data-inbox-tab="work" title="Розмови з лідами: кому відповісти, нагадати, написати першим — і всі переписки">В роботі <b id="inboxWorkCount"></b></button>
             <button type="button" role="tab" data-inbox-tab="new" title="Люди з папки CRM, яким ще ніхто не писав. Відкриваються, коли розберете відповіді й прострочені (або за нормою з Налаштувань)">Нові <small class="view-tab-hint" id="inboxNewHint"></small></button>
           </div>
@@ -287,7 +287,7 @@
                 <!-- Розвантаження (аудит 16.10, D7): заголовок «Вхідні» вже є вгорі сторінки, а стан
                      оновлення — у підказці «Оновити». Елементи лишаються для inbox.js. -->
                 <div class="warmup-inbox-heading" hidden>
-                  <h2 id="warmupInboxTitle">Вхідні</h2>
+                  <h2 id="warmupInboxTitle">Workspace</h2>
                   <p id="warmupInboxSubtitle"></p>
                 </div>
                 <div class="warmup-inbox-controls" id="warmupInboxControls">

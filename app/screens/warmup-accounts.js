@@ -1279,7 +1279,7 @@ document.getElementById("warmupDetailBody")?.addEventListener("click", (event) =
   const block = event.target.closest("[data-warmup-block]");
   if (block) {
     const health = block.dataset.warmupBlock;
-    if (health === "blocked" && !window.confirm("Позначити акаунт заблокованим? Агент перестане його відкривати, а нагадування про нього зникнуть з «Вхідних» і «Головної».")) return;
+    if (health === "blocked" && !window.confirm("Позначити акаунт заблокованим? Агент перестане його відкривати, а нагадування про нього зникнуть з Workspace і «Головної».")) return;
     warmupApi("/accounts/health", {
       method: "POST",
       body: JSON.stringify({ accountId: warmupState.selectedAccountId, health, note: health === "blocked" ? "Заблоковано в LinkedIn" : "" })

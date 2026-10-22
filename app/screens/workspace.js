@@ -1,4 +1,5 @@
-// WorkSpace LinkedIn (таск f78ffd9a, 16.10.2026): кампанії лідгенів — стратегія аутріч.
+// Campaign (до 22.10 — «WorkSpace LinkedIn»; таск f78ffd9a, 16.10.2026; перейменовано — таск 485bbc8d):
+// кампанії лідгенів — стратегія аутріч. Внутрішня назва екрана лишилась "workspace".
 //
 // На вкладці: кампанії лідгенів (lead-campaigns.js), порівняння кампаній
 // (campaign-report.js) і хребет, спільний для всіх кампаній: драбина кваліфікації,
@@ -15,7 +16,7 @@ import "./campaign-report.js";
 
 onScreen("workspace", { open: () => { void loadLeadCampaigns(); void openSpine(); } });
 
-/** З Головної: відкрити WorkSpace (кампанії). */
+/** З Головної: відкрити Campaign (кампанії; view "workspace"). */
 export function showWorkspace() {
   document.querySelector('.nav-item[data-view="workspace"]')?.click();
 }

@@ -161,7 +161,7 @@ test("відкрито один акаунт — найсвіжіший, — і 
   assert.match(rowOf(els.warmupInboxBody.innerHTML, "t-new-unread"), /is-unread/);
   assert.doesNotMatch(rowOf(els.warmupInboxBody.innerHTML, "t-read"), /is-unread/);
   assert.equal(els.warmupInboxPill.textContent, "2 непрочитані", "число над списком — усі непрочитані, а не одного акаунта");
-  assert.equal(els.warmupInboxTitle.textContent, "Вхідні");
+  assert.equal(els.warmupInboxTitle.textContent, "Workspace");
 });
 
 test("час на рядку й у розмові — коли повідомлення прийшло в LinkedIn, а не коли агент його прочитав (власник 16.10)", () => {
@@ -440,7 +440,7 @@ test("відкрита розмова стоїть праворуч, а її р�
   assert.deepEqual(orderOf(els.warmupInboxBody.innerHTML), ["t-read", "t-new-unread"], "список не зник");
   assert.match(rowOf(els.warmupInboxBody.innerHTML, "t-read"), /is-open[\s\S]*aria-current="true"/);
   assert.doesNotMatch(rowOf(els.warmupInboxBody.innerHTML, "t-new-unread"), /aria-current/);
-  assert.equal(els.warmupInboxTitle.textContent, "Вхідні", "заголовок не міняється на ім'я людини");
+  assert.equal(els.warmupInboxTitle.textContent, "Workspace", "заголовок не міняється на ім'я людини");
 });
 
 test("розмова: з неї є хід в CRM, коли контакт відомий, і чесне «не знайдено», коли ні", () => {

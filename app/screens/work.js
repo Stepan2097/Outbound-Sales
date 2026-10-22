@@ -170,7 +170,7 @@ function summaryHtml(report) {
   const cards = [
     ["users", "Написали людям", now.written, deltaHtml(now.written, was.written), "Людей, кому за період пішло наше повідомлення в LinkedIn чи лист"],
     ["message-circle-reply", `Відповіли${now.rate != null ? ` · ${now.rate}%` : ""}`, now.replied, deltaHtml(now.replied, was.replied), "Людей, які за період написали нам у LinkedIn чи відповіли на лист"],
-    ["badge-check", "Кваліфіковані", now.qualified, deltaHtml(now.qualified, was.qualified), "Відповіді з міткою «Кваліфікована» у Вхідних (AI або лідген)"],
+    ["badge-check", "Кваліфіковані", now.qualified, deltaHtml(now.qualified, was.qualified), "Відповіді з міткою «Кваліфікована» у Workspace (AI або лідген)"],
     ["phone", "Дзвінки", now.calls, deltaHtml(now.calls, was.calls), "Статус «Дзвінок» поставлено в CRM за період"],
     ["timer", "Медіана нашої відповіді", durationWord(now.responseMedianMinutes), deltaHtml(now.responseMedianMinutes, was.responseMedianMinutes, { lowerBetter: true, minutes: true }), "Від повідомлення людини до нашої відповіді в тій самій розмові. Містить паузу агента, що читає LinkedIn раз на кілька хвилин"],
     ["hourglass", "Відповіли пізніше 24 год", now.slow, deltaHtml(now.slow, was.slow, { lowerBetter: true }), "Повідомлення людей за період, на які ми відповіли пізніше ніж за добу або ще не відповіли"]

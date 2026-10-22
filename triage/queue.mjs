@@ -162,7 +162,7 @@ export async function channelsFor(contact, { accounts = null, friends = null, em
         acceptedAt: row.responded_at || null,
         // Only an accepted, silent friend on a working account takes a first message from here.
         canWrite: row.status === "accepted" && !account?.retired,
-        why: account?.retired ? "акаунт заблоковано або виключено" : row.status === "connected" ? "розмова вже йде — пишіть у «Вхідних»" : "",
+        why: account?.retired ? "акаунт заблоковано або виключено" : row.status === "connected" ? "розмова вже йде — пишіть у Workspace" : "",
         reply: waiting?.reply || null,
         draft: drafts.get(String(row.id))?.text || waiting?.draft?.text || ""
       };

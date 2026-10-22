@@ -326,14 +326,14 @@ function setView(viewName) {
     {
       home: "Головна",
       work: "Звіт команди",
-      workspace: "WorkSpace LinkedIn",
+      workspace: "Campaign — кампанії LinkedIn",
       warmup: "Прогрів LinkedIn",
       "mail-warmup": "Прогрів пошт",
       campaigns: "Кампанії",
       "mail-inbox": "Вхідні пошти",
       leads: "Ліди",
       reports: "Звіти",
-      inbox: "Вхідні LinkedIn",
+      inbox: "Workspace",
       pitch: "Смисли продуктів",
       contacts: "Контакти з CRM",
       account: "Налаштування"

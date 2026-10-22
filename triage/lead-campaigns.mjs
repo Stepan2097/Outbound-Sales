@@ -98,7 +98,7 @@ export async function anyCampaignOf(contactId) {
 export async function assignToCampaign({ contactId, campaignId }) {
   const campaign = leadCampaignById(String(campaignId || ""));
   if (!campaign) throw refuse("Цієї кампанії вже немає.", 404);
-  if (!campaign.folderIds.length) throw refuse("У кампанії немає папки CRM — додайте її у WorkSpace.");
+  if (!campaign.folderIds.length) throw refuse("У кампанії немає папки CRM — додайте її в Campaign.");
   const id = String(contactId || "").trim();
   if (!id) throw refuse("Потрібен контакт.");
   const present = await crm.from("contact_folder_memberships").select("folder_id").eq("contact_id", id).in("folder_id", campaign.folderIds).rows();

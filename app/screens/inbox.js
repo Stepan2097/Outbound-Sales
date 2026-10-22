@@ -418,13 +418,13 @@ function warmupInboxSync(accountId = null) {
 function warmupInboxNoteHtml(sync) {
   if (sync.known && !sync.lastSyncedAt) {
     return `<div class="warmup-inbox-note is-bad">
-      <strong>Вхідні ще жодного разу не читали.</strong>
+      <strong>Розмови LinkedIn ще жодного разу не читали.</strong>
       <span>Перевір, що агент працює і його токен заданий.</span>
     </div>`;
   }
   if (sync.stale) {
     return `<div class="warmup-inbox-note is-warn">
-      <strong>Вхідні не читали ${escapeHtml(warmupAgo(sync.lastSyncedAt))} — схоже, агент зупинився.</strong>
+      <strong>Розмови LinkedIn не читали ${escapeHtml(warmupAgo(sync.lastSyncedAt))} — схоже, агент зупинився.</strong>
     </div>`;
   }
   return "";
@@ -899,7 +899,7 @@ export function renderWarmupInbox() {
 
   const inbox = warmupState.inbox;
   renderWarmupNavBadge();
-  title.textContent = "Вхідні";
+  title.textContent = "Workspace";
 
   if (pill) {
     if (!inbox.available) {
@@ -935,7 +935,7 @@ export function renderWarmupInbox() {
     alone(`<div class="warmup-inbox-note is-warn">
       <strong>На цьому сервері немає ендпоїнта вхідних.</strong>
       <span>З акаунтами все гаразд — просто цей портал старший за вхідні. Нічия відповідь не губиться, але й ніхто її не читає.</span>
-    </div>`, "Вхідних на цьому сервері ще немає");
+    </div>`, "Розмов LinkedIn на цьому сервері ще немає");
     return;
   }
 
@@ -943,7 +943,7 @@ export function renderWarmupInbox() {
     alone(`<div class="warmup-inbox-note is-bad">
       <strong>${escapeHtml(inbox.error)}</strong>
       <span>«Вхідні не відповідають» і «ніхто не написав» — це різні відповіді; тут перша.</span>
-    </div>`, "Вхідні не вдалося прочитати");
+    </div>`, "Розмови LinkedIn не вдалося прочитати");
     return;
   }
 
@@ -1287,7 +1287,7 @@ export async function loadWarmupInbox() {
       } else {
         inbox.available = true;
         inbox.ready = true;
-        inbox.error = error.message || "Вхідні не вдалося прочитати.";
+        inbox.error = error.message || "Розмови LinkedIn не вдалося прочитати.";
       }
     }
     renderWarmupInbox();

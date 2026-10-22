@@ -61,7 +61,7 @@ test("«Потребує уваги» names only real problems, and is empty whe
     today: { today: "2026-10-19", blocks: { overdue: [{ dueDay: "2026-10-08" }, { dueDay: "2026-10-09" }] } },
     warmup: { attention: [{ kind: "account", text: "Profile 48: потрібен вхід" }], inbox: { lastSyncedAt: "2026-10-17T12:00:00Z" } }
   }).map((item) => item.text);
-  assert.deepEqual([...busy], ["Profile 48: потрібен вхід", "Вхідні LinkedIn не оновлювались 48 год — агент не читає акаунти.", "2 пінги прострочено понад 2 робочі дні."]);
+  assert.deepEqual([...busy], ["Profile 48: потрібен вхід", "Розмови LinkedIn не оновлювались 48 год — агент не читає акаунти.", "2 пінги прострочено понад 2 робочі дні."]);
 });
 
 test("WorkSpace — лише кампанії", () => {
