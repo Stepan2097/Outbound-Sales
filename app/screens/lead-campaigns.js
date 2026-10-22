@@ -33,6 +33,25 @@ export async function loadLeadCampaigns() {
   renderLeadCampaigns();
 }
 
+// Кампанію створюють з картки ліда (Марко 22.10, таск a0c0820f): після збереження людину відносять
+// до нової кампанії й повертають лідгена до того самого контакта; «Скасувати» теж повертає.
+let returnTo = null; // { name, contactId, back(campaign|null) }
+
+/** З картки ліда у Workspace: відкрити форму нової кампанії, а після неї — назад до людини. */
+export function createCampaignFor({ name, contactId, back }) {
+  returnTo = { name: name || "контакта", contactId: String(contactId || ""), back };
+  Object.assign(lead, { formOpen: true, editingId: null, notice: "", folderQuery: "" });
+  document.querySelector('.nav-item[data-view="workspace"]')?.click();
+  renderLeadCampaigns();
+  document.getElementById("leadCampaignName")?.focus();
+}
+
+function goBack(campaign) {
+  const target = returnTo;
+  returnTo = null;
+  target?.back?.(campaign);
+}
+
 const host = () => document.getElementById("leadCampaignPanel");
 const planHost = () => document.getElementById("leadCampaignPlan");
 const editing = () => lead.campaigns.find((campaign) => campaign.id === lead.editingId) || null;
@@ -82,6 +101,7 @@ function foldersPickerHtml(selected) {
 function formHtml(campaign) {
   return `
     <form class="lead-campaign-form" id="leadCampaignForm">
+      ${returnTo && !campaign ? `<p class="lead-return"><i data-lucide="corner-up-left"></i><span>Після збереження — назад до <b>${escapeHtml(returnTo.name)}</b>, і цю людину буде віднесено до нової кампанії. «Скасувати» теж поверне до неї.</span></p>` : ""}
       <div class="campaign-form-section">
         <h3>Основне</h3>
         <div class="lead-form-grid">
@@ -164,10 +184,24 @@ async function save() {
   lead.saving = true;
   lead.notice = "";
   try {
-    await api("/api/lead-campaigns", { method: current ? "PATCH" : "POST", body: JSON.stringify(current ? { id: current.id, ...values } : values) });
+    const saved = await api("/api/lead-campaigns", { method: current ? "PATCH" : "POST", body: JSON.stringify(current ? { id: current.id, ...values } : values) });
     lead.formOpen = false;
     lead.editingId = null;
     lead.saving = false;
+    if (returnTo && !current && saved?.campaign?.id) {
+      let campaign = saved.campaign;
+      if (returnTo.contactId) {
+        try {
+          ({ campaign } = await api("/api/lead-campaigns/assign", { method: "POST", body: JSON.stringify({ contactId: returnTo.contactId, campaignId: saved.campaign.id }) }));
+          // Кампанію людини черга бачить після звірки.
+          await api("/api/today/refresh", { method: "POST", body: "{}" }).catch(() => {});
+        } catch (error) {
+          campaign = { ...saved.campaign, assignError: error?.message || "Не вдалося віднести людину до кампанії." };
+        }
+      }
+      void loadLeadCampaigns();
+      return goBack(campaign);
+    }
     await loadLeadCampaigns();
     return;
   } catch (error) {
@@ -194,6 +228,7 @@ document.addEventListener("click", async (event) => {
   const target = event.target instanceof Element ? event.target : null;
   if (!target?.closest("#leadCampaignPanel")) return;
   if (target.closest("[data-lead-new]")) {
+    returnTo = null;
     Object.assign(lead, { formOpen: true, editingId: null, notice: "", folderQuery: "" });
     renderLeadCampaigns();
     document.getElementById("leadCampaignName")?.focus();
@@ -207,6 +242,8 @@ document.addEventListener("click", async (event) => {
       : Boolean(values.name || values.folderIds.length || !emptyPlan(values.plan));
     if (dirty && !window.confirm("Скасувати незбережені зміни кампанії?")) return;
     Object.assign(lead, { formOpen: false, editingId: null, notice: "" });
+    // Спершу назад до людини — перемальовування списку кампаній її вже не затримає.
+    if (returnTo) goBack(null);
     renderLeadCampaigns();
     return;
   }

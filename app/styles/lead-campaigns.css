@@ -23,3 +23,7 @@
 .lead-campaign-who { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
 .lead-campaign-who strong { font-size: 15px; }
 .lead-campaign { padding: var(--sp-4); gap: var(--sp-3); }
+
+/* Форма, відкрита з картки ліда (таск a0c0820f): куди повернемось після збереження. */
+.lead-return { display: flex; align-items: flex-start; gap: var(--sp-2); margin: 0 0 var(--sp-3); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--teal); border-radius: 10px; background: var(--teal-weak); font-size: 13px; }
+.lead-return svg { flex: none; width: 16px; height: 16px; margin-top: 2px; color: var(--teal); }

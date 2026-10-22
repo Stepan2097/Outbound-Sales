@@ -119,6 +119,7 @@ const SAVED_AS = {
   inboxLabels: "inboxLabels",
   campaignSpine: "campaignSpine",
   leadCampaigns: "leadCampaigns",
+  campaignSkips: "campaignSkips",
   warmupTargeting: "warmupTargeting",
   espSenderPauses: "espSenderPauses",
   espTemplates: "espTemplates",

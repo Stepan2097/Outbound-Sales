@@ -312,3 +312,7 @@
 .today-help dt { font-weight: 600; }
 .today-help dd { margin: 0; color: var(--muted); }
 @media (max-width: 600px) { .today-help dl { grid-template-columns: minmax(0, 1fr); } .today-help dd { margin-bottom: var(--sp-2); } }
+
+/* Кампанія: створити з картки / пропустити на 3 дні (таск a0c0820f). */
+.today-side-row button svg { width: 14px; height: 14px; }
+.today-side-remind { color: var(--amber); }

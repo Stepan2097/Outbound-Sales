@@ -6,7 +6,7 @@
 // Звірка йде сама кожні дві хвилини, одразу після відповіді ліда і після
 // відправки з «Сьогодні». Звірка лише з'ясовує й вирівнює — нічого не надсилає.
 
-import { anyCampaignOf, campaignsByContact, leadCampaignById, leadCampaigns } from "./lead-campaigns.mjs";
+import { anyCampaignOf, campaignSkippedUntil, campaignsByContact, leadCampaignById, leadCampaigns } from "./lead-campaigns.mjs";
 import { anty, crm } from "../warmup/db.mjs";
 import { listThreads, readThread } from "../warmup/inbox.mjs";
 import { repliesOf, sameText } from "../warmup/outbox.mjs";
@@ -577,6 +577,7 @@ export async function todayItem({ pingId, viewer, now = new Date() }) {
     // (таск 207ffbc1). Кампанія на паузі теж рахується: людина вже віднесена.
     campaignAny: item.campaign || (contactId ? await anyCampaignOf(contactId).catch(() => null) : null),
     campaigns: leadCampaigns().filter((campaign) => campaign.folderIds.length).map(({ id, name, state }) => ({ id, name, state })),
+    campaignSkippedUntil: contactId ? campaignSkippedUntil(contactId) : null,
     pending: (state?.pending || []).map(({ id, state: status, body, queuedAt }) => ({ id, state: status, body, queuedAt })),
     acceptedAt: state?.accepted?.acceptedAt || null,
     draft: drafts.get(`${pingId}|${key}`) || (firstDraft?.text ? { text: firstDraft.text, model: firstDraft.model, kind: "first" } : null)
@@ -625,7 +626,8 @@ export async function contactSide({ contactId, viewer }) {
     crmUrl: `${CRM_CONTACT_URL}/contacts/${id}`,
     ping: task ? { pingId: task.id, title: task.title || "", dueDay: task.due_date ? dayIn(task.due_date) : null, mine: mayTouch(task, viewer) } : null,
     campaignAny: await anyCampaignOf(id).catch(() => null),
-    campaigns: leadCampaigns().filter((campaign) => campaign.folderIds.length).map(({ id: campaignId, name, state }) => ({ id: campaignId, name, state }))
+    campaigns: leadCampaigns().filter((campaign) => campaign.folderIds.length).map(({ id: campaignId, name, state }) => ({ id: campaignId, name, state })),
+    campaignSkippedUntil: campaignSkippedUntil(id)
   };
 }
 

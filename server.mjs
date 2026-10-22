@@ -12,7 +12,7 @@ import { handleKnowledgeLibraryApi } from "./knowledge/api.mjs";
 import { handlePitchApi } from "./knowledge/pitch-api.mjs";
 import { handleTodayApi, todayList, reconcileSoon, setLeadgenStore, setNewContactPolicyStore, setPingStepsStore, startPingReconciler } from "./triage/today.mjs";
 import { setActivityAuthor } from "./warmup/activities.mjs";
-import { campaignsByContact, handleLeadCampaignApi, leadCampaigns, setLeadCampaignStore } from "./triage/lead-campaigns.mjs";
+import { campaignsByContact, handleLeadCampaignApi, leadCampaigns, setCampaignSkipStore, setLeadCampaignStore } from "./triage/lead-campaigns.mjs";
 import { handleCampaignReportApi, setReportStores, startReplyLabeler } from "./triage/campaign-report.mjs";
 import { handleScenarioApi, scenarioForPrompt } from "./warmup/scenarios.mjs";
 import { loadPitchBook, pitchCardForPrompt, pitchCatalogForPrompt, pitchFallbackBrief, pitchProductList } from "./knowledge/pitch.mjs";
@@ -321,6 +321,8 @@ const state = {
   inboxLabels: {},
   // Кампанії лідгенів (WorkSpace, 16.10): папки CRM, продукт, сценарій, кроки — triage/lead-campaigns.mjs.
   leadCampaigns: [],
+  // «Пропустити» кампанію в картці ліда (таск a0c0820f): { contactId: до коли }.
+  campaignSkips: {},
   // Хребет LinkedIn-кампаній (WorkSpace, 16.10): драбина кваліфікації, маршрути, правила. null — як в артефакті.
   campaignSpine: null,
   // ESP 1: sending mailboxes Google stopped letting us act as, by address —
@@ -798,6 +800,13 @@ server.listen(port, listenHost, () => {
     }
   });
   // Кампанії лідгенів (WorkSpace, 16.10) — окремо від автозапитів прогріву.
+  setCampaignSkipStore({
+    read: () => state.campaignSkips || {},
+    async write(value) {
+      state.campaignSkips = value;
+      await writePersistentWorkspaceState();
+    }
+  });
   setLeadCampaignStore({
     read: () => state.leadCampaigns || [],
     async write(value) {
@@ -1200,7 +1209,7 @@ async function handleApi(request, response, url) {
   }
 
   // WorkSpace: кампанії лідгенів — папки CRM, продукт зі «Смислів», сценарій.
-  if (url.pathname === "/api/lead-campaigns" || url.pathname === "/api/lead-campaigns/assign") {
+  if (url.pathname === "/api/lead-campaigns" || url.pathname === "/api/lead-campaigns/assign" || url.pathname === "/api/lead-campaigns/skip") {
     const handled = await handleLeadCampaignApi({ request, response, url, sendJson, readJson, products: () => pitchProductList() });
     if (handled) return;
   }
@@ -5223,6 +5232,9 @@ function applyPersistentWorkspaceState(saved = {}) {
   if (saved.replyLabels && typeof saved.replyLabels === "object" && !Array.isArray(saved.replyLabels)) {
     state.replyLabels = saved.replyLabels;
   }
+  if (saved.campaignSkips && typeof saved.campaignSkips === "object" && !Array.isArray(saved.campaignSkips)) {
+    state.campaignSkips = saved.campaignSkips;
+  }
   if (Array.isArray(saved.leadCampaigns)) {
     state.leadCampaigns = saved.leadCampaigns;
   }
@@ -5499,6 +5511,7 @@ async function writeWorkspaceStateNow() {
       inboxLabels: state.inboxLabels,
       campaignSpine: state.campaignSpine,
       leadCampaigns: state.leadCampaigns,
+      campaignSkips: state.campaignSkips,
       warmupTargeting: state.warmupTargeting,
       espSenderPauses: state.espSenderPauses,
       espTemplates: state.espTemplates,

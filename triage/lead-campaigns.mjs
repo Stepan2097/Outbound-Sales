@@ -21,6 +21,32 @@ export function setLeadCampaignStore(next) {
   if (next?.read && next?.write) store = next;
 }
 
+// «Пропустити» кампанію (Марко 22.10, таск a0c0820f): { contactId: до коли ISO }. Поки пропуск
+// діє, відповісти можна без кампанії; минув — картка знову просить обрати, створити чи пропустити.
+export const CAMPAIGN_SKIP_DAYS = 3;
+let skipStore = { read: () => ({}), write: async () => {} };
+export function setCampaignSkipStore(next) {
+  if (next?.read && next?.write) skipStore = next;
+}
+
+/**
+ * До коли пропущено вибір кампанії для контакта, або null. Минулий пропуск теж повертається:
+ * картка за ним каже «це нагадування» — пропускали, час обрати, створити чи пропустити знову.
+ */
+export function campaignSkippedUntil(contactId) {
+  return skipStore.read()[String(contactId || "")] || null;
+}
+
+/** Пропустити на 3 дні; старі пропуски, що вже минули, прибираються. */
+export async function skipCampaign({ contactId, now = new Date() }) {
+  const id = String(contactId || "").trim();
+  if (!id) throw refuse("Потрібен контакт.");
+  const until = new Date(now.getTime() + CAMPAIGN_SKIP_DAYS * 86400000).toISOString();
+  const kept = Object.fromEntries(Object.entries(skipStore.read()).filter(([, value]) => Date.parse(value) > now.getTime()));
+  await skipStore.write({ ...kept, [id]: until });
+  return { contactId: id, until };
+}
+
 function isSteps(value) {
   return Array.isArray(value) && value.length >= 1 && value.length <= MAX_SILENT_STEPS && value.every((days) => Number.isInteger(days) && days >= 1 && days <= 30);
 }
@@ -140,8 +166,14 @@ function parseInput(body, { products }) {
 }
 
 export async function handleLeadCampaignApi({ request, response, url, sendJson, readJson, products = () => [] }) {
-  if (url.pathname !== "/api/lead-campaigns" && url.pathname !== "/api/lead-campaigns/assign") return false;
+  if (url.pathname !== "/api/lead-campaigns" && url.pathname !== "/api/lead-campaigns/assign" && url.pathname !== "/api/lead-campaigns/skip") return false;
   try {
+    if (url.pathname === "/api/lead-campaigns/skip") {
+      if (request.method !== "POST") throw refuse("Невідомий метод.", 405);
+      const body = (await readJson(request)) || {};
+      sendJson(response, 200, await skipCampaign({ contactId: body.contactId }));
+      return true;
+    }
     if (url.pathname === "/api/lead-campaigns/assign") {
       if (request.method !== "POST") throw refuse("Невідомий метод.", 405);
       const body = (await readJson(request)) || {};

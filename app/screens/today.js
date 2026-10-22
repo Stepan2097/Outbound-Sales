@@ -17,6 +17,7 @@
 import { api, escapeAttr, escapeHtml, keepScroll, onScreen, refreshIcons } from "../core.js";
 import { connectInboxWork, renderWarmupInbox, warmupThreadTotal, showWarmupInboxThread, warmupGoesOutText, warmupMessageHtml, warmupProfileUrl } from "./inbox.js";
 import { showContactCard } from "./contacts.js";
+import { createCampaignFor } from "./lead-campaigns.js";
 import { leaveNewContacts, openNewContacts } from "./new-contacts.js";
 
 onScreen("inbox", { open: () => applyInboxMode() });
@@ -554,7 +555,65 @@ function messagesHtml(messages, name, accountName) {
    позначають «Не лід». Кампанії на паузі теж у списку: людина в них уже віднесена. */
 
 function needsCampaign(detail = today.detail) {
-  return Boolean(detail && !detail.campaignAny && (detail.campaigns || []).length && detail.item?.contactId);
+  return Boolean(detail && !detail.campaignAny && (detail.campaigns || []).length && detail.item?.contactId && !skipActive(detail.campaignSkippedUntil));
+}
+
+/* ── Кампанія: створити з картки або пропустити на 3 дні (Марко 22.10, таск a0c0820f) ── */
+
+const skipActive = (until) => Boolean(until && Date.parse(until) > Date.now());
+const skipDate = (until) => new Date(until).toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit" });
+
+/** Блок «Кампанія» без кампанії: обрати, створити, пропустити — і що з пропуском зараз. */
+function campaignChoiceHtml({ campaigns, skippedUntil, attr, busy }) {
+  const active = skipActive(skippedUntil);
+  const note = active
+    ? `<p class="today-side-text is-muted">Пропущено до ${escapeHtml(skipDate(skippedUntil))} — тоді нагадаю обрати.</p>`
+    : skippedUntil ? `<p class="today-side-text today-side-remind">Нагадування: кампанію пропускали до ${escapeHtml(skipDate(skippedUntil))}. Оберіть, створіть або пропустіть ще раз.</p>` : "";
+  const pick = campaigns.length ? `<select id="${attr === "side" ? "inboxSideCampaign" : "todayCampaignPick"}" aria-label="Кампанія" title="AI писатиме за продуктом і сценарієм кампанії, нагадування підуть за її кроками">
+        <option value="">— обрати —</option>
+        ${campaigns.map((entry) => `<option value="${escapeAttr(entry.id)}">${escapeHtml(entry.name || "без назви")}${entry.state === "paused" ? " (на паузі)" : ""}</option>`).join("")}
+      </select>` : "";
+  const act = (value) => (attr === "side" ? `data-side="${value}"` : `data-today="${value}"`);
+  return `${note}${pick}
+      <div class="today-side-row">
+        ${campaigns.length ? `<button type="button" class="primary-button" ${act(attr === "side" ? "campaign" : "campaign-assign")} ${busy ? "disabled" : ""}>Віднести</button>` : ""}
+        <button type="button" ${act("campaign-create")} title="Нова кампанія; після збереження — назад до цієї людини, її буде віднесено до кампанії"><i data-lucide="plus"></i><span>Створити</span></button>
+      </div>
+      <div class="today-side-row">
+        ${active ? "" : `<button type="button" class="text-button" ${act("campaign-skip")} title="Відповісти без кампанії; через 3 дні картка знову попросить обрати">Пропустити на 3 дні</button>`}
+        <button type="button" class="text-button" ${act("not-lead")} title="Знайомий, рекрутер, не наш ICP — статус «Не ICP», пінги закриються">Не лід</button>
+      </div>`;
+}
+
+/** З картки «До роботи» у форму нової кампанії — і назад до цього ж пінга. */
+function createCampaignFromWork() {
+  const item = today.detail?.item;
+  if (!item?.contactId) return;
+  const pingId = item.pingId;
+  createCampaignFor({
+    name: item.name,
+    contactId: item.contactId,
+    back: (campaign) => {
+      setInboxMode("work");
+      today.selected = pingId;
+      today.detail = null;
+      if (campaign) say(campaign.assignError ? `Кампанію «${campaign.name}» створено, але: ${campaign.assignError}` : `${item.name}: тепер у новій кампанії «${campaign.name}».`, campaign.assignError ? "is-warn" : "");
+      document.querySelector('.nav-item[data-view="inbox"]')?.click();
+      void openToday({ keepSelection: true }).then(() => loadDetail(pingId)).then(() => { if (campaign && !campaign.assignError) void writeDraft(true); });
+    }
+  });
+}
+
+async function skipCampaignForWork() {
+  const item = today.detail?.item;
+  if (!item?.contactId) return;
+  try {
+    const { until } = await api("/api/lead-campaigns/skip", { method: "POST", body: JSON.stringify({ contactId: item.contactId }) });
+    say(`${item.name}: кампанію пропущено до ${skipDate(until)} — можна відповідати.`);
+    await loadDetail(item.pingId);
+  } catch (error) {
+    if (error?.name !== "AbortError") { say(error.message || "Не вдалося пропустити.", "is-error"); render(); }
+  }
 }
 
 function canSend() {
@@ -635,7 +694,7 @@ function workHtml() {
           </span>
         </div>
         ${today.draftNote ? `<p class="today-draft-note">${escapeHtml(today.draftNote)}</p>` : ""}
-        ${needsCampaign(detail) ? `<p class="today-draft-note">Спершу оберіть кампанію праворуч — без неї надіслати не можна.</p>` : ""}
+        ${needsCampaign(detail) ? `<p class="today-draft-note">Спершу оберіть, створіть або пропустіть кампанію праворуч — без цього надіслати не можна.</p>` : ""}
         <textarea id="todayText" rows="6" placeholder="${today.draftLoading ? "Модель пише чернетку…" : "Текст повідомлення"}">${escapeHtml(today.text)}</textarea>
         <div class="today-actions">
           <button type="button" class="primary-button" data-today="send" title="Піде з цього акаунта в найближчу сесію. Наступний пінг — через 3 робочі дні." ${canSend() ? "" : "disabled"}><i data-lucide="send"></i><span>${today.sending ? "Ставлю в чергу…" : "Погодити й надіслати"}</span></button>
@@ -656,16 +715,9 @@ function sideBox(title, body) {
 function sideHtml(item, detail) {
   const linkedin = warmupProfileUrl(detail.participant?.slug);
   const campaignName = item.campaign?.name || detail.campaignAny?.name || "";
-  const campaign = needsCampaign(detail)
-    ? `<select id="todayCampaignPick" aria-label="Кампанія" title="Лід узяли не з бази: AI писатиме за продуктом і сценарієм кампанії, нагадування підуть за її кроками">
-        <option value="">— обрати —</option>
-        ${detail.campaigns.map((entry) => `<option value="${escapeAttr(entry.id)}">${escapeHtml(entry.name || "без назви")}${entry.state === "paused" ? " (на паузі)" : ""}</option>`).join("")}
-      </select>
-      <div class="today-side-row">
-        <button type="button" class="primary-button" data-today="campaign-assign" ${today.assigning ? "disabled" : ""}>${today.assigning ? "Відношу…" : "Віднести"}</button>
-        <button type="button" class="text-button" data-today="not-lead" title="Знайомий, рекрутер, не наш ICP — статус «Не ICP», пінги закриються">Не лід</button>
-      </div>`
-    : campaignName ? `<p class="today-side-text">${escapeHtml(campaignName)}</p>` : `<p class="today-side-text is-muted">без кампанії</p>`;
+  const campaign = campaignName
+    ? `<p class="today-side-text">${escapeHtml(campaignName)}</p>`
+    : campaignChoiceHtml({ campaigns: detail.campaigns || [], skippedUntil: detail.campaignSkippedUntil, attr: "today", busy: today.assigning });
   const ping = item.pingId ? `
       <div class="today-side-row">
         <button type="button" data-today="move" data-when="+1" title="На завтра (робочий день)">+1</button>
@@ -958,6 +1010,8 @@ document.addEventListener("click", (event) => {
   }
   if (act === "rewrite") return void writeDraft(true);
   if (act === "campaign-assign") return void assignCampaign();
+  if (act === "campaign-create") return createCampaignFromWork();
+  if (act === "campaign-skip") return void skipCampaignForWork();
   if (act === "not-lead") {
     const item = today.detail?.item;
     if (!item) return;
@@ -1051,7 +1105,7 @@ document.addEventListener("submit", (event) => {
    Та сама, що в картці «До роботи»: статус у CRM, наступний пінг, кампанія, посилання. Пінга
    в розмови може й не бути — тоді «+1 / +3 / +7 / дата» ставлять новий (/api/today/ping за контактом). */
 
-const side = { key: "", contactId: "", thread: null, data: null, loading: false, error: "", saving: false, callMode: false, notice: "", pendingStatus: "" };
+const side = { key: "", contactId: "", thread: null, data: null, loading: false, error: "", saving: false, callMode: false, notice: "", pendingStatus: "", carry: "" };
 const sideRoot = () => document.getElementById("warmupInboxSide");
 
 async function openThreadSide(open) {
@@ -1059,7 +1113,7 @@ async function openThreadSide(open) {
   if (!host) return;
   const key = open ? `${open.accountId}|${open.threadKey}` : "";
   if (key === side.key && open) return;
-  Object.assign(side, { key, thread: open?.thread || null, contactId: open?.thread?.crmContactId ? String(open.thread.crmContactId) : "", data: null, error: "", notice: "", callMode: false, pendingStatus: "" });
+  Object.assign(side, { key, thread: open?.thread || null, contactId: open?.thread?.crmContactId ? String(open.thread.crmContactId) : "", data: null, error: "", notice: side.carry || "", carry: "", callMode: false, pendingStatus: "" });
   host.hidden = !open;
   document.getElementById("warmupInboxLayout")?.classList.toggle("has-side", Boolean(open));
   if (!open) return;
@@ -1110,10 +1164,7 @@ function renderThreadSide() {
       <button type="button" class="today-side-wide today-later-button" data-side="bad-timing" title="Статус «Невдалий час»: пінги закриються, через місяць прийде пінг «Повернутись»">Невдалий час · через місяць</button>`;
   const campaign = data.campaignAny
     ? `<p class="today-side-text">${escapeHtml(data.campaignAny.name || "кампанія без назви")}</p>`
-    : data.campaigns?.length
-      ? `<select id="inboxSideCampaign" aria-label="Кампанія"><option value="">— обрати —</option>${data.campaigns.map((entry) => `<option value="${escapeAttr(entry.id)}">${escapeHtml(entry.name || "без назви")}${entry.state === "paused" ? " (на паузі)" : ""}</option>`).join("")}</select>
-        <div class="today-side-row"><button type="button" class="primary-button" data-side="campaign" ${side.saving ? "disabled" : ""}>Віднести</button><button type="button" class="text-button" data-side="not-lead" title="Знайомий, рекрутер, не наш ICP — статус «Не ICP», пінги закриються">Не лід</button></div>`
-      : `<p class="today-side-text is-muted">без кампанії</p>`;
+    : campaignChoiceHtml({ campaigns: data.campaigns || [], skippedUntil: data.campaignSkippedUntil, attr: "side", busy: side.saving });
   const links = [linkedinLink, `<a href="${escapeAttr(data.crmUrl)}" target="_blank" rel="noreferrer noopener" title="Контакт у CRM — нова вкладка">CRM <i data-lucide="arrow-up-right"></i></a>`,
     `<button type="button" class="text-button" data-side="card" title="Картка людини в «Контактах» порталу">Картка контакту</button>`].filter(Boolean).join("");
   host.innerHTML = `${side.notice ? `<p class="today-notice" role="status">${escapeHtml(side.notice)}</p>` : ""}
@@ -1177,6 +1228,27 @@ document.addEventListener("click", (event) => {
     input?.focus();
     try { if (side.callMode) input?.showPicker?.(); } catch {}
     return;
+  }
+  if (act === "campaign-skip") {
+    return void sideAction("пропустити кампанію", async () => {
+      const { until } = await api("/api/lead-campaigns/skip", { method: "POST", body: JSON.stringify({ contactId: side.contactId }) });
+      return `Кампанію пропущено до ${skipDate(until)}.`;
+    });
+  }
+  if (act === "campaign-create") {
+    const open = { accountId: side.thread?.accountId, threadKey: side.thread?.threadKey, contactId: side.contactId };
+    const name = side.thread?.participant?.name || "контакта";
+    return createCampaignFor({
+      name,
+      contactId: side.contactId,
+      back: (campaign) => {
+        setInboxMode("all");
+        side.key = "";
+        if (campaign) side.carry = campaign.assignError ? `Кампанію «${campaign.name}» створено, але: ${campaign.assignError}` : `Тепер у новій кампанії «${campaign.name}».`;
+        document.querySelector('.nav-item[data-view="inbox"]')?.click();
+        if (open.accountId && open.threadKey) void showWarmupInboxThread(open.accountId, open.threadKey);
+      }
+    });
   }
   if (act === "campaign") {
     const campaignId = document.getElementById("inboxSideCampaign")?.value || "";

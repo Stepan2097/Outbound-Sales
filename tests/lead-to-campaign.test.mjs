@@ -32,3 +32,22 @@ test("віднести можна лише до наявної кампанії 
   await assert.rejects(assignToCampaign({ contactId: "1", campaignId: "nope" }), /Цієї кампанії вже немає/);
   await assert.rejects(assignToCampaign({ contactId: "1", campaignId: "c1" }), /немає папки CRM/);
 });
+
+test("Марко 22.10 (таск a0c0820f): «Пропустити» на 3 дні знімає обов'язковість, потім картка нагадує; «Створити» повертає до людини", async () => {
+  const { CAMPAIGN_SKIP_DAYS, campaignSkippedUntil, setCampaignSkipStore, skipCampaign } = await import("../triage/lead-campaigns.mjs");
+  let saved = { old: "2026-10-01T00:00:00.000Z" };
+  setCampaignSkipStore({ read: () => saved, write: async (value) => { saved = value; } });
+  const { until } = await skipCampaign({ contactId: "c7", now: new Date("2026-10-22T10:00:00Z") });
+  assert.equal(CAMPAIGN_SKIP_DAYS, 3);
+  assert.equal(until, "2026-10-25T10:00:00.000Z");
+  assert.equal(campaignSkippedUntil("c7"), until);
+  assert.deepEqual(Object.keys(saved), ["c7"], "минулі пропуски прибираються");
+  assert.match(today, /&& !skipActive\(detail\.campaignSkippedUntil\)\);/, "діючий пропуск знімає обов'язковість");
+  assert.match(today, /Нагадування: кампанію пропускали до/);
+  assert.match(today, /act\("campaign-create"\)/);
+  assert.match(today, /act\("campaign-skip"\)/);
+  const form = readFileSync(new URL("../app/screens/lead-campaigns.js", import.meta.url), "utf8");
+  assert.match(form, /export function createCampaignFor\(\{ name, contactId, back \}\)/);
+  assert.match(form, /api\("\/api\/lead-campaigns\/assign", \{ method: "POST", body: JSON\.stringify\(\{ contactId: returnTo\.contactId, campaignId: saved\.campaign\.id \}\) \}\)/);
+  assert.match(form, /if \(returnTo\) goBack\(null\);\n    renderLeadCampaigns\(\);/, "«Скасувати» теж повертає — раніше, ніж перемальовується список");
+});
