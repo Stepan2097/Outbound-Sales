@@ -35,13 +35,15 @@ test("віднести можна лише до наявної кампанії 
 
 test("Марко 22.10 (таск a0c0820f): «Пропустити» на 3 дні знімає обов'язковість, потім картка нагадує; «Створити» повертає до людини", async () => {
   const { CAMPAIGN_SKIP_DAYS, campaignSkippedUntil, setCampaignSkipStore, skipCampaign } = await import("../triage/lead-campaigns.mjs");
-  let saved = { old: "2026-10-01T00:00:00.000Z" };
+  let saved = { expired: "2026-10-20T00:00:00.000Z", ancient: "2026-06-01T00:00:00.000Z" };
   setCampaignSkipStore({ read: () => saved, write: async (value) => { saved = value; } });
   const { until } = await skipCampaign({ contactId: "c7", now: new Date("2026-10-22T10:00:00Z") });
   assert.equal(CAMPAIGN_SKIP_DAYS, 3);
   assert.equal(until, "2026-10-25T10:00:00.000Z");
   assert.equal(campaignSkippedUntil("c7"), until);
-  assert.deepEqual(Object.keys(saved), ["c7"], "минулі пропуски прибираються");
+  // Суддя 22.10: пропуск іншого контакта не стирає минулий пропуск цього — інакше зникло б «Нагадування».
+  assert.equal(campaignSkippedUntil("expired"), "2026-10-20T00:00:00.000Z");
+  assert.deepEqual(Object.keys(saved).sort(), ["c7", "expired"], "прибираються лише ті, що минули понад 90 днів тому");
   assert.match(today, /&& !skipActive\(detail\.campaignSkippedUntil\)\);/, "діючий пропуск знімає обов'язковість");
   assert.match(today, /Нагадування: кампанію пропускали до/);
   assert.match(today, /act\("campaign-create"\)/);

@@ -37,12 +37,18 @@ export function campaignSkippedUntil(contactId) {
   return skipStore.read()[String(contactId || "")] || null;
 }
 
-/** Пропустити на 3 дні; старі пропуски, що вже минули, прибираються. */
+// Минулий пропуск лишається: за ним картка каже «це нагадування» (суддя 22.10: прибирати минулі
+// при кожному новому пропуску — і нагадування зникало б майже завжди). Прибираються лише ті, що
+// минули понад 90 днів тому, — щоб стан не ріс без кінця.
+export const CAMPAIGN_SKIP_KEEP_DAYS = 90;
+
+/** Пропустити на 3 дні. Чужі пропуски, і минулі теж, не чіпаються — крім зовсім давніх. */
 export async function skipCampaign({ contactId, now = new Date() }) {
   const id = String(contactId || "").trim();
   if (!id) throw refuse("Потрібен контакт.");
   const until = new Date(now.getTime() + CAMPAIGN_SKIP_DAYS * 86400000).toISOString();
-  const kept = Object.fromEntries(Object.entries(skipStore.read()).filter(([, value]) => Date.parse(value) > now.getTime()));
+  const oldest = now.getTime() - CAMPAIGN_SKIP_KEEP_DAYS * 86400000;
+  const kept = Object.fromEntries(Object.entries(skipStore.read()).filter(([, value]) => Date.parse(value) > oldest));
   await skipStore.write({ ...kept, [id]: until });
   return { contactId: id, until };
 }
