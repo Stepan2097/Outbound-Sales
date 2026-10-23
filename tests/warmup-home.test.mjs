@@ -446,17 +446,21 @@ test("невдале перше повідомлення лишає людину
   assert.match(row.reply.reason, /Повідомлення/);
 });
 
-test("надіслати не можна: акаунт на паузі, немає профілю, порожньо, задовго, не той статус", async () => {
+test("надіслати не можна: немає профілю, порожньо, задовго, не той статус", async () => {
   rows.wl_outreach[0].person_linkedin = "";
   assert.equal((await ask("first-messages/send", { outreachId: "o-1", text: "Hi" })).status, 409);
-  rows.wl_runs[1].paused_until = new Date(Date.now() + 864e5).toISOString().slice(0, 10);
-  const paused = await ask("first-messages/send", { outreachId: "o-3", text: "Hi" });
-  assert.equal(paused.status, 409);
-  assert.match(paused.payload.error, /на паузі/);
   assert.equal((await ask("first-messages/send", { outreachId: "o-2", text: "  " })).status, 400);
   assert.equal((await ask("first-messages/send", { outreachId: "o-2", text: "a".repeat(1201) })).status, 400);
   assert.equal((await ask("first-messages/send", { outreachId: "o-4", text: "Hi" })).status, 404);
   assert.equal(events("outbox.queued").length, 0);
+});
+
+// Пауза після попередження зупиняє прогрів, не розмови (власник 23.10).
+test("перше повідомлення йде і під час паузи після попередження", async () => {
+  rows.wl_runs[1].paused_until = new Date(Date.now() + 864e5).toISOString().slice(0, 10);
+  const paused = await ask("first-messages/send", { outreachId: "o-3", text: "Hi" });
+  assert.notEqual(paused.status, 409);
+  assert.equal(events("outbox.queued").length, 1);
 });
 
 test("«Пропустити» прибирає людину зі списку, а журнал не показує текстів чернеток", async () => {

@@ -1178,9 +1178,6 @@ async function replyDoor(account) {
   if (!run) {
     return { open: false, reason: "Для цього акаунта не запущено прогрів — агент його не відкриває, тож відповісти звідси не вийде." };
   }
-  if (pausedOn(run, today())) {
-    return { open: false, reason: `Акаунт на паузі до ${run.paused_until} — поки вона триває, агент його не відкриває.` };
-  }
   if (account.health !== "ok") {
     return { open: false, reason: "Акаунт позначено як проблемний — агент його не відкриває, поки це не знято." };
   }
@@ -3594,6 +3591,11 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       // Every list below is empty rather than missing, so an agent that reads
       // them without looking at `runnable` still finds nothing to do.
       const paused = pausedOn(run, today());
+      // Except the conversations: a look into the inbox or a send of approved
+      // replies goes on during a warning pause — the pause stops the warming
+      // (власник 23.10: «temporarily restricted — але це не причина не відписувати на повідомлення»).
+      const light = leaseOf(account.id);
+      const talking = Boolean((light?.urgent || light?.duty) && run && account.status !== "excluded");
       // The folder's share, written down here and only here: the people the
       // poll counted become waiting invitations, and so does the place of a
       // person the agent could not reach earlier today. Idempotent: what is
@@ -3640,7 +3642,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         // wakes the account by, so a session opened for the read is told to do it.
         inbox: {
           lastSyncedAt: await lastSyncedAt(account.id),
-          maxThreads: paused ? 0 : MAX_THREADS_PER_RUN,
+          maxThreads: paused && !talking ? 0 : MAX_THREADS_PER_RUN,
           due: upkeep.inbox,
           // The past month's conversations, read back a portion a session until done (16.10).
           backfill: paused ? null : await inboxBackfill(account.id)
@@ -3659,7 +3661,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         // all where the account would not be opened anyway. The agent still asks
         // `outbox.prepare` before typing each one, because a person may take a
         // reply back in the hours between this answer and its turn.
-        outbox: !run || paused || account.status === "excluded" || account.health !== "ok"
+        outbox: !run || (paused && !talking) || account.status === "excluded" || account.health !== "ok"
           ? { toSend: [], waiting: 0, sentToday: 0, perDay: null }
           : await outboxPlan(account.id),
         // The invitation work, ready to act on. `toSend` is already cut to what
@@ -3680,11 +3682,12 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       // messages and nothing else — no plan, no invitations, no inbox read, no
       // contacts list — so an account opened at night does only what a person
       // asked it to.
-      const light = leaseOf(account.id);
-      if ((light?.urgent || light?.duty) && run && !paused && account.status !== "excluded") {
+      if (talking) {
         sendJson(response, 200, {
           ...base,
           urgent: true,
+          // On a warning pause: the agent knows the warning and does not stop on it again.
+          paused,
           // Чергування (16.10): the inbox is read on this look; an out-of-turn send does not read it.
           duty: Boolean(light.duty),
           // Stays true when the last message has gone: the agent asks this
@@ -3698,7 +3701,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           inbox: { ...base.inbox, due: Boolean(light.duty) },
           network: { due: false },
           // A look into the inbox sets a few profiles right too; a send-only session does not.
-          profiles: light.duty ? base.profiles : { toResolve: [] }
+          profiles: light.duty && !paused ? base.profiles : { toResolve: [] }
         });
         return true;
       }
@@ -4118,7 +4121,8 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         const replyId = String(body.replyId || "");
         if (!replyId) return fail(response, sendJson, 400, "Яку відповідь?");
         const run = await activeRun(account.id);
-        const stopAll = !run || pausedOn(run, today()) || account.health !== "ok" || account.status === "excluded";
+        // Not the warning pause: replies go out during it (власник 23.10).
+        const stopAll = !run || account.health !== "ok" || account.status === "excluded";
         const prepared = stopAll
           ? { allowed: false, reply: null, reason: "stopped" }
           : await prepareReply(account.id, replyId, { todayIso: today() });

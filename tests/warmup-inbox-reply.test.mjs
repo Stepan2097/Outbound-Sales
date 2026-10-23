@@ -284,9 +284,9 @@ test("акаунт, який агент не відкриє, відповіді 
 
   rows.wl_runs = [{ id: "run-p", account_id: "acc-1", state: "running", started_at: new Date(Date.now() - 5 * 864e5).toISOString(),
     paused_days: 0, paused_until: new Date(Date.now() + 2 * 864e5).toISOString().slice(0, 10), strategy_snapshot: DEFAULT_STRATEGY }];
+  // Пауза після попередження зупиняє прогрів, не розмови (власник 23.10).
   answer = await reply("Так");
-  assert.equal(answer.status, 409);
-  assert.match(answer.payload.error, /на паузі/);
+  assert.equal(answer.status, 201, "на паузі відповідь приймається");
 
   rows.wl_runs = [{ id: "run-ok", account_id: "acc-1", state: "running", started_at: new Date(Date.now() - 5 * 864e5).toISOString(),
     paused_days: 0, paused_until: null, strategy_snapshot: DEFAULT_STRATEGY }];
@@ -295,7 +295,7 @@ test("акаунт, який агент не відкриє, відповіді 
   rows.wl_accounts[0].health = "ok";
   rows.wl_accounts[0].status = "excluded";
   assert.equal((await reply("Так")).status, 409);
-  assert.equal(events("outbox.queued").length, 0, "жодна не потрапила в чергу");
+  assert.equal(events("outbox.queued").length, 1, "у черзі лише та, що на паузі");
 });
 
 // ── Скільки і як часто ────────────────────────────────────────────────────
@@ -458,11 +458,17 @@ test("«так» перед набором дає текст; пауза пос�
   assert.equal(yes.payload.reply.threadKey, "t-ivan");
   assert.equal(yes.payload.stopAll, false);
 
+  // Пауза після попередження відповідей не зупиняє (власник 23.10); проблемний вхід — зупиняє.
   rows.wl_runs[0].paused_until = new Date(Date.now() + 864e5).toISOString().slice(0, 10);
+  const duringPause = await post({ action: "outbox.prepare", accountId: "acc-1", replyId: made.id });
+  assert.equal(duringPause.payload.allowed, true);
+  assert.equal(duringPause.payload.stopAll, false);
+  rows.wl_accounts[0].health = "needs_login";
   const stopped = await post({ action: "outbox.prepare", accountId: "acc-1", replyId: made.id });
   assert.equal(stopped.payload.allowed, false);
   assert.equal(stopped.payload.stopAll, true);
   assert.equal(stopped.payload.reply, null);
+  rows.wl_accounts[0].health = "ok";
   // Відповідь чужого акаунта — невідома.
   rows.wl_runs[0].paused_until = null;
   const foreign = await post({ action: "outbox.prepare", accountId: "acc-2", replyId: made.id });

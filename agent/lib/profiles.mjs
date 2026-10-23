@@ -14,6 +14,7 @@
  */
 import { buildThread } from './inbox-dom.mjs';
 import { settleThread } from './inbox.mjs';
+import { VisitStopped } from './connections.mjs';
 
 const ORIGIN = 'https://www.linkedin.com';
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -157,6 +158,8 @@ export async function resolveProfiles(page, items, {
           : { ...answer, memberId: member, failed: 'no_profile_address' };
       }
     } catch (error) {
+      // A LinkedIn warning stops the visit; it is not this person's failure.
+      if (error instanceof VisitStopped) throw error;
       answer = { ...answer, failed: `error: ${String(error.message).slice(0, 120)}` };
       if (/Target crashed|Page crashed|has been closed/i.test(error.message)) {
         // The tab died: the portal hears of it, and the next person opens in a fresh one.

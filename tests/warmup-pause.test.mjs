@@ -285,21 +285,33 @@ test("a warning stops everything for two days, and on the third the account is b
     t.mock.timers.setTime(now.getTime());
 
     const due = await decideNext({ now });
-    assert.equal(due.next, null, `nothing is handed out ${offset} day(s) after the warning`);
+    // Only a look into the inbox — the conversations go on (власник 23.10); no warming.
+    assert.ok(due.next === null || (due.next.mode === "inbox" && due.next.remaining === 0 && due.next.kinds.length === 0),
+      `no warming is handed out ${offset} day(s) after the warning`);
     const lease = await leaseAccount({ accountId: "acc-1", now });
-    assert.equal(lease.ok, false);
+    // A lease, if any, is only the look into the inbox.
+    assert.ok(!lease.ok || lease.lease.duty === true, "no warming lease");
 
-    // And an agent that turns up anyway is given nothing to do.
     const agent = await call({ method: "GET", path: "/api/warmup/agent?accountId=acc-1" });
-    assert.equal(agent.payload.runnable, false);
-    assert.equal(agent.payload.pausedUntil, pausedUntil);
     assert.deepEqual(agent.payload.plan, []);
     assert.deepEqual(agent.payload.invites.toSend, [], "no invitations to send");
     assert.deepEqual(agent.payload.invites.toCheck, [], "and none to check either");
-    assert.equal(agent.payload.invites.connectsLeft, 0);
     assert.deepEqual(agent.payload.queue, []);
-    assert.equal(agent.payload.upkeep.any, false);
-    assert.equal(agent.payload.inbox.maxThreads, 0, "no inbox read");
+    assert.deepEqual(agent.payload.profiles.toResolve, [], "no profiles opened");
+    if (lease.ok) {
+      // The inbox is read and approved replies go out; the agent knows the warning.
+      assert.equal(agent.payload.duty, true);
+      assert.equal(agent.payload.paused, true);
+      assert.ok(agent.payload.inbox.maxThreads > 0);
+      releaseLease("acc-1", lease.lease.leaseId);
+    } else {
+      // And an agent that turns up without a lease is given nothing to do.
+      assert.equal(agent.payload.runnable, false);
+      assert.equal(agent.payload.pausedUntil, pausedUntil);
+      assert.equal(agent.payload.invites.connectsLeft, 0);
+      assert.equal(agent.payload.upkeep.any, false);
+      assert.equal(agent.payload.inbox.maxThreads, 0, "no inbox read");
+    }
   }
 
   // The third morning. Nobody pressed anything.
@@ -510,8 +522,9 @@ test("the agent can report a warning, and a second report the same morning is th
   assert.equal(rows.wl_runs[0].paused_days, 2, "one morning's warning is one pause");
   assert.equal(events("run.warning").length, 2, "both reports are on the record");
 
-  // And it is the same pause the button starts: nothing handed out.
-  assert.equal((await decideNext({ now: morning(0) })).next, null);
+  // And it is the same pause the button starts: no warming handed out — at most a look into the inbox.
+  const next = (await decideNext({ now: morning(0) })).next;
+  assert.ok(next === null || (next.mode === "inbox" && next.remaining === 0));
 });
 
 test("an invitation LinkedIn answered with a block page starts the same pause and keeps the person held", async (t) => {

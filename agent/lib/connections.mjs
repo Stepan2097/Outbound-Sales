@@ -81,9 +81,36 @@ export async function pendingSlugs(page, { sleep = wait, guard = async () => {} 
  */
 export async function linkedinWarning(page) {
   if (/\/(checkpoint|challenge|captcha)(\/|\?)/i.test(page.url())) return 'LinkedIn checkpoint or CAPTCHA';
-  const text = await page.locator('body').innerText();
+  const text = await linkedinOwnText(page);
   const restriction = /(?:you(?:'ve| have) reached (?:your |the )?(?:weekly )?invitation limit|weekly invitation limit|too many invitations|temporarily restricted|account (?:has been |is )restricted|verify your identity|security verification|unusual activity|підтверд(?:іть|ити) (?:свою )?особу|ліміт запрошень|ліміт\S* на запрошення|тижнев\S* ліміт\S*|запрошення не було надіслано|обмежено ваш акаунт|превышен.{0,30}лимит приглашений|подтвердите (?:свою )?личность|аккаунт.{0,30}ограничен|необычн.{0,15}активност)/i;
   return text.match(restriction)?.[0] ?? null;
+}
+
+/**
+ * What LinkedIn itself says on the page — its toasts, alerts and dialogs, the
+ * page's headings, and the whole text only of a page too short to be anything
+ * but a notice — never what people wrote. Reading the whole body put Chloe on
+ * a two-day pause on 23.10: «temporarily restricted» was in somebody's profile
+ * (Jodie Thind's), opened only to learn who wrote in, and the account was fine.
+ * A chat window is a dialog too, so a dialog with a text box in it, or a long
+ * one, is a conversation, not a notice.
+ */
+export async function linkedinOwnText(page) {
+  return page.evaluate(() => {
+    const parts = [];
+    for (const el of document.querySelectorAll('[role="alert"], [role="alertdialog"], [role="dialog"], .artdeco-toast-item, .artdeco-modal')) {
+      const text = (el.innerText || '').trim();
+      if (!text || text.length > 600 || el.querySelector('[contenteditable="true"], textarea')) continue;
+      parts.push(text);
+    }
+    for (const el of document.querySelectorAll('h1, h2')) {
+      const text = (el.innerText || '').trim();
+      if (text && text.length <= 200) parts.push(text);
+    }
+    const body = (document.body?.innerText || '').trim();
+    if (body.length < 1500) parts.push(body);
+    return parts.join('\n');
+  });
 }
 
 export class VisitStopped extends Error {}
@@ -120,6 +147,9 @@ export async function stopOnWarning(page, portal) {
   }
   const result = await reportWithRetry(() => portal.warning(warning));
   if (!result.success) throw new VisitStopped(`Could not report LinkedIn warning: ${result.error}`);
+  // Said to people at once, with what was on the screen (власник 23.10: «не було
+  // ніяких сповіщень, немає чіткої причини»). Best effort: the pause is already written.
+  if (portal.warned) await portal.warned(warning, page).catch(() => {});
   throw new VisitStopped(`LinkedIn warning — account paused: ${warning}`);
 }
 

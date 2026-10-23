@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { AntyCloud, forBrowser, openElsewhere, proxyKey, sessionCookie, withOurSession } from './lib/anty-cloud.mjs';
-import { AntyApi, ProfileOpenElsewhere } from './lib/anty-api.mjs';
+import { AntyApi } from './lib/anty-api.mjs';
 
 const FUTURE = Math.floor(Date.now() / 1000) + 86_400 * 300;
 const li = (value, extra = {}) => ({ name: 'li_at', value, domain: '.www.linkedin.com', path: '/', expires: FUTURE, httpOnly: true, secure: true, sameSite: 'None', ...extra });
@@ -163,7 +163,6 @@ test('the runtime client takes on open and gives on close only after the feed wa
   const calls = [];
   const context = {};
   const cloud = {
-    busyElsewhere: async () => null,
     take: async () => { calls.push('take'); return {}; },
     give: async () => { calls.push('give'); return {}; }
   };
@@ -207,10 +206,9 @@ test('a spent refresh token is replaced through the device session, without a ne
   assert.equal(h.calls.at(-1).auth, 'Bearer A3');
 });
 
-test('a profile open on a desktop is neither taken from nor written to', async () => {
+test('a profile open on a desktop is opened, but no session is swapped with it', async () => {
   const now = new Date().toISOString();
   const h = setup({ rows: [cloudRow({ status: 'running', runningBy: 'Степан', lastLaunchedAt: now })] });
-  assert.deepEqual(await h.cloud.busyElsewhere('r1'), { by: 'Степан' });
   assert.deepEqual(await h.cloud.take('r1', browserContext([li('server')])), { skipped: 'open_elsewhere' });
   assert.deepEqual(await h.cloud.give('r1', browserContext([li('server')])), { skipped: 'open_elsewhere' });
   assert.equal(h.calls.some((call) => call.url.endsWith('/profiles/push')), false);
@@ -225,25 +223,4 @@ test('a session is taken only through the proxy the cloud copy uses', async () =
   assert.equal(sessionCookie(context.jar()).value, 'server');
   assert.equal((await h.cloud.take('r1', context, { proxy: 'http://1.2.3.4:1' })).taken, true);
   assert.equal(proxyKey('socks5://u:p@1.2.3.4:50100'), '1.2.3.4:50100');
-});
-
-test('the runtime client refuses to open a profile somebody has open on a desktop', async () => {
-  const calls = [];
-  const cloud = { busyElsewhere: async () => ({ by: 'Степан' }), take: async () => ({}), give: async () => ({}) };
-  const api = new AntyApi('http://127.0.0.1:3032', { cloud, fetchImpl: async (url, opts) => {
-    calls.push(url);
-    return { ok: true, json: async () => ({ ok: true, profile: { id: 3, remote_id: 'r1', name: 'Fixture', hasProxy: true, running: false } }) };
-  } });
-  await assert.rejects(api.open('r1', {}), ProfileOpenElsewhere);
-  assert.equal(calls.some((url) => url.endsWith('/start')), false);
-});
-
-test('the first look at a profile only notes the cloud, and a registered device alone is enough to start', async () => {
-  const h = setup({ state: { access: '', refresh: '', synced: {} }, device: () => ({ status: 200, data: { access_token: 'D1', refresh_token: 'DR1' } }) });
-  assert.equal(h.cloud.enabled, true);
-  const context = browserContext([li('server')]);
-  assert.deepEqual(await h.cloud.take('r1', context), { skipped: 'first_look' });
-  assert.equal(sessionCookie(context.jar()).value, 'server');
-  assert.equal(h.read().synced.r1, '2026-10-23T10:00:00.000Z');
-  assert.equal(h.read().access, 'D1');
 });

@@ -407,7 +407,9 @@ export async function urgentCandidates(nowMs = Date.now()) {
   const found = [];
   for (const account of accounts) {
     const run = runs.find((row) => row.account_id === account.id);
-    if (!run || pausedOn(run, todayIso)) continue;
+    // A pause after a warning stops the warming, not the conversations
+    // (власник 23.10: «temporarily restricted — але це не причина не відписувати на повідомлення»).
+    if (!run) continue;
     if ((coolingOff.get(account.id) ?? 0) > nowMs) continue;
     if ((leases.get(account.id)?.expiresAt ?? 0) > nowMs) continue;
     if (nowMs - (urgentEnded.get(account.id) ?? 0) < URGENT_MIN_GAP_MS) continue;
@@ -450,7 +452,8 @@ export async function dutyCandidates(nowMs = Date.now()) {
   const found = [];
   for (const account of accounts) {
     const run = runs.find((row) => row.account_id === account.id);
-    if (!run || pausedOn(run, todayIso)) continue;
+    // Read and answer during a warning pause too — only the warming stops (23.10).
+    if (!run) continue;
     if ((coolingOff.get(account.id) ?? 0) > nowMs) continue;
     if ((leases.get(account.id)?.expiresAt ?? 0) > nowMs) continue;
     if (onDutyBreak(account.id, new Date(nowMs))) continue;

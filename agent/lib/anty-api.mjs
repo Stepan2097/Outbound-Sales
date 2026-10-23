@@ -1,13 +1,5 @@
 import { randomUUID } from 'node:crypto';
 
-/** The profile is open in somebody's desktop Anty: not a failure, a visit for later. */
-export class ProfileOpenElsewhere extends Error {
-  constructor(name, by) {
-    super(`${name} зараз відкритий у десктопному Anty (${by}) — не відкриваю вдруге`);
-    this.code = 'open_elsewhere';
-  }
-}
-
 export class AntyApi {
   /**
    * `cloud` — an AntyCloud (lib/anty-cloud.mjs): the profile's LinkedIn session
@@ -45,8 +37,6 @@ export class AntyApi {
     }
     if (profile.running) throw new Error(`${profile.name} is already running in Anty`);
     if (!profile.hasProxy) throw new Error(`${profile.name} has no proxy; refusing a direct LinkedIn visit`);
-    const elsewhere = this.cloud ? await this.cloud.busyElsewhere(remoteId).catch(() => null) : null;
-    if (elsewhere) throw new ProfileOpenElsewhere(profile.name, elsewhere.by);
     const ownerToken = randomUUID();
     let browser;
     let closing;

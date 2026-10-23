@@ -274,17 +274,6 @@ export class AntyCloud {
   }
 
   /**
-   * Somebody has this profile open in a desktop Anty right now: the server must
-   * not open it too — one LinkedIn session from two IPs and two fingerprints at
-   * once is what brings a security check (чат Anty 23.10) — and must not write
-   * it, because the desktop writes its own cookies over ours as it closes.
-   */
-  async busyElsewhere(remoteId) {
-    if (!this.enabled || !remoteId) return null;
-    return this.locked(async () => openElsewhere(await this.pull(this.read(), remoteId), this.now()));
-  }
-
-  /**
    * As a profile opens: the cloud's LinkedIn session, when it is newer and works.
    * Only through the same proxy the cloud copy uses — a session moved to another
    * IP is a new sign-in to LinkedIn.
@@ -295,6 +284,9 @@ export class AntyCloud {
       const state = this.read();
       const row = await this.pull(state, remoteId);
       if (!row || row.deleted) return { skipped: 'not_in_cloud' };
+      // Open on a desktop right now: the server still works the profile (власник
+      // 23.10: «має відкривати»), but swaps no session with one in use — the
+      // desktop writes its own over the cloud as it closes anyway.
       if (openElsewhere(row, this.now())) return { skipped: 'open_elsewhere' };
       // The first look only notes where the cloud stands: a desktop session that
       // was there before the sync existed is not a reason to swap a working one.

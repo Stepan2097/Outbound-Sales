@@ -16,7 +16,7 @@
  */
 import { chromium } from 'playwright-core';
 import { DEFAULT_PORTAL, CHROME_PATH } from './lib/env.mjs';
-import { checkInvitations, InvitesStopped, sendQueuedInvitations, stopOnWarning, VisitStopped, reportWithRetry } from './lib/connections.mjs';
+import { checkInvitations, InvitesStopped, linkedinWarning, sendQueuedInvitations, stopOnWarning, VisitStopped, reportWithRetry } from './lib/connections.mjs';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -25,7 +25,8 @@ import { readProfile, normalizeCookie } from './lib/anty.mjs';
 import { syncInbox } from './lib/inbox.mjs';
 import { syncNetwork } from './lib/network.mjs';
 import { sendReplies } from './lib/outbox.mjs';
-import { AntyApi, ProfileOpenElsewhere } from './lib/anty-api.mjs';
+import { AntyApi } from './lib/anty-api.mjs';
+import { Telegram } from './lib/telegram.mjs';
 import { cloudFromEnv } from './lib/anty-cloud.mjs';
 import { fileURLToPath } from 'node:url';
 import { settle } from './lib/login-probe.mjs';
@@ -57,6 +58,18 @@ const rand = (lo, hi) => lo + Math.random() * (hi - lo);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const portal = new Portal(PORTAL);
+const telegram = new Telegram();
+let accountLabel = ACCOUNT;
+// A warning that pauses the account goes to the group with its page (власник
+// 23.10: «не було ніяких сповіщень, немає чіткої причини»).
+portal.warned = async (warning, tab) => {
+  if (!telegram.configured) return;
+  const where = String(tab?.url?.() || '').slice(0, 120);
+  const text = `⛔ ${accountLabel}: LinkedIn показав попередження «${warning}» — прогрів по акаунту на паузі.\nСторінка: ${where}`;
+  const photo = await tab?.screenshot?.({ type: 'jpeg', quality: 70 }).catch(() => null);
+  if (photo) await telegram.sendPhoto(photo, text).catch(() => telegram.send(text));
+  else await telegram.send(text);
+};
 const report = { account: ACCOUNT, shots: SHOTS, actions: [], errors: [], shotFiles: [] };
 
 async function shot(page, name) {
@@ -96,6 +109,7 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
 }
 async function main() {
 const found = await portal.resolve(ACCOUNT);
+accountLabel = found?.label || ACCOUNT;
 if (!suppliedLeaseId) {
   const lease = await portal.lease(found.accountId);
   if (!lease.success || !lease.lease?.leaseId) throw new Error(lease.error || 'Server did not grant a lease');
@@ -133,22 +147,13 @@ if (!Object.values(remaining).some((n) => n > 0) && !plan.inbox?.due && !(plan.i
 }
 
 // ── the browser this account lives in ──────────────────────────────────────
-let runtime = null;
-try {
-  runtime = process.env.WARMUP_ANTY_API
-    ? await new AntyApi(process.env.WARMUP_ANTY_API, {
-      // The session is taken from Anty's cloud and given back to it (власник 23.10).
-      cloud: cloudFromEnv({ agentDir: path.dirname(fileURLToPath(import.meta.url)), log, check: (tab) => settle(tab) }),
-      log
-    }).open(found.profileRemoteId, chromium)
-    : null;
-} catch (error) {
-  if (!(error instanceof ProfileOpenElsewhere)) throw error;
-  // Somebody works in this profile on a desktop: the visit waits for the next turn.
-  log(`⏸ ${error.message}`);
-  await portal.log('agent.skipped', error.message);
-  return 0;
-}
+const runtime = process.env.WARMUP_ANTY_API
+  ? await new AntyApi(process.env.WARMUP_ANTY_API, {
+    // The session is taken from Anty's cloud and given back to it (власник 23.10).
+    cloud: cloudFromEnv({ agentDir: path.dirname(fileURLToPath(import.meta.url)), log, check: (tab) => settle(tab) }),
+    log
+  }).open(found.profileRemoteId, chromium)
+  : null;
 if (runtime) closeBrowser = runtime.close;
 const profile = runtime?.profile || readProfile(found.profileRemoteId);
 if (!profile) throw new Error(`Anty has no local copy of profile ${found.profileRemoteId} — open it in Anty once`);
@@ -257,7 +262,13 @@ log(`сесію відкрито (${session.sessionId}${session.resumed ? ', п�
     return true;
   };
   const guard = async () => {
-    await stopOnWarning(page, portal);
+    // Already on a pause after a warning, this visit only reads and answers
+    // messages (власник 23.10: «temporarily restricted — але це не причина не
+    // відписувати на повідомлення»): the warning is known, so only a checkpoint stops it.
+    if (plan.paused) {
+      const warning = await linkedinWarning(page);
+      if (warning && /checkpoint|captcha/i.test(warning)) throw new VisitStopped(`LinkedIn: ${warning}`);
+    } else await stopOnWarning(page, portal);
     const fresh = await portal.plan();
     if (!fresh.success || !fresh.runnable) throw new VisitStopped(fresh.error || fresh.reason || 'Server stopped this visit');
   };

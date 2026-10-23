@@ -423,3 +423,24 @@ test('message ids survive aging labels, preserve LinkedIn URNs, and distinguish 
   assert.equal(first.payload.messages[2].externalId, 'urn:li:msg_message:(a,b)');
   assert.equal(first.payload.messages[2].sentAt, '2026-09-22T10:11:00.000Z');
 });
+
+// 23.10.2026, Chloe: «temporarily restricted» stood in somebody else's profile
+// text, opened only to learn who wrote in, and paused a healthy account for two days.
+test('words in what people wrote are not a LinkedIn warning; LinkedIn’s own notice still is', async (t) => {
+  resetVisitState();
+  const about = `<section><p>${'Our agency supports B2B and B2C brands in casino and poker. '.repeat(30)} My old account was temporarily restricted once, lesson learned.</p></section>`;
+  const chat = '<div role="dialog"><p>my account got temporarily restricted lol</p><div contenteditable="true" role="textbox"></div></div>';
+  const page = await profile(t, { warning: about + chat });
+  await page.goto(queued.linkedin, { waitUntil: 'domcontentloaded' });
+  let paused = 0;
+  const portal = { warning: async () => { paused++; return { success: true }; }, invitesHeld: async () => ({ success: true }) };
+  await stopOnWarning(page, portal);
+  assert.equal(paused, 0, 'a healthy account is not paused');
+
+  const real = await profile(t, { warning: about + '<div role="alert">Your account is temporarily restricted</div>' });
+  await real.goto(queued.linkedin, { waitUntil: 'domcontentloaded' });
+  const told = [];
+  await assert.rejects(stopOnWarning(real, { ...portal, warned: async (warning) => { told.push(warning); } }), VisitStopped);
+  assert.equal(paused, 1);
+  assert.deepEqual(told, ['temporarily restricted'], 'people are told at once');
+});
