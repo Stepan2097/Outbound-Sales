@@ -151,3 +151,11 @@ test("a lead-gen's day journal: the sends from the accounts they run, not only t
   assert.match(server, /const shown = led \? sends\.filter\(\(send\) => led\.has\(send\.accountId\)\) : sends;/);
   assert.match(server, /async function accountsLedBy\(email, knownId = ""\)/);
 });
+
+test("журнал дня не прочитався, а зведення є — зведення видно, помилка лише на місці журналу (суддя 23.10, таск de89bd49)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const work = readFileSync(new URL("../app/screens/work.js", import.meta.url), "utf8");
+  assert.match(work, /if \(day\.status === "rejected" && report\.status === "rejected"\) throw day\.reason;/);
+  assert.match(work, /else if \(!data && work\.dayError && work\.report\) \{/);
+  assert.match(work, /\$\{summaryHtml\(report\)\}\$\{leadgensHtml\(report\)\}\n      <h3 class="work-subtitle">Журнал дня<\/h3>\n      <p class="esp-notice is-bad">Журнал дня не прочитався:/);
+});

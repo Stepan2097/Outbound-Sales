@@ -27,7 +27,7 @@ const FILTERS = [["all", "Усі"], ["fresh", "Нові відповіді"], ["
 
 const PERIOD_KEY = "outbound.work.period";
 const readPeriod = () => { try { return localStorage.getItem(PERIOD_KEY) === "week" ? "week" : "day"; } catch { return "day"; } };
-const work = { period: readPeriod(), date: "", user: "", data: null, report: null, reportError: "", loading: false, error: "", filter: "all", open: "", dialog: null, timer: null };
+const work = { period: readPeriod(), date: "", user: "", data: null, report: null, reportError: "", dayError: "", loading: false, error: "", filter: "all", open: "", dialog: null, timer: null };
 
 const rootEl = () => document.getElementById("workRoot");
 const visible = () => document.getElementById("view-work")?.classList.contains("active");
@@ -68,13 +68,15 @@ async function load({ quiet = false } = {}) {
       api(`/api/work/report?${asked}`),
       work.period === "day" || !work.data ? api(`/api/work/day?${query}`) : Promise.resolve(work.data)
     ]);
-    if (day.status === "rejected") throw day.reason;
-    const data = day.value;
+    // Обидва не відповіли — помилка на всю сторінку; одне — друге показується (суддя 23.10).
+    if (day.status === "rejected" && report.status === "rejected") throw day.reason;
     work.report = report.status === "fulfilled" ? report.value : null;
     work.reportError = report.status === "rejected" ? (report.reason?.message || "Звіт не прочитався.") : "";
-    work.data = data;
-    work.date = work.date || data.date;
-    work.user = data.user;
+    work.dayError = day.status === "rejected" ? (day.reason?.message || "Журнал дня не прочитався.") : "";
+    // Журнал іншого дня не лишається на екрані під новим зведенням.
+    work.data = day.status === "fulfilled" ? day.value : null;
+    work.date = work.date || work.data?.date || work.report?.from || "";
+    if (work.data) work.user = work.data.user;
     work.error = "";
   } catch (error) {
     work.error = error.message || "Не вдалося прочитати день.";
@@ -375,7 +377,14 @@ function render() {
   const data = work.data;
   let body = "";
   if (work.error) body = `<p class="esp-notice is-bad">${escapeHtml(work.error)}</p>`;
-  else if (!data) body = '<p class="work-muted">Читаю день…</p>';
+  else if (!data && work.dayError && work.report) {
+    // Журнал дня не прочитався, а зведення є — зведення видно, помилка лише на місці журналу.
+    const report = work.report;
+    body = `${work.period === "week" ? `<h2 class="work-title">Тиждень · ${escapeHtml(rangeWord(report))}${report.admin ? " · уся команда" : ""}</h2>${weekDaysHtml(report)}` : `<h2 class="work-title">${escapeHtml(dayWord(work.date))}${report.admin ? " · уся команда" : ""}</h2>`}
+      ${summaryHtml(report)}${leadgensHtml(report)}
+      <h3 class="work-subtitle">Журнал дня</h3>
+      <p class="esp-notice is-bad">Журнал дня не прочитався: ${escapeHtml(work.dayError)} <button type="button" data-work="reload">Ще раз</button></p>`;
+  } else if (!data) body = '<p class="work-muted">Читаю день…</p>';
   else {
     const report = work.report;
     const who = data.user === "all" ? " · уся команда" : data.user !== data.viewer ? ` · ${escapeHtml((data.users || []).find((row) => row.user === data.user)?.name || data.user)}` : "";
@@ -393,7 +402,7 @@ function render() {
         <div class="work-body">${listHtml(data)}${dialogHtml()}</div>`;
   }
   const restore = keepScroll(root, [".work-rows"]);
-  root.innerHTML = `${toolbarHtml(data)}${body}`;
+  root.innerHTML = `${toolbarHtml(data || (work.report ? { today: work.report.today } : null))}${body}`;
   restore();
   refreshIcons(root);
 }
