@@ -1,0 +1,25 @@
+/* Акаунти, що чекають людину (таск 4e97fa87): значок у верхньому правому куті, панель з кроками. */
+/* Окремий рядок над сторінкою, праворуч: місце займає лише тоді, коли є що показати, і не накриває
+   кнопок у правому куті екранів (Оновити, Мої/Усі). Липне до верху при прокрутці. */
+.account-alerts { position: sticky; top: calc(env(safe-area-inset-top, 0px) + var(--sp-2)); z-index: 40; display: flex; justify-content: flex-end; min-width: 0; }
+.account-alerts[hidden] { display: none; }
+.account-alerts-bell { display: inline-flex; align-items: center; gap: var(--sp-2); min-height: 34px; padding: 0 var(--sp-3); border: 1px solid var(--amber); border-radius: 999px; background: color-mix(in srgb, var(--amber) 16%, var(--surface)); color: var(--ink); font-weight: 600; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35); }
+.account-alerts-bell svg { width: 16px; height: 16px; color: var(--amber); }
+.account-alerts-bell b { min-width: 18px; padding: 0 6px; border-radius: 999px; background: var(--amber); color: #1b1407; font-size: 12px; text-align: center; }
+.account-alerts-panel { position: absolute; top: calc(100% + var(--sp-2)); right: 0; width: min(420px, calc(100vw - 32px)); max-height: min(70vh, 640px); overflow-y: auto; padding: var(--sp-3) var(--sp-4); border: 1px solid var(--line); border-radius: 12px; background: var(--surface-strong); box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5); display: grid; gap: var(--sp-3); }
+.account-alerts-panel header { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.account-alerts-panel h2 { margin: 0; font-size: 15px; }
+.account-alerts-panel ul { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-3); }
+.account-alert { display: grid; gap: var(--sp-2); padding-top: var(--sp-3); border-top: 1px solid var(--line); }
+.account-alert:first-child { padding-top: 0; border-top: 0; }
+.account-alert-head { margin: 0; font-size: 13px; line-height: 1.45; }
+.account-alert-steps { margin: 0; padding-left: 1.2em; display: grid; gap: var(--sp-1); color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+.account-alert-steps b { color: var(--ink); }
+.account-alert-state { margin: 0; font-size: 12.5px; color: var(--muted); }
+.account-alert-state.is-ok { color: var(--teal); }
+.account-alert-state.is-bad { color: var(--amber); }
+.account-alert .primary-button { justify-self: start; }
+/* Телефон: над нижнім меню й не на заголовку сторінки — значок лише з числом. */
+@media (max-width: 720px) {
+  .account-alerts-bell span { display: none; }
+}

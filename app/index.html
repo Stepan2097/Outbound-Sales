@@ -31,6 +31,7 @@
     <link rel="stylesheet" href="/styles/mail-reports.css" />
     <link rel="stylesheet" href="/styles/mail-warmup.css" />
     <link rel="stylesheet" href="/styles/pitch.css" />
+    <link rel="stylesheet" href="/styles/account-alerts.css" />
     <script defer src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
     <script defer type="module" src="/main.js"></script>
   </head>
@@ -104,6 +105,8 @@
       </aside>
 
       <main class="workspace">
+        <!-- Акаунти, що чекають людину (таск 4e97fa87): значок у верхньому куті на кожному екрані — app/screens/account-alerts.js. -->
+        <div class="account-alerts" id="accountAlerts" hidden></div>
         <header class="topbar">
           <div>
             <h1 id="pageTitle">Головна</h1>

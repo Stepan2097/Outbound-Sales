@@ -21,6 +21,7 @@ import { channelsFor as triageChannels, nextContact as nextTriageContact } from 
 import { AUTO_TACTIC, tacticData, tacticForPrompt, tacticLabel, tacticOptions } from "./triage/tactics.mjs";
 import { digestDue, digestText, freshReplies, leadgenTelegram, replyText, troubleText } from "./triage/leadgen-notify.mjs";
 import { readWindow, reportRange, REPORT_PERIODS, teamReport } from "./triage/team-report.mjs";
+import { accountAlerts, requestRecheck } from "./triage/account-alerts.mjs";
 import { addSendsToDays, contactKeyOf, contactWork, dayActivity, dayOf, daysAround, linkedinSends, logWork, useWorkLog, withLinkedinSends, workEntries, workUsers } from "./triage/work-log.mjs";
 import { checkEmail } from "./contacts/email-check.mjs";
 import { contactEmails, crmPatch } from "./contacts/enrich-crm.mjs";
@@ -1567,6 +1568,27 @@ async function handleApi(request, response, url) {
       sendJson(response, status, { error: error?.message || "Не вдалося." });
       return;
     }
+  }
+
+  // Сповіщення лідгену у верхньому куті (таск 4e97fa87): акаунти, що чекають людину, і «Перевірити вхід».
+  if (url.pathname === "/api/account-alerts" || url.pathname === "/api/account-alerts/recheck") {
+    const profile = request.auth?.profile;
+    const who = { viewerId: String(profile?.id || ""), admin: profile?.role === "admin", leadgens: state.accountLeadgens || {} };
+    try {
+      if (request.method === "GET" && url.pathname === "/api/account-alerts") {
+        sendJson(response, 200, { alerts: warmupAnty.configured() ? await accountAlerts(who) : [] });
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/account-alerts/recheck") {
+        const body = (await readJson(request)) || {};
+        sendJson(response, 200, await requestRecheck({ ...who, accountId: body.accountId, by: String(profile?.email || "") }));
+        return;
+      }
+      sendJson(response, 405, { error: "Невідомий метод." });
+    } catch (error) {
+      sendJson(response, Number(error?.statusCode) || 502, { error: error?.message || "Не вдалося." });
+    }
+    return;
   }
 
   // ── «По днях» (12.10): whom a person wrote to on a day, who answered, and

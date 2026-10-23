@@ -13,6 +13,8 @@
 import { api, authState, escapeAttr, escapeHtml, onScreen, refreshIcons, uaPlural } from "../core.js";
 import { openNewTab, openTodayBlock } from "./today.js";
 import { warmupApi } from "./warmup-accounts.js";
+// Сповіщення про акаунти у верхньому куті — на кожному екрані; вантажиться разом із Головною (таск 4e97fa87).
+import "./account-alerts.js";
 
 onScreen("home", { open: () => void openHome() });
 
