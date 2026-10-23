@@ -124,6 +124,23 @@ function expiresMs(value) {
   return Date.parse(value);
 }
 
+const OPEN_LOCK_MS = 12 * 3_600_000;
+
+/** Running on some desktop, by a lock fresh enough to be real (a crash leaves one behind). */
+export function openElsewhere(row, nowMs = Date.now()) {
+  if (!row || String(row.status) !== 'running') return null;
+  const launched = Date.parse(row.lastLaunchedAt || '');
+  if (Number.isFinite(launched) && nowMs - launched > OPEN_LOCK_MS) return null;
+  return { by: row.runningBy || row.runningOn || 'хтось' };
+}
+
+/** `http://host:port` or `host:port` → `host:port`. */
+export function proxyKey(server) {
+  const text = String(server || '').replace(/^[a-z0-9]+:\/\//i, '').replace(/^[^@]*@/, '').replace(/\/.*$/, '');
+  const [host, port] = text.split(':');
+  return `${host}:${Number(port) || 0}`;
+}
+
 export function deviceInfo(deviceId) {
   return { deviceId, deviceName: 'outbound-server', os: `${os.platform()}-${os.release()}`, arch: os.arch() };
 }
@@ -185,12 +202,24 @@ export class AntyCloud {
     return { source: SOURCE, appVersion: APP_VERSION, device: deviceInfo(state.deviceId) };
   }
 
+  /**
+   * New tokens: by the refresh token, and when that one is spent or rotated
+   * away, by the device itself — the platform keeps the device's session after
+   * one login (`auth/device-token`, чат Anty 23.10), so the owner signs in once,
+   * not every time a refresh token ages out. Only a device someone logged out
+   * needs a new login, and then the cloud switches itself off.
+   */
   async refresh(state) {
-    if (!state.refresh) throw new Error('Anty-хмара: нема refresh-токена — потрібен новий вхід');
-    const result = await this.post(`${this.platform}/refresh`, { refresh_token: state.refresh, ...this.base(state) });
-    const tokens = tokensOf(result.body);
+    let result = state.refresh
+      ? await this.post(`${this.platform}/refresh`, { refresh_token: state.refresh, ...this.base(state) })
+      : { ok: false, status: 0, body: {} };
+    let tokens = tokensOf(result.body);
+    if ((!result.ok || !tokens.access) && state.deviceId) {
+      result = await this.post(`${this.platform}/auth/device-token`, this.base(state));
+      tokens = tokensOf(result.body);
+    }
     if (!result.ok || !tokens.access) {
-      if ([400, 401, 403, 423].includes(result.status)) {
+      if ([400, 401, 403, 404, 423].includes(result.status)) {
         state.dead = `refresh ${result.status} ${result.body?.error || ''}`.trim();
         this.write(state);
       }
@@ -240,13 +269,32 @@ export class AntyCloud {
     return state.rows[remoteId] ?? null;
   }
 
-  /** As a profile opens: the cloud's LinkedIn session, when it is newer and works. */
-  async take(remoteId, context) {
+  /**
+   * Somebody has this profile open in a desktop Anty right now: the server must
+   * not open it too — one LinkedIn session from two IPs and two fingerprints at
+   * once is what brings a security check (чат Anty 23.10) — and must not write
+   * it, because the desktop writes its own cookies over ours as it closes.
+   */
+  async busyElsewhere(remoteId) {
+    if (!this.enabled || !remoteId) return null;
+    return this.locked(async () => openElsewhere(await this.pull(this.read(), remoteId), this.now()));
+  }
+
+  /**
+   * As a profile opens: the cloud's LinkedIn session, when it is newer and works.
+   * Only through the same proxy the cloud copy uses — a session moved to another
+   * IP is a new sign-in to LinkedIn.
+   */
+  async take(remoteId, context, { proxy = null } = {}) {
     if (!this.enabled || !remoteId) return { skipped: 'off' };
     return this.locked(async () => {
       const state = this.read();
       const row = await this.pull(state, remoteId);
       if (!row || row.deleted) return { skipped: 'not_in_cloud' };
+      if (openElsewhere(row, this.now())) return { skipped: 'open_elsewhere' };
+      if (proxy && row.proxy?.host && proxyKey(proxy) !== `${row.proxy.host}:${Number(row.proxy.port) || 0}`) {
+        return { skipped: 'proxy_differs' };
+      }
       if (state.synced[remoteId] && String(row.updatedAt) <= String(state.synced[remoteId])) return { skipped: 'nothing_new' };
       const theirs = cloudLinkedin(row, this.now());
       const mark = () => { state.synced[remoteId] = String(row.updatedAt); this.write(state); };
@@ -294,6 +342,7 @@ export class AntyCloud {
       // ago must go back as it is now, not as it was at the start of the visit.
       const row = await this.pull(state, remoteId);
       if (!row || row.deleted) return { skipped: 'not_in_cloud' };
+      if (openElsewhere(row, this.now())) return { skipped: 'open_elsewhere' };
       const profile = withOurSession(row, ours);
       const body = await this.call(state, `${this.platform}/profiles/push`, { action: 'profile_upsert', payload: { profile } });
       const updatedAt = String(body?.updatedAt || new Date(this.now()).toISOString());

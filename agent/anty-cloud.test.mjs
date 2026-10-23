@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { AntyCloud, forBrowser, sessionCookie, withOurSession } from './lib/anty-cloud.mjs';
-import { AntyApi } from './lib/anty-api.mjs';
+import { AntyCloud, forBrowser, openElsewhere, proxyKey, sessionCookie, withOurSession } from './lib/anty-cloud.mjs';
+import { AntyApi, ProfileOpenElsewhere } from './lib/anty-api.mjs';
 
 const FUTURE = Math.floor(Date.now() / 1000) + 86_400 * 300;
 const li = (value, extra = {}) => ({ name: 'li_at', value, domain: '.www.linkedin.com', path: '/', expires: FUTURE, httpOnly: true, secure: true, sameSite: 'None', ...extra });
@@ -19,7 +19,7 @@ function cloudRow(extra = {}) {
   };
 }
 
-function setup({ rows = [cloudRow()], state = {}, refresh = null, verdict = { signedIn: true }, pushStatus = 200 } = {}) {
+function setup({ rows = [cloudRow()], state = {}, refresh = null, device = null, verdict = { signedIn: true }, pushStatus = 200 } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'anty-cloud-'));
   const file = path.join(dir, 'anty-cloud.json');
   fs.writeFileSync(file, JSON.stringify({ deviceId: 'dev', access: 'A1', refresh: 'R1', expiresAt: '', cursor: '', rows: {}, synced: {}, ...state }));
@@ -30,6 +30,7 @@ function setup({ rows = [cloudRow()], state = {}, refresh = null, verdict = { si
     let status = 200;
     let data = {};
     if (url.endsWith('/refresh')) ({ status, data } = refresh ? refresh(body) : { status: 200, data: { access_token: 'A2', refresh_token: 'R2' } });
+    else if (url.endsWith('/auth/device-token')) ({ status, data } = device ? device(body) : { status: 401, data: { error: 'device_not_active' } });
     else if (opts.headers.Authorization === 'Bearer EXPIRED') status = 401;
     else if (url.endsWith('/profiles/pull')) data = { profiles: rows, cursor: rows.at(-1)?.updatedAt || body.cursor };
     else if (url.endsWith('/profiles/push')) { status = pushStatus; data = { remoteId: 'r1', updatedAt: '2026-10-23T11:00:00.000Z' }; }
@@ -162,6 +163,7 @@ test('the runtime client takes on open and gives on close only after the feed wa
   const calls = [];
   const context = {};
   const cloud = {
+    busyElsewhere: async () => null,
     take: async () => { calls.push('take'); return {}; },
     give: async () => { calls.push('give'); return {}; }
   };
@@ -190,4 +192,48 @@ test('the runtime client takes on open and gives on close only after the feed wa
   failing.signedIn(true);
   await failing.close();
   assert.deepEqual(calls, ['take', 'give', 'stop'], 'a cloud failure never keeps the profile open');
+});
+
+test('a spent refresh token is replaced through the device session, without a new login', async () => {
+  const h = setup({
+    state: { access: 'EXPIRED' },
+    refresh: () => ({ status: 401, data: { error: 'invalid_refresh_token' } }),
+    device: (body) => (body.device.deviceId === 'dev' ? { status: 200, data: { access_token: 'A3', refresh_token: 'R3', expires_at: '' } } : { status: 401, data: {} })
+  });
+  await h.cloud.take('r1', browserContext([li('desk')]));
+  assert.equal(h.read().access, 'A3');
+  assert.equal(h.read().refresh, 'R3');
+  assert.equal(h.read().dead, undefined);
+  assert.equal(h.calls.at(-1).auth, 'Bearer A3');
+});
+
+test('a profile open on a desktop is neither taken from nor written to', async () => {
+  const now = new Date().toISOString();
+  const h = setup({ rows: [cloudRow({ status: 'running', runningBy: 'Степан', lastLaunchedAt: now })] });
+  assert.deepEqual(await h.cloud.busyElsewhere('r1'), { by: 'Степан' });
+  assert.deepEqual(await h.cloud.take('r1', browserContext([li('server')])), { skipped: 'open_elsewhere' });
+  assert.deepEqual(await h.cloud.give('r1', browserContext([li('server')])), { skipped: 'open_elsewhere' });
+  assert.equal(h.calls.some((call) => call.url.endsWith('/profiles/push')), false);
+  // A lock a crash left behind a day ago is no lock.
+  assert.equal(openElsewhere(cloudRow({ status: 'running', lastLaunchedAt: '2026-01-01T00:00:00Z' })), null);
+});
+
+test('a session is taken only through the proxy the cloud copy uses', async () => {
+  const h = setup();
+  const context = browserContext([li('server')]);
+  assert.deepEqual(await h.cloud.take('r1', context, { proxy: 'http://9.9.9.9:1' }), { skipped: 'proxy_differs' });
+  assert.equal(sessionCookie(context.jar()).value, 'server');
+  assert.equal((await h.cloud.take('r1', context, { proxy: 'http://1.2.3.4:1' })).taken, true);
+  assert.equal(proxyKey('socks5://u:p@1.2.3.4:50100'), '1.2.3.4:50100');
+});
+
+test('the runtime client refuses to open a profile somebody has open on a desktop', async () => {
+  const calls = [];
+  const cloud = { busyElsewhere: async () => ({ by: 'Степан' }), take: async () => ({}), give: async () => ({}) };
+  const api = new AntyApi('http://127.0.0.1:3032', { cloud, fetchImpl: async (url, opts) => {
+    calls.push(url);
+    return { ok: true, json: async () => ({ ok: true, profile: { id: 3, remote_id: 'r1', name: 'Fixture', hasProxy: true, running: false } }) };
+  } });
+  await assert.rejects(api.open('r1', {}), ProfileOpenElsewhere);
+  assert.equal(calls.some((url) => url.endsWith('/start')), false);
 });

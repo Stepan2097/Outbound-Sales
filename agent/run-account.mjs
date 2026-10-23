@@ -25,7 +25,7 @@ import { readProfile, normalizeCookie } from './lib/anty.mjs';
 import { syncInbox } from './lib/inbox.mjs';
 import { syncNetwork } from './lib/network.mjs';
 import { sendReplies } from './lib/outbox.mjs';
-import { AntyApi } from './lib/anty-api.mjs';
+import { AntyApi, ProfileOpenElsewhere } from './lib/anty-api.mjs';
 import { cloudFromEnv } from './lib/anty-cloud.mjs';
 import { fileURLToPath } from 'node:url';
 import { settle } from './lib/login-probe.mjs';
@@ -133,13 +133,22 @@ if (!Object.values(remaining).some((n) => n > 0) && !plan.inbox?.due && !(plan.i
 }
 
 // ── the browser this account lives in ──────────────────────────────────────
-const runtime = process.env.WARMUP_ANTY_API
-  ? await new AntyApi(process.env.WARMUP_ANTY_API, {
-    // The session is taken from Anty's cloud and given back to it (власник 23.10).
-    cloud: cloudFromEnv({ agentDir: path.dirname(fileURLToPath(import.meta.url)), log, check: (tab) => settle(tab) }),
-    log
-  }).open(found.profileRemoteId, chromium)
-  : null;
+let runtime = null;
+try {
+  runtime = process.env.WARMUP_ANTY_API
+    ? await new AntyApi(process.env.WARMUP_ANTY_API, {
+      // The session is taken from Anty's cloud and given back to it (власник 23.10).
+      cloud: cloudFromEnv({ agentDir: path.dirname(fileURLToPath(import.meta.url)), log, check: (tab) => settle(tab) }),
+      log
+    }).open(found.profileRemoteId, chromium)
+    : null;
+} catch (error) {
+  if (!(error instanceof ProfileOpenElsewhere)) throw error;
+  // Somebody works in this profile on a desktop: the visit waits for the next turn.
+  log(`⏸ ${error.message}`);
+  await portal.log('agent.skipped', error.message);
+  return 0;
+}
 if (runtime) closeBrowser = runtime.close;
 const profile = runtime?.profile || readProfile(found.profileRemoteId);
 if (!profile) throw new Error(`Anty has no local copy of profile ${found.profileRemoteId} — open it in Anty once`);
