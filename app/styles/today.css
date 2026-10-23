@@ -332,3 +332,7 @@
 .today-account-alerts { display: grid; gap: var(--sp-1); }
 .today-account-alerts p { display: flex; align-items: flex-start; gap: var(--sp-2); margin: 0; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--amber); border-radius: 8px; background: rgba(224, 178, 94, 0.1); color: var(--ink); font-size: 13px; }
 .today-account-alerts svg { flex: none; width: 16px; height: 16px; margin-top: 2px; color: var(--amber); }
+
+/* AI лише пропонує «Кваліфікований» (таск e06c67c1). */
+.today-side-suggest { display: flex; align-items: flex-start; gap: var(--sp-1); margin: 0; color: var(--teal); font-size: 12px; }
+.today-side-suggest svg { flex: none; width: 14px; height: 14px; margin-top: 1px; }

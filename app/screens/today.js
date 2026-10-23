@@ -15,7 +15,7 @@
 // закриває цей і ставить наступний (через 3 робочі дні).
 
 import { api, escapeAttr, escapeHtml, keepScroll, onScreen, refreshIcons } from "../core.js";
-import { connectInboxWork, renderWarmupInbox, warmupAccountsNeedingPerson, warmupThreadTotal, showWarmupInboxThread, warmupGoesOutText, warmupMessageHtml, warmupProfileUrl } from "./inbox.js";
+import { connectInboxWork, renderWarmupInbox, warmupAccountsNeedingPerson, warmupThreadAiLabel, warmupThreadTotal, showWarmupInboxThread, warmupGoesOutText, warmupMessageHtml, warmupProfileUrl } from "./inbox.js";
 import { showContactCard } from "./contacts.js";
 import { createCampaignFor } from "./lead-campaigns.js";
 import { leaveNewContacts, openNewContacts } from "./new-contacts.js";
@@ -613,6 +613,14 @@ function campaignChoiceHtml({ campaigns, skippedUntil, attr, busy }) {
       </div>`;
 }
 
+/** AI лише пропонує «Кваліфікований» (Марко 23.10, таск e06c67c1): ставить статус сам лідген, кнопкою. */
+function qualifiedHintHtml(aiLabel, status, attr) {
+  if (aiLabel?.label !== "qualified" || status === "qualified") return "";
+  const act = attr === "side" ? 'data-side="set-qualified"' : 'data-today="set-qualified"';
+  return `<p class="today-side-suggest"><i data-lucide="sparkles"></i><span>AI: схоже на кваліфікованого ліда. Статус ставиш ти.</span></p>
+    <button type="button" class="today-side-wide" ${act} title="Поставити статус «Кваліфікований» у CRM">Поставити «Кваліфікований»</button>`;
+}
+
 /* ── Переклад чернетки українською (Марко 22.10, таск 532076ec) ─────────────────────────
    Компактно: до двох рядків під полем, своя прокрутка; поле на цей час нижче, тож розмова не
    зменшується. Лише прочитати. */
@@ -796,7 +804,7 @@ function sideHtml(item, detail) {
     item.contactId ? `<button type="button" class="text-button" data-today="contact" title="Картка людини в «Контактах» порталу">Картка контакту</button>` : ""
   ].filter(Boolean).join("");
   return `<aside class="today-side" aria-label="Дії з лідом">
-    ${sideBox("Статус у CRM", statusHtml(item))}
+    ${sideBox("Статус у CRM", `${statusHtml(item)}${qualifiedHintHtml(detail.aiLabel, item.status, "today")}`)}
     ${sideBox("Наступний пінг", ping)}
     ${sideBox("Кампанія", item.contactId ? campaign : "")}
     ${sideBox("Посилання", links ? `<div class="today-side-links">${links}</div>` : "")}
@@ -1005,6 +1013,12 @@ document.addEventListener("click", (event) => {
     today.helpOpen = !today.helpOpen;
     today.filterOpen = false;
     return render();
+  }
+  if (act === "set-qualified") {
+    const item = today.detail?.item;
+    if (!item?.contactId) return;
+    today.statusDraft = { pingId: item.pingId, status: "qualified", exitReason: "" };
+    return void saveStatus();
   }
   if (act === "bad-timing") {
     const item = today.detail?.item;
@@ -1246,7 +1260,7 @@ function renderThreadSide() {
   const links = [linkedinLink, `<a href="${escapeAttr(data.crmUrl)}" target="_blank" rel="noreferrer noopener" title="Контакт у CRM — нова вкладка">CRM <i data-lucide="arrow-up-right"></i></a>`,
     `<button type="button" class="text-button" data-side="card" title="Картка людини в «Контактах» порталу">Картка контакту</button>`].filter(Boolean).join("");
   host.innerHTML = `${side.notice ? `<p class="today-notice" role="status">${escapeHtml(side.notice)}</p>` : ""}
-    ${sideBox("Статус у CRM", status)}
+    ${sideBox("Статус у CRM", `${status}${qualifiedHintHtml(warmupThreadAiLabel(side.thread?.accountId, side.thread?.threadKey), data.status, "side")}`)}
     ${sideBox("Наступний пінг", ping)}
     ${sideBox("Кампанія", campaign)}
     ${sideBox("Посилання", `<div class="today-side-links">${links}</div>`)}`;
@@ -1298,6 +1312,7 @@ document.addEventListener("click", (event) => {
   const act = target.dataset.side;
   if (act === "card") return void (side.contactId && showContactCard(side.contactId));
   if (act === "bad-timing") return void sideStatus("bad_timing");
+  if (act === "set-qualified") return void sideStatus("qualified");
   if (act === "not-lead") return void sideStatus("not_icp");
   if (act === "call") {
     side.callMode = !side.callMode;

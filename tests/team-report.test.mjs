@@ -65,13 +65,10 @@ test("speed: from the person's first message to our answer; over a day — or no
   assert.equal(bogdan.slow, 2, "26 hours to answer, and one still waiting since Monday");
 });
 
-test("qualified by the inbox label of the last answer in the period; calls by who set «Дзвінок» in CRM", () => {
+test("qualified — by who set «Кваліфікований» in CRM in the period, never AI's label (таск e06c67c1); calls by who set «Дзвінок»", () => {
   const report = periodReport(facts({
-    labels: {
-      "acc1|t1": { label: "qualified", basis: "2|2026-10-21T08:00:00Z" },
-      "acc1|t2": { label: "qualified", basis: "1|2026-10-10T08:00:00Z" },
-      "acc1|t3": { label: "not_icp", basis: "1|2026-10-21T08:00:00Z" }
-    },
+    labels: { "acc1|t9": { label: "qualified", basis: "2|2026-10-21T08:00:00Z" } },
+    qualified: [{ changed_at: "2026-10-21T08:00:00Z", changed_by: "u-bogdan" }, { changed_at: "2026-10-10T08:00:00Z", changed_by: "u-bogdan" }],
     calls: [{ changed_at: "2026-10-21T08:08:00Z", changed_by: "u-bogdan" }, { changed_at: "2026-10-21T09:00:00Z", changed_by: "u-pavlo" }, { changed_at: "2026-10-01T09:00:00Z", changed_by: "u-pavlo" }]
   }), { from: "2026-10-21", to: "2026-10-21" });
   assert.equal(report.rows.find((row) => row.key === BOGDAN).qualified, 1);

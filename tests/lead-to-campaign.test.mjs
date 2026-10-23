@@ -53,3 +53,12 @@ test("Марко 22.10 (таск a0c0820f): «Пропустити» на 3 дн
   assert.match(form, /api\("\/api\/lead-campaigns\/assign", \{ method: "POST", body: JSON\.stringify\(\{ contactId: returnTo\.contactId, campaignId: saved\.campaign\.id \}\) \}\)/);
   assert.match(form, /if \(returnTo\) goBack\(null\);\n    renderLeadCampaigns\(\);/, "«Скасувати» теж повертає — раніше, ніж перемальовується список");
 });
+
+test("Марко 23.10 (таск e06c67c1): статус «Кваліфікований» ставить лідген; AI лише пропонує в картці", async () => {
+  const { LEAD_STATUSES, CLOSING } = await import("../triage/statuses.mjs");
+  assert.ok(LEAD_STATUSES.some(([key, label]) => key === "qualified" && label === "Кваліфікований"));
+  assert.equal(CLOSING.has("qualified"), false, "кваліфікований не виводить із воронки");
+  assert.match(today, /if \(aiLabel\?\.label !== "qualified" \|\| status === "qualified"\) return "";/);
+  assert.match(today, /status: "qualified", exitReason: ""/, "статус ставиться лише кнопкою лідгена");
+  assert.match(api, /aiLabel: item\.accountId && item\.threadKey \? inboxLabelOf\(item\.accountId, item\.threadKey\) \|\| null : null,/);
+});

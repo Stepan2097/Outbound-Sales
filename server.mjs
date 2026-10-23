@@ -10,7 +10,7 @@ import { CHANNEL_RULES, LANGUAGES, buildFallbackDrafts, draftsPromptPayload, nor
 import { invalidateContactCaches, contactAsProspect, contactsConfigured, contactsMissingConfig, crmKeyKind, folderContactAt, listContactFolders, listFolderContacts, searchFolderContacts, readContact, supabaseKeyKind } from "./contacts/store.mjs";
 import { handleKnowledgeLibraryApi } from "./knowledge/api.mjs";
 import { handlePitchApi } from "./knowledge/pitch-api.mjs";
-import { handleTodayApi, todayList, reconcileSoon, setLeadgenStore, setNewContactPolicyStore, setPingStepsStore, startPingReconciler } from "./triage/today.mjs";
+import { handleTodayApi, todayList, reconcileSoon, setInboxLabelReader, setLeadgenStore, setNewContactPolicyStore, setPingStepsStore, startPingReconciler } from "./triage/today.mjs";
 import { setActivityAuthor } from "./warmup/activities.mjs";
 import { campaignsByContact, handleLeadCampaignApi, leadCampaigns, setCampaignSkipStore, setLeadCampaignStore } from "./triage/lead-campaigns.mjs";
 import { handleCampaignReportApi, setReportStores, startReplyLabeler } from "./triage/campaign-report.mjs";
@@ -793,6 +793,7 @@ server.listen(port, listenHost, () => {
   // Автор наших повідомлень у CRM — лідген акаунта (20.10).
   setActivityAuthor(async (accountId) => (accountId && state.accountLeadgens?.[accountId]) || null);
   setContactOwnerOf(async (accountId) => (accountId && state.accountLeadgens?.[accountId]) || null);
+  setInboxLabelReader((accountId, threadKey) => inboxLabels.labelOf(accountId, threadKey));
   setPingStepsStore({
     read: () => state.pingSteps,
     async write(value) {
@@ -3463,17 +3464,19 @@ async function teamReportFacts(range) {
   }
   let people = new Map();
   let calls = [];
+  let qualified = [];
   if (warmupCrm.configured()) {
-    [people, calls] = await Promise.all([
+    [people, calls, qualified] = await Promise.all([
       warmupCrm.from("profiles").select("id,email").rows().then((rows) => new Map(rows.map((row) => [row.id, String(row.email || "").toLowerCase()]))).catch(() => new Map()),
-      warmupCrm.from("contact_status_history").select("changed_at,changed_by").eq("new_status", "booked_call").gte("changed_at", since).limit(5000).rows().catch(() => [])
+      warmupCrm.from("contact_status_history").select("changed_at,changed_by").eq("new_status", "booked_call").gte("changed_at", since).limit(5000).rows().catch(() => []),
+      // «Кваліфікований» ставить лише лідген (таск e06c67c1) — звіт рахує за статусом, не за міткою AI.
+      warmupCrm.from("contact_status_history").select("changed_at,changed_by").eq("new_status", "qualified").gte("changed_at", since).limit(5000).rows().catch(() => [])
     ]);
   }
   const entries = await workEntries();
   const value = {
-    events, people, calls, entries,
+    events, people, calls, qualified, entries,
     leadgens: state.accountLeadgens || {},
-    labels: state.inboxLabels || {},
     names: new Map(workUsers(entries).filter((row) => row.name).map((row) => [row.user, row.name])),
     journal: (await allEntries().catch(() => [])).filter((entry) => String(entry.at) >= since && ["message.sent", "message.replied"].includes(entry.type))
   };

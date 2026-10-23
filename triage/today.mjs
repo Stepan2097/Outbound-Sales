@@ -40,6 +40,13 @@ export function setLeadgenStore(store) {
 }
 const leadgenOf = (accountId) => (accountId && leadgenStore.read()[accountId]) || null;
 
+// Мітка AI розмови з «Вхідних» (warmup/inbox-labels.mjs) — щоб картка могла запропонувати статус
+// «Кваліфікований» (таск e06c67c1). Сам AI статусу не ставить.
+let inboxLabelOf = () => null;
+export function setInboxLabelReader(read) {
+  if (typeof read === "function") inboxLabelOf = read;
+}
+
 // Скільки нових контактів лідген бере, коли в нього є живі розмови (Марко 19.10:
 // «правило не змінюємо, можемо лише додати в налаштуваннях опцію вручну … зняти
 // обмеження, або дозволити обмежену кількість контактів»). { email: { mode, limit } }:
@@ -578,6 +585,7 @@ export async function todayItem({ pingId, viewer, now = new Date() }) {
     campaignAny: item.campaign || (contactId ? await anyCampaignOf(contactId).catch(() => null) : null),
     campaigns: leadCampaigns().filter((campaign) => campaign.folderIds.length).map(({ id, name, state }) => ({ id, name, state })),
     campaignSkippedUntil: contactId ? campaignSkippedUntil(contactId) : null,
+    aiLabel: item.accountId && item.threadKey ? inboxLabelOf(item.accountId, item.threadKey) || null : null,
     pending: (state?.pending || []).map(({ id, state: status, body, queuedAt }) => ({ id, state: status, body, queuedAt })),
     acceptedAt: state?.accepted?.acceptedAt || null,
     draft: drafts.get(`${pingId}|${key}`) || (firstDraft?.text ? { text: firstDraft.text, model: firstDraft.model, kind: "first" } : null)

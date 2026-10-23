@@ -61,6 +61,11 @@ export function warmupThreadTotal() {
   return warmupState.inbox.ready ? inboxThreadsOf(INBOX_ALL_ACCOUNTS).length : null;
 }
 
+/** Мітка AI розмови зі списку — картка пропонує за нею статус «Кваліфікований» (таск e06c67c1). */
+export function warmupThreadAiLabel(accountId, threadKey) {
+  return warmupState.inbox.threads.find((row) => row.accountId === accountId && row.threadKey === threadKey)?.aiLabel || null;
+}
+
 /**
  * Акаунти, які агент зараз не може читати: LinkedIn просить увійти або капча (таск b0eb7c3a,
  * Богдан 22.10: «не оновлюється діалоги»). Заблоковані сюди не входять — вони вже поза роботою.

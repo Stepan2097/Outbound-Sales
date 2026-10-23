@@ -8,7 +8,8 @@
 //                message.out), зараховані лідгену, що веде акаунт (Налаштування →
 //                акаунти); пошта: листи ESP (message.sent) — кнопкою чи розсилкою;
 //   відповіли  — розмови з повідомленням людини за період; відповіді на листи;
-//   кваліфіковані — мітка AI «Кваліфікована» у Вхідних, остання відповідь — у періоді;
+//   кваліфіковані — лідген поставив статус «Кваліфікований» у CRM за період (історія статусів, хто
+//                поставив); мітка AI лише пропонує його в картці (Марко 23.10, таск e06c67c1);
 //   дзвінки    — історія статусів CRM: «Дзвінок» поставлено в періоді (хто поставив);
 //   швидкість  — від повідомлення людини (першого поспіль) до нашої відповіді в тій
 //                самій розмові; «повільно» — понад 24 год, або досі без відповіді.
@@ -69,7 +70,7 @@ const median = (values) => {
  *   events   — LinkedIn: [{ type: "message.in"|"message.out", account_id, created_at, meta: { threadKey, sentAt, sentAtIso } }]
  *   leadgens — { accountId: profileId };   people — Map profileId → email
  *   names    — Map email → ім'я (з журналу роботи)
- *   labels   — мітки Вхідних: { "accountId|threadKey": { label, basis: "N|lastInAt" } }
+ *   qualified — [{ changed_at, changed_by }] — «Кваліфікований» в історії статусів CRM
  *   calls    — [{ changed_at, changed_by }] — «Дзвінок» в історії статусів CRM
  *   journal  — журнал ESP: [{ type, at, contact, data }]
  *   entries  — журнал роботи: хто надіслав лист кнопкою (wrote · email)
@@ -125,12 +126,10 @@ export function periodReport(facts, { from, to, now = new Date(), only = "" }) {
     }
   }
 
-  // Кваліфіковані: мітка Вхідних, остання відповідь людини — в періоді.
-  for (const [key, value] of Object.entries(facts.labels || {})) {
-    if (value?.label !== "qualified") continue;
-    const lastIn = String(value.basis || "").split("|")[1];
-    if (!lastIn || !inside(lastIn)) continue;
-    row(leadgenOf(key.split("|")[0])).qualified += 1;
+  // Кваліфіковані: хто поставив «Кваліфікований» у CRM за період — лише людина, не AI.
+  for (const set of facts.qualified || []) {
+    if (!inside(set.changed_at)) continue;
+    row(facts.people?.get(set.changed_by) || "").qualified += 1;
   }
 
   // Дзвінки: хто поставив «Дзвінок» у CRM.
