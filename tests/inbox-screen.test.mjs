@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import vm from "node:vm";
 
 import { loadMain, mainSource, declaration } from "./app-main-excerpt.mjs";
@@ -17,7 +18,7 @@ import { loadMain, mainSource, declaration } from "./app-main-excerpt.mjs";
 const NAMES = [
   "escapeHtml", "escapeAttr", "uaPlural", "warmupCount",
   "WARMUP_OUTREACH_LABEL", "WARMUP_OUTREACH_TONE",
-  "WARMUP_SYNC_STALE_HOURS", "inboxAccountFilter", "inboxSearch", "inboxReplied", "inboxLabelFilter", "AI_LABEL_TONE", "inboxLabelOf", "inboxLabelRank", "inboxLabelWord", "warmupInboxLabelsHtml", "warmupThreadLabelHtml", "INBOX_REPLIED", "repliedTest", "warmupInboxRepliedHtml", "inboxSearchTerms", "inboxPaneKey",
+  "WARMUP_SYNC_STALE_HOURS", "inboxAccountFilter", "inboxSearch", "inboxReplied", "inboxLabelFilter", "AI_LABEL_TONE", "shownLabel", "inboxLabelOf", "inboxLabelRank", "inboxLabelWord", "warmupInboxLabelsHtml", "warmupThreadLabelHtml", "INBOX_REPLIED", "repliedTest", "warmupInboxRepliedHtml", "inboxSearchTerms", "inboxPaneKey",
   "inboxIndexedThreads", "inboxIndexedAccounts", "inboxThreadIndex", "warmupInboxIndex",
   "inboxRenderedMarkup", "inboxLoadPromise", "inboxSessionVersion", "inboxOpenRequest", "setInboxMarkup", "warmupInboxNextHtml", "renderWarmupInboxNext", "renderWarmupInboxList",
   "warmupAgo", "KYIV_DAY", "kyivDay", "warmupWhen", "warmupTimeHtml", "warmupMoment", "warmupStamp", "warmupHoursSince", "WARMUP_PLACEHOLDERS", "warmupPlaceholder", "warmupBodyHtml",
@@ -1183,4 +1184,16 @@ test("на самому Workspace перехід до розмови не нат
   const { clicks, get } = screen({ accounts: [{ accountId: "acc-a", identity: "Anna Kovalenko", unread: 1 }, { accountId: "acc-b", label: "Profile 7", unread: 1 }] });
   get("showWarmupInboxThread")("acc-a", "t-read");
   assert.deepEqual(clicks, []);
+});
+
+test("Марко 23.10 (таск e06c67c1): «Кваліфікована» від AI не показується ні міткою, ні фільтром — лише пропозицією статусу в картці", () => {
+  const { get } = screen();
+  const shown = get("shownLabel");
+  const of = get("inboxLabelOf");
+  assert.equal(shown({ aiLabel: { label: "qualified", by: "ai" } }), null);
+  assert.equal(of({ answered: true, aiLabel: { label: "qualified", by: "ai" } }), "none", "у списку — як без мітки");
+  assert.deepEqual(shown({ aiLabel: { label: "not_icp", by: "ai" } }), { label: "not_icp", by: "ai" }, "інші мітки AI лишаються");
+  assert.deepEqual(shown({ aiLabel: { label: "qualified", by: "human" } }), { label: "qualified", by: "human" });
+  const source = readFileSync(new URL("../app/screens/inbox.js", import.meta.url), "utf8");
+  assert.match(source, /const options = meta\.list\.filter\(\(\[key\]\) => key !== "qualified" \|\| current === "qualified"\);/, "у полі «Мітка» «Кваліфікована» не пропонується");
 });

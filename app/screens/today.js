@@ -617,7 +617,7 @@ function campaignChoiceHtml({ campaigns, skippedUntil, attr, busy }) {
 function qualifiedHintHtml(aiLabel, status, attr) {
   if (aiLabel?.label !== "qualified" || status === "qualified") return "";
   const act = attr === "side" ? 'data-side="set-qualified"' : 'data-today="set-qualified"';
-  return `<p class="today-side-suggest"><i data-lucide="sparkles"></i><span>AI: схоже на кваліфікованого ліда. Статус ставиш ти.</span></p>
+  return `<p class="today-side-suggest"><i data-lucide="sparkles"></i><span>AI: схоже на кваліфікованого — відповів на кілька запитань, час дзвінка ще не погоджено. Статус ставиш ти.</span></p>
     <button type="button" class="today-side-wide" ${act} title="Поставити статус «Кваліфікований» у CRM">Поставити «Кваліфікований»</button>`;
 }
 
@@ -954,6 +954,7 @@ function helpHtml() {
   return `<section class="today-help" aria-label="Як працювати з фільтрами">
     <p><b>Порядок дня:</b> Відповіді → Прострочені → На сьогодні → Перші повідомлення. «Без відповіді» й «Усі розмови» — перевіряти час від часу.</p>
     <dl>${rows.map(([title, key]) => `<dt>${escapeHtml(title)}</dt><dd>${escapeHtml(FILTER_TEXT[key][1])}</dd>`).join("")}</dl>
+    <p><b>Статуси:</b> «Відповів» — лід написав у відповідь. «Кваліфікований» — відповів на кілька наших запитань, можливо, вже говорили про дзвінок, але час не погодили. «Дзвінок» — чітко домовились про дату й час дзвінка. Статус ставиш ти; AI лише підказує «Кваліфікований» у колонці дій.</p>
     <p>Праворуч від розмови — дії з лідом: статус у CRM, наступний пінг (+1 і +3 — робочі дні, +7 — тиждень, дата, дзвінок), «Невдалий час» — пінг «Повернутись» через місяць, і кампанія. У CRM для цього заходити не треба.</p>
   </section>`;
 }

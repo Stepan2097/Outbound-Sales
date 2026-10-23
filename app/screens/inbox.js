@@ -114,9 +114,20 @@ let inboxReplied = "all";
 let inboxLabelFilter = "";
 const AI_LABEL_TONE = { qualified: "tone-live", other: "tone-muted", traffic_only: "tone-warn", not_icp: "tone-muted", refusal: "tone-warn" };
 
+/**
+ * Мітка, яку видно людині. «Кваліфікована» від AI — не мітка й не статус: її ставить лише лідген
+ * статусом у CRM, а AI лише пропонує в картці розмови (Марко 23.10, таск e06c67c1: «деякі розмови
+ * мають такий статус, хоча наш лідген цього не позначав… треба це відкатити»).
+ */
+function shownLabel(thread) {
+  const label = thread?.aiLabel;
+  return label?.label && !(label.label === "qualified" && label.by === "ai") ? label : null;
+}
+
 /** The key a conversation is sorted and filtered by: its label, "none" when the person wrote and AI has not looked yet, "" when they never wrote. */
 function inboxLabelOf(thread) {
-  if (thread?.aiLabel?.label) return thread.aiLabel.label;
+  const label = shownLabel(thread);
+  if (label) return label.label;
   return thread?.answered ? "none" : "";
 }
 
@@ -521,7 +532,7 @@ function warmupThreadRowHtml(thread) {
       <span class="warmup-thread-main">
         <span class="warmup-thread-top">
           <strong${warmupParticipantNameAttr(participant)}>${escapeHtml(name)}</strong>
-          ${thread.aiLabel?.label ? `<span class="warmup-thread-label is-${escapeAttr(thread.aiLabel.label)}" title="${escapeAttr(thread.aiLabel.by === "ai" ? "Мітку поставив AI" : "Мітку поставила людина")}">${escapeHtml(inboxLabelWord(thread.aiLabel.label))}</span>` : ""}
+          ${shownLabel(thread) ? `<span class="warmup-thread-label is-${escapeAttr(shownLabel(thread).label)}" title="${escapeAttr(shownLabel(thread).by === "ai" ? "Мітку поставив AI" : "Мітку поставила людина")}">${escapeHtml(inboxLabelWord(shownLabel(thread).label))}</span>` : ""}
           ${warmupTimeHtml(last)}
         </span>
         ${participant.headline ? `<span class="warmup-thread-headline">${escapeHtml(participant.headline)}</span>` : ""}
@@ -761,9 +772,11 @@ function warmupThreadLabelHtml(thread) {
   if (!meta) return "";
   const listed = warmupState.inbox.threads.find((row) => row.accountId === (thread.accountId || warmupState.inbox.openAccountId) && row.threadKey === (thread.threadKey || warmupState.inbox.openThreadKey));
   if (!listed?.answered) return "";
-  const current = listed.aiLabel?.label || "";
-  return `<label class="warmup-thread-label-pick" title="${escapeAttr(listed.aiLabel?.by === "ai" ? "Мітку поставив AI — змініть, якщо не так" : current ? "Мітку поставила людина" : "AI ще не дивився")}"><span>Мітка</span>
-    <select data-warmup-label-set>${current ? "" : '<option value="" selected>без мітки</option>'}${meta.list.map(([key, word]) => `<option value="${escapeAttr(key)}"${current === key ? " selected" : ""}>${escapeHtml(word)}</option>`).join("")}</select></label>`;
+  const current = shownLabel(listed)?.label || "";
+  // «Кваліфікований» — статус у CRM у колонці дій, а не мітка (таск e06c67c1).
+  const options = meta.list.filter(([key]) => key !== "qualified" || current === "qualified");
+  return `<label class="warmup-thread-label-pick" title="${escapeAttr(shownLabel(listed)?.by === "ai" ? "Мітку поставив AI — змініть, якщо не так" : current ? "Мітку поставила людина" : "Без мітки")}"><span>Мітка</span>
+    <select data-warmup-label-set>${current ? "" : '<option value="" selected>без мітки</option>'}${options.map(([key, word]) => `<option value="${escapeAttr(key)}"${current === key ? " selected" : ""}>${escapeHtml(word)}</option>`).join("")}</select></label>`;
 }
 
 /**
