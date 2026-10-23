@@ -77,7 +77,8 @@ function teamRowHtml(person, selfEmail) {
     (person.aliases || []).length ? `та сама пошта, що ${person.aliases.join(", ")}` : "",
     person.crmRole ? `у CRM ${person.crmRole}` : "",
     person.signedInHere ? "" : "тут ще не заходив",
-    person.lastSignInAt ? `вхід ${relativeTime(person.lastSignInAt)}` : "жодного входу"
+    // Остання робота — у CRM чи тут (23.10): вхід паролем буває раз на тиждень, робота — щодня.
+    person.lastActiveAt ? `активність ${relativeTime(person.lastActiveAt)}` : person.lastSignInAt ? `вхід ${relativeTime(person.lastSignInAt)}` : "жодного входу"
   ].filter(Boolean).join(" · ");
   const options = ["admin", "seller"].map((value) =>
     `<option value="${value}"${value === person.role ? " selected" : ""}>${ROLE_LABEL[value]}</option>`

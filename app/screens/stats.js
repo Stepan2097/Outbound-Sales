@@ -3,7 +3,7 @@
 // днях. Сервер кличе ті самі функції бази CRM (triage/crm-stats.mjs), тож числа
 // збігаються з CRM.
 
-import { api, escapeAttr, escapeHtml, onScreen, refreshIcons } from "../core.js";
+import { api, authState, escapeAttr, escapeHtml, onScreen, refreshIcons } from "../core.js";
 
 const PERIODS = [["this_week", "Цей тиждень"], ["prev_week", "Минулий тиждень"], ["this_month", "Цей місяць"], ["prev_month", "Минулий місяць"]];
 const STAGE_COLOR = { in_progress: "#8b5cf6", linkedin_activity: "#0a66c2", responded_or_other: "#10b981", booked_call: "#f59e0b", deal_created: "#ec4899" };
@@ -115,6 +115,27 @@ function teamHtml(team) {
   </table></div></div>`;
 }
 
+const hours = (minutes) => (minutes ? `${Math.floor(minutes / 60)} год ${String(minutes % 60).padStart(2, "0")} хв` : "0");
+
+/**
+ * Години (власник 23.10: «а де години?»): час роботи — один на CRM і Outbound,
+ * відрізки, що перекриваються, не додаються (triage/crm-sessions.mjs); дій на
+ * годину — «Всього дій» на цей час. Як у CRM — лише для адміністратора.
+ */
+function trackerHtml(team) {
+  if (authState?.user?.role !== "admin") return "";
+  const rows = [...team].filter((row) => row.minutes || row.total_activities).sort((left, right) => right.minutes - left.minutes || String(left.email).localeCompare(String(right.email)));
+  return `<div class="panel stats-table-panel"><h4>Ефективність по трекеру: дій на годину і час роботи</h4>
+    <p class="stats-subtle stats-note">Час роботи — разом у CRM і Outbound: коли відкриті обидві вкладки, це один час, а не два.</p>
+    <div class="table-wrap"><table class="stats-table">
+      <thead><tr><th>Користувач</th><th class="is-number">Дій / год</th><th class="is-number">Час роботи</th><th class="is-number">Сесій</th><th class="is-number">Всього дій</th></tr></thead>
+      <tbody>${rows.length ? rows.map((row) => `<tr title="${escapeAttr((row.weekdayMinutes || []).filter((day) => day.minutes).map((day) => `${day.label}: ${hours(day.minutes)}`).join("\n"))}">
+        <td>${escapeHtml(row.email)}</td><td class="is-number">${row.actionsPerHour ? row.actionsPerHour.toLocaleString("uk-UA") : "—"}</td>
+        <td class="is-number">${hours(row.minutes)}</td><td class="is-number">${number(row.sessions)}</td><td class="is-number">${number(row.total_activities)}</td>
+      </tr>`).join("") : '<tr><td colspan="5" class="stats-subtle">За цей період ніхто не працював.</td></tr>'}</tbody>
+    </table></div></div>`;
+}
+
 function dailyHtml(daily) {
   if (!daily.length) return '<div class="panel"><p class="stats-subtle">За цей період нічого не додано й не зроблено.</p></div>';
   return `<div class="panel stats-table-panel"><h4>По кожному користувачу за день: додані контакти та сейлз активності</h4><div class="table-wrap stats-daily"><table class="stats-table">
@@ -137,7 +158,7 @@ function render() {
       ${kpisHtml(data.kpis)}
       ${funnelHtml(data.funnel, data.people || [])}
       ${dealsHtml(data.deals)}
-      <section class="stats-section"><h3>3. Навантаження команди</h3>${teamHtml(data.team)}${dailyHtml(data.daily)}</section>
+      <section class="stats-section"><h3>3. Навантаження команди</h3>${teamHtml(data.team)}${trackerHtml(data.team)}${dailyHtml(data.daily)}</section>
     </div>`;
   refreshIcons(root);
 }

@@ -46,3 +46,4 @@
 @media (max-width: 720px) {
   .stats-funnel-row { grid-template-columns: 110px 1fr 40px; }
 }
+.stats-note { margin: -4px 0 10px; font-size: 12px; }

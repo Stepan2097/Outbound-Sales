@@ -9,6 +9,8 @@
 // або свої дати; порівняння — з попереднім періодом тієї самої довжини. Межі днів —
 // за Europe/Warsaw, як підписано в CRM («Таймзона аналітики»).
 
+import { mergedIntervals, sessionStats, sessionsInRange } from "./crm-sessions.mjs";
+
 export const STATS_ZONE = "Europe/Warsaw";
 export const PRESETS = ["this_week", "prev_week", "this_month", "prev_month"];
 
@@ -151,6 +153,16 @@ export function teamFrom(profiles = [], breakdown = [], details = []) {
   })).sort((left, right) => right.total_activities - left.total_activities || String(left.email).localeCompare(String(right.email)));
 }
 
+/** Hours at work (CRM + Outbound, overlaps merged) and actions per hour, as CRM's tracker shows them. */
+export function withTime(team, time) {
+  const byUser = new Map(time.map((row) => [row.userId, row]));
+  return team.map((row) => {
+    const tracked = byUser.get(row.userId);
+    const minutes = tracked?.minutes || 0;
+    return { ...row, minutes, sessions: tracked?.sessions || 0, weekdayMinutes: tracked?.weekdays || [], actionsPerHour: minutes ? Math.round((row.total_activities / (minutes / 60)) * 10) / 10 : 0 };
+  });
+}
+
 /** get_user_daily_performance → newest day first, then by person. */
 export function dailyFrom(profiles = [], rows = []) {
   const emails = new Map(profiles.map((profile) => [profile.id, profile.email]));
@@ -166,7 +178,7 @@ export async function crmStats({ crm, preset, from, to, user = "all", now = Date
   const who = /^[0-9a-f-]{36}$/i.test(String(user)) ? user : null;
   const rpc = (name, args) => crm.rpc(name, args).rows();
   const span = (r) => ({ p_start: r.start, p_end: r.end });
-  const [funnelNow, funnelBefore, volumesNow, volumesBefore, breakdown, details, daily, profiles] = await Promise.all([
+  const [funnelNow, funnelBefore, volumesNow, volumesBefore, breakdown, details, daily, profiles, sessions] = await Promise.all([
     rpc("get_funnel_counts", { ...span(current), p_user: who }),
     rpc("get_funnel_counts", { ...span(previous), p_user: who }),
     rpc("get_deal_volumes", { start_date: current.start, end_date: current.end }),
@@ -174,7 +186,9 @@ export async function crmStats({ crm, preset, from, to, user = "all", now = Date
     rpc("get_user_activity_breakdown", span(current)),
     rpc("get_user_channel_details", span(current)),
     rpc("get_user_daily_performance", span(current)),
-    crm.from("profiles").select("id,email").eq("approval_status", "approved").rows()
+    crm.from("profiles").select("id,email").eq("approval_status", "approved").rows(),
+    // Working time — one for CRM and Outbound (triage/crm-sessions.mjs): «години» of the page.
+    sessionsInRange({ crm, start: current.start, end: current.end })
   ]);
   const funnel = funnelFrom(funnelNow[0] || {});
   const before = funnelFrom(funnelBefore[0] || {});
@@ -188,7 +202,7 @@ export async function crmStats({ crm, preset, from, to, user = "all", now = Date
     kpis: kpisFrom(funnel, before, revenue, prevRevenue),
     funnel,
     deals: { won, lost: stageCount(funnel, "lost"), revenue, average: won ? revenue / won : 0 },
-    team: teamFrom(profiles, breakdown, details),
+    team: withTime(teamFrom(profiles, breakdown, details), sessionStats(mergedIntervals(sessions, { start: current.start, end: current.end, now }), { zone: STATS_ZONE })),
     daily: dailyFrom(profiles, daily)
   };
 }

@@ -52,6 +52,7 @@ import { leadStore } from "./esp/leads.mjs";
 import { crmLeadSource } from "./esp/crm-leads.mjs";
 import { folderChecker } from "./esp/folder-check.mjs";
 import { crmStats } from "./triage/crm-stats.mjs";
+import { lastActive, sessionBeat } from "./triage/crm-sessions.mjs";
 import { companyFolderSource, isCompanyFolder } from "./esp/crm-company-leads.mjs";
 import { anty as warmupAnty, crm as warmupCrm } from "./warmup/db.mjs";
 import { likeLiteral } from "./warmup/rest.mjs";
@@ -1746,6 +1747,9 @@ async function handleApi(request, response, url) {
   if (request.method === "POST" && url.pathname === "/api/account/heartbeat") {
     const body = await readJson(request).catch(() => ({}));
     sendJson(response, 200, recordUserHeartbeat(request.auth.profile, { tabId: body?.tabId }));
+    // The same beat keeps the person's CRM session open: one working time for
+    // both apps, overlaps not added (triage/crm-sessions.mjs, 23.10).
+    beatCrmSession(request.auth.profile);
     return;
   }
 
@@ -4356,8 +4360,22 @@ async function supabaseRestRows(table, columns) {
  * anybody has to fix: the role shown for them is the one they would be given
  * the moment they do.
  */
+// One CRM session beat per person per 45 s, however many tabs are open.
+const crmBeatAt = new Map();
+function beatCrmSession(profile) {
+  const userId = cleanText(profile?.id || "");
+  if (!userId || !warmupCrm.configured()) return;
+  const now = Date.now();
+  if (now - (crmBeatAt.get(userId) || 0) < 45_000) return;
+  crmBeatAt.set(userId, now);
+  void sessionBeat({ crm: warmupCrm, userId, now }).catch((error) => console.warn(`[time] CRM session: ${error.message}`));
+}
+
 async function workspaceDirectory({ endValue = new Date() } = {}) {
   const crmByEmail = await crmProfilesByEmail({ maxAgeMs: 0 });
+  // When each person was last at work, in the CRM or here (23.10): a sign-in is
+  // made once a week, the work every day.
+  const activeAt = warmupCrm.configured() ? await lastActive({ crm: warmupCrm }).catch(() => new Map()) : new Map();
   const { accounts, adminApi, adminApiError } = await directoryAccounts(crmByEmail);
 
   // The team is the CRM's user base — the people its own users page shows
@@ -4402,6 +4420,7 @@ async function workspaceDirectory({ endValue = new Date() } = {}) {
       // Other addresses that reach this same person. Empty for almost everybody.
       aliases: [],
       lastSignInAt: user.last_sign_in_at || crm?.last_sign_in_at || null,
+      lastActiveAt: [activeAt.get(user.id), state.userActivity?.[user.id]?.lastSeenAt].filter(Boolean).sort().at(-1) || null,
       createdAt: user.created_at || null
     };
   });
@@ -4410,7 +4429,7 @@ async function workspaceDirectory({ endValue = new Date() } = {}) {
   // Those who can work first, then by how recently they used the CRM.
   collapsed.sort((left, right) => {
     if (Boolean(left.blocked) !== Boolean(right.blocked)) return left.blocked ? 1 : -1;
-    return String(right.lastSignInAt || right.createdAt || "").localeCompare(String(left.lastSignInAt || left.createdAt || ""));
+    return String(right.lastActiveAt || right.lastSignInAt || right.createdAt || "").localeCompare(String(left.lastActiveAt || left.lastSignInAt || left.createdAt || ""));
   });
   return {
     people: collapsed,
