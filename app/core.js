@@ -40,13 +40,25 @@ export const uaPlural = (count, one, few, many) => {
 
 export async function api(path, options = {}) {
   const requestEpoch = getCacheEpoch();
-  const response = await fetch(path, {
+  const init = {
     ...options,
     headers: {
       "Content-Type": "application/json",
       ...(options.headers || {})
     }
-  });
+  };
+  // Проксі перед порталом відповідає 502/503/504 без JSON, поки портал перезапускається після деплою
+  // (Марко 23.10, таск de89bd49: «Звіт команди» інколи відкривається з помилкою, після перезавантаження —
+  // ні). Читання (GET) тоді тихо повторюється двічі — через 1,5 і 3 с; запис — ніколи, щоб нічого не задвоїти.
+  const read = ["GET", "HEAD"].includes(String(options.method || "GET").toUpperCase());
+  let response;
+  let fromGateway = false;
+  for (const wait of [1500, 3000, null]) {
+    response = await fetch(path, init);
+    fromGateway = [502, 503, 504].includes(response.status) && !String(response.headers?.get?.("content-type") || "").includes("application/json");
+    if (!fromGateway || !read || wait === null) break;
+    await new Promise((resolve) => setTimeout(resolve, wait));
+  }
   if (requestEpoch !== getCacheEpoch() && !path.startsWith("/api/auth/")) {
     const failure = new Error("Session changed");
     failure.name = "AbortError";
@@ -63,7 +75,9 @@ export async function api(path, options = {}) {
       authState = { authenticated: false, bootstrapRequired: Boolean(body.bootstrapRequired) };
       showAuthGate();
     }
-    const failure = new Error(body.error || `Request failed with ${response.status}`);
+    const failure = new Error(body.error || (fromGateway
+      ? "Портал щойно перезапускався й не встиг відповісти. Оновіть сторінку за хвилину."
+      : `Request failed with ${response.status}`));
     failure.status = response.status;
     failure.payload = body;
     throw failure;

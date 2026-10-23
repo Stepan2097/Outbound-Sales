@@ -27,7 +27,7 @@ const FILTERS = [["all", "Усі"], ["fresh", "Нові відповіді"], ["
 
 const PERIOD_KEY = "outbound.work.period";
 const readPeriod = () => { try { return localStorage.getItem(PERIOD_KEY) === "week" ? "week" : "day"; } catch { return "day"; } };
-const work = { period: readPeriod(), date: "", user: "", data: null, report: null, loading: false, error: "", filter: "all", open: "", dialog: null, timer: null };
+const work = { period: readPeriod(), date: "", user: "", data: null, report: null, reportError: "", loading: false, error: "", filter: "all", open: "", dialog: null, timer: null };
 
 const rootEl = () => document.getElementById("workRoot");
 const visible = () => document.getElementById("view-work")?.classList.contains("active");
@@ -62,12 +62,16 @@ async function load({ quiet = false } = {}) {
     if (work.user) query.set("user", work.user);
     const asked = new URLSearchParams({ period: work.period });
     if (work.date) asked.set("date", work.date);
-    // Тиждень — лише звіт; день — звіт і журнал дня.
-    const [report, data] = await Promise.all([
+    // Тиждень — лише звіт; день — звіт і журнал дня. Кожне — окремо: якщо одне не відповіло,
+    // друге однаково показується (таск de89bd49).
+    const [report, day] = await Promise.allSettled([
       api(`/api/work/report?${asked}`),
       work.period === "day" || !work.data ? api(`/api/work/day?${query}`) : Promise.resolve(work.data)
     ]);
-    work.report = report;
+    if (day.status === "rejected") throw day.reason;
+    const data = day.value;
+    work.report = report.status === "fulfilled" ? report.value : null;
+    work.reportError = report.status === "rejected" ? (report.reason?.message || "Звіт не прочитався.") : "";
     work.data = data;
     work.date = work.date || data.date;
     work.user = data.user;
@@ -375,12 +379,12 @@ function render() {
   else {
     const report = work.report;
     const who = data.user === "all" ? " · уся команда" : data.user !== data.viewer ? ` · ${escapeHtml((data.users || []).find((row) => row.user === data.user)?.name || data.user)}` : "";
-    const results = report ? `${summaryHtml(report)}${leadgensHtml(report)}` : "";
-    body = work.period === "week" && report
-      ? `<h2 class="work-title">Тиждень · ${escapeHtml(rangeWord(report))}${report.admin ? " · уся команда" : ""}</h2>
+    const results = report ? `${summaryHtml(report)}${leadgensHtml(report)}` : work.reportError ? `<p class="esp-notice is-bad">Зведення не прочиталось: ${escapeHtml(work.reportError)} <button type="button" data-work="reload">Ще раз</button></p>` : "";
+    body = work.period === "week"
+      ? (report ? `<h2 class="work-title">Тиждень · ${escapeHtml(rangeWord(report))}${report.admin ? " · уся команда" : ""}</h2>
         ${weekDaysHtml(report)}
         ${results}
-        <p class="work-muted">Журнал людей — по днях: натисніть день у смузі вище.</p>`
+        <p class="work-muted">Журнал людей — по днях: натисніть день у смузі вище.</p>` : results)
       : `${daysHtml(data)}
         <h2 class="work-title">${escapeHtml(dayWord(work.date))}${report?.admin ? " · уся команда" : ""}</h2>
         ${results}

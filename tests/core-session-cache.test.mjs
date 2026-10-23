@@ -19,7 +19,9 @@ function harness(fetch) {
     document: { getElementById: () => ({ hidden: false }) },
     window: { location: { hash: "", origin: "https://workspace.example" } }, URLSearchParams,
     rememberedView: () => "contacts", linkedView: () => null, setView: () => openedScopes.push(scope),
-    render: () => { renders += 1; }, startActivityHeartbeat: () => {}, enterHooks: []
+    render: () => { renders += 1; }, startActivityHeartbeat: () => {}, enterHooks: [],
+    // Повтор після 502 від проксі (таск de89bd49) чекає 1,5 і 3 с — у тестах одразу.
+    setTimeout: (fn) => setTimeout(fn, 0)
   });
   return { get: main.get, switchSession: () => { epoch += 1; }, openedScopes,
     invalidationOptions, gates: () => gates, invalidations: () => invalidations, renders: () => renders, scope: () => scope };
@@ -70,4 +72,16 @@ test("successful mutations invalidate safe read caches but heartbeat and GET do 
   assert.equal(h.invalidations(), 1);
   assert.equal(h.invalidationOptions[0].prefix, "");
   assert.equal(h.invalidationOptions[0].options.retryPending, true);
+});
+
+test("a GET that meets the proxy's 502 while the portal restarts is retried; a write is not (таск de89bd49)", async () => {
+  const gateway = { ok: false, status: 502, headers: { get: () => "text/html" }, json: async () => { throw new Error("not json"); } };
+  let reads = 0;
+  const h = harness(async () => { reads += 1; return reads < 2 ? gateway : answer({ fine: true }); });
+  assert.deepEqual(await h.get("api")("/api/work/report"), { fine: true });
+  assert.equal(reads, 2, "один повтор після 502 від проксі");
+  let writes = 0;
+  const w = harness(async () => { writes += 1; return gateway; });
+  await assert.rejects(w.get("api")("/api/today/status", { method: "POST", body: "{}" }), /Портал щойно перезапускався/);
+  assert.equal(writes, 1, "запис не повторюється");
 });
