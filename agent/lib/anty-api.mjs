@@ -1,7 +1,13 @@
 import { randomUUID } from 'node:crypto';
 
 export class AntyApi {
-  constructor(baseUrl, { fetchImpl = fetch } = {}) {
+  /**
+   * `cloud` — an AntyCloud (lib/anty-cloud.mjs): the profile's LinkedIn session
+   * is taken from Anty's cloud as it opens and given back as it closes, when
+   * the visit said it saw the feed (`session.signedIn(true)`). It never stops a
+   * visit: a cloud that fails is a line in the log.
+   */
+  constructor(baseUrl, { fetchImpl = fetch, cloud = null, log = () => {} } = {}) {
     const url = new URL(baseUrl);
     if (url.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) ||
         url.username || url.password || url.pathname !== '/' || url.search || url.hash) {
@@ -9,6 +15,8 @@ export class AntyApi {
     }
     this.baseUrl = url.origin;
     this.fetch = fetchImpl;
+    this.cloud = cloud;
+    this.log = log;
   }
 
   async request(route, body) {
@@ -32,9 +40,15 @@ export class AntyApi {
     const ownerToken = randomUUID();
     let browser;
     let closing;
+    let context;
+    let sawFeed = false;
     const close = () => {
       if (closing) return closing;
       closing = (async () => {
+        if (sawFeed && context && this.cloud) {
+          await this.cloud.give(remoteId, context)
+            .catch(error => this.log(`☁️ не віддав сесію в Anty-хмару: ${error.message}`));
+        }
         // Runtime owns the persistent context and flushes it before closing Chrome.
         // Closing the attached context first would lose the last session changes.
         await this.request(`/api/profiles/${profile.id}/stop`, { ownerToken });
@@ -51,9 +65,21 @@ export class AntyApi {
         throw new Error('Anty returned an invalid private CDP endpoint');
       }
       browser = await chromium.connectOverCDP(endpoint.href, { timeout: 30000 });
-      const context = browser.contexts()[0];
+      context = browser.contexts()[0];
       if (!context) throw new Error('Anty did not expose its persistent context');
-      return { profile: { ...profile, proxy: { server: profile.proxyServer }, managedByAnty: true }, context, close };
+      const taken = this.cloud
+        ? await this.cloud.take(remoteId, context).catch(error => {
+          this.log(`☁️ не взяв сесію з Anty-хмари: ${error.message}`);
+          return {};
+        })
+        : {};
+      if (taken.signedIn) sawFeed = true;
+      return {
+        profile: { ...profile, proxy: { server: profile.proxyServer }, managedByAnty: true },
+        context,
+        close,
+        signedIn: (yes) => { sawFeed = Boolean(yes); }
+      };
     } catch (error) {
       // The request may have reached the server before the client lost its response.
       // The owner token prevents cleanup from stopping a concurrent user's browser.

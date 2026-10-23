@@ -31,7 +31,8 @@ import { DEFAULT_PORTAL } from './lib/env.mjs';
 import { Portal } from './lib/portal.mjs';
 import { AntyApi } from './lib/anty-api.mjs';
 import { Telegram } from './lib/telegram.mjs';
-import { probeLogin } from './lib/login-probe.mjs';
+import { probeLogin, settle } from './lib/login-probe.mjs';
+import { cloudFromEnv } from './lib/anty-cloud.mjs';
 import { answerAsks, checkParked, normalizeState, RECHECK_MS } from './lib/login-watch.mjs';
 import { writeFileAtomicSync } from './lib/atomic-write.mjs';
 
@@ -68,7 +69,10 @@ function writeState(state) {
 
 const portal = new Portal(PORTAL);
 const telegram = new Telegram();
-const antyApi = process.env.WARMUP_ANTY_API ? new AntyApi(process.env.WARMUP_ANTY_API) : null;
+// A login the owner makes in his desktop Anty reaches this copy through the cloud (власник 23.10).
+const antyApi = process.env.WARMUP_ANTY_API
+  ? new AntyApi(process.env.WARMUP_ANTY_API, { cloud: cloudFromEnv({ agentDir: here, log, check: (page) => settle(page) }), log })
+  : null;
 
 const probe = async (account) => {
   if (!antyApi) throw new Error('WARMUP_ANTY_API не заданий — нема де відкрити профіль');

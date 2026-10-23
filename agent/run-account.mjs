@@ -26,6 +26,8 @@ import { syncInbox } from './lib/inbox.mjs';
 import { syncNetwork } from './lib/network.mjs';
 import { sendReplies } from './lib/outbox.mjs';
 import { AntyApi } from './lib/anty-api.mjs';
+import { cloudFromEnv } from './lib/anty-cloud.mjs';
+import { fileURLToPath } from 'node:url';
 import { settle } from './lib/login-probe.mjs';
 import { UNREACTED_BUTTON, isUnreacted } from './lib/reactions.mjs';
 import { TAB_HEAP_LIMIT_MB, describeMemory, freshTab, isTabCrash, oneTab, tabMemory } from './lib/tab.mjs';
@@ -132,7 +134,11 @@ if (!Object.values(remaining).some((n) => n > 0) && !plan.inbox?.due && !(plan.i
 
 // ── the browser this account lives in ──────────────────────────────────────
 const runtime = process.env.WARMUP_ANTY_API
-  ? await new AntyApi(process.env.WARMUP_ANTY_API).open(found.profileRemoteId, chromium)
+  ? await new AntyApi(process.env.WARMUP_ANTY_API, {
+    // The session is taken from Anty's cloud and given back to it (власник 23.10).
+    cloud: cloudFromEnv({ agentDir: path.dirname(fileURLToPath(import.meta.url)), log, check: (tab) => settle(tab) }),
+    log
+  }).open(found.profileRemoteId, chromium)
   : null;
 if (runtime) closeBrowser = runtime.close;
 const profile = runtime?.profile || readProfile(found.profileRemoteId);
@@ -280,6 +286,8 @@ log(`сесію відкрито (${session.sessionId}${session.resumed ? ', п�
   await shot(page, '1-feed');
 
   await guard();
+  // Only a session that opened the feed goes back to the cloud.
+  runtime?.signedIn?.(signedIn);
   if (!signedIn) {
     await portal.health(reason === 'checkpoint' ? 'captcha' : 'needs_login', `LinkedIn: ${reason} at ${url}`);
     await portal.log('agent.login', `Not signed in — ${reason} at ${url}`, { url, reason, seen }, 'error');

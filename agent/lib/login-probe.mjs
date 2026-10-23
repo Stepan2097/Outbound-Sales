@@ -84,6 +84,7 @@ export async function probeLogin({ api, chromium, profileRemoteId, timeoutMs = 4
     const page = session.context.pages()[0] || await session.context.newPage();
     await page.goto('https://www.linkedin.com/feed/', { waitUntil: 'domcontentloaded', timeout: 60000 });
     const state = await settle(page, timeoutMs);
+    session.signedIn?.(state.signedIn);
     // Не ввійшли — що саме на екрані (власник 23.10: «чіткіше формулюй чому
     // заблокований, а краще скрін відправляй»): заголовок сторінки і знімок.
     if (!state.signedIn) {
