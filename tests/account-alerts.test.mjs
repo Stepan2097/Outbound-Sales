@@ -42,3 +42,21 @@ test("значок на кожному екрані, кроки для лідг�
   assert.match(server, /type: RECHECK_REQUESTED,/);
   assert.match(server, /meta: \{ nonce, issuedAt: Date\.now\(\), source: "portal" \}/);
 });
+
+test("суддя 23.10: акаунт, що щойно відновився за перевіркою, ще 30 хв у сповіщенні з «Вхід є», а не зникає мовчки", async () => {
+  const { RECOVERED_SHOW_MS, recoveredFor } = await import("../triage/account-alerts.mjs");
+  const now = Date.parse("2026-10-23T10:00:00Z");
+  const rows = [{ id: "gulaj", status: "warming", health: "ok" }, { id: "chloe", status: "warming", health: "ok" }];
+  const done = [
+    { account_id: "gulaj", created_at: "2026-10-23T09:50:00Z", meta: { signedIn: true } },
+    { account_id: "chloe", created_at: "2026-10-23T09:50:00Z", meta: { signedIn: false } }
+  ];
+  assert.equal(RECOVERED_SHOW_MS, 30 * 60000);
+  assert.deepEqual(recoveredFor(rows, done, { leadgens, viewerId: "bogdan" }, now).map((row) => row.id), ["gulaj"]);
+  assert.deepEqual(recoveredFor(rows, done, { leadgens, viewerId: "lilia" }, now), [], "чужий акаунт — ні");
+  assert.deepEqual(recoveredFor(rows, done, { leadgens, viewerId: "bogdan" }, now + 31 * 60000), [], "через 30 хв — уже ні");
+  const ui = readFileSync(new URL("../app/screens/account-alerts.js", import.meta.url), "utf8");
+  assert.match(ui, /if \(account\.recovered\) \{/);
+  assert.match(ui, /data-alerts-seen=/);
+  assert.match(ui, /"Вхід відновлено"/);
+});

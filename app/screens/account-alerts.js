@@ -13,6 +13,18 @@ const day = (iso) => (iso ? new Date(iso).toLocaleDateString("uk-UA", { day: "2-
 const time = (iso) => (iso ? new Date(iso).toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" }) : "");
 const waiting = (account) => Boolean(account.recheck && !account.recheck.doneAt);
 
+// «Вхід є» після вдалої перевірки лишається, доки людина не натисне «Зрозуміло» (суддя 23.10: інакше
+// картка мовчки зникала, бо сервер одразу знімає паузу). Що вже бачили — пам'ятає браузер.
+const SEEN_KEY = "outbound.accountAlerts.seen";
+const seenKey = (account) => `${account.id}|${account.recheck?.doneAt || ""}`;
+function readSeen() {
+  try { return new Set(JSON.parse(localStorage.getItem(SEEN_KEY) || "[]")); } catch { return new Set(); }
+}
+function markSeen(account) {
+  try { localStorage.setItem(SEEN_KEY, JSON.stringify([...readSeen(), seenKey(account)].slice(-50))); } catch { /* приватне вікно: побачить ще раз */ }
+}
+const shownAlerts = () => alerts.list.filter((account) => !account.recovered || !readSeen().has(seenKey(account)));
+
 /** Перечитати сповіщення — і з інших екранів (Workspace після «Перевірити вхід»). */
 export async function refreshAccountAlerts() {
   return loadAlerts();
@@ -54,11 +66,20 @@ function recheckHtml(account) {
 function render() {
   const root = host();
   if (!root) return;
-  const count = alerts.list.length;
+  const shown = shownAlerts();
+  const count = shown.length;
+  const allGood = count > 0 && shown.every((account) => account.recovered);
   root.hidden = !count;
   if (!count) { alerts.open = false; root.innerHTML = ""; return; }
-  const items = alerts.list.map((account) => {
+  const items = shownAlerts().map((account) => {
     const name = account.identity ? `${account.identity} (${account.label})` : account.label;
+    if (account.recovered) {
+      return `<li class="account-alert is-recovered">
+      <p class="account-alert-head"><b>${escapeHtml(name || "Акаунт")}</b> — вхід є${account.recheck?.doneAt ? ` (перевірено о ${escapeHtml(time(account.recheck.doneAt))})` : ""}.</p>
+      <p class="account-alert-state is-ok">Акаунт повертається в роботу: нові повідомлення знову підтягуватимуться, відповіді з нього підуть.</p>
+      <button type="button" data-alerts-seen="${escapeAttr(account.id)}">Зрозуміло</button>
+    </li>`;
+    }
     const what = account.health === "captcha" ? "LinkedIn показав капчу" : "LinkedIn просить увійти";
     return `<li class="account-alert">
       <p class="account-alert-head"><b>${escapeHtml(name || "Акаунт")}</b> — ${escapeHtml(what)}${account.since ? ` з ${escapeHtml(day(account.since))}` : ""}. Нові повідомлення з нього не підтягуються, відповіді з нього не йдуть.</p>
@@ -67,11 +88,12 @@ function render() {
       <button type="button" class="primary-button" data-alerts-recheck="${escapeAttr(account.id)}" ${alerts.busy === account.id || waiting(account) ? "disabled" : ""}><i data-lucide="refresh-cw"></i><span>${waiting(account) ? "Перевіряю…" : "Перевірити вхід"}</span></button>
     </li>`;
   }).join("");
-  root.innerHTML = `<button type="button" class="account-alerts-bell" data-alerts="toggle" aria-expanded="${alerts.open}" title="Акаунти LinkedIn, які чекають на тебе">
-      <i data-lucide="triangle-alert"></i><b>${count}</b><span>${count === 1 ? "Акаунт потребує уваги" : "Акаунти потребують уваги"}</span>
+  const title = allGood ? "Вхід відновлено" : count === 1 ? "Акаунт потребує уваги" : "Акаунти потребують уваги";
+  root.innerHTML = `<button type="button" class="account-alerts-bell${allGood ? " is-ok" : ""}" data-alerts="toggle" aria-expanded="${alerts.open}" title="Акаунти LinkedIn, які чекають на тебе">
+      <i data-lucide="${allGood ? "circle-check" : "triangle-alert"}"></i><b>${count}</b><span>${title}</span>
     </button>
-    ${alerts.open ? `<section class="account-alerts-panel" role="dialog" aria-label="Акаунти, що потребують уваги">
-      <header><h2>Акаунти потребують уваги</h2><button type="button" class="icon-button" data-alerts="toggle" aria-label="Закрити"><i data-lucide="x"></i></button></header>
+    ${alerts.open ? `<section class="account-alerts-panel" role="dialog" aria-label="${escapeAttr(title)}">
+      <header><h2>${escapeHtml(title)}</h2><button type="button" class="icon-button" data-alerts="toggle" aria-label="Закрити"><i data-lucide="x"></i></button></header>
       ${alerts.notice ? `<p class="account-alert-state is-bad">${escapeHtml(alerts.notice)}</p>` : ""}
       <ul>${items}</ul>
     </section>` : ""}`;
@@ -92,12 +114,17 @@ async function recheck(accountId) {
 }
 
 document.addEventListener("click", (event) => {
-  const target = event.target.closest?.("#accountAlerts [data-alerts], #accountAlerts [data-alerts-recheck]");
+  const target = event.target.closest?.("#accountAlerts [data-alerts], #accountAlerts [data-alerts-recheck], #accountAlerts [data-alerts-seen]");
   if (!target) {
     if (alerts.open && !event.target.closest?.("#accountAlerts")) { alerts.open = false; render(); }
     return;
   }
   if (target.dataset.alertsRecheck) return void recheck(target.dataset.alertsRecheck);
+  if (target.dataset.alertsSeen) {
+    const account = alerts.list.find((row) => row.id === target.dataset.alertsSeen);
+    if (account) markSeen(account);
+    return render();
+  }
   alerts.open = !alerts.open;
   render();
 });

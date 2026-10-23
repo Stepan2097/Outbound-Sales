@@ -23,3 +23,8 @@
 @media (max-width: 720px) {
   .account-alerts-bell span { display: none; }
 }
+/* Вхід відновлено (суддя 23.10): зелений значок і результат замість кроків, доки людина не натисне «Зрозуміло». */
+.account-alerts-bell.is-ok { border-color: var(--teal); background: color-mix(in srgb, var(--teal) 14%, var(--surface)); }
+.account-alerts-bell.is-ok svg { color: var(--teal); }
+.account-alerts-bell.is-ok b { background: var(--teal); color: #062320; }
+.account-alert.is-recovered button { justify-self: start; }
