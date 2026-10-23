@@ -273,6 +273,12 @@ export class AntyCloud {
     return state.rows[remoteId] ?? null;
   }
 
+  /** The cloud's own copy of a profile, read fresh — to make a server copy of one only a desktop has. */
+  async cloudRow(remoteId) {
+    if (!this.enabled || !remoteId) return null;
+    return this.locked(async () => this.pull(this.read(), remoteId));
+  }
+
   /**
    * As a profile opens: the cloud's LinkedIn session, when it is newer and works.
    * Only through the same proxy the cloud copy uses — a session moved to another

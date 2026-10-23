@@ -60,6 +60,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const portal = new Portal(PORTAL);
 const telegram = new Telegram();
 let accountLabel = ACCOUNT;
+let importedCopy = null;
 // A warning that pauses the account goes to the group with its page (власник
 // 23.10: «не було ніяких сповіщень, немає чіткої причини»).
 portal.warned = async (warning, tab) => {
@@ -151,7 +152,12 @@ const runtime = process.env.WARMUP_ANTY_API
   ? await new AntyApi(process.env.WARMUP_ANTY_API, {
     // The session is taken from Anty's cloud and given back to it (власник 23.10).
     cloud: cloudFromEnv({ agentDir: path.dirname(fileURLToPath(import.meta.url)), log, check: (tab) => settle(tab) }),
-    log
+    log,
+    // Said to the group the moment it happens, not after two failed sessions.
+    onImported: async (row) => {
+      importedCopy = row.name;
+      if (telegram.configured) await telegram.send(`🛠 ${accountLabel}: профілю «${row.name}» не було на серверній Anty — я сам переніс його з хмари Anty (проксі, відбиток, сесія) і відкриваю. Що вийшло — напишу наступним повідомленням.`);
+    }
   }).open(found.profileRemoteId, chromium)
   : null;
 if (runtime) closeBrowser = runtime.close;
@@ -308,6 +314,11 @@ log(`сесію відкрито (${session.sessionId}${session.resumed ? ', п�
   await guard();
   // Only a session that opened the feed goes back to the cloud.
   runtime?.signedIn?.(signedIn);
+  if (importedCopy && telegram.configured) {
+    await telegram.send(signedIn
+      ? `✅ ${accountLabel}: перенесений профіль працює — LinkedIn відкрив стрічку, прогрів іде далі.`
+      : `❌ ${accountLabel}: перенесений профіль не увійшов у LinkedIn (${reason}) — в хмарі Anty для нього немає робочого входу. Увійди в LinkedIn у цьому профілі на десктопі й закрий його — сервер підхопить сам.`).catch(() => {});
+  }
   if (!signedIn) {
     await portal.health(reason === 'checkpoint' ? 'captcha' : 'needs_login', `LinkedIn: ${reason} at ${url}`);
     await portal.log('agent.login', `Not signed in — ${reason} at ${url}`, { url, reason, seen }, 'error');

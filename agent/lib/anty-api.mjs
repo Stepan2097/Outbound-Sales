@@ -7,7 +7,7 @@ export class AntyApi {
    * the visit said it saw the feed (`session.signedIn(true)`). It never stops a
    * visit: a cloud that fails is a line in the log.
    */
-  constructor(baseUrl, { fetchImpl = fetch, cloud = null, log = () => {} } = {}) {
+  constructor(baseUrl, { fetchImpl = fetch, cloud = null, log = () => {}, onImported = async () => {} } = {}) {
     const url = new URL(baseUrl);
     if (url.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) ||
         url.username || url.password || url.pathname !== '/' || url.search || url.hash) {
@@ -17,11 +17,12 @@ export class AntyApi {
     this.fetch = fetchImpl;
     this.cloud = cloud;
     this.log = log;
+    this.onImported = onImported;
   }
 
-  async request(route, body) {
+  async request(route, body, method = body === undefined ? 'GET' : 'POST') {
     const response = await this.fetch(`${this.baseUrl}${route}`, {
-      method: body === undefined ? 'GET' : 'POST',
+      method,
       ...(body === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
       signal: AbortSignal.timeout(body === undefined ? 15000 : 180000),
     });
@@ -30,8 +31,41 @@ export class AntyApi {
     return data;
   }
 
+  /**
+   * A profile made only in a desktop Anty has no copy on the server (власник
+   * 23.10: «якщо така фігня ти мусиш сам запускатися і перевіряти»): the copy
+   * is made from the cloud's own — its name, proxy, fingerprint, user agent and
+   * session — and people are told it was.
+   */
+  async copyFromCloud(remoteId) {
+    const row = this.cloud ? await this.cloud.cloudRow(remoteId) : null;
+    if (!row || row.deleted) throw new Error('Профілю немає ні на серверній Anty, ні в хмарі Anty');
+    if (!row.proxy?.host) throw new Error(`«${row.name}» у хмарі Anty без проксі — без нього сервер LinkedIn не відкриває`);
+    const made = await this.request('/api/profiles', {
+      name: row.name, platform: 'linkedin', userAgent: row.userAgent || '', proxy: row.proxy
+    });
+    const id = made.profile?.id;
+    if (!Number.isSafeInteger(id) || id <= 0) throw new Error('Anty API не створив копію профілю');
+    await this.request(`/api/profiles/${id}`, {
+      remote_id: row.remoteId, team_id: row.teamId || '', fingerprint: row.fingerprint || {},
+      cookies: row.cookies || [], storage_state: row.storageState || {}, user_agent: row.userAgent || '',
+      start_page: row.startPage || 'https://www.linkedin.com/feed/'
+    }, 'PATCH');
+    await this.onImported(row).catch(() => {});
+    this.log(`☁️ «${row.name}» не було на серверній Anty — копію зроблено з хмари`);
+    return row;
+  }
+
   async open(remoteId, chromium) {
-    const { profile } = await this.request(`/api/profiles/by-remote/${encodeURIComponent(remoteId)}`);
+    let found;
+    try {
+      found = await this.request(`/api/profiles/by-remote/${encodeURIComponent(remoteId)}`);
+    } catch (error) {
+      if (!/not available in this server scope/i.test(error.message) || !this.cloud?.enabled) throw error;
+      await this.copyFromCloud(remoteId);
+      found = await this.request(`/api/profiles/by-remote/${encodeURIComponent(remoteId)}`);
+    }
+    const { profile } = found;
     if (!profile || profile.remote_id !== remoteId || !Number.isSafeInteger(profile.id) || profile.id <= 0) {
       throw new Error('Anty API resolved a different profile');
     }

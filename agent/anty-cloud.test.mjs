@@ -224,3 +224,33 @@ test('a session is taken only through the proxy the cloud copy uses', async () =
   assert.equal((await h.cloud.take('r1', context, { proxy: 'http://1.2.3.4:1' })).taken, true);
   assert.equal(proxyKey('socks5://u:p@1.2.3.4:50100'), '1.2.3.4:50100');
 });
+
+test('a profile only a desktop has is copied to the server from the cloud, and people are told', async () => {
+  const calls = [];
+  let exists = false;
+  const told = [];
+  const row = { remoteId: 'r9', teamId: 't1', name: 'b.naiborovskyi', userAgent: 'UA', fingerprint: { canvas: 'x' },
+    cookies: [{ name: 'li_at', value: 'v', domain: '.linkedin.com' }], storageState: {}, startPage: '', proxy: { type: 'http', host: '1.2.3.4', port: 5, username: 'u', password: 'p' } };
+  const cloud = { enabled: true, cloudRow: async () => row, take: async () => ({}), give: async () => ({}) };
+  const api = new AntyApi('http://127.0.0.1:3032', { cloud, onImported: async (r) => { told.push(r.name); }, fetchImpl: async (url, opts) => {
+    calls.push({ url, method: opts.method, body: opts.body ? JSON.parse(opts.body) : null });
+    if (url.includes('/by-remote/')) {
+      return exists
+        ? { ok: true, json: async () => ({ ok: true, profile: { id: 7, remote_id: 'r9', name: 'b.naiborovskyi', hasProxy: true, running: false } }) }
+        : { ok: false, status: 404, json: async () => ({ ok: false, error: 'Profile is not available in this server scope' }) };
+    }
+    if (url.endsWith('/api/profiles') && opts.method === 'POST') return { ok: true, json: async () => ({ ok: true, profile: { id: 7 } }) };
+    if (url.endsWith('/api/profiles/7') && opts.method === 'PATCH') { exists = true; return { ok: true, json: async () => ({ ok: true }) }; }
+    if (url.endsWith('/start')) return { ok: true, json: async () => ({ ok: true, protocol: 'cdp', wsEndpoint: 'ws://127.0.0.1:34123/devtools/browser/abc-123' }) };
+    return { ok: true, json: async () => ({ ok: true }) };
+  } });
+  const chromium = { connectOverCDP: async () => ({ contexts: () => [{}], close: async () => {} }) };
+  const session = await api.open('r9', chromium);
+  assert.equal(session.profile.id, 7);
+  const create = calls.find((call) => call.method === 'POST' && call.url.endsWith('/api/profiles'));
+  assert.deepEqual(create.body.proxy, row.proxy);
+  const patch = calls.find((call) => call.method === 'PATCH');
+  assert.equal(patch.body.remote_id, 'r9');
+  assert.deepEqual(patch.body.fingerprint, { canvas: 'x' });
+  assert.deepEqual(told, ['b.naiborovskyi']);
+});
