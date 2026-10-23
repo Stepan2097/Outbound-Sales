@@ -110,7 +110,7 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
 }
 async function main() {
 const found = await portal.resolve(ACCOUNT);
-accountLabel = found?.label || ACCOUNT;
+accountLabel = found?.name || ACCOUNT;
 if (!suppliedLeaseId) {
   const lease = await portal.lease(found.accountId);
   if (!lease.success || !lease.lease?.leaseId) throw new Error(lease.error || 'Server did not grant a lease');
@@ -156,7 +156,6 @@ const runtime = process.env.WARMUP_ANTY_API
     // Said to the group the moment it happens, not after two failed sessions.
     onImported: async (row) => {
       importedCopy = row.name;
-      if (telegram.configured) await telegram.send(`🛠 ${accountLabel}: профілю «${row.name}» не було на серверній Anty — я сам переніс його з хмари Anty (проксі, відбиток, сесія) і відкриваю. Що вийшло — напишу наступним повідомленням.`);
     }
   }).open(found.profileRemoteId, chromium)
   : null;
@@ -314,10 +313,9 @@ log(`сесію відкрито (${session.sessionId}${session.resumed ? ', п�
   await guard();
   // Only a session that opened the feed goes back to the cloud.
   runtime?.signedIn?.(signedIn);
-  if (importedCopy && telegram.configured) {
-    await telegram.send(signedIn
-      ? `✅ ${accountLabel}: перенесений профіль працює — LinkedIn відкрив стрічку, прогрів іде далі.`
-      : `❌ ${accountLabel}: перенесений профіль не увійшов у LinkedIn (${reason}) — в хмарі Anty для нього немає робочого входу. Увійди в LinkedIn у цьому профілі на десктопі й закрий його — сервер підхопить сам.`).catch(() => {});
+  // A copy made just now that LinkedIn does not let in: said at once — the rest goes quietly.
+  if (importedCopy && !signedIn && telegram.configured) {
+    await telegram.send(`❌ ${accountLabel}: профіль перенесено з хмари Anty, але LinkedIn не пускає (${reason}) — у хмарі для нього немає робочого входу. Увійди в LinkedIn у цьому профілі на десктопі й закрий його — сервер підхопить сам.`).catch(() => {});
   }
   if (!signedIn) {
     await portal.health(reason === 'checkpoint' ? 'captcha' : 'needs_login', `LinkedIn: ${reason} at ${url}`);

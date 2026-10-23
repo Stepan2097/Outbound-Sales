@@ -46,6 +46,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Portal } from './lib/portal.mjs';
+import { AntyApi } from './lib/anty-api.mjs';
+import { cloudFromEnv } from './lib/anty-cloud.mjs';
+import { Telegram } from './lib/telegram.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, '..');
@@ -369,7 +372,40 @@ const portal = new Portal(PORTAL, { prefix: '/api/warmup/agent' });
 
 let offline = OFFLINE_FIRST_S;
 
+/**
+ * Every warm-up account's profile is on the server before its first session
+ * (власник 23.10: «синхронізація має проходити автоматично»): a profile made
+ * only in a desktop Anty is copied from the Anty cloud in the background, every
+ * few minutes, without a word. Only a copy that cannot be made goes to the
+ * group — once a day per profile — with the reason.
+ */
+const PROFILE_SYNC_MS = 5 * 60_000;
+let profilesSyncedAt = 0;
+const syncFailedOn = new Map();
+const telegram = new Telegram();
+async function syncProfiles() {
+  if (!process.env.WARMUP_ANTY_API || Date.now() - profilesSyncedAt < PROFILE_SYNC_MS) return;
+  profilesSyncedAt = Date.now();
+  const api = new AntyApi(process.env.WARMUP_ANTY_API, { cloud: cloudFromEnv({ agentDir: here, log }), log });
+  if (!api.cloud.enabled) return;
+  let accounts = [];
+  try { accounts = await new Portal(PORTAL).accounts(); } catch { return; }
+  for (const account of accounts) {
+    if (!account.profileRemoteId || account.status === 'excluded') continue;
+    try {
+      if (await api.ensureCopy(account.profileRemoteId)) log(`☁️ ${account.label}: профіль перенесено з хмари Anty на сервер`);
+    } catch (error) {
+      const today = new Date().toISOString().slice(0, 10);
+      if (syncFailedOn.get(account.profileRemoteId) === today) continue;
+      syncFailedOn.set(account.profileRemoteId, today);
+      log(`⚠️ ${account.label}: профіль не перенести на сервер — ${error.message}`);
+      if (telegram.configured) await telegram.send(`⚠️ ${account.label}: профілю немає на серверній Anty, і сам перенести його з хмари Anty я не зміг — ${error.message}`).catch(() => {});
+    }
+  }
+}
+
 do {
+  await syncProfiles().catch((error) => log(`⚠️ перенесення профілів: ${error.message}`));
   let answer = null;
   try {
     answer = await portal.due();

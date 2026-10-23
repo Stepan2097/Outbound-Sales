@@ -56,6 +56,18 @@ export class AntyApi {
     return row;
   }
 
+  /** The server copy of a profile, made from the cloud when there is none yet. True when one was made. */
+  async ensureCopy(remoteId) {
+    try {
+      await this.request(`/api/profiles/by-remote/${encodeURIComponent(remoteId)}`);
+      return false;
+    } catch (error) {
+      if (!/not available in this server scope/i.test(error.message) || !this.cloud?.enabled) throw error;
+      await this.copyFromCloud(remoteId);
+      return true;
+    }
+  }
+
   async open(remoteId, chromium) {
     let found;
     try {
