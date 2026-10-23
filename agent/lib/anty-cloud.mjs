@@ -157,10 +157,14 @@ export class AntyCloud {
     this.now = now;
   }
 
-  /** On when the owner's login is on disk and has not been refused since. */
+  /**
+   * On when the file holds a login or a device the platform registered for this
+   * server (then the first call fetches tokens by `auth/device-token`), and
+   * neither has been refused since.
+   */
   get enabled() {
     const state = this.read();
-    return Boolean(state?.refresh || state?.access) && !state.dead;
+    return Boolean(state?.refresh || state?.access || state?.deviceId) && !state.dead;
   }
 
   read() {
@@ -292,6 +296,13 @@ export class AntyCloud {
       const row = await this.pull(state, remoteId);
       if (!row || row.deleted) return { skipped: 'not_in_cloud' };
       if (openElsewhere(row, this.now())) return { skipped: 'open_elsewhere' };
+      // The first look only notes where the cloud stands: a desktop session that
+      // was there before the sync existed is not a reason to swap a working one.
+      if (!state.synced[remoteId]) {
+        state.synced[remoteId] = String(row.updatedAt);
+        this.write(state);
+        return { skipped: 'first_look' };
+      }
       if (proxy && row.proxy?.host && proxyKey(proxy) !== `${row.proxy.host}:${Number(row.proxy.port) || 0}`) {
         return { skipped: 'proxy_differs' };
       }

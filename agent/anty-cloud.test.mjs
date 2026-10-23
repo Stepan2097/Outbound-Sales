@@ -22,7 +22,7 @@ function cloudRow(extra = {}) {
 function setup({ rows = [cloudRow()], state = {}, refresh = null, device = null, verdict = { signedIn: true }, pushStatus = 200 } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'anty-cloud-'));
   const file = path.join(dir, 'anty-cloud.json');
-  fs.writeFileSync(file, JSON.stringify({ deviceId: 'dev', access: 'A1', refresh: 'R1', expiresAt: '', cursor: '', rows: {}, synced: {}, ...state }));
+  fs.writeFileSync(file, JSON.stringify({ deviceId: 'dev', access: 'A1', refresh: 'R1', expiresAt: '', cursor: '', rows: {}, synced: { r1: '2026-10-01T00:00:00.000Z' }, ...state }));
   const calls = [];
   const fetchImpl = async (url, opts) => {
     const body = JSON.parse(opts.body);
@@ -93,7 +93,7 @@ test('nothing is taken from a cloud copy without a LinkedIn session, or the same
 });
 
 test('without a login on disk the cloud is off and nothing is called', async () => {
-  const h = setup({ state: { access: '', refresh: '' } });
+  const h = setup({ state: { access: '', refresh: '', deviceId: '' } });
   assert.deepEqual(await h.cloud.take('r1', browserContext([])), { skipped: 'off' });
   assert.deepEqual(await h.cloud.give('r1', browserContext([li('server')])), { skipped: 'off' });
   assert.equal(h.calls.length, 0);
@@ -236,4 +236,14 @@ test('the runtime client refuses to open a profile somebody has open on a deskto
   } });
   await assert.rejects(api.open('r1', {}), ProfileOpenElsewhere);
   assert.equal(calls.some((url) => url.endsWith('/start')), false);
+});
+
+test('the first look at a profile only notes the cloud, and a registered device alone is enough to start', async () => {
+  const h = setup({ state: { access: '', refresh: '', synced: {} }, device: () => ({ status: 200, data: { access_token: 'D1', refresh_token: 'DR1' } }) });
+  assert.equal(h.cloud.enabled, true);
+  const context = browserContext([li('server')]);
+  assert.deepEqual(await h.cloud.take('r1', context), { skipped: 'first_look' });
+  assert.equal(sessionCookie(context.jar()).value, 'server');
+  assert.equal(h.read().synced.r1, '2026-10-23T10:00:00.000Z');
+  assert.equal(h.read().access, 'D1');
 });
