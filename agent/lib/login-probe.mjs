@@ -84,8 +84,35 @@ export async function probeLogin({ api, chromium, profileRemoteId, timeoutMs = 4
     const page = session.context.pages()[0] || await session.context.newPage();
     await page.goto('https://www.linkedin.com/feed/', { waitUntil: 'domcontentloaded', timeout: 60000 });
     const state = await settle(page, timeoutMs);
+    // Не ввійшли — що саме на екрані (власник 23.10: «чіткіше формулюй чому
+    // заблокований, а краще скрін відправляй»): заголовок сторінки і знімок.
+    if (!state.signedIn) {
+      state.heading = await page.evaluate(() => {
+        const line = [...document.querySelectorAll('h1, h2, main p')].map((el) => (el.innerText || '').trim()).find(Boolean);
+        return line ? line.replace(/\s+/g, ' ').slice(0, 140) : null;
+      }).catch(() => null);
+      state.screenshot = await page.screenshot({ type: 'jpeg', quality: 70 }).catch(() => null);
+    }
     return { ...state, profile: session.profile?.name ?? null };
   } finally {
     await session.close().catch(() => {});
   }
+}
+
+/**
+ * Чому акаунт не ввійшов — реченням для людини, а не технічним словом
+ * («checkpoint», «login form»). Що саме сказав LinkedIn — заголовком сторінки.
+ */
+export function describeLoginState(state = {}) {
+  const url = String(state.url || '');
+  const heading = state.heading ? ` На екрані: «${state.heading}».` : '';
+  const text = `${state.heading || ''} ${url}`;
+  let why;
+  if (/restrict|обмеж|suspend|заблок/i.test(text)) why = 'LinkedIn обмежив акаунт';
+  else if (/\/checkpoint\/challenge|captcha|verification|підтверд|verify/i.test(text) || state.reason === 'checkpoint') why = 'LinkedIn просить підтвердити, що це ви (код на пошту, капча або перевірка безпеки)';
+  else if (state.reason === 'login form') why = 'LinkedIn вийшов із сесії — на сторінці форма входу (пошта й пароль)';
+  else if (state.reason === 'сторінка входу') why = 'LinkedIn відкриває сторінку входу замість стрічки — сесію скинуто';
+  else if (/timed out/.test(String(state.reason))) why = 'стрічка не відкрилась за 40 с — LinkedIn або проксі не відповідає';
+  else why = `LinkedIn не пустив у стрічку (${state.reason || 'невідомо чому'})`;
+  return `${why}.${heading}`;
 }

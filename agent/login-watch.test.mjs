@@ -41,6 +41,10 @@ function fakeTelegram({ configured = true } = {}) {
     async send(text, button = null) {
       if (button && !button.url) throw new Error('кнопка без url — це callback, якого тут не має бути');
       this.sent.push({ text, button });
+    },
+    async sendPhoto(photo, text, button = null) {
+      if (button && !button.url) throw new Error('кнопка без url — це callback, якого тут не має бути');
+      this.sent.push({ text, button, photo });
     }
   };
 }
@@ -58,7 +62,7 @@ test('розлогінений акаунт отримує одне повідо
   assert.deepEqual(first, { parked: 1, checked: 1, restored: 0, announced: 1 });
   assert.equal(telegram.sent.length, 1);
   assert.match(telegram.sent[0].text, /Profile 47/);
-  assert.match(telegram.sent[0].text, /вийшов із LinkedIn/);
+  assert.match(telegram.sent[0].text, /не працює: LinkedIn відкриває сторінку входу замість стрічки — сесію скинуто/);
   assert.match(telegram.sent[0].text, /кожні 30 хвилин/);
   // Кнопка лише відкриває сторінку: callback_data тут не буває.
   assert.deepEqual(telegram.sent[0].button, { text: BUTTON_TEXT, url: `${PORTAL}/api/warmup/login-check?t=signed` });
@@ -263,4 +267,34 @@ test('клієнт Telegram уміє лише надсилати: читати �
   assert.equal(typeof telegram.send, 'function');
   // І кнопка з callback_data не пройде навіть як параметр.
   assert.throws(() => telegram.send('текст', { text: 'кнопка', data: 'warmup:login:acc-47' }), /callback/i);
+});
+
+test('причина — реченням, із заголовком сторінки, і знімок екрана в групу (власник 23.10: «чіткіше формулюй … скрін відправляй»)', async () => {
+  const { describeLoginState } = await import('./lib/login-probe.mjs');
+  assert.match(describeLoginState({ reason: 'checkpoint', url: 'https://www.linkedin.com/checkpoint/challenge/x' }), /просить підтвердити, що це ви/);
+  assert.match(describeLoginState({ reason: 'login form', heading: 'Welcome back' }), /форма входу.*На екрані: «Welcome back»/);
+  assert.match(describeLoginState({ reason: 'checkpoint', heading: 'Your account has been restricted' }), /обмежив акаунт/);
+  assert.match(describeLoginState({ reason: 'timed out waiting for the feed' }), /не відкрилась за 40 с/);
+
+  const portal = fakePortal([parked]);
+  const telegram = fakeTelegram();
+  const shot = Buffer.from('jpeg');
+  await checkParked({ portal, telegram, probe: async () => ({ signedIn: false, reason: 'login form', heading: 'Welcome back', screenshot: shot }), state: normalizeState(null), today: '2026-10-08', nowMs: AT, portalUrl: PORTAL });
+  assert.equal(telegram.sent.length, 1);
+  assert.equal(telegram.sent[0].photo, shot, 'знімок пішов разом із повідомленням');
+  assert.match(telegram.sent[0].text, /форма входу.*«Welcome back»/s);
+});
+
+test('Telegram.sendPhoto — лише надсилання: sendPhoto з файлом, підписом і кнопкою-посиланням', async () => {
+  const { Telegram } = await import('./lib/telegram.mjs');
+  const calls = [];
+  const tg = new Telegram({ token: 't', chatId: 'c', fetchImpl: async (url, init) => { calls.push({ url, init }); return { json: async () => ({ ok: true, result: {} }) }; } });
+  await tg.sendPhoto(Buffer.from('jpeg'), 'підпис', { text: 'Перевірити', url: 'https://x' });
+  assert.match(calls[0].url, /\/sendPhoto$/);
+  assert.ok(calls[0].init.body instanceof FormData);
+  assert.equal(calls[0].init.body.get('caption'), 'підпис');
+  assert.match(calls[0].init.body.get('reply_markup'), /"url":"https:\/\/x"/);
+  await assert.rejects(tg.sendPhoto(Buffer.from('x'), 'a', { text: 'no url' }), /link buttons/);
+  await tg.sendPhoto(null, 'без знімка');
+  assert.match(calls[1].url, /\/sendMessage$/);
 });

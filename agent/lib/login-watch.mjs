@@ -33,6 +33,8 @@
  *   checking and un-pausing recovered accounts; it just cannot say so.
  */
 
+import { describeLoginState } from './login-probe.mjs';
+
 /** How often a parked account is looked at. */
 export const RECHECK_MS = 30 * 60 * 1000;
 
@@ -165,7 +167,9 @@ export async function answerAsks({ portal, telegram, probe, state, nowMs = Date.
     }
     log(`${account.label}: за посиланням із групи входу не видно (${result.reason})`);
     if (written && telegram.configured) {
-      await telegram.send(`${account.label}: входу ще не видно (${result.reason}). Перевір, що залогінився саме в цьому профілі.`);
+      const text = `${account.label}: входу ще не видно — ${describeLoginState(result)} Перевір, що залогінився саме в цьому профілі.`;
+      if (result.screenshot && telegram.sendPhoto) await telegram.sendPhoto(result.screenshot, text).catch(() => telegram.send(text));
+      else await telegram.send(text);
     }
   }
 
@@ -213,12 +217,16 @@ export async function checkParked({
     log(`${account.label}: досі розлогінений (${result.reason})`);
     if (state.lastTold[account.id] === today) continue;
     if (telegram.configured) {
-      await telegram.send(
-        `⚠️ ${account.label}: акаунт вийшов із LinkedIn — прогрів по ньому стоїть.\n`
-        + `Відкрий профіль в Anty, залогінься — і натисни кнопку нижче, щоб я перевірив одразу.\n`
-        + `Можна й не тиснути: перевіряю кожні 30 хвилин і сам продовжу прогрів, коли побачу вхід.`,
-        account.loginCheckPath ? { text: BUTTON_TEXT, url: `${portalUrl}${account.loginCheckPath}` } : null
-      );
+      const text = `⚠️ ${account.label} не працює: ${describeLoginState(result)}\n`
+        + `Прогрів по ньому стоїть. Відкрий профіль в Anty, залогінься — і натисни кнопку нижче, щоб я перевірив одразу.\n`
+        + `Можна й не тиснути: перевіряю кожні 30 хвилин і сам продовжу прогрів, коли побачу вхід.`;
+      const button = account.loginCheckPath ? { text: BUTTON_TEXT, url: `${portalUrl}${account.loginCheckPath}` } : null;
+      // Знімок того, що бачив вартовий; не пішов — те саме текстом.
+      if (result.screenshot && telegram.sendPhoto) {
+        await telegram.sendPhoto(result.screenshot, text, button).catch(() => telegram.send(text, button));
+      } else {
+        await telegram.send(text, button);
+      }
       announced += 1;
     }
     state.lastTold[account.id] = today;

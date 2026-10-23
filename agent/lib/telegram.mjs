@@ -64,4 +64,23 @@ export class Telegram {
     });
   }
 
+  /**
+   * Знімок екрана з підписом (власник 23.10: «а краще скрін відправляй») — так
+   * само лише надсилання. Без знімка — звичайне повідомлення.
+   */
+  async sendPhoto(photo, caption, button = null) {
+    if (!photo) return this.send(caption, button);
+    if (button && !button.url) throw new Error('Only link buttons are allowed — a callback button would need getUpdates');
+    if (!this.token) throw new Error('TELEGRAM_BOT_TOKEN is not set');
+    const form = new FormData();
+    form.append('chat_id', this.chatId);
+    form.append('caption', String(caption).slice(0, 1024));
+    form.append('photo', new Blob([photo], { type: 'image/jpeg' }), 'screen.jpg');
+    if (button) form.append('reply_markup', JSON.stringify({ inline_keyboard: [[{ text: button.text, url: button.url }]] }));
+    const response = await this.fetch(`${API}/bot${this.token}/sendPhoto`, { method: 'POST', body: form, signal: AbortSignal.timeout(this.timeoutMs) });
+    const body = await response.json().catch(() => ({}));
+    if (!body?.ok) throw new Error(`Telegram sendPhoto: ${body?.description || `HTTP ${response.status}`}`);
+    return body.result;
+  }
+
 }
