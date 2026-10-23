@@ -446,3 +446,18 @@ test("переклад чернетки українською: той сами�
   await assert.rejects(translateDraft({ text: "Another text", writer: {} }), (error) => error.statusCode === 503);
   await assert.rejects(translateDraft({ text: "   ", writer }), (error) => error.statusCode === 400);
 });
+
+test("суддя 23.10 (таск e06c67c1): статус з Outbound підписано в історії CRM людиною — тригер CRM для сервісного ключа пише changed_by = NULL", async () => {
+  const { signStatusChange } = await import("../triage/today.mjs");
+  const now = new Date().toISOString();
+  rows.contact_status_history = [
+    { id: "h-new", contact_id: "c1", old_status: "responded", new_status: "qualified", changed_by: null, changed_at: now },
+    { id: "h-crm", contact_id: "c1", old_status: "new", new_status: "qualified", changed_by: "u-crm-user", changed_at: now },
+    { id: "h-old", contact_id: "c1", old_status: "new", new_status: "qualified", changed_by: null, changed_at: "2026-01-01T00:00:00.000Z" }
+  ];
+  const signed = await signStatusChange({ contactId: "c1", status: "qualified", viewer: BOHDAN, since: new Date(Date.now() - 60000).toISOString() });
+  assert.equal(signed, 1);
+  const by = Object.fromEntries(rows.contact_status_history.map((row) => [row.id, row.changed_by]));
+  assert.deepEqual(by, { "h-new": BOHDAN.id, "h-crm": "u-crm-user", "h-old": null }, "лише щойно вписаний і непідписаний рядок");
+  assert.equal(await signStatusChange({ contactId: "c1", status: "qualified", viewer: {}, since: now }), 0, "без людини — нічого");
+});

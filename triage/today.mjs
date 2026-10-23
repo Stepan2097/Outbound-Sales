@@ -686,6 +686,27 @@ export async function setManualPing({ pingId = "", contactId = "", when, call = 
  * Вихідний статус закриває відкриті пінги контакту; «Дзвінок» — угода з міткою
  * Outbound, якщо в контакту ще немає жодної.
  */
+/**
+ * Хто змінив статус (суддя 23.10, таск e06c67c1). Outbound пише в CRM сервісним ключем, а тригер
+ * CRM log_contact_status_change ставить changed_by = auth.uid() — для сервісного ключа NULL. Тож
+ * рядок історії, який щойно вписав тригер, підписуємо людиною, що змінила статус у порталі. Без
+ * цього «Звіт команди» не знав би, чий це «Кваліфікований» чи «Дзвінок». Збій не зупиняє зміну статусу.
+ */
+export async function signStatusChange({ contactId, status, viewer, since }) {
+  if (!viewer?.id) return 0;
+  try {
+    const rows = await crm.from("contact_status_history").select("id,changed_by,changed_at")
+      .eq("contact_id", contactId).eq("new_status", status).gte("changed_at", since)
+      .order("changed_at", { ascending: false }).limit(3).rows();
+    const unsigned = rows.filter((row) => !row.changed_by);
+    for (const row of unsigned) await crm.from("contact_status_history").update({ changed_by: viewer.id }).eq("id", row.id).rows();
+    return unsigned.length;
+  } catch (error) {
+    console.warn(`[today] автор зміни статусу ${contactId}: ${error.message}`);
+    return 0;
+  }
+}
+
 export async function setContactStatus({ contactId, status, exitReason = "", viewer, now = new Date() }) {
   const target = String(contactId || "");
   if (!target) throw refuse("Потрібен контакт.", 400);
@@ -698,6 +719,7 @@ export async function setContactStatus({ contactId, status, exitReason = "", vie
   const nowIso = now.toISOString();
   if (contact.lead_status !== checked.patch.lead_status || checked.patch.exit_reason) {
     await crm.from("contacts").update(checked.patch).eq("id", target).rows();
+    await signStatusChange({ contactId: target, status: checked.patch.lead_status, viewer, since: new Date(now.getTime() - 60000).toISOString() });
   }
   let closed = 0;
   if (CLOSING.has(status)) {
