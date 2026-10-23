@@ -386,8 +386,11 @@ const telegram = new Telegram();
 async function syncProfiles() {
   if (!process.env.WARMUP_ANTY_API || Date.now() - profilesSyncedAt < PROFILE_SYNC_MS) return;
   profilesSyncedAt = Date.now();
-  const api = new AntyApi(process.env.WARMUP_ANTY_API, { cloud: cloudFromEnv({ agentDir: here, log }), log });
-  if (!api.cloud.enabled) return;
+  // The runtime makes the copy itself from the Anty cloud when it is asked for
+  // a profile it has none of (ANTY_CLOUD_SOURCE=1, pavlo-ch/anty 2ab2924); the
+  // agent's own copying is the fallback for a runtime without that mode.
+  const cloud = cloudFromEnv({ agentDir: here, log });
+  const api = new AntyApi(process.env.WARMUP_ANTY_API, { cloud: cloud.enabled ? cloud : null, log });
   let accounts = [];
   try { accounts = await new Portal(PORTAL).accounts(); } catch { return; }
   for (const account of accounts) {
@@ -398,8 +401,10 @@ async function syncProfiles() {
       const today = new Date().toISOString().slice(0, 10);
       if (syncFailedOn.get(account.profileRemoteId) === today) continue;
       syncFailedOn.set(account.profileRemoteId, today);
-      log(`⚠️ ${account.label}: профіль не перенести на сервер — ${error.message}`);
-      if (telegram.configured) await telegram.send(`⚠️ ${account.label}: профілю немає на серверній Anty, і сам перенести його з хмари Anty я не зміг — ${error.message}`).catch(() => {});
+      const why = /not available in this server scope/i.test(error.message) ? 'його немає і в хмарі Anty (видалений або в іншій команді)'
+        : /Cloud profile unavailable/i.test(error.message) ? `хмара Anty не відповіла (${error.message})` : error.message;
+      log(`⚠️ ${account.label}: профіль не перенести на сервер — ${why}`);
+      if (telegram.configured) await telegram.send(`⚠️ ${account.label}: профілю немає на серверній Anty, і взяти його з хмари Anty не вийшло — ${why}`).catch(() => {});
     }
   }
 }
