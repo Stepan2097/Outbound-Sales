@@ -1,0 +1,48 @@
+/* «Статистика» — як у CRM (23.10): app/screens/stats.js. */
+.stats-page { display: grid; gap: 22px; }
+.stats-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; }
+.stats-head h2 { margin: 0; font-size: 22px; }
+.stats-head p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+.stats-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.stats-dates { display: flex; align-items: center; gap: 6px; }
+.stats-dates input { width: auto; }
+.stats-periods { margin: 0; }
+.stats-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; margin-bottom: 22px; }
+.stats-kpi { padding: 16px; }
+.stats-kpi p, .stats-deal p { margin: 0; color: var(--muted); font-size: 12px; font-weight: 600; }
+.stats-kpi b { display: block; margin-top: 8px; font-size: 26px; font-variant-numeric: tabular-nums; }
+.stats-kpi small { display: block; margin-top: 6px; font-size: 12px; font-weight: 600; }
+.is-up { color: var(--green); }
+.is-down { color: var(--red); }
+.stats-section { margin-bottom: 22px; }
+.stats-section h3 { margin: 0 0 12px; font-size: 17px; }
+.stats-section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.stats-section-head h3 { margin: 0; }
+.stats-section-head select { width: auto; max-width: 280px; }
+.stats-funnel { display: grid; gap: 6px; padding: 20px; }
+.stats-funnel-row { display: grid; grid-template-columns: 180px 1fr 52px; align-items: center; gap: 12px; }
+.stats-funnel-label { text-align: right; font-size: 13px; color: var(--muted); }
+.stats-funnel-track { height: 34px; display: flex; align-items: center; }
+.stats-funnel-bar { height: 100%; min-width: 34px; display: flex; align-items: center; justify-content: center; border-radius: 6px; color: #fff; font-weight: 700; font-size: 14px; }
+.stats-funnel-rate { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.stats-funnel-foot { margin-top: 10px; color: var(--muted); font-size: 13px; }
+.stats-deals { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; }
+.stats-deal { padding: 16px; }
+.stats-deal b { display: block; margin-top: 8px; font-size: 24px; font-variant-numeric: tabular-nums; }
+.stats-table-panel { padding: 16px; margin-bottom: 14px; }
+.stats-table-panel h4 { margin: 0 0 10px; font-size: 14px; }
+.stats-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 13px; }
+.stats-table th, .stats-table td { padding: 7px 10px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+.stats-table th { color: var(--muted); font-size: 11px; text-transform: uppercase; }
+.stats-table .is-number { text-align: right; }
+.stats-table .stats-group { border-left: 1px solid var(--line); text-align: center; }
+.stats-table td[title] { cursor: help; }
+.stats-table .is-replied { color: var(--green); }
+.stats-table .is-total { font-weight: 700; }
+.stats-zero { color: var(--muted); opacity: 0.6; }
+.stats-daily { max-height: 420px; overflow: auto; }
+.stats-subtle { color: var(--muted); }
+.stats-busy { opacity: 0.55; transition: opacity 0.15s; }
+@media (max-width: 720px) {
+  .stats-funnel-row { grid-template-columns: 110px 1fr 40px; }
+}

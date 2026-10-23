@@ -51,6 +51,7 @@ import { campaignStore } from "./esp/campaigns.mjs";
 import { leadStore } from "./esp/leads.mjs";
 import { crmLeadSource } from "./esp/crm-leads.mjs";
 import { folderChecker } from "./esp/folder-check.mjs";
+import { crmStats } from "./triage/crm-stats.mjs";
 import { companyFolderSource, isCompanyFolder } from "./esp/crm-company-leads.mjs";
 import { anty as warmupAnty, crm as warmupCrm } from "./warmup/db.mjs";
 import { likeLiteral } from "./warmup/rest.mjs";
@@ -1595,6 +1596,23 @@ async function handleApi(request, response, url) {
   // ── «По днях» (12.10): whom a person wrote to on a day, who answered, and
   // how much each login did — triage/work-log.mjs. A seller sees their own
   // days; an administrator anybody's, or everybody's together.
+  // «Статистика» — та сама, що в CRM, з тих самих функцій бази (triage/crm-stats.mjs, 23.10).
+  if (request.method === "GET" && url.pathname === "/api/stats") {
+    if (!warmupCrm.configured()) return sendJson(response, 503, { error: "CRM не підключено." });
+    try {
+      sendJson(response, 200, await crmStats({
+        crm: warmupCrm,
+        preset: cleanText(url.searchParams.get("preset") || ""),
+        from: cleanText(url.searchParams.get("from") || ""),
+        to: cleanText(url.searchParams.get("to") || ""),
+        user: cleanText(url.searchParams.get("user") || "all")
+      }));
+    } catch (error) {
+      sendJson(response, 502, { error: `CRM не відповіла: ${error.message}` });
+    }
+    return;
+  }
+
   if (url.pathname.startsWith("/api/work/")) {
     const profile = request.auth?.profile;
     const viewer = String(profile?.email || "").toLowerCase();

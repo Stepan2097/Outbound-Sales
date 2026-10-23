@@ -340,6 +340,7 @@ function setView(viewName) {
     {
       home: "Головна",
       work: "Звіт команди",
+      stats: "Статистика",
       workspace: "Campaign — кампанії LinkedIn",
       warmup: "Прогрів LinkedIn",
       "mail-warmup": "Прогрів пошт",

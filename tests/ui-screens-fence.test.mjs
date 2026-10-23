@@ -45,7 +45,7 @@ function sources(dir = APP.pathname) {
   });
 }
 
-const SCREENS = [["home", "Головна"], ["work", "Звіт команди"], ["workspace", "Campaign"], ["inbox", "Workspace"], ["pitch", "Смисли"], ["warmup", "Прогрів"], ["mail-warmup", "Прогрів пошт"], ["campaigns", "Кампанії"], ["mail-inbox", "Вхідні"], ["leads", "Ліди"], ["reports", "Звіти"], ["contacts", "Контакти"], ["account", "Налаштування"]];
+const SCREENS = [["home", "Головна"], ["work", "Звіт команди"], ["stats", "Статистика"], ["workspace", "Campaign"], ["inbox", "Workspace"], ["pitch", "Смисли"], ["warmup", "Прогрів"], ["mail-warmup", "Прогрів пошт"], ["campaigns", "Кампанії"], ["mail-inbox", "Вхідні"], ["leads", "Ліди"], ["reports", "Звіти"], ["contacts", "Контакти"], ["account", "Налаштування"]];
 
 const REMOVED_VIEWS = ["email", "prospects", "ai", "products", "overview", "models", "routing", "budgets", "privacy", "evaluation"];
 
@@ -99,6 +99,7 @@ const SCREEN_FILES = {
   // Головна — пульт (19.10). Черга пінгів «Сьогодні» — частина «Вхідних» («До роботи»).
   home: ["screens/home.js"],
   work: ["screens/work.js"],
+  stats: ["screens/stats.js"],
   // WorkSpace (16.10): кампанії лідгенів, порівняння й хребет — окремо від прогріву.
   workspace: ["screens/workspace.js", "screens/lead-campaigns.js", "screens/campaign-plan.js", "screens/campaign-report.js"],
   warmup: ["screens/warmup-accounts.js", "screens/warmup-campaign.js"],

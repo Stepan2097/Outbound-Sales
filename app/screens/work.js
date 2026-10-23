@@ -11,6 +11,8 @@
 
 import { api, escapeAttr, escapeHtml, keepScroll, onScreen, refreshIcons } from "../core.js";
 import { pathTracks } from "./work-path.js";
+// «Статистика» (23.10) — сусідній звіт; вантажиться разом зі «Звітом команди».
+import "./stats.js";
 
 onScreen("work", { open: () => void openWork() });
 
