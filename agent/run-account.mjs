@@ -279,7 +279,22 @@ log(`сесію відкрито (${session.sessionId}${session.resumed ? ', п�
   };
 
   // ── the proxy actually carries the traffic ───────────────────────────────
-  await page.goto('https://api.ipify.org?format=json', { waitUntil: 'domcontentloaded', timeout: 45000 });
+  // A home or mobile proxy drops for a minute now and then (gulajpole 24.10:
+  // ERR_TUNNEL_CONNECTION_FAILED at 10:22 and 11:11, fine at 11:37). Two more
+  // tries a while apart before the session gives up — and then the reason
+  // says it is the proxy, in words.
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await page.goto('https://api.ipify.org?format=json', { waitUntil: 'domcontentloaded', timeout: 45000 });
+      break;
+    } catch (error) {
+      if (!/ERR_(TUNNEL_CONNECTION_FAILED|PROXY_CONNECTION_FAILED|PROXY_CERTIFICATE|NO_SUPPORTED_PROXIES|CONNECTION_(RESET|REFUSED|CLOSED|TIMED_OUT)|TIMED_OUT)|Timeout/i.test(error.message)) throw error;
+      const proxyHost = String(profile.proxy?.server || '').replace(/^[a-z0-9]+:\/\//i, '');
+      if (attempt >= 3) throw new Error(`проксі ${proxyHost} не відповідає — тунель не відкрився з 3 спроб за ~2 хв (${(error.message.match(/ERR_[A-Z_]+/) || ['timeout'])[0]}); LinkedIn не відкривали`);
+      log(`  проксі ${proxyHost} не відповів (спроба ${attempt}) — чекаю й пробую ще`);
+      await sleep(attempt * 30_000);
+    }
+  }
   const ip = (await page.textContent('body').catch(() => ''))?.match(/[\d.]+/)?.[0] ?? null;
   log('IP через проксі:', ip);
   await portal.log('agent.proxy', `Proxy exit ${ip ?? 'unknown'}`, { ip, server: profile.proxy.server });
