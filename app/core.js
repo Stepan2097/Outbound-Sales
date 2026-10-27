@@ -20,6 +20,9 @@ let authMode = "login";
 let profileTabId = null;
 
 let heartbeatTimer = null;
+const USER_IDLE_MS = 3 * 60 * 1000;
+let lastUserActivity = Date.now();
+let activityListening = false;
 
 const views = [...document.querySelectorAll(".view")];
 
@@ -563,10 +566,19 @@ function startActivityHeartbeat() {
   } catch {
     profileTabId = "default";
   }
+  // Як у CRM (27.10, «максимально точний підрахунок часу»): вкладка на екрані ще не
+  // робота — серцебиття йде, лише коли за останні 3 хв рухали мишею, гортали чи друкували.
   const beat = () => {
     if (document.visibilityState !== "visible") return;
+    if (Date.now() - lastUserActivity > USER_IDLE_MS) return;
     api("/api/account/heartbeat", { method: "POST", body: JSON.stringify({ tabId: profileTabId }) }).catch(() => {});
   };
+  if (!activityListening) {
+    activityListening = true;
+    const seen = () => { lastUserActivity = Date.now(); };
+    for (const name of ["mousedown", "keydown", "scroll", "touchstart", "mousemove"]) window.addEventListener(name, seen, { passive: true, capture: true });
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") seen(); });
+  }
   window.clearInterval(heartbeatTimer);
   beat();
   heartbeatTimer = window.setInterval(beat, 60000);

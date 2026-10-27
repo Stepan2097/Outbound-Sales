@@ -1606,7 +1606,9 @@ async function handleApi(request, response, url) {
         preset: cleanText(url.searchParams.get("preset") || ""),
         from: cleanText(url.searchParams.get("from") || ""),
         to: cleanText(url.searchParams.get("to") || ""),
-        user: cleanText(url.searchParams.get("user") || "all")
+        user: cleanText(url.searchParams.get("user") || "all"),
+        // What people did in Outbound counts as working time too (27.10).
+        workEntries: await workEntries()
       }));
     } catch (error) {
       sendJson(response, 502, { error: `CRM не відповіла: ${error.message}` });

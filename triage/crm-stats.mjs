@@ -9,7 +9,7 @@
 // або свої дати; порівняння — з попереднім періодом тієї самої довжини. Межі днів —
 // за Europe/Warsaw, як підписано в CRM («Таймзона аналітики»).
 
-import { mergedIntervals, sessionStats, sessionsInRange } from "./crm-sessions.mjs";
+import { workTime } from "./crm-sessions.mjs";
 
 export const STATS_ZONE = "Europe/Warsaw";
 export const PRESETS = ["this_week", "prev_week", "this_month", "prev_month"];
@@ -159,7 +159,7 @@ export function withTime(team, time) {
   return team.map((row) => {
     const tracked = byUser.get(row.userId);
     const minutes = tracked?.minutes || 0;
-    return { ...row, minutes, sessions: tracked?.sessions || 0, weekdayMinutes: tracked?.weekdays || [], actionsPerHour: minutes ? Math.round((row.total_activities / (minutes / 60)) * 10) / 10 : 0 };
+    return { ...row, minutes, sessions: tracked?.sessions || 0, tabMinutes: tracked?.tabMinutes || 0, actions: tracked?.actions || 0, weekdayMinutes: tracked?.weekdays || [], actionsPerHour: minutes ? Math.round((row.total_activities / (minutes / 60)) * 10) / 10 : 0 };
   });
 }
 
@@ -172,13 +172,13 @@ export function dailyFrom(profiles = [], rows = []) {
 }
 
 /** The whole page, read from the CRM. `crm` — the REST client (warmup/db.mjs). */
-export async function crmStats({ crm, preset, from, to, user = "all", now = Date.now() }) {
+export async function crmStats({ crm, preset, from, to, user = "all", now = Date.now(), workEntries = [] }) {
   const range = statsRange({ preset, from, to, now });
   const { current, previous } = rangeInstants(range);
   const who = /^[0-9a-f-]{36}$/i.test(String(user)) ? user : null;
   const rpc = (name, args) => crm.rpc(name, args).rows();
   const span = (r) => ({ p_start: r.start, p_end: r.end });
-  const [funnelNow, funnelBefore, volumesNow, volumesBefore, breakdown, details, daily, profiles, sessions] = await Promise.all([
+  const [funnelNow, funnelBefore, volumesNow, volumesBefore, breakdown, details, daily, profiles] = await Promise.all([
     rpc("get_funnel_counts", { ...span(current), p_user: who }),
     rpc("get_funnel_counts", { ...span(previous), p_user: who }),
     rpc("get_deal_volumes", { start_date: current.start, end_date: current.end }),
@@ -186,10 +186,12 @@ export async function crmStats({ crm, preset, from, to, user = "all", now = Date
     rpc("get_user_activity_breakdown", span(current)),
     rpc("get_user_channel_details", span(current)),
     rpc("get_user_daily_performance", span(current)),
-    crm.from("profiles").select("id,email").eq("approval_status", "approved").rows(),
-    // Working time — one for CRM and Outbound (triage/crm-sessions.mjs): «години» of the page.
-    sessionsInRange({ crm, start: current.start, end: current.end })
+    crm.from("profiles").select("id,email").eq("approval_status", "approved").rows()
   ]);
+  // Working time (triage/crm-sessions.mjs, 27.10): CRM and Outbound tabs plus the
+  // person's own actions — in CRM, its LinkedIn extension and Outbound — overlaps once.
+  const idByEmail = new Map(profiles.map((profile) => [String(profile.email || "").toLowerCase(), profile.id]));
+  const time = await workTime({ crm, start: current.start, end: current.end, workEntries, idByEmail, zone: STATS_ZONE, now });
   const funnel = funnelFrom(funnelNow[0] || {});
   const before = funnelFrom(funnelBefore[0] || {});
   const revenue = Number(volumesNow[0]?.won) || 0;
@@ -202,7 +204,7 @@ export async function crmStats({ crm, preset, from, to, user = "all", now = Date
     kpis: kpisFrom(funnel, before, revenue, prevRevenue),
     funnel,
     deals: { won, lost: stageCount(funnel, "lost"), revenue, average: won ? revenue / won : 0 },
-    team: withTime(teamFrom(profiles, breakdown, details), sessionStats(mergedIntervals(sessions, { start: current.start, end: current.end, now }), { zone: STATS_ZONE })),
+    team: withTime(teamFrom(profiles, breakdown, details), time),
     daily: dailyFrom(profiles, daily)
   };
 }
