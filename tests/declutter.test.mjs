@@ -36,7 +36,8 @@ test("Звіт команди: дії кнопками — одним рядко
   assert.doesNotMatch(work, /function statsHtml|function teamHtml/, "плитки й таблиця журналу замінені зведенням і таблицею по лідгенах");
 });
 
-test("Налаштування: домени й відправники згорнуті з лічильником; прогрів пошт — пояснення згорнуто", () => {
-  assert.match(read("screens/esp-registry.js"), /<details class="esp-fold" data-esp-fold="senders"/);
+test("прогрів пошт — пояснення згорнуто; поштових блоків у «Налаштуваннях» немає (власник 27.10: «прибери це все»)", () => {
   assert.match(read("screens/mail-warmup.js"), /<details class="warmup-mail-about">/);
+  const html = read("index.html");
+  for (const id of ["espRegistryPanel", "espAccessPanel", "espMailPanel"]) assert.doesNotMatch(html, new RegExp(`id="${id}"`), id);
 });

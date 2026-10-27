@@ -180,39 +180,6 @@
               </details>
             </section>
 
-            <!-- Пошта для адміністратора (13.10 перенесено з «Пошт»): домени, доступи, ключ домену. -->
-            <!-- ESP 9: реєстр доменів і відправників; малює app/screens/esp-registry.js. -->
-            <section class="panel blk-settings esp-registry-panel span-2" id="espRegistryPanel">
-              <div class="panel-heading">
-                <div>
-                  <h2>Пошта: домени й відправники</h2>
-                  <p>Звідки йдуть холодні листи. Кожна зміна — рядок у журналі, який лише дописується.</p>
-                </div>
-              </div>
-              <div id="espRegistryBody"></div>
-            </section>
-
-            <!-- ESP 10: доступи, журнал дій адміністраторів, секрети; малює app/screens/esp-access.js. -->
-            <section class="panel blk-settings esp-access-panel span-2" id="espAccessPanel">
-              <div class="panel-heading">
-                <div>
-                  <h2>Пошта: доступи й журнал дій</h2>
-                  <p>Хто що може в холодній розсилці, що міняли адміністратори і чи задані секрети.</p>
-                </div>
-              </div>
-              <div id="espAccessBody"></div>
-            </section>
-
-            <!-- ESP 1: з чим сервер ходить у Gmail; малює app/screens/esp-mailboxes.js, лише адміністраторові. -->
-            <section class="panel blk-settings esp-mail-panel span-2" id="espMailPanel" hidden>
-              <div class="panel-heading">
-                <div>
-                  <h2>Пошта: доступ через адміністратора домену</h2>
-                  <p>Необов'язково: сервісний акаунт Google з делегуванням на весь домен — тоді пошти домену працюють без входу кожної.</p>
-                </div>
-              </div>
-              <div id="espMailBody"></div>
-            </section>
           </div>
         </section>
 
@@ -277,8 +244,6 @@
           <div class="mail-page warmup-mail-page" id="mailWarmupRoot"></div>
         </section>
 
-        <!-- Налаштування пошти: підключення Gmail, домени й відправники, доступи й журнал дій
-             (esp-mailboxes.js, esp-registry.js, esp-access.js). У «Налаштуваннях» — лише профіль і команда. -->
         <section class="view" id="view-inbox">
           <!-- LinkedIn → «Вхідні» (Марко 20.10, таск f50d24e9) — дві вкладки:
                «В роботі» — усі розмови з лідами в одному місці: фільтри «Відповіді / Прострочені / На сьогодні /
