@@ -128,11 +128,11 @@ function trackerHtml(team) {
   return `<div class="panel stats-table-panel"><h4>Ефективність по трекеру: дій на годину і час роботи</h4>
     <p class="stats-subtle stats-note">Час роботи — вкладки CRM і Outbound, поки людина ними користується (рух миші чи клавіші за останні 3 хв), і її дії: LinkedIn через розширення CRM, нотатки, статуси, угоди, задачі, листи й відповіді з Outbound. Дії ближче 15 хв одна до одної — одна безперервна робота; що перекривається, рахується раз.</p>
     <div class="table-wrap"><table class="stats-table">
-      <thead><tr><th>Користувач</th><th class="is-number">Дій / год</th><th class="is-number">Час роботи</th><th class="is-number" title="Скільки окремих відрізків роботи">Відрізків</th><th class="is-number" title="Дій людини, з яких рахується час">Дій</th><th class="is-number">Всього дій</th></tr></thead>
+      <thead><tr><th>Користувач</th><th class="is-number">Дій / год</th><th class="is-number">Час роботи</th><th class="is-number" title="Дій людини, з яких рахується час">Дій</th><th class="is-number">Всього дій</th></tr></thead>
       <tbody>${rows.length ? rows.map((row) => `<tr title="${escapeAttr((row.weekdayMinutes || []).filter((day) => day.minutes).map((day) => `${day.label}: ${hours(day.minutes)}`).join("\n"))}">
         <td>${escapeHtml(row.email)}</td><td class="is-number">${row.actionsPerHour ? row.actionsPerHour.toLocaleString("uk-UA") : "—"}</td>
-        <td class="is-number">${hours(row.minutes)}</td><td class="is-number">${number(row.sessions)}</td><td class="is-number">${number(row.actions)}</td><td class="is-number">${number(row.total_activities)}</td>
-      </tr>`).join("") : '<tr><td colspan="6" class="stats-subtle">За цей період ніхто не працював.</td></tr>'}</tbody>
+        <td class="is-number">${hours(row.minutes)}</td><td class="is-number">${number(row.actions)}</td><td class="is-number">${number(row.total_activities)}</td>
+      </tr>`).join("") : '<tr><td colspan="5" class="stats-subtle">За цей період ніхто не працював.</td></tr>'}</tbody>
     </table></div></div>`;
 }
 
