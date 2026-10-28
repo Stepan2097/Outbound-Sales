@@ -126,7 +126,7 @@ function trackerHtml(team) {
   if (authState?.user?.role !== "admin") return "";
   const rows = [...team].filter((row) => row.minutes || row.total_activities).sort((left, right) => right.minutes - left.minutes || String(left.email).localeCompare(String(right.email)));
   return `<div class="panel stats-table-panel"><h4>Ефективність по трекеру: дій на годину і час роботи</h4>
-    <p class="stats-subtle stats-note">Час роботи — вкладки CRM і Outbound, поки людина ними користується (рух миші чи клавіші за останні 3 хв), і її дії: LinkedIn через розширення CRM, нотатки, статуси, угоди, задачі, листи й відповіді з Outbound. Дії, між якими не більше години, — одна безперервна робота; що перекривається, рахується раз.</p>
+    <p class="stats-subtle stats-note">Час роботи — вкладки CRM і Outbound, поки людина ними користується (рух миші чи клавіші за останні 3 хв), і її дії: LinkedIn через розширення CRM, нотатки, статуси, угоди, задачі, листи й відповіді з Outbound. Дії, між якими не більше 3 хв, — одна безперервна робота; відправлене агентом не рахується; що перекривається, рахується раз.</p>
     <div class="table-wrap"><table class="stats-table">
       <thead><tr><th>Користувач</th><th class="is-number">Дій / год</th><th class="is-number">Час роботи</th><th class="is-number" title="Дій людини, з яких рахується час">Дій</th><th class="is-number">Всього дій</th></tr></thead>
       <tbody>${rows.length ? rows.map((row) => `<tr title="${escapeAttr((row.weekdayMinutes || []).filter((day) => day.minutes).map((day) => `${day.label}: ${hours(day.minutes)}`).join("\n"))}">

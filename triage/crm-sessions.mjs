@@ -123,13 +123,12 @@ export async function lastActive({ crm, since = new Date(Date.now() - 400 * 86_4
 // вкладки немає. Тому до вкладок додаються дії людини — із журналу CRM
 // (розширення LinkedIn, угоди, задачі), нотатки й повідомлення CRM, зміни
 // статусів, журнал Outbound (переглянув, написав, відповів, збагатив…). Дія —
-// це щонайменше хвилина роботи перед нею; дії, між якими ≤ 60 хв, — одна
+// це щонайменше хвилина роботи перед нею; дії, між якими ≤ 3 хв, — одна
 // безперервна робота. Відправлене агентом (origin outbound) роботою людини не є.
 // Час — об'єднання вкладок і дій: що перекривається, рахується раз.
 
-// Година (28.10): лідген зберігає контакти пачками кожні 30–45 хв, а між ними працює в LinkedIn —
-// з межею 15 хв робочий день 09–20 рахувався як 3 год.
-export const ACTION_GAP_MS = 60 * 60_000;
+// Перерва довше 3 хв — кінець роботи (власник 28.10).
+export const ACTION_GAP_MS = 3 * 60_000;
 export const ACTION_LEAD_MS = 2 * 60_000;
 export const ACTION_TAIL_MS = 60_000;
 
@@ -176,7 +175,7 @@ async function paged(build) {
 /** Every action of every person in the range, as moments by CRM user id. */
 export async function actionMoments({ crm, start, end, workEntries = [], idByEmail = new Map() }) {
   const [log, activities, statuses] = await Promise.all([
-    paged(() => crm.from("user_activity_log").select("user_id,created_at").gte("created_at", start).lt("created_at", end).order("created_at").order("id")),
+    paged(() => crm.from("user_activity_log").select("user_id,created_at,metadata").gte("created_at", start).lt("created_at", end).order("created_at").order("id")),
     paged(() => crm.from("activities").select("user_id,created_at,origin").gte("created_at", start).lt("created_at", end).notNull("user_id").order("created_at").order("id")),
     paged(() => crm.from("contact_status_history").select("changed_by,changed_at").gte("changed_at", start).lt("changed_at", end).notNull("changed_by").order("changed_at").order("id"))
   ]);
@@ -187,7 +186,9 @@ export async function actionMoments({ crm, start, end, workEntries = [], idByEma
     if (!moments.has(userId)) moments.set(userId, []);
     moments.get(userId).push(ms);
   };
-  for (const row of log) add(row.user_id, row.created_at);
+  // The CRM's log mirrors every activity row, the agent's too (28.10: all 166 «actions»
+  // of a lead-gen in a day were the agent's LinkedIn sends) — only the person's own.
+  for (const row of log) if (row.metadata?.origin !== "outbound") add(row.user_id, row.created_at);
   // What the agent sent on a person's account is not the person's work.
   for (const row of activities) if (row.origin !== "outbound") add(row.user_id, row.created_at);
   for (const row of statuses) add(row.changed_by, row.changed_at);
