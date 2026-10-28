@@ -4,7 +4,8 @@ import { randomUUID } from 'node:crypto';
 export async function stopLeftOpen(api, held) {
   const running = await api.request('/api/running');
   if (!(running.running || []).some((row) => Number(row.id) === Number(held.profileId))) return false;
-  await api.request(`/api/profiles/${held.profileId}/stop`, { ownerToken: held.ownerToken });
+  // `force`: a normal close for up to ~20 s, then the runtime kills the browser (pavlo-ch/anty a6817be).
+  await api.request(`/api/profiles/${held.profileId}/stop`, { ownerToken: held.ownerToken, force: true });
   return true;
 }
 
