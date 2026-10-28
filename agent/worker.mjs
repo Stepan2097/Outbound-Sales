@@ -389,11 +389,18 @@ async function closeLeftOpen() {
     const file = path.join(RUNS_DIR, name);
     let held = null;
     try { held = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* half-written: skip */ }
-    if (held?.profileId && held.ownerToken && await stopLeftOpen(api, held)) {
-      closed.push(held.account || `профіль ${held.profileId}`);
-      log(`🧹 ${held.account || held.profileId}: браузер лишився відкритим після сесії — закрив`);
+    try {
+      if (held?.profileId && held.ownerToken && await stopLeftOpen(api, held)) {
+        closed.push(held.account || `профіль ${held.profileId}`);
+        log(`🧹 ${held.account || held.profileId}: браузер лишився відкритим після сесії — закрив`);
+      }
+      fs.rmSync(file, { force: true });
+    } catch (error) {
+      // Kept for the next pass; a browser the runtime cannot close holds all the
+      // server's memory, so the group hears of it now, not after two failures.
+      log(`⚠️ ${held?.account || name}: браузер не закривається — ${error.message}`);
+      if (telegramTrouble.configured) await telegramTrouble.send(`🧯 ${held?.account || name}: браузер профілю завис на сервері й не закривається (${humanReason(error.message)}). Поки він висить, інші акаунти теж падатимуть — пробую закрити знову після наступної сесії.`).catch(() => {});
     }
-    fs.rmSync(file, { force: true });
   }
   return closed;
 }

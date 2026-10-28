@@ -17,6 +17,8 @@
  * Read only: nothing is clicked. A card that cannot be read is skipped, never
  * guessed at.
  */
+import { tabMemory } from './tab.mjs';
+
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export const CONNECTIONS_URL = 'https://www.linkedin.com/mynetwork/invite-connect/connections/';
@@ -94,7 +96,18 @@ async function scrollDown(page, { stalled = false, sleep = wait } = {}) {
  * nothing new arrived for `stallRounds` scrolls in a row — LinkedIn
  * sometimes takes two of them to load the next ten.
  */
-export async function readConnections(page, { guard = async () => {}, log = () => {}, sleep = wait, max = 3000, stallRounds = 4, pauseMs = 2500 } = {}) {
+/**
+ * One look at the contacts page is bounded (28.10: b.naiborovskyi's 2365
+ * contacts on one endless page took the server's browser to 4 GB in 20
+ * minutes; the session was killed and the browser hung). Past either bound the
+ * read stops as an incomplete one — what was read still goes to the portal.
+ */
+export const NETWORK_HEAP_LIMIT_MB = 700;
+export const NETWORK_TIME_LIMIT_MS = 12 * 60_000;
+
+export async function readConnections(page, { guard = async () => {}, log = () => {}, sleep = wait, max = 3000, stallRounds = 4, pauseMs = 2500,
+  heapMb = async () => (await tabMemory(page))?.heapMb ?? 0, heapLimitMb = NETWORK_HEAP_LIMIT_MB, timeLimitMs = NETWORK_TIME_LIMIT_MS, now = Date.now } = {}) {
+  const startedAt = now();
   await page.goto(CONNECTIONS_URL, { waitUntil: 'domcontentloaded', timeout: 45000 });
   await sleep(5000);
   await guard();
@@ -111,7 +124,15 @@ export async function readConnections(page, { guard = async () => {}, log = () =
     if (total && people.size >= total) break;
     stalled = people.size > before ? 0 : stalled + 1;
     rounds += 1;
-    if (rounds % 10 === 0) { log(`  контакти: ${people.size}${total ? ` з ${total}` : ''}`); await guard(); }
+    if (rounds % 10 === 0) {
+      log(`  контакти: ${people.size}${total ? ` з ${total}` : ''}`);
+      await guard();
+      const heap = await heapMb().catch(() => 0);
+      if (heap > heapLimitMb || now() - startedAt > timeLimitMs) {
+        log(`  контакти: зупиняюсь на ${people.size} — ${heap > heapLimitMb ? `вкладка вже ${heap} МБ` : 'читаю довше 12 хв'}, решта наступного разу`);
+        break;
+      }
+    }
     await scrollDown(page, { stalled: stalled > 0, sleep });
     await sleep(pauseMs);
   }
