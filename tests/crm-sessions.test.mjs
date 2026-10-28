@@ -59,14 +59,14 @@ test("відрізки CRM і Outbound, що перекриваються, — �
   assert.equal(row.weekdays[1].minutes, 210, "20.10 — вівторок");
 });
 
-test("робочий час за діями: дії ближче 15 хв — одна робота; поодинока — 3 хв; вкладки й дії, що перекриваються, — раз", async () => {
+test("робочий час за діями: дії ближче години — одна робота; поодинока — 3 хв; вкладки й дії, що перекриваються, — раз", async () => {
   const { actionIntervals, unionIntervals, ACTION_GAP_MS } = await import("../triage/crm-sessions.mjs");
   const t = (hhmm) => Date.parse(`2026-10-27T${hhmm}:00Z`);
-  const work = actionIntervals([t("09:00"), t("09:10"), t("09:24"), t("11:00")]);
-  assert.deepEqual(work.map((row) => [(row.to - row.from) / 60_000]), [[27], [3]], "09:00–09:24 разом (+2 хв до, +1 після), 11:00 окремо");
-  assert.equal(actionIntervals([t("09:00"), t("09:00") + ACTION_GAP_MS + 60_000]).length, 2, "понад 15 хв — дві роботи");
-  const all = unionIntervals([[{ from: t("09:20"), to: t("10:00") }], work], { start: "2026-10-27T00:00:00Z", end: "2026-10-28T00:00:00Z" });
-  assert.deepEqual(all.map((row) => [new Date(row.from).toISOString().slice(11, 16), new Date(row.to).toISOString().slice(11, 16)]), [["08:58", "10:00"], ["10:58", "11:01"]]);
+  const work = actionIntervals([t("09:00"), t("09:40"), t("10:20"), t("12:00")]);
+  assert.deepEqual(work.map((row) => [(row.to - row.from) / 60_000]), [[83], [3]], "пачки кожні 40 хв — одна робота 09:00–10:20 (+2 хв до, +1 після); 12:00 окремо");
+  assert.equal(actionIntervals([t("09:00"), t("09:00") + ACTION_GAP_MS + 60_000]).length, 2, "понад годину — дві роботи");
+  const all = unionIntervals([[{ from: t("10:00"), to: t("10:50") }], work], { start: "2026-10-27T00:00:00Z", end: "2026-10-28T00:00:00Z" });
+  assert.deepEqual(all.map((row) => [new Date(row.from).toISOString().slice(11, 16), new Date(row.to).toISOString().slice(11, 16)]), [["08:58", "10:50"], ["11:58", "12:01"]]);
 });
 
 test("сесія, закрита на межі дня й зачеплена після, — не тягнеться до півночі: її останнє серцебиття невідоме", () => {
