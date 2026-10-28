@@ -440,7 +440,7 @@ async function tellTrouble({ accountId, label, ok, outcome, shots, closed }) {
     `Причина: ${humanReason(raw)}`,
     closed.length ? `Що я вже зробив: закрив браузер, що лишився відкритим (${closed.join(', ')}).` : null,
     `Агент пробує знову сам.`,
-    `Технічно: ${String(raw).replace(/\s+/g, ' ').slice(0, 160)}`
+    `Технічно: ${String(raw).replace(/\s+/g, ' ').slice(0, 200)}`
   ].filter(Boolean).join('\n');
   if (shot) await telegramTrouble.sendPhoto(fs.readFileSync(shot), text).catch(() => telegramTrouble.send(text));
   else await telegramTrouble.send(text);

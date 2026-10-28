@@ -33,16 +33,30 @@ export class AntyApi {
   }
 
   async request(route, body, method = body === undefined ? 'GET' : 'POST') {
-    const response = await this.fetch(`${this.baseUrl}${route}`, {
+    const response = await this.fetchNamed(route, body, method);
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(`Anty API: ${data.error || response.status}`);
+    return data;
+  }
+
+  /** The runtime's own timeout said as the runtime's, with the call it hung on. */
+  async fetchNamed(route, body, method) {
+    try {
+      return await this.fetchRaw(route, body, method);
+    } catch (error) {
+      if (error?.name !== 'TimeoutError') throw error;
+      throw new Error(`серверна Anty не відповіла вчасно на ${method} ${route.replace(/\/[0-9a-f-]{20,}/gi, '/…')}`);
+    }
+  }
+
+  async fetchRaw(route, body, method) {
+    return this.fetch(`${this.baseUrl}${route}`, {
       method,
       ...(body === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
       // A start with the cloud's session can take minutes on a profile with a
       // long storage state (gulajpole 28.10: 141 origins seeded, over 3 min).
       signal: AbortSignal.timeout(body === undefined ? 15000 : 360000),
     });
-    const data = await response.json();
-    if (!response.ok || !data.ok) throw new Error(`Anty API: ${data.error || response.status}`);
-    return data;
   }
 
   /**

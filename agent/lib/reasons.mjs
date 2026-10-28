@@ -5,8 +5,12 @@
  * A message nobody has a sentence for goes through as it is, after the known ones.
  */
 const KNOWN = [
-  [/aborted due to timeout|Anty API: .*timeout|ETIMEDOUT/i,
-    'серверна Anty не відповіла вчасно — вона зависла або їй забракло пам\'яті (зазвичай через браузер, що лишився відкритим після попередньої сесії)'],
+  [/портал Outbound не відповів/i,
+    'сервер Outbound не відповів вчасно — агент чекав на нього посеред сесії (браузер і LinkedIn тут ні до чого)'],
+  [/серверна Anty не відповіла вчасно/i,
+    'серверна Anty не відповіла вчасно — вона зависла або їй забракло пам\'яті'],
+  [/aborted due to timeout|ETIMEDOUT/i,
+    'один із запитів посеред сесії не дочекався відповіді (агент старої версії не записав, який саме)'],
   [/is already running in Anty|Profile is still starting|belongs to another browser session/i,
     'профіль уже відкритий на сервері — попередня сесія не закрила браузер'],
   [/Target crashed|Page crashed|has been closed|Target page, context or browser has been closed/i,

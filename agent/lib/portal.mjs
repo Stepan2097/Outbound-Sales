@@ -25,10 +25,18 @@ export class Portal {
   async #json(path, init = {}) {
     let res;
     for (let attempt = 0; ; attempt += 1) {
-      res = await fetch(`${this.base}${path}`, {
-        ...init, signal: AbortSignal.timeout(this.timeoutMs),
-        headers: { ...(init.headers ?? {}), ...(this.token ? { 'X-Agent-Token': this.token } : {}) }
-      });
+      try {
+        res = await fetch(`${this.base}${path}`, {
+          ...init, signal: AbortSignal.timeout(this.timeoutMs),
+          headers: { ...(init.headers ?? {}), ...(this.token ? { 'X-Agent-Token': this.token } : {}) }
+        });
+      } catch (error) {
+        // Who did not answer, and to what (28.10: a bare «aborted due to timeout»
+        // was read as the browser's runtime when it was the portal).
+        if (error?.name !== 'TimeoutError') throw error;
+        const action = (() => { try { return JSON.parse(init.body || '{}').action; } catch { return null; } })();
+        throw new Error(`портал Outbound не відповів за ${Math.round(this.timeoutMs / 1000)} с (${path.split('?')[0]}${action ? ` → ${action}` : ''})`);
+      }
       if (![502, 503].includes(res.status) || attempt >= this.gatewayWaitsMs.length) break;
       await res.body?.cancel?.().catch(() => {});
       await this.wait(this.gatewayWaitsMs[attempt]);

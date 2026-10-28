@@ -74,3 +74,15 @@ test('портал довго лежить — після всіх пауз по
     await assert.rejects(portal.accounts(), /HTTP 502: Bad Gateway/);
   } finally { globalThis.fetch = original; }
 });
+
+// 28.10: a bare «aborted due to timeout» was read as Anty's when it was the portal.
+test('a portal that does not answer in time is named, with the call', async () => {
+  const { Portal } = await import('./lib/portal.mjs');
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => { const error = new Error('The operation was aborted due to timeout'); error.name = 'TimeoutError'; throw error; };
+  try {
+    const portal = new Portal('http://127.0.0.1:1', { token: 't', timeoutMs: 30000 });
+    portal.accountId = 'a1';
+    await assert.rejects(portal.log('x', 'y'), /портал Outbound не відповів за 30 с \(\/api\/warmup\/agent → /);
+  } finally { globalThis.fetch = realFetch; }
+});
