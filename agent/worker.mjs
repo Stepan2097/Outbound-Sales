@@ -46,7 +46,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Portal } from './lib/portal.mjs';
-import { AntyApi } from './lib/anty-api.mjs';
+import { AntyApi, stopLeftOpen } from './lib/anty-api.mjs';
+import { humanReason } from './lib/reasons.mjs';
+import { writeFileAtomicSync } from './lib/atomic-write.mjs';
 import { cloudFromEnv } from './lib/anty-cloud.mjs';
 import { Telegram } from './lib/telegram.mjs';
 
@@ -257,9 +259,9 @@ function seconds(value, { field, min = SLEEP_FLOOR_S, max = SLEEP_CEIL_S }) {
  * honest "nothing to do today"), anything else is a failure and becomes a
  * cool-off on the server.
  */
-function runAccount(accountId, leaseId, { maxMs = RUN_MAX_MS, graceMs = RUN_KILL_GRACE_MS } = {}) {
+function runAccount(accountId, leaseId, { maxMs = RUN_MAX_MS, graceMs = RUN_KILL_GRACE_MS, shots = null } = {}) {
   return new Promise((resolve) => {
-    const args = [RUN_ACCOUNT, '--account', accountId, '--portal', PORTAL, ...(leaseId ? ['--lease-id', leaseId] : [])];
+    const args = [RUN_ACCOUNT, '--account', accountId, '--portal', PORTAL, ...(leaseId ? ['--lease-id', leaseId] : []), ...(shots ? ['--shots', shots] : [])];
     let settled = false;
     let overdue = false;
     let watchdog = null;
@@ -371,6 +373,66 @@ if (RUN_ACCOUNT !== path.join(here, 'run-account.mjs')) log(`⚠️ підмін
 const portal = new Portal(PORTAL, { prefix: '/api/warmup/agent' });
 
 let offline = OFFLINE_FIRST_S;
+const RUNS_DIR = path.join(here, 'runs');
+
+/**
+ * A browser the finished run left open is closed here, with the run's own token
+ * (28.10: a session that died kept gulajpole's browser open for two hours —
+ * 2.3 GB — and every account after it failed on «timeout»). Only this worker
+ * runs sessions, one at a time, so after a run nothing of its may stay open.
+ */
+async function closeLeftOpen() {
+  if (!process.env.WARMUP_ANTY_API) return [];
+  const api = new AntyApi(process.env.WARMUP_ANTY_API);
+  const closed = [];
+  for (const name of fs.readdirSync(RUNS_DIR).filter((file) => /^open-\d+\.json$/.test(file))) {
+    const file = path.join(RUNS_DIR, name);
+    let held = null;
+    try { held = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* half-written: skip */ }
+    if (held?.profileId && held.ownerToken && await stopLeftOpen(api, held)) {
+      closed.push(held.account || `профіль ${held.profileId}`);
+      log(`🧹 ${held.account || held.profileId}: браузер лишився відкритим після сесії — закрив`);
+    }
+    fs.rmSync(file, { force: true });
+  }
+  return closed;
+}
+
+/**
+ * A failing account, said to the group by the worker itself — with the reason
+ * in words and what was on the screen (власник 28.10: «де нормальні причини?
+ * де скріни?»). Twice in a row is when it is said, as before; once it works
+ * again, that is said too. What the worker already fixed goes in the same message.
+ */
+const FAILURES_FILE = path.join(RUNS_DIR, 'worker-failures.json');
+const telegramTrouble = new Telegram();
+function readFailures() { try { return JSON.parse(fs.readFileSync(FAILURES_FILE, 'utf8')); } catch { return {}; } }
+async function tellTrouble({ accountId, label, ok, outcome, shots, closed }) {
+  const failures = readFailures();
+  const before = failures[accountId]?.count ?? 0;
+  if (ok) {
+    if (before) { delete failures[accountId]; writeFileAtomicSync(FAILURES_FILE, JSON.stringify(failures)); }
+    if (before >= 2 && telegramTrouble.configured) await telegramTrouble.send(`✅ ${label}: знову працює.`);
+    return;
+  }
+  let result = {};
+  try { result = JSON.parse(fs.readFileSync(path.join(shots, 'result.json'), 'utf8')); } catch { /* the run never wrote one */ }
+  const raw = (result.errors || []).at(-1) || outcome.note || `код ${outcome.code}`;
+  failures[accountId] = { count: before + 1, at: new Date().toISOString(), reason: raw };
+  writeFileAtomicSync(FAILURES_FILE, JSON.stringify(failures));
+  if (before + 1 !== 2 || !telegramTrouble.configured) return;
+  const shot = ['failure.jpg', ...[...(result.shotFiles || [])].reverse().map((file) => path.basename(file))]
+    .map((name) => path.join(shots, name)).find((file) => fs.existsSync(file));
+  const text = [
+    `⚠️ ${label} не працює — 2 сесії поспіль не вдалися.`,
+    `Причина: ${humanReason(raw)}`,
+    closed.length ? `Що я вже зробив: закрив браузер, що лишився відкритим (${closed.join(', ')}).` : null,
+    `Агент пробує знову сам.`,
+    `Технічно: ${String(raw).replace(/\s+/g, ' ').slice(0, 160)}`
+  ].filter(Boolean).join('\n');
+  if (shot) await telegramTrouble.sendPhoto(fs.readFileSync(shot), text).catch(() => telegramTrouble.send(text));
+  else await telegramTrouble.send(text);
+}
 
 /**
  * Every warm-up account's profile is on the server before its first session
@@ -525,8 +587,9 @@ do {
 
   let outcome = { code: -1, note: 'запуск не завершився' };
   let sleepAfter = SLEEP_FALLBACK_S;
+  const shots = path.join(RUNS_DIR, `${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}-${String(next.accountId).replace(/\W+/g, '_')}`);
   try {
-    outcome = await runAccount(next.accountId, leaseId);
+    outcome = await runAccount(next.accountId, leaseId, { shots });
   } catch (error) {
     // Belt and braces: `runAccount` resolves rather than throws, but a run that
     // somehow threw is precisely the case where the report must still go out.
@@ -534,6 +597,8 @@ do {
   } finally {
     const ok = outcome.code === 0;
     shout(`${ok ? '✅' : '❌'} ${label}: run-account завершився з кодом ${outcome.code}${outcome.note ? ` — ${outcome.note}` : ''}`);
+    const closed = await closeLeftOpen().catch((error) => { log(`⚠️ не зміг закрити браузер після сесії: ${error.message}`); return []; });
+    await tellTrouble({ accountId: next.accountId, label, ok, outcome, shots, closed }).catch((error) => log(`⚠️ звіт у групу: ${error.message}`));
     sleepAfter = await report(portal, {
       accountId: next.accountId,
       label,

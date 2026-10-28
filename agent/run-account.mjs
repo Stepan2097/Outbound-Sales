@@ -160,6 +160,9 @@ const runtime = process.env.WARMUP_ANTY_API
   }).open(found.profileRemoteId, chromium)
   : null;
 if (runtime) closeBrowser = runtime.close;
+// What the worker needs to close this browser if this run dies with it open.
+const HELD = path.join(path.dirname(fileURLToPath(import.meta.url)), 'runs', `open-${runtime?.profile?.id ?? 'local'}.json`);
+if (runtime) fs.writeFileSync(HELD, JSON.stringify({ profileId: runtime.profile.id, ownerToken: runtime.ownerToken, account: accountLabel, at: new Date().toISOString() }), { mode: 0o600 });
 const profile = runtime?.profile || readProfile(found.profileRemoteId);
 if (!profile) throw new Error(`Anty has no local copy of profile ${found.profileRemoteId} — open it in Anty once`);
 if (!runtime && profile.openInAnty) {
@@ -189,6 +192,8 @@ const context = runtime?.context || await chromium.launchPersistentContext(profi
 
 if (!runtime) closeBrowser = () => context.close();
 let failed = false;
+// Out here so the failure shot can still reach it from `finally`.
+let page = null;
 try {
 // The user agent says Windows; without this navigator still says the host. The
 // pair is the first thing a fingerprinting script cross-checks.
@@ -240,7 +245,7 @@ log(`сесію відкрито (${session.sessionId}${session.resumed ? ', п�
   // One tab per stage (lib/tab.mjs): a LinkedIn tab kept for a whole visit
   // grew to 3.6 GB and was killed for it. `page` is reassigned at each stage,
   // and everything below reads it when it runs, not when it was defined.
-  let page = await oneTab(context);
+  page = await oneTab(context);
   report.memory = [];
   const recycle = async (stage) => {
     const used = await tabMemory(page);
@@ -625,12 +630,15 @@ log(`сесію відкрито (${session.sessionId}${session.resumed ? ', п�
   const repliesNote = report.replies
     ? ` | відповідей: надіслано ${report.replies.sent}, не пішло ${report.replies.failed}, пропущено ${report.replies.skipped}`
     : '';
-  try { await closeBrowser?.(); } catch (error) {
+  // What was on the screen when it went wrong — for the report in the group (власник 28.10: «де скріни?»).
+  if (failed) await page?.screenshot?.({ path: path.join(SHOTS, 'failure.jpg'), type: 'jpeg', quality: 70 }).catch(() => {});
+  try { await closeBrowser?.(); if (runtime) fs.rmSync(HELD, { force: true }); } catch (error) {
     failed = true;
     report.errors.push(`Browser cleanup: ${error.message}`);
     await portal.log('agent.error', `Browser cleanup: ${error.message}`, null, 'error').catch(() => {});
   }
   await portal.closeSession(`${summary}${inboxNote}${repliesNote}`.slice(0, 500), failed).catch(() => {});
+  report.failed = failed;
   fs.writeFileSync(path.join(SHOTS, 'result.json'), JSON.stringify(report, null, 2));
   log(`готово. дій: ${report.actions.length} | помилок: ${report.errors.length}${inboxNote}${repliesNote} | скріни: ${SHOTS}`);
   if (!failed) closeBrowser = null;
@@ -646,6 +654,7 @@ try {
   // it is already open, the browser would not start — says why to the portal,
   // so the account's trouble reaches a person and not only this log (16.10).
   if (portal.accountId) await portal.log('agent.error', error.message, { stage: 'start' }, 'error').catch(() => {});
+  try { fs.writeFileSync(path.join(SHOTS, 'result.json'), JSON.stringify({ ...report, failed: true, errors: [...report.errors, error.message] }, null, 2)); } catch { /* the worker still has the exit code */ }
   await closeBrowser?.().catch(error => console.error(`Browser cleanup: ${error.message}`));
 } finally {
   if (ownLeaseId) {

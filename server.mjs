@@ -3572,6 +3572,9 @@ async function announceReply({ account, participant, inbound }) {
 
 /** An account that keeps failing — or works again — said to the same group. */
 async function announceTrouble({ account, failures, reason, recovered }) {
+  // Звіт про збій тепер шле сам агент — зі знімком екрана й причиною словами
+  // (власник 28.10: «де нормальні причини? де скріни?»). Цей, текстовий, — лише з LEADGEN_TROUBLE_TELEGRAM=on.
+  if (process.env.LEADGEN_TROUBLE_TELEGRAM !== "on") return;
   if (!leadgenBot.configured || process.env.LEADGEN_TELEGRAM === "off") return;
   await leadgenBot.send(troubleText({ name: account?.login?.trim() || account?.label || "акаунт", failures, reason, recovered, url: appUrl() ? `${appUrl()}/#warmup` : "" }));
 }
@@ -3603,6 +3606,9 @@ async function leadgenDigest(now = new Date()) {
 }
 
 async function leadgenDigestTick() {
+  // Ранкове зведення «☀️ Outbound на сьогодні» — лише з LEADGEN_DIGEST=on
+  // (власник 28.10: «для чого було відправлено це повідомлення… я ніколи не просив цього»).
+  if (process.env.LEADGEN_DIGEST !== "on") return;
   if (!leadgenBot.configured || !warmupAnty.configured()) return;
   const { due, today } = digestDue(new Date(), state.leadgenDigestSentOn);
   if (!due) return;

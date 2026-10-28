@@ -1,5 +1,13 @@
 import { randomUUID } from 'node:crypto';
 
+/** A browser a run left open: closed with the run's own token, which only that run had. */
+export async function stopLeftOpen(api, held) {
+  const running = await api.request('/api/running');
+  if (!(running.running || []).some((row) => Number(row.id) === Number(held.profileId))) return false;
+  await api.request(`/api/profiles/${held.profileId}/stop`, { ownerToken: held.ownerToken });
+  return true;
+}
+
 export class AntyApi {
   /**
    * `cloud` — an AntyCloud (lib/anty-cloud.mjs): the profile's LinkedIn session
@@ -124,6 +132,9 @@ export class AntyApi {
         profile: { ...profile, proxy: { server: profile.proxyServer }, managedByAnty: true },
         context,
         close,
+        // Kept on disk by the run, so the worker can still close this browser
+        // if the run dies with it open (28.10: gulajpole's held 2.3 GB for two hours).
+        ownerToken,
         signedIn: (yes) => { sawFeed = Boolean(yes); }
       };
     } catch (error) {

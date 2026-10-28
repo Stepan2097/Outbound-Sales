@@ -63,7 +63,7 @@ test('the tab says how big it is, and the log line reads it', async (t) => {
 
 test('a visit takes a fresh tab before the likes, the invitations and the inbox, and logs the last one', () => {
   const source = fs.readFileSync(new URL('run-account.mjs', import.meta.url), 'utf8');
-  assert.match(source, /let page = await oneTab\(context\)/);
+  assert.match(source, /page = await oneTab\(context\)/);
   const at = (needle) => {
     const index = source.indexOf(needle);
     assert.ok(index > 0, `немає: ${needle}`);
