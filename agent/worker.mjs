@@ -393,9 +393,14 @@ async function closeLeftOpen() {
       if (held?.profileId && held.ownerToken && await stopLeftOpen(api, held)) {
         closed.push(held.account || `профіль ${held.profileId}`);
         log(`🧹 ${held.account || held.profileId}: браузер лишився відкритим після сесії — закрив`);
+        fs.rmSync(file, { force: true });
+      } else if (!held || Date.now() - Date.parse(held.at || 0) > 15 * 60_000) {
+        // Not open, and too old to be a start still under way.
+        fs.rmSync(file, { force: true });
       }
-      fs.rmSync(file, { force: true });
     } catch (error) {
+      // A start that outlived the run's wait is still going: next pass.
+      if (/still starting/i.test(error.message)) continue;
       // Kept for the next pass; a browser the runtime cannot close holds all the
       // server's memory, so the group hears of it now, not after two failures.
       log(`⚠️ ${held?.account || name}: браузер не закривається — ${error.message}`);
@@ -480,6 +485,8 @@ async function syncProfiles() {
 
 do {
   await syncProfiles().catch((error) => log(`⚠️ перенесення профілів: ${error.message}`));
+  // Before asking for the next account too: a start that outlived its run finishes while the worker waits.
+  await closeLeftOpen().catch((error) => log(`⚠️ не зміг закрити браузер: ${error.message}`));
   let answer = null;
   try {
     answer = await portal.due();

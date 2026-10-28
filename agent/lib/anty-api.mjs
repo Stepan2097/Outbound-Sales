@@ -16,7 +16,7 @@ export class AntyApi {
    * the visit said it saw the feed (`session.signedIn(true)`). It never stops a
    * visit: a cloud that fails is a line in the log.
    */
-  constructor(baseUrl, { fetchImpl = fetch, cloud = null, log = () => {}, onImported = async () => {} } = {}) {
+  constructor(baseUrl, { fetchImpl = fetch, cloud = null, log = () => {}, onImported = async () => {}, onLeftOpen = () => {} } = {}) {
     const url = new URL(baseUrl);
     if (url.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) ||
         url.username || url.password || url.pathname !== '/' || url.search || url.hash) {
@@ -27,13 +27,18 @@ export class AntyApi {
     this.cloud = cloud;
     this.log = log;
     this.onImported = onImported;
+    // A browser this client could not close itself (a start that outlived its
+    // wait goes on starting in the runtime): handed on, so the worker closes it.
+    this.onLeftOpen = onLeftOpen;
   }
 
   async request(route, body, method = body === undefined ? 'GET' : 'POST') {
     const response = await this.fetch(`${this.baseUrl}${route}`, {
       method,
       ...(body === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
-      signal: AbortSignal.timeout(body === undefined ? 15000 : 180000),
+      // A start with the cloud's session can take minutes on a profile with a
+      // long storage state (gulajpole 28.10: 141 origins seeded, over 3 min).
+      signal: AbortSignal.timeout(body === undefined ? 15000 : 360000),
     });
     const data = await response.json();
     if (!response.ok || !data.ok) throw new Error(`Anty API: ${data.error || response.status}`);
@@ -141,8 +146,15 @@ export class AntyApi {
     } catch (error) {
       // The request may have reached the server before the client lost its response.
       // The owner token prevents cleanup from stopping a concurrent user's browser.
-      try { await close(); } catch (cleanupError) { error.message += `; cleanup failed: ${cleanupError.message}`; }
-      throw error;
+      // A timeout is a DOMException whose message cannot be added to (28.10:
+      // «Cannot set property message … which has only a getter» hid the real cause).
+      let cleanup = null;
+      try { await close(); } catch (cleanupError) {
+        cleanup = cleanupError;
+        try { this.onLeftOpen({ profileId: profile.id, ownerToken }); } catch { /* the caller's file, best effort */ }
+      }
+      if (!cleanup) throw error;
+      throw new Error(`${error.message}; браузер не вдалося закрити одразу (${cleanup.message}) — воркер закриє його після сесії`, { cause: error });
     }
   }
 }

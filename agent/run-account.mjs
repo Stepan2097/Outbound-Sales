@@ -153,6 +153,9 @@ const runtime = process.env.WARMUP_ANTY_API
     // The session is taken from Anty's cloud and given back to it (власник 23.10).
     cloud: cloudFromEnv({ agentDir: path.dirname(fileURLToPath(import.meta.url)), log, check: (tab) => settle(tab) }),
     log,
+    onLeftOpen: ({ profileId, ownerToken }) => fs.writeFileSync(
+      path.join(path.dirname(fileURLToPath(import.meta.url)), 'runs', `open-${profileId}.json`),
+      JSON.stringify({ profileId, ownerToken, account: accountLabel, at: new Date().toISOString() }), { mode: 0o600 }),
     // Said to the group the moment it happens, not after two failed sessions.
     onImported: async (row) => {
       importedCopy = row.name;
