@@ -112,6 +112,7 @@ export function openPing(pingId) {
   today.blockFilter = "";
   // Той самий лід, що вже відкритий, — картка лишається як є: без «Оберіть пінг» і «Відкриваю…».
   if (today.detail?.item?.pingId !== pingId) {
+    keepDraft();
     today.translation = { open: false, for: "", text: "", loading: false, error: "" };
     today.detail = null;
     today.detailLoading = true;
@@ -159,9 +160,9 @@ const BLOCKS = [
 const FILTER_TEXT = {
   "": ["Усе нижче разом", "Усе, що чекає на вас, разом: відповіді, прострочені, на сьогодні й перші повідомлення. Не окремий список, а сума."],
   replies: ["Лід написав — відповісти. Першими", "Лід написав останнім і чекає відповіді — з будь-якого дня, не лише сьогодні. Робити першими."],
-  overdue: ["Дата пінга минула — нагадати, написати, подзвонити", "Дата пінга минула, а ми не написали: нагадати мовчуну, перше повідомлення чи дзвінок. Друге за пріоритетом."],
+  overdue: ["Дата пінга минула — нагадати, написати, подзвонити", "Розмова вже є, дата пінга минула, а ми не написали: нагадати мовчуну чи подзвонити. Хто лише прийняв запит — у «Перших повідомленнях». Друге за пріоритетом."],
   today: ["Нагадування з датою на сьогодні", "Нагадування тим, хто мовчить, з датою на сьогодні."],
-  first: ["Прийняв запит — написати першим", "Людина прийняла запит у друзі — написати першими."],
+  first: ["Прийняв запит — написати першим", "Людина прийняла запит у друзі, розмови ще немає — написати першими, хоч би й дата минула."],
   silent: ["Ми написали останніми — людина мовчить", "Ми написали останніми, людина мовчить. Нагадування саме прийде в «На сьогодні» в свій день — тут лише перевірити, хто чекає."],
   threads: ["Усі переписки, і без пінга", "Усі переписки акаунтів, і ті, де пінга немає: люди не з CRM, старі, закриті статусом. Перевіряти час від часу."]
 };
@@ -184,6 +185,8 @@ const today = {
   account: "", search: "",
   selected: "", detail: null, detailError: "", detailLoading: false,
   draftLoading: false, draftNote: "", sending: false, notice: "", tone: "", text: "", textFor: "",
+  // Ненадіслані тексти по пінгах: перехід до іншого ліда зберігає мовчки, без питання (таск 85ea1e97).
+  drafts: new Map(),
   // Етап 2/6: відкриті діалоги з 01.08 (адмін).
   imports: null, importOpen: false, importError: "", importPick: new Set(), importEdits: new Map(), importAssignee: "", importBusy: false, importTimer: null,
   // Коли нагадувати тим, хто мовчить (власник 20.10: «зробити ці поля редагованими»).
@@ -291,6 +294,13 @@ async function openToday({ keepSelection = false } = {}) {
   else today.detail = null;
 }
 
+/** Текст відкритого ліда — у пам'ять: повернення до ліда покаже його на місці. */
+function keepDraft() {
+  if (!today.textFor) return;
+  if (today.text.trim()) today.drafts.set(today.textFor, today.text);
+  else today.drafts.delete(today.textFor);
+}
+
 async function loadDetail(pingId) {
   today.detailLoading = true;
   today.detailError = "";
@@ -300,7 +310,7 @@ async function loadDetail(pingId) {
     if (today.selected !== pingId) return;
     today.detail = detail;
     if (today.textFor !== pingId) {
-      today.text = detail.draft?.text || "";
+      today.text = today.drafts.get(pingId) || detail.draft?.text || "";
       today.textFor = pingId;
     }
     // Відповідь, яку відкрили тут, прочитана — як у «Вхідних».
@@ -373,6 +383,7 @@ async function send() {
     await api("/api/today/refresh", { method: "POST", body: "{}" }).catch(() => {});
     const goes = warmupGoesOutText(reply);
     const name = item.name;
+    today.drafts.delete(item.pingId);
     today.text = "";
     today.textFor = "";
     today.draftNote = "";
@@ -702,6 +713,7 @@ async function assignCampaign() {
     // Кампанію людини сервер бачить після звірки; потім — чернетка під її продукт і сценарій.
     await api("/api/today/refresh", { method: "POST", body: "{}" }).catch(() => {});
     say(`${item.name}: тепер у кампанії «${campaign.name}». Чернетку переписую під неї.`);
+    today.drafts.delete(item.pingId);
     today.text = "";
     today.textFor = "";
     await loadDetail(item.pingId);
@@ -1044,8 +1056,7 @@ document.addEventListener("click", (event) => {
     return void openToday();
   }
   if (act === "select") {
-    if (today.text.trim() && today.textFor && today.textFor !== target.dataset.id && today.text !== (today.detail?.draft?.text || "")
-      && !window.confirm("Текст ще не надіслано. Перейти до іншого ліда?")) return;
+    keepDraft();
     today.selected = target.dataset.id;
     today.callMode = false;
     today.translation = { open: false, for: "", text: "", loading: false, error: "" };

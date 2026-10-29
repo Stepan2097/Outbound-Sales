@@ -126,7 +126,7 @@ test("блоки «Сьогодні»: відповіді вище за прос
   assert.equal(blockOf({ reason: "silent", dueDay: "2026-10-15" }, today), "overdue");
   assert.equal(blockOf({ reason: "silent", dueDay: today }, today), "today");
   assert.equal(blockOf({ reason: "first", dueDay: today }, today), "first");
-  assert.equal(blockOf({ reason: "first", dueDay: "2026-10-15" }, today), "overdue", "минуле перше повідомлення — прострочене, стримує нові контакти");
+  assert.equal(blockOf({ reason: "first", dueDay: "2026-10-15" }, today), "first", "минуле перше повідомлення без розмови — не прострочення (Марко 29.10)");
   assert.equal(blockOf({ reason: "manual", dueDay: today }, today), "today");
   assert.equal(blockOf({ reason: "reply", dueDay: "2026-10-17", awaitingUs: true }, today), "later", "перенесена людиною відповідь — на свій день");
   assert.equal(newContactsAllowed({ replies: [], overdue: [], today: [1], first: [1] }), true);

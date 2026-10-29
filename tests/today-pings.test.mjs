@@ -264,7 +264,7 @@ test("відкриті діалоги з 01.08: пропозиції → при�
   assert.equal(imported.reason, "reply");
 });
 
-test("перенесене «Перше повідомлення» стає ручним пінгом: на свій день — «На сьогодні», після — «Прострочені», і стримує нові контакти", async () => {
+test("перенесене «Перше повідомлення» стає ручним пінгом: на свій день — «На сьогодні», після — «Перші повідомлення» (розмови ще немає — не прострочення, Марко 29.10)", async () => {
   rows.wl_events = [];
   rows.contacts.find((row) => row.id === "c2").owner_id = "u-bohdan";
   rows.wl_outreach = [{ id: "o2", account_id: "acc-1", crm_contact_id: "c2", person_name: "Lead Two", status: "accepted", created_at: ago(3000) }];
@@ -279,8 +279,9 @@ test("перенесене «Перше повідомлення» стає ру
   assert.equal(list.blocks.today[0].reasonTitle, "Перше повідомлення");
   rows.tasks.find((row) => row.id === first.id).due_date = ago(60 * 48);
   list = await todayList({ viewerId: "u-bohdan" });
-  assert.equal(list.blocks.overdue[0]?.contactId, "c2", "після дати — «Прострочені»");
-  assert.equal(list.newContactsAllowed, false, "прострочений пінг стримує нові контакти");
+  assert.equal(list.blocks.overdue.length, 0, "без жодного повідомлення — не «Прострочені»");
+  assert.equal(list.blocks.first[0]?.contactId, "c2", "після дати — у «Перших повідомленнях»");
+  assert.equal(list.newContactsAllowed, true, "контакт без розмови не стримує нові контакти");
 });
 
 import { setLeadCampaignStore } from "../triage/lead-campaigns.mjs";

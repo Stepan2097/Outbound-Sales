@@ -468,7 +468,9 @@ function itemOf(task, { contact, state, today, now, emails, accounts = new Map()
     reasonTitle: reason === "manual" && String(task.title || "").includes(":") ? task.title.split(":")[0] : REASONS[reason]?.title || REASONS.manual.title,
     title: task.title,
     dueDay,
-    block: blockOf({ reason, dueDay, awaitingUs }, today),
+    // Розмова — є повідомлення в треді або наше вже в черзі (таск 85ea1e97). Стану
+    // прогріву немає (звірка не відповіла) — правило за причиною пінгу, як раніше.
+    block: blockOf({ reason, dueDay, awaitingUs, dialog: state ? Boolean(thread) || Boolean(state.pending?.length) : undefined }, today),
     basisAt: next?.basisAt || null,
     accountId: next?.accountId || thread?.accountId || state?.accepted?.accountId || null,
     accountName: accounts.get(next?.accountId || thread?.accountId || state?.accepted?.accountId) || null,

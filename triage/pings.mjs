@@ -313,15 +313,18 @@ export function planPingChanges(desired, tasks) {
 /**
  * Блок списку «Сьогодні» для відкритого пінгу:
  *   replies — лід відповів і чекає нас (дата настала);
- *   first   — прийняв запит, перше повідомлення (дата настала);
- *   overdue — дата минула;  today — сьогодні;  later — пізніше.
+ *   first   — розмови ще немає: прийняв запит, перше повідомлення (дата настала чи минула);
+ *   overdue — дата минула, а розмова вже є;  today — сьогодні;  later — пізніше.
  * `awaitingUs` — за станом прогріву останнє слово за лідом.
+ * `dialog` — у треді є хоч одне повідомлення або наше вже поставлене в чергу.
  */
-export function blockOf({ reason, dueDay, awaitingUs }, today) {
+export function blockOf({ reason, dueDay, awaitingUs, dialog = reason !== "first" }, today) {
   if (dueDay && dueDay > today) return "later";
   if (awaitingUs || reason === "reply") return "replies";
-  // Минула дата — прострочений, хоч би й перше повідомлення: інакше він не стримує
-  // нові контакти й губиться серед них (вердикт судді, 16.10).
+  // Без розмови (лише взаємне додавання) — не прострочення, а перше повідомлення
+  // (Марко 29.10: «мають бути лише просрочені пінги або відповіді»). Так воно не
+  // стримує нові контакти — як і раніше до вердикту судді 16.10.
+  if (!dialog) return reason === "first" || (dueDay && dueDay < today) ? "first" : "today";
   if (dueDay && dueDay < today) return "overdue";
   if (reason === "first") return "first";
   return "today";
