@@ -3973,6 +3973,28 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         return true;
       }
 
+      // The screen a parked account stops on, from the login watch: read by a
+      // model into the note the alert shows. Health and its date stay — this
+      // says what LinkedIn shows, not that anything changed.
+      if (action === "screen") {
+        if (typeof body.shot !== "string" || !body.shot) return fail(response, sendJson, 400, "No screenshot");
+        sendJson(response, 200, { success: true });
+        const health = account.health;
+        if (!["needs_login", "captcha"].includes(health)) return true;
+        diagnoseScreen({ shot: body.shot, text: body.text, url: body.url }).then(async (seen) => {
+          if (!seen) return;
+          await anty.from("wl_accounts").update({ health_note: seen.sentence }).eq("id", account.id).eq("health", health).rows();
+          await logEvent({
+            accountId: account.id,
+            level: "warn",
+            type: "account.diagnosed",
+            message: `Знімок екрана: ${seen.sentence}`,
+            meta: { kind: seen.kind, sentence: seen.sentence, health, source: "login-watch" }
+          });
+        }).catch(() => {});
+        return true;
+      }
+
       if (action === "health") {
         if (!isHealth(body.health)) return fail(response, sendJson, 400, "Unknown health value");
         const note = typeof body.note === "string" ? body.note.slice(0, 300) : null;

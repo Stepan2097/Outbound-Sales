@@ -44,7 +44,7 @@ export const BUTTON_TEXT = 'Вже залогінився — продовжит
 export const NEEDS_PERSON = ['needs_login', 'captcha'];
 
 export function emptyState() {
-  return { lastCheck: {}, lastTold: {}, asked: {} };
+  return { lastCheck: {}, lastTold: {}, asked: {}, lastRead: {} };
 }
 
 /**
@@ -68,11 +68,33 @@ export function normalizeState(input) {
   for (const [nonce, at] of Object.entries(input.asked ?? {})) {
     if (Number.isFinite(at) && at > 0) state.asked[nonce] = Number(at);
   }
+  for (const [id, day] of Object.entries(input.lastRead ?? {})) {
+    if (typeof day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(day)) state.lastRead[id] = day;
+  }
   return state;
 }
 
 function parkedAmong(accounts) {
   return accounts.filter((account) => NEEDS_PERSON.includes(account.health) && account.profileRemoteId);
+}
+
+/**
+ * What LinkedIn shows instead of the feed, handed to the portal, which has a
+ * model read the screenshot into the alert's words (власник 30.10: the alert
+ * said «просить увійти» for an account he knew was restricted). Never in the
+ * way of the check itself.
+ */
+async function readScreen({ portal, account, result, log }) {
+  if (!result?.screenshot) return false;
+  portal.accountId = account.id;
+  const shot = Buffer.isBuffer(result.screenshot) ? result.screenshot.toString('base64') : String(result.screenshot);
+  try {
+    const answer = await portal.screen({ shot, text: result.pageText || '', url: result.url || '' });
+    return answer?.success === true;
+  } catch (error) {
+    log(`${account.label}: знімок порталу не пішов — ${error.message}`);
+    return false;
+  }
 }
 
 async function restore({ portal, telegram, account, asked = false, log = () => {} }) {
@@ -166,6 +188,7 @@ export async function answerAsks({ portal, telegram, probe, state, nowMs = Date.
       log(`${account.label}: вердикт не записався — ${error.message}`);
     }
     log(`${account.label}: за посиланням із групи входу не видно (${result.reason})`);
+    await readScreen({ portal, account, result, log });
     if (written && telegram.configured) {
       const text = `${account.label}: входу ще не видно — ${describeLoginState(result)} Перевір, що залогінився саме в цьому профілі.`;
       if (result.screenshot && telegram.sendPhoto) await telegram.sendPhoto(result.screenshot, text).catch(() => telegram.send(text));
@@ -215,6 +238,10 @@ export async function checkParked({
       continue;
     }
     log(`${account.label}: досі розлогінений (${result.reason})`);
+    // Read once a day: what is on the screen of a parked account rarely changes by the half hour.
+    if (state.lastRead && state.lastRead[account.id] !== today && await readScreen({ portal, account, result, log })) {
+      state.lastRead[account.id] = today;
+    }
     if (state.lastTold[account.id] === today) continue;
     if (telegram.configured) {
       const text = `⚠️ ${account.label} не працює: ${describeLoginState(result)}\n`

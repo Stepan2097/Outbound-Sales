@@ -139,11 +139,11 @@ test('перевірка, що впала, не купує акаунту пів
 });
 
 test('стан від старої версії не ламає вартового: день у lastCheck і offset просто відкидаються', () => {
-  assert.deepEqual(normalizeState(null), { lastCheck: {}, lastTold: {}, asked: {} });
-  assert.deepEqual(normalizeState({ offset: 12, lastCheck: { 'acc-47': '2026-10-08' } }), { lastCheck: {}, lastTold: {}, asked: {} });
+  assert.deepEqual(normalizeState(null), { lastCheck: {}, lastTold: {}, asked: {}, lastRead: {} });
+  assert.deepEqual(normalizeState({ offset: 12, lastCheck: { 'acc-47': '2026-10-08' } }), { lastCheck: {}, lastTold: {}, asked: {}, lastRead: {} });
   assert.deepEqual(
     normalizeState({ lastCheck: { a: AT }, lastTold: { a: '2026-10-08' }, asked: { n: AT, зле: 'колись' } }),
-    { lastCheck: { a: AT }, lastTold: { a: '2026-10-08' }, asked: { n: AT } }
+    { lastCheck: { a: AT }, lastTold: { a: '2026-10-08' }, asked: { n: AT }, lastRead: {} }
   );
 });
 
@@ -297,4 +297,23 @@ test('Telegram.sendPhoto — лише надсилання: sendPhoto з фай�
   await assert.rejects(tg.sendPhoto(Buffer.from('x'), 'a', { text: 'no url' }), /link buttons/);
   await tg.sendPhoto(null, 'без знімка');
   assert.match(calls[1].url, /\/sendMessage$/);
+});
+
+test('знімок розлогіненого акаунта йде порталу раз на день — щоб сповіщення казало, що показав LinkedIn (власник 30.10)', async () => {
+  const portal = fakePortal([parked]);
+  portal.screens = [];
+  portal.screen = async function (screen) { this.screens.push({ accountId: this.accountId, ...screen }); return { success: true }; };
+  const telegram = fakeTelegram();
+  const state = normalizeState(null);
+  const withShot = async () => ({ signedIn: false, reason: 'сторінка входу', url: 'https://www.linkedin.com/login/', screenshot: Buffer.from('jpeg'), pageText: 'З поверненням! Mary Lindsay' });
+
+  await checkParked({ portal, telegram, probe: withShot, state, today: '2026-10-30', nowMs: AT, portalUrl: PORTAL });
+  assert.deepEqual(portal.screens, [{ accountId: 'acc-47', shot: Buffer.from('jpeg').toString('base64'), text: 'З поверненням! Mary Lindsay', url: 'https://www.linkedin.com/login/' }]);
+  assert.equal(state.lastRead['acc-47'], '2026-10-30');
+  // Наступна перевірка того ж дня — без моделі; стан переживає перезапуск.
+  await checkParked({ portal, telegram, probe: withShot, state: normalizeState(JSON.parse(JSON.stringify(state))), today: '2026-10-30', nowMs: AT + RECHECK_MS, portalUrl: PORTAL });
+  assert.equal(portal.screens.length, 1);
+  // Без знімка нічого не шле; здоров'я акаунта не чіпає.
+  await checkParked({ portal: fakePortal([parked]), telegram, probe: signedOut, state: normalizeState(null), today: '2026-10-31', nowMs: AT, portalUrl: PORTAL });
+  assert.deepEqual(portal.written, []);
 });

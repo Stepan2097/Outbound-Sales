@@ -93,6 +93,7 @@ export async function probeLogin({ api, chromium, profileRemoteId, timeoutMs = 4
         return line ? line.replace(/\s+/g, ' ').slice(0, 140) : null;
       }).catch(() => null);
       state.screenshot = await page.screenshot({ type: 'jpeg', quality: 70 }).catch(() => null);
+      state.pageText = await page.evaluate(() => (document.body?.innerText ?? '').slice(0, 3000)).catch(() => '');
     }
     return { ...state, profile: session.profile?.name ?? null };
   } finally {

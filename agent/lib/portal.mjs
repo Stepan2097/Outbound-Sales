@@ -89,6 +89,8 @@ export class Portal {
   log(type, message, meta, level) { return this.#post({ action: 'log', type, message, meta, level }); }
   /** `screen` — { shot, text, url } of the tab, for the portal to read what LinkedIn showed. */
   health(health, note, screen = null) { return this.#post({ action: 'health', health, note, ...(screen ?? {}) }); }
+  /** The screen a parked account stops on, for the portal to read into its note; health stays as it is. */
+  screen({ shot, text = '', url = '' }) { return this.#post({ action: 'screen', shot, text, url }); }
   /** What somebody asked to have looked at, by opening the link in the group. */
   async loginChecks() {
     const answer = await this.#json(`${this.prefix}/login-checks`);
