@@ -87,7 +87,8 @@ export class Portal {
   closeSession(note, failed) { return this.#post({ action: 'session.close', note, failed }); }
   record(kind, detail, count) { return this.#post({ action: 'record', kind, detail, count }); }
   log(type, message, meta, level) { return this.#post({ action: 'log', type, message, meta, level }); }
-  health(health, note) { return this.#post({ action: 'health', health, note }); }
+  /** `screen` — { shot, text, url } of the tab, for the portal to read what LinkedIn showed. */
+  health(health, note, screen = null) { return this.#post({ action: 'health', health, note, ...(screen ?? {}) }); }
   /** What somebody asked to have looked at, by opening the link in the group. */
   async loginChecks() {
     const answer = await this.#json(`${this.prefix}/login-checks`);

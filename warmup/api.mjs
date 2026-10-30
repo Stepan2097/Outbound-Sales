@@ -1,5 +1,6 @@
 import { LABELS as INBOX_LABELS, LABEL_ORDER as INBOX_LABEL_ORDER } from "./inbox-labels.mjs";
 import { scenarioForPrompt } from "./scenarios.mjs";
+import { diagnoseScreen } from "./diagnose.mjs";
 import { LIVE_ACCOUNT_STATUSES, withAccountQuota } from "./store.mjs";
 import { applyResolved, profilesToResolve } from "./profile-resolve.mjs";
 import { connectCeiling, weeklyAllowance, weeklyConnectAllowance, weeklyConnectCounts } from "./weekly.mjs";
@@ -3987,6 +3988,23 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           meta: { health: body.health, note }
         });
         sendJson(response, 200, { success: true });
+        // The screen the agent stopped on, read by a model after the answer —
+        // the agent's portal call must not wait on it. The note becomes what
+        // LinkedIn showed, if the account is still in the state it was put in.
+        if (body.health !== "ok" && typeof body.shot === "string" && body.shot) {
+          diagnoseScreen({ shot: body.shot, text: body.text, url: body.url }).then(async (seen) => {
+            if (!seen) return;
+            await anty.from("wl_accounts").update({ health_note: seen.sentence })
+              .eq("id", account.id).eq("health", body.health).eq("health_changed_at", now).rows();
+            await logEvent({
+              accountId: account.id,
+              level: "warn",
+              type: "account.diagnosed",
+              message: `Знімок екрана: ${seen.sentence}`,
+              meta: { kind: seen.kind, sentence: seen.sentence, health: body.health }
+            });
+          }).catch(() => {});
+        }
         return true;
       }
 

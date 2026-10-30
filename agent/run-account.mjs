@@ -341,7 +341,15 @@ log(`сесію відкрито (${session.sessionId}${session.resumed ? ', п�
     await telegram.send(`❌ ${accountLabel}: профіль перенесено з хмари Anty, але LinkedIn не пускає (${reason}) — у хмарі для нього немає робочого входу. Увійди в LinkedIn у цьому профілі на десктопі й закрий його — сервер підхопить сам.`).catch(() => {});
   }
   if (!signedIn) {
-    await portal.health(reason === 'checkpoint' ? 'captcha' : 'needs_login', `LinkedIn: ${reason} at ${url}`);
+    // What is on the screen goes with it: the portal has a model read it, so the
+    // alert says what LinkedIn showed (password page, restriction, code) rather
+    // than «просить увійти» for all of them (власник 30.10).
+    const screen = {
+      shot: await page.screenshot({ type: 'jpeg', quality: 60 }).then((buffer) => buffer.toString('base64')).catch(() => null),
+      text: await page.evaluate(() => (document.body?.innerText ?? '').slice(0, 3000)).catch(() => ''),
+      url,
+    };
+    await portal.health(reason === 'checkpoint' ? 'captcha' : 'needs_login', `LinkedIn: ${reason} at ${url}`, screen.shot ? screen : null);
     await portal.log('agent.login', `Not signed in — ${reason} at ${url}`, { url, reason, seen }, 'error');
     throw new Error(`не залогінено (${reason}): ${url}`);
   }

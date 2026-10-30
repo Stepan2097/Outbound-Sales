@@ -80,9 +80,11 @@ function render() {
       <button type="button" data-alerts-seen="${escapeAttr(account.id)}">Зрозуміло</button>
     </li>`;
     }
-    const what = account.health === "captcha" ? "LinkedIn показав капчу" : "LinkedIn просить увійти";
+    // Що показав LinkedIn за знімком екрана (warmup/diagnose.mjs); сирий запис агента («LinkedIn: … at https://…») — ні.
+    const read = account.note && !/^LinkedIn: |^Agent: /.test(account.note) ? account.note.replace(/[.\s]+$/, "") : "";
+    const what = read || (account.health === "captcha" ? "LinkedIn показав капчу" : "LinkedIn просить увійти");
     return `<li class="account-alert">
-      <p class="account-alert-head"><b>${escapeHtml(name || "Акаунт")}</b> — ${escapeHtml(what)}${account.since ? ` з ${escapeHtml(day(account.since))}` : ""}. Нові повідомлення з нього не підтягуються, відповіді з нього не йдуть.</p>
+      <p class="account-alert-head"><b>${escapeHtml(name || "Акаунт")}</b> — ${escapeHtml(what)}${account.since ? (read ? ` (з ${escapeHtml(day(account.since))})` : ` з ${escapeHtml(day(account.since))}`) : ""}. Нові повідомлення з нього не підтягуються, відповіді з нього не йдуть.</p>
       ${stepsHtml(account)}
       ${recheckHtml(account)}
       <button type="button" class="primary-button" data-alerts-recheck="${escapeAttr(account.id)}" ${alerts.busy === account.id || waiting(account) ? "disabled" : ""}><i data-lucide="refresh-cw"></i><span>${waiting(account) ? "Перевіряю…" : "Перевірити вхід"}</span></button>
