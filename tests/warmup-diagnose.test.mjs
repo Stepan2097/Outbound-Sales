@@ -30,7 +30,7 @@ test("знімок іде моделі картинкою разом з текс
   assert.match(text.text, /З поверненням! Mary Lindsay/);
   assert.equal(await diagnoseScreen({ shot: "/9j/AAAA" }, { key: "", fetchImpl }), null);
   assert.equal(await diagnoseScreen({ shot: "" }, { key: "k", fetchImpl }), null);
-  assert.equal(await diagnoseScreen({ shot: "/9j/" }, { key: "k", fetchImpl: async () => { throw new Error("down"); } }), null);
+  assert.equal(await diagnoseScreen({ shot: "/9j/" }, { key: "k", fetchImpl: async () => { throw new Error("down"); }, onFail: () => {} }), null);
 });
 
 test("агент шле знімок з health, портал пише прочитане в примітку, сповіщення показує її замість «просить увійти»", () => {

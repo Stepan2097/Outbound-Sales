@@ -3991,7 +3991,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
             message: `Знімок екрана: ${seen.sentence}`,
             meta: { kind: seen.kind, sentence: seen.sentence, health, source: "login-watch" }
           });
-        }).catch(() => {});
+        }).catch((error) => console.warn(`[diagnose] ${account.label}: ${error.message}`));
         return true;
       }
 
@@ -4025,7 +4025,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
               message: `Знімок екрана: ${seen.sentence}`,
               meta: { kind: seen.kind, sentence: seen.sentence, health: body.health }
             });
-          }).catch(() => {});
+          }).catch((error) => console.warn(`[diagnose] ${account.label}: ${error.message}`));
         }
         return true;
       }

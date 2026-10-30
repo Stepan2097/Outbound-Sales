@@ -50,7 +50,8 @@ export async function diagnoseScreen({ shot, text = "", url = "" }, {
   key = String(process.env.ANTHROPIC_API_KEY || "").trim(),
   model = String(process.env.ANTHROPIC_DIAGNOSE_MODEL || "").trim() || "claude-sonnet-5-5",
   fetchImpl = fetch,
-  timeoutMs = 45000
+  timeoutMs = 45000,
+  onFail = (why) => console.warn(`[diagnose] ${why}`)
 } = {}) {
   if (!key || !shot) return null;
   const mediaType = String(shot).startsWith("iVBOR") ? "image/png" : "image/jpeg";
@@ -72,10 +73,17 @@ export async function diagnoseScreen({ shot, text = "", url = "" }, {
       }),
       signal: AbortSignal.timeout(timeoutMs)
     });
-    if (!response.ok) return null;
+    if (!response.ok) {
+      onFail(`HTTP ${response.status}: ${(await response.text().catch(() => "")).slice(0, 200)}`);
+      return null;
+    }
     const payload = await response.json();
-    return parseDiagnosis((payload.content || []).filter((block) => block.type === "text").map((block) => block.text).join(""));
-  } catch {
+    const answer = (payload.content || []).filter((block) => block.type === "text").map((block) => block.text).join("");
+    const seen = parseDiagnosis(answer);
+    if (!seen) onFail(`no JSON in the answer: ${answer.slice(0, 200)}`);
+    return seen;
+  } catch (error) {
+    onFail(error?.message || String(error));
     return null;
   }
 }
