@@ -171,8 +171,101 @@ export function dailyFrom(profiles = [], rows = []) {
     .sort((left, right) => right.day.localeCompare(left.day) || String(left.email).localeCompare(String(right.email)));
 }
 
+// ── Воронка роботи за період (власник 30.10: «дуже дивні цифри … бо в одного
+// богдана сотні») ────────────────────────────────────────────────────────────
+//
+// Воронка CRM рахує контакти, створені за період, тож тиждень, коли лідген
+// написав сотням людей, давав у ній одиниці. Тут — що зроблено за період: кожен
+// крок — люди, які дійшли до нього в ці дні. Запрошення — з журналу агента
+// (wl_events), повідомлення й відповіді — з таймлайну CRM, кваліфіковані — мітки
+// AI у «Вхідних», дзвінок — статус CRM, угоди — створені за період. Люди на
+// кроках можуть бути з різних тижнів (сьогодні пишемо й давнім друзям), тож
+// відсоток стоїть лише там, де крок не більший за попередній.
+
+export const WORK_STEPS = [
+  ["invited", "Запрошення надіслано", "Запити в друзі, які агент надіслав з LinkedIn-акаунтів за період."],
+  ["accepted", "Прийняли запрошення", "Хто прийняв запит за період (сам запит міг піти раніше)."],
+  ["wrote", "Написали", "Люди, яким за період пішло повідомлення в LinkedIn, Email чи WhatsApp, — і нові друзі, і давні розмови."],
+  ["replied", "Відповіли", "Люди, які за період написали у відповідь."],
+  ["qualified", "Кваліфіковані", "Розмови з міткою «кваліфікована» у «Вхідних», де людина писала за період."],
+  ["booked_call", "Дзвінок", "Контакти, яким за період поставили статус «Дзвінок»."],
+  ["deal", "Угода", "Угоди, створені за період."]
+];
+const MESSAGE_TYPES = ["linkedin", "email", "whatsapp"];
+
+/** Counts per step → the steps with a rate from the previous one where it means something. */
+export function workFunnelFrom(counts = {}) {
+  return WORK_STEPS.map(([key, label, hint], index) => {
+    const count = counts[key] || 0;
+    const before = index ? counts[WORK_STEPS[index - 1][0]] || 0 : 0;
+    return { key, label, hint, count, rate: index && before && count <= before ? Math.round((count / before) * 100) : null };
+  });
+}
+
+/** When the person's newest message under an inbox label was (its basis), else when it was put. */
+const labelMoment = (stored) => Date.parse(String(stored?.basis || "").split("|")[1] || "") || Date.parse(stored?.at || "");
+
+/** What was done in the range, as the work funnel; `who` — one lead-gen, or null for everyone. */
+export async function workFunnel({ crm, anty = null, start, end, who = null, accountLeadgens = {}, inboxLabels = {} }) {
+  const mine = (accountId) => !who || accountLeadgens[accountId] === who;
+  const [events, messages, calls, deals] = await Promise.all([
+    anty?.configured?.() ? pagedRows(() => anty.from("wl_events").select("id,account_id,type,meta").in("type", ["invite.sent", "invite.accepted"]).gte("created_at", start).lt("created_at", end).order("id")) : [],
+    pagedRows(() => crm.from("activities").select("id,contact_id,user_id,direction").in("type", MESSAGE_TYPES).gte("created_at", start).lt("created_at", end).notNull("contact_id").order("id")),
+    pagedRows(() => crm.from("contact_status_history").select("id,contact_id,changed_by").eq("new_status", "booked_call").gte("changed_at", start).lt("changed_at", end).order("id")),
+    pagedRows(() => crm.from("deals").select("id,owner_id").gte("created_at", start).lt("created_at", end).order("id"))
+  ]);
+  const people = (rows) => new Set(rows.map((row) => row.meta?.crmContactId || row.meta?.outreachId || row.id)).size;
+  const invited = events.filter((row) => row.type === "invite.sent" && mine(row.account_id));
+  const accepted = events.filter((row) => row.type === "invite.accepted" && mine(row.account_id));
+  const wrote = new Set(messages.filter((row) => row.direction === "outgoing" && (!who || row.user_id === who)).map((row) => row.contact_id));
+  let replied = new Set(messages.filter((row) => row.direction === "incoming").map((row) => row.contact_id));
+  // A reply comes in without a person on it: it is the lead-gen's who last wrote to them, else whose contact it is.
+  if (who && replied.size) replied = new Set((await repliesOf(crm, [...replied])).filter(([, owner]) => owner === who).map(([id]) => id));
+  const startMs = Date.parse(start);
+  const endMs = Date.parse(end);
+  const qualified = Object.entries(inboxLabels || {}).filter(([key, stored]) => {
+    const at = labelMoment(stored);
+    return stored?.label === "qualified" && at >= startMs && at <= endMs && mine(key.split("|")[0]);
+  });
+  return workFunnelFrom({
+    invited: people(invited),
+    accepted: people(accepted),
+    wrote: wrote.size,
+    replied: replied.size,
+    qualified: qualified.length,
+    booked_call: new Set(calls.filter((row) => !who || row.changed_by === who).map((row) => row.contact_id)).size,
+    deal: deals.filter((row) => !who || row.owner_id === who).length
+  });
+}
+
+async function pagedRows(build) {
+  const rows = [];
+  for (let offset = 0; ; offset += 1000) {
+    const page = await build().limit(1000).offset(offset).rows();
+    rows.push(...page);
+    if (page.length < 1000) return rows;
+  }
+}
+
+/** [contact id, the person it is answering] — the newest writer of an outgoing message, else the contact's owner. */
+async function repliesOf(crm, contactIds) {
+  const out = [];
+  for (let at = 0; at < contactIds.length; at += 120) {
+    const batch = contactIds.slice(at, at + 120);
+    const [sent, owned] = await Promise.all([
+      crm.from("activities").select("contact_id,user_id,created_at").in("contact_id", batch).eq("direction", "outgoing").notNull("user_id").order("created_at", { ascending: false }).limit(1000).rows(),
+      crm.from("contacts").select("id,owner_id").in("id", batch).rows()
+    ]);
+    const writer = new Map();
+    for (const row of sent) if (!writer.has(row.contact_id)) writer.set(row.contact_id, row.user_id);
+    const owner = new Map(owned.map((row) => [row.id, row.owner_id]));
+    for (const id of batch) out.push([id, writer.get(id) || owner.get(id) || null]);
+  }
+  return out;
+}
+
 /** The whole page, read from the CRM. `crm` — the REST client (warmup/db.mjs). */
-export async function crmStats({ crm, preset, from, to, user = "all", now = Date.now(), workEntries = [] }) {
+export async function crmStats({ crm, anty = null, preset, from, to, user = "all", now = Date.now(), workEntries = [], accountLeadgens = {}, inboxLabels = {} }) {
   const range = statsRange({ preset, from, to, now });
   const { current, previous } = rangeInstants(range);
   const who = /^[0-9a-f-]{36}$/i.test(String(user)) ? user : null;
@@ -191,7 +284,10 @@ export async function crmStats({ crm, preset, from, to, user = "all", now = Date
   // Working time (triage/crm-sessions.mjs, 27.10): CRM and Outbound tabs plus the
   // person's own actions — in CRM, its LinkedIn extension and Outbound — overlaps once.
   const idByEmail = new Map(profiles.map((profile) => [String(profile.email || "").toLowerCase(), profile.id]));
-  const time = await workTime({ crm, start: current.start, end: current.end, workEntries, idByEmail, zone: STATS_ZONE, now });
+  const [time, work] = await Promise.all([
+    workTime({ crm, start: current.start, end: current.end, workEntries, idByEmail, zone: STATS_ZONE, now }),
+    workFunnel({ crm, anty, start: current.start, end: current.end, who, accountLeadgens, inboxLabels })
+  ]);
   const funnel = funnelFrom(funnelNow[0] || {});
   const before = funnelFrom(funnelBefore[0] || {});
   const revenue = Number(volumesNow[0]?.won) || 0;
@@ -203,6 +299,7 @@ export async function crmStats({ crm, preset, from, to, user = "all", now = Date
     people: profiles.map((profile) => ({ id: profile.id, email: profile.email })).sort((left, right) => String(left.email).localeCompare(String(right.email))),
     kpis: kpisFrom(funnel, before, revenue, prevRevenue),
     funnel,
+    work,
     deals: { won, lost: stageCount(funnel, "lost"), revenue, average: won ? revenue / won : 0 },
     team: withTime(teamFrom(profiles, breakdown, details), time),
     daily: dailyFrom(profiles, daily)

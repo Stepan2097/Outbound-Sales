@@ -1603,6 +1603,10 @@ async function handleApi(request, response, url) {
     try {
       sendJson(response, 200, await crmStats({
         crm: warmupCrm,
+        anty: warmupAnty,
+        // The work funnel (30.10): invites by account → lead-gen, qualified from the inbox's AI labels.
+        accountLeadgens: state.accountLeadgens || {},
+        inboxLabels: state.inboxLabels || {},
         preset: cleanText(url.searchParams.get("preset") || ""),
         from: cleanText(url.searchParams.get("from") || ""),
         to: cleanText(url.searchParams.get("to") || ""),

@@ -1,5 +1,6 @@
 /* «Статистика» — як у CRM (23.10): app/screens/stats.js. */
-.stats-page { display: grid; gap: 22px; }
+.stats-page { display: grid; gap: 22px; min-width: 0; }
+.stats-page > * { min-width: 0; }
 .stats-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; }
 .stats-head h2 { margin: 0; font-size: 22px; }
 .stats-head p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
@@ -36,7 +37,9 @@
 .stats-table th { color: var(--muted); font-size: 11px; text-transform: uppercase; }
 .stats-table .is-number { text-align: right; }
 .stats-table .stats-group { border-left: 1px solid var(--line); text-align: center; }
-.stats-table td[title] { cursor: help; }
+.stats-table [data-tip], .stats-funnel-label[data-tip] { cursor: help; }
+.stats-tip { position: fixed; z-index: 60; max-width: 320px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-strong); color: var(--ink); box-shadow: var(--shadow); font-size: 12px; line-height: 1.45; white-space: pre-line; pointer-events: none; }
+.stats-tip[hidden] { display: none; }
 .stats-table .is-replied { color: var(--green); }
 .stats-table .is-total { font-weight: 700; }
 .stats-zero { color: var(--muted); opacity: 0.6; }

@@ -6,7 +6,7 @@
 import { api, authState, escapeAttr, escapeHtml, onScreen, refreshIcons } from "../core.js";
 
 const PERIODS = [["this_week", "Цей тиждень"], ["prev_week", "Минулий тиждень"], ["this_month", "Цей місяць"], ["prev_month", "Минулий місяць"]];
-const STAGE_COLOR = { in_progress: "#8b5cf6", linkedin_activity: "#0a66c2", responded_or_other: "#10b981", booked_call: "#f59e0b", deal_created: "#ec4899" };
+const STEP_COLOR = { invited: "#64748b", accepted: "#8b5cf6", wrote: "#0a66c2", replied: "#10b981", qualified: "#14b8a6", booked_call: "#f59e0b", deal: "#ec4899" };
 const CHANNELS = [["email", "Email", "emails_count", "emails_replied"], ["linkedin", "LinkedIn", "linkedin_count", "linkedin_replied"], ["whatsapp", "WhatsApp", "whatsapp_count", "whatsapp_replied"]];
 
 const stats = { preset: "this_week", from: "", to: "", user: "all", data: null, error: "", loading: false, open: null };
@@ -59,26 +59,28 @@ function kpisHtml(kpis) {
   </div>`).join("")}</div>`;
 }
 
-function funnelHtml(funnel, people) {
-  // «Новий» лишається поза смугами, як у CRM: імпортовані контакти затуляли б роботу.
-  const main = funnel.stages.filter((stage) => STAGE_COLOR[stage.key]);
-  const top = Math.max(...main.map((stage) => stage.count), 1);
-  const outcome = funnel.stages.filter((stage) => stage.key === "won" || stage.key === "lost");
+/**
+ * Воронка роботи за період (власник 30.10: «дуже дивні цифри … бо в одного
+ * богдана сотні»): не контакти, створені в ці дні, як у CRM, а що з людьми
+ * зроблено в ці дні (triage/crm-stats.mjs, workFunnel). Відсоток — від
+ * попереднього кроку, де він не більший.
+ */
+function funnelHtml(steps, people) {
+  const top = Math.max(...steps.map((step) => step.count), 1);
   return `<section class="stats-section">
-    <div class="stats-section-head"><h3>1. Воронка обробки лідів</h3>
+    <div class="stats-section-head"><h3>1. Воронка роботи за період</h3>
       <select id="statsUser" aria-label="Лідген"><option value="all">Усі лідгени</option>${people.map((person) => `<option value="${escapeAttr(person.id)}"${stats.user === person.id ? " selected" : ""}>${escapeHtml(person.email)}</option>`).join("")}</select>
     </div>
     <div class="panel stats-funnel">
-      ${main.map((stage) => {
-        const step = funnel.transitions.find((row) => row.to === stage.key && main.some((other) => other.key === row.from));
-        const width = stage.count ? Math.max((stage.count / top) * 100, 1.2) : 0;
+      ${steps.map((step) => {
+        const width = step.count ? Math.max((step.count / top) * 100, 1.2) : 0;
         return `<div class="stats-funnel-row">
-          <span class="stats-funnel-label">${escapeHtml(stage.label)}</span>
-          <div class="stats-funnel-track">${stage.count ? `<div class="stats-funnel-bar" style="width:${width}%;background:${STAGE_COLOR[stage.key]}">${number(stage.count)}</div>` : '<span class="stats-zero">0</span>'}</div>
-          <span class="stats-funnel-rate">${step ? `${step.conversionRate}%` : ""}</span>
+          <span class="stats-funnel-label" data-tip="${escapeAttr(step.hint)}">${escapeHtml(step.label)}</span>
+          <div class="stats-funnel-track">${step.count ? `<div class="stats-funnel-bar" style="width:${width}%;background:${STEP_COLOR[step.key]}">${number(step.count)}</div>` : '<span class="stats-zero">0</span>'}</div>
+          <span class="stats-funnel-rate">${step.rate === null ? "" : `${step.rate}%`}</span>
         </div>`;
       }).join("")}
-      <div class="stats-funnel-foot">Нових контактів за період: <b>${number(funnel.totalContacts)}</b> · ${outcome.map((stage) => `${escapeHtml(stage.label)}: <b>${number(stage.count)}</b>`).join(" · ")}</div>
+      <div class="stats-funnel-foot">Кожен крок — люди, а не повідомлення; відсоток — від попереднього кроку.</div>
     </div>
   </section>`;
 }
@@ -99,7 +101,7 @@ function channelHint(details, sent) {
 }
 
 function teamHtml(team) {
-  const cell = (value, title = "", kind = "") => `<td class="is-number${value ? ` ${kind}` : " stats-zero"}"${title ? ` title="${escapeAttr(title)}"` : ""}>${number(value)}</td>`;
+  const cell = (value, title = "", kind = "") => `<td class="is-number${value ? ` ${kind}` : " stats-zero"}"${title ? ` data-tip="${escapeAttr(title)}"` : ""}>${number(value)}</td>`;
   const totalTitle = (row) => [["Всього дій", row.total_activities], ["LinkedIn повідомлення", row.linkedin_count], ["Email повідомлення", row.emails_count], ["WhatsApp повідомлення", row.whatsapp_count], ["Нотатки", row.notes_count], ["Сейлз", row.calls_count], ["Відповіді контактів", row.incoming_count], ["Зустрічі", row.meeting_activities], ["Забуковані дзвінки", row.booked_calls]]
     .filter(([, value], index) => index === 0 || value).map(([label, value]) => `${label}: ${value}`).join("\n") + "\n«Відписало» рахує людей, а не дії, тому в суму не входить.";
   return `<div class="panel stats-table-panel"><div class="table-wrap"><table class="stats-table">
@@ -128,8 +130,8 @@ function trackerHtml(team) {
   return `<div class="panel stats-table-panel"><h4>Ефективність по трекеру: дій на годину і час роботи</h4>
     <p class="stats-subtle stats-note">Час роботи — вкладки CRM і Outbound, поки людина ними користується (рух миші чи клавіші за останні 3 хв), і її дії: LinkedIn через розширення CRM, нотатки, статуси, угоди, задачі, листи й відповіді з Outbound. Дії, між якими не більше 3 хв, — одна безперервна робота; відправлене агентом не рахується; що перекривається, рахується раз.</p>
     <div class="table-wrap"><table class="stats-table">
-      <thead><tr><th>Користувач</th><th class="is-number">Дій / год</th><th class="is-number">Час роботи</th><th class="is-number" title="Дій людини, з яких рахується час">Дій</th><th class="is-number">Всього дій</th></tr></thead>
-      <tbody>${rows.length ? rows.map((row) => `<tr title="${escapeAttr((row.weekdayMinutes || []).filter((day) => day.minutes).map((day) => `${day.label}: ${hours(day.minutes)}`).join("\n"))}">
+      <thead><tr><th>Користувач</th><th class="is-number">Дій / год</th><th class="is-number">Час роботи</th><th class="is-number" data-tip="Дій людини, з яких рахується час">Дій</th><th class="is-number">Всього дій</th></tr></thead>
+      <tbody>${rows.length ? rows.map((row) => `<tr data-tip="${escapeAttr((row.weekdayMinutes || []).filter((day) => day.minutes).map((day) => `${day.label}: ${hours(day.minutes)}`).join("\n"))}">
         <td>${escapeHtml(row.email)}</td><td class="is-number">${row.actionsPerHour ? row.actionsPerHour.toLocaleString("uk-UA") : "—"}</td>
         <td class="is-number">${hours(row.minutes)}</td><td class="is-number">${number(row.actions)}</td><td class="is-number">${number(row.total_activities)}</td>
       </tr>`).join("") : '<tr><td colspan="5" class="stats-subtle">За цей період ніхто не працював.</td></tr>'}</tbody>
@@ -156,7 +158,7 @@ function render() {
     ${stats.error ? `<p class="esp-notice is-bad">${escapeHtml(stats.error)}</p>` : ""}
     <div class="${stats.loading ? "stats-busy" : ""}">
       ${kpisHtml(data.kpis)}
-      ${funnelHtml(data.funnel, data.people || [])}
+      ${funnelHtml(data.work || [], data.people || [])}
       ${dealsHtml(data.deals)}
       <section class="stats-section"><h3>3. Навантаження команди</h3>${teamHtml(data.team)}${trackerHtml(data.team)}${dailyHtml(data.daily)}</section>
     </div>`;
@@ -171,6 +173,28 @@ root()?.addEventListener("click", (event) => {
   Object.assign(stats, { preset, from: "", to: "" });
   void loadStats();
 });
+
+// Підказки — одразу при наведенні (власник 30.10: «ця підказка має зявлятися
+// одразу при наведенні»), а не через секунду, як title. Одна плаваюча на
+// сторінку: таблиці прокручуються й обрізали б підказку всередині себе.
+const tip = document.createElement("div");
+tip.className = "stats-tip";
+tip.hidden = true;
+document.body.append(tip);
+
+root()?.addEventListener("mouseover", (event) => {
+  const target = event.target.closest("[data-tip]");
+  if (!target?.dataset.tip) return void (tip.hidden = true);
+  tip.textContent = target.dataset.tip;
+  tip.hidden = false;
+  const box = target.getBoundingClientRect();
+  const left = Math.min(Math.max(8, box.left), window.innerWidth - tip.offsetWidth - 8);
+  const below = box.bottom + 6 + tip.offsetHeight <= window.innerHeight;
+  tip.style.left = `${left}px`;
+  tip.style.top = `${below ? box.bottom + 6 : Math.max(8, box.top - tip.offsetHeight - 6)}px`;
+});
+root()?.addEventListener("mouseleave", () => { tip.hidden = true; });
+window.addEventListener("scroll", () => { tip.hidden = true; }, true);
 
 root()?.addEventListener("change", (event) => {
   if (event.target.id !== "statsUser") return;
