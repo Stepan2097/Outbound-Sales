@@ -153,13 +153,20 @@ test("папка за провайдерами й «10 гугл, 1 яхо» у �
     });
     return captured;
   };
-  const split = await call("GET", `/leads/providers?folder=${FOLDER_B}`);
-  assert.deepEqual(split.payload.providers.map((row) => [row.key, row.total, row.available, row.valid]), [["google", 3, 2, 1], ["yahoo", 1, 1, 1]]);
-  assert.deepEqual(split.payload.verification, { valid: 2, risky: 0, invalid: 1, unknown: 0, none: 1 }, "точки — по всій папці");
+  const breakdown = await call("GET", `/leads/providers?folder=${FOLDER_B}`);
+  assert.deepEqual(breakdown.payload.providers.map((row) => [row.key, row.total, row.available, row.valid]), [["google", 3, 2, 1], ["yahoo", 1, 1, 1]]);
+  assert.deepEqual(breakdown.payload.verification, { valid: 2, risky: 0, invalid: 1, unknown: 0, none: 1 }, "точки — по всій папці");
   const sent = await call("POST", "/campaigns/leads-by-provider", { id: campaign.id, folder: FOLDER_B, quotas: { google: 10, yahoo: 1 } });
   assert.equal(sent.payload.added, 2);
   assert.deepEqual(state.enrollments.map((row) => row.email), ["g1@gco.com", "g2@gco.com"], "першими — перевірені «є»");
   assert.deepEqual(sent.payload.short, { google: { missing: 8, passed: {} }, yahoo: { missing: 1, passed: { "пошта не на Google": 1 } } });
   const again = await call("POST", "/campaigns/leads-by-provider", { id: campaign.id, folder: FOLDER_B, quotas: { google: 1 } });
   assert.equal(again.status, 400, "ті, хто вже в кампанії, вдруге не беруться");
+
+  // «на 2 кампанії розділити»: порівну, провайдер за провайдером; людина — лише в одній.
+  state.enrollments.length = 0;
+  const second = await campaigns.create({ name: "Mix B", steps: [{ templateId: "t1", delayDays: 0 }], senders: ["boris@send.com"] });
+  const split = await call("POST", "/campaigns/leads-by-provider", { id: campaign.id, campaigns: [second.id], folder: FOLDER_B, quotas: { google: 2 } });
+  assert.deepEqual(split.payload.perCampaign.map((row) => [row.name, row.added]), [["Mix", 1], ["Mix B", 1]]);
+  assert.deepEqual(state.enrollments.map((row) => row.campaignId).sort(), [campaign.id, second.id].sort());
 });

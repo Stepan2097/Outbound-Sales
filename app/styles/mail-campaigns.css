@@ -940,6 +940,27 @@
   text-align: right;
 }
 
+.mc-pick-all {
+  min-height: 0;
+  margin-left: 6px;
+  padding: 0 4px;
+  font-size: 12px;
+}
+
+.mc-pick-split {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  font-size: 13px;
+}
+
+.mc-pick-split label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .mc-pick .table-wrap {
   max-height: 360px;
 }

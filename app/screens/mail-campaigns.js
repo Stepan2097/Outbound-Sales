@@ -43,7 +43,7 @@ const page = {
   openId: null, step: "sequence", people: [], peopleLoaded: false, peopleResult: null, peopleText: "", plan: null, previews: {}, sampleEmail: "",
   chooser: null, editor: null, busy: false,
   // «Одержувачі» з папки «Лідів» за провайдерами пошти (02.11): папки, обрана, її розбивка, вписані кількості.
-  pick: { folders: null, foldersLoading: false, folder: "", providers: null, loading: false, error: "", quotas: {} },
+  pick: { folders: null, foldersLoading: false, folder: "", providers: null, loading: false, error: "", quotas: {}, split: new Set() },
   // Фільтр пошт за тегом у «Параметрах відправки»; null — ще не обрано (тоді «Розсилка», якщо така є).
   senderTag: null
 };
@@ -495,14 +495,19 @@ function pickHtml() {
       <thead><tr><th>Провайдер</th><th class="is-number">Можна додати</th><th class="is-number">З них перевірено «є»</th><th class="is-number">Скільки взяти</th></tr></thead>
       <tbody>${rows.map((row) => `<tr>
         <td>${escapeHtml(row.label)}</td><td class="is-number">${row.available}</td><td class="is-number">${row.valid}</td>
-        <td class="is-number"><input type="number" min="0" max="${row.available}" step="1" inputmode="numeric" data-mc-input="pick-quota" data-key="${escapeAttr(row.key)}" value="${escapeAttr(pick.quotas[row.key] || "")}" placeholder="0" aria-label="Скільки взяти: ${escapeAttr(row.label)}" /></td>
+        <td class="is-number"><input type="number" min="0" max="${row.available}" step="1" inputmode="numeric" data-mc-input="pick-quota" data-key="${escapeAttr(row.key)}" value="${escapeAttr(pick.quotas[row.key] || "")}" placeholder="0" aria-label="Скільки взяти: ${escapeAttr(row.label)}" />
+          <button type="button" class="text-button mc-pick-all" data-mc-pick-all="${escapeAttr(row.key)}" data-max="${row.available}">усі</button></td>
       </tr>`).join("")}</tbody></table></div>
-      <p class="mc-subtle">Беруться ті, кого ще немає в жодній кампанії; першими — перевірені «є». Хто не пройде перевірок перед додаванням, замість нього береться наступний.</p>` : "";
+      <p class="mc-subtle">Беруться лише ті, кому лист справді піде, і кого ще не було в жодній кампанії; першими — перевірені «є». Хто чекає даних (країна, перевірка) чи не проходить фільтрів, той пропускається — чому, видно під результатом.</p>` : "";
   const total = pickTotal();
+  // «Розділити порівну» (02.11: «я хочу на 2 кампанії розділити»): інші кампанії, куди ще можна додавати.
+  const others = page.campaigns.filter((row) => row.id !== page.openId && row.state !== "done" && !row.archived);
+  const split = rows.length && others.length ? `<div class="mc-pick-split"><span>Розділити порівну з:</span>${others.map((row) => `<label><input type="checkbox" data-mc-pick-split="${escapeAttr(row.id)}"${pick.split.has(row.id) ? " checked" : ""} /> ${escapeHtml(row.name)}</label>`).join("")}</div>` : "";
   return `<form class="mc-import mc-pick" data-mc-form="pick">
     <div class="mc-pick-head"><strong>З папки «Лідів» — за провайдерами пошти</strong>
       <select data-mc-input="pick-folder" aria-label="Папка лідів"><option value="">${pick.folders === null ? "Читаю папки…" : pick.folders.length ? "Виберіть папку CRM…" : "Папок CRM з поштою немає"}</option>${options}</select></div>
     ${table}
+    ${split}
     ${rows.length ? `<div class="mc-import-actions"><button type="submit" class="primary-button" data-mc-pick-submit ${page.busy || !total ? "disabled" : ""}><i data-lucide="user-plus"></i><span>Додати в кампанію${total ? ` (${total})` : ""}</span></button></div>` : ""}
   </form>`;
 }
@@ -535,7 +540,7 @@ function recipientsHtml(campaign) {
       </div>
     </form>`}
     ${result ? `<div class="mc-import-result">
-      <strong>Додано ${result.added}.</strong>
+      <strong>Додано ${result.added}${result.perCampaign?.length > 1 ? `: ${result.perCampaign.map((row) => `«${escapeHtml(row.name)}» — ${row.added}`).join(", ")}` : ""}.</strong>
       ${shortHtml(result.short)}
       ${result.skipped.length ? `<p>Не додано ${result.skipped.length}: ${result.skipped.slice(0, 12).map((row) => `${escapeHtml(row.email)} — ${escapeHtml(row.reason === "in_other_campaign" ? `уже в «${row.campaign}»` : result.labels?.[row.email] || row.reason)}`).join("; ")}${result.skipped.length > 12 ? "…" : ""}</p>` : ""}
       ${result.waiting.length ? `<p>Додано, але чекають даних ${result.waiting.length}: ${result.waiting.slice(0, 12).map((row) => `${escapeHtml(row.email)} — ${escapeHtml(row.label)}`).join("; ")}${result.waiting.length > 12 ? "…" : ""}</p>` : ""}
@@ -1010,6 +1015,13 @@ function onClick(event) {
     if (page.menuFor) { page.menuFor = null; renderCampaignsPage(); }
     return;
   }
+  if (button.dataset.mcPickAll) {
+    // «усі» — уся кількість провайдера в поле; сума на кнопці — як при введенні руками.
+    const input = button.parentElement.querySelector("[data-mc-input=pick-quota]");
+    input.value = button.dataset.max;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    return undefined;
+  }
   const action = button.dataset.mc;
   const editor = page.editor;
 
@@ -1136,6 +1148,10 @@ function onInput(event) {
 
 async function onChange(event) {
   const input = event.target;
+  if (input.dataset.mcPickSplit) {
+    if (input.checked) page.pick.split.add(input.dataset.mcPickSplit); else page.pick.split.delete(input.dataset.mcPickSplit);
+    return undefined;
+  }
   if (input.dataset.mcInput === "pick-folder") {
     Object.assign(page.pick, { folder: input.value, quotas: {} });
     return loadPickProviders();
@@ -1184,7 +1200,7 @@ async function onSubmit(event) {
     if (!page.pick.folder || !pickTotal()) return;
     await act(async () => {
       try {
-        page.peopleResult = await api("/api/esp/campaigns/leads-by-provider", { method: "POST", body: JSON.stringify({ id: campaign.id, folder: page.pick.folder, quotas }) });
+        page.peopleResult = await api("/api/esp/campaigns/leads-by-provider", { method: "POST", body: JSON.stringify({ id: campaign.id, campaigns: [...page.pick.split], folder: page.pick.folder, quotas }) });
       } catch (error) {
         if (error.payload?.short) page.peopleResult = { added: 0, skipped: [], waiting: [], rejected: [], short: error.payload.short };
         throw error;

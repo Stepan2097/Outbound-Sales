@@ -378,11 +378,18 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
   /**
    * People from a «Лідів» folder by mail provider (02.11: «вписати наприклад 10
    * пошт гугл 1 яхо»): `quotas` — { provider: how many } (esp/provider-quotas.mjs).
+   * Only those a letter would really go to — not those waiting for a country
+   * or a check. `campaigns` — several campaigns: the people are split between
+   * them evenly, provider by provider (02.11: «я хочу на 2 кампанії розділити»).
    */
   if (method === "POST" && path === "/campaigns/leads-by-provider") {
     const body = await readJson(request);
     if (!body) return badRequest(sendJson, response, "Некоректне тіло JSON");
     if (!esp.crmLeads?.configured()) return badRequest(sendJson, response, "CRM не підключено — папок не прочитати.");
+    const targets = [...new Set([String(body.id || ""), ...(Array.isArray(body.campaigns) ? body.campaigns.map(String) : [])].filter(Boolean))]
+      .map((id) => esp.campaigns.list().find((row) => row.id === id)).filter(Boolean);
+    if (!targets.length) return badRequest(sendJson, response, "Такої кампанії немає.");
+    if (targets.some((row) => row.state === "done")) return badRequest(sendJson, response, "У завершену кампанію людей не додати.");
     let rows;
     try {
       rows = decorateLeads(await leadsOfFolder(esp, String(body.folder || "")), {
@@ -398,14 +405,39 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
       keyOf: groupKey,
       accept: async (lead) => {
         const verdict = await filters.check(campaignLead(lead), context);
-        return refusedAtEnrolment(verdict) ? SKIP_REASON_LABEL[verdict.reason] || verdict.reason : true;
+        return verdict.ok ? true : SKIP_REASON_LABEL[verdict.reason] || verdict.reason;
       }
     });
     if (!picked.length) {
       sendJson(response, 400, { success: false, error: "З цих провайдерів не підійшов ніхто.", short });
       return true;
     }
-    return enrolChecked(String(body.id || ""), picked.map(campaignLead), [], { short, byProvider: Object.fromEntries(Object.keys(body.quotas || {}).map((key) => [key, picked.filter((row) => groupKey(row) === key).length])) });
+    // Provider by provider, in turn: each campaign gets its share of each, the remainders alternate.
+    const shares = targets.map(() => []);
+    let turn = 0;
+    for (const key of Object.keys(body.quotas || {})) {
+      for (const row of picked.filter((lead) => groupKey(lead) === key)) shares[turn++ % targets.length].push(campaignLead(row));
+    }
+    const perCampaign = [];
+    const skipped = [];
+    try {
+      for (const [index, campaign] of targets.entries()) {
+        if (!shares[index].length) { perCampaign.push({ id: campaign.id, name: campaign.name, added: 0 }); continue; }
+        const result = await esp.campaigns.enroll(campaign.id, shares[index]);
+        await logged("campaign_leads_added", { id: campaign.id, added: result.added.length });
+        perCampaign.push({ id: campaign.id, name: campaign.name, added: result.added.length });
+        skipped.push(...result.skipped);
+      }
+    } catch (error) {
+      if (!(error instanceof CampaignError)) throw error;
+      sendJson(response, error.status, { success: false, error: error.message, code: error.code, perCampaign });
+      return true;
+    }
+    sendJson(response, 200, {
+      success: true, added: perCampaign.reduce((sum, row) => sum + row.added, 0), perCampaign, skipped, rejected: [], waiting: [], short,
+      labels: Object.fromEntries(skipped.map((row) => [row.email, SKIP_REASON_LABEL[row.reason] || row.reason]))
+    });
+    return true;
   }
 
   if (method === "GET" && path === "/campaigns/people") {

@@ -109,6 +109,16 @@ test("three letters on day 0, +3 and +4 working days, from one mailbox, in one t
   assert.match(firstSending.data.text, /How we handle your data: https:\/\/advantage-mail\.com\/privacy/);
 });
 
+test("людину з однієї кампанії не взяти в іншу — і коли та кампанія вже завершилась (02.11)", async (t) => {
+  const w = await world(t);
+  const a = await w.campaigns.create({ name: "A", steps: w.steps, senders: ["anna@advantage-mail.com"] });
+  const b = await w.campaigns.create({ name: "B", steps: w.steps, senders: ["boris@advantage-mail.com"] });
+  await w.campaigns.enroll(a.id, [LEAD]);
+  await w.campaigns.setState(a.id, "done");
+  const second = await w.campaigns.enroll(b.id, [LEAD]);
+  assert.deepEqual(second.skipped, [{ email: "olena@northwind.com", reason: "in_other_campaign", campaign: "A" }]);
+});
+
 test("a lead is in one live campaign only, and keeps the sender it got for the whole chain", async (t) => {
   const w = await world(t);
   const a = await w.campaigns.create({ name: "A", steps: w.steps, senders: ["anna@advantage-mail.com", "boris@advantage-mail.com"] });

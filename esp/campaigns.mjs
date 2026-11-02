@@ -215,15 +215,17 @@ export function campaignStore({ read, write, readEnrollments, writeEnrollments, 
 
     /**
      * Put people into a campaign. Each gets the campaign's least-loaded sender,
-     * for good. Somebody already live in another campaign — or in this one —
-     * is not added, and is reported with the reason.
+     * for good. Somebody who was ever put into another campaign — or is in this
+     * one — is not added, and is reported with the reason (власник 02.11: «якщо
+     * я використаю пошти в якійсь кампанії то зроби щоб в іншій я вже їх
+     * використати не міг»; before, only a live one counted).
      */
     async enroll(id, leads, { blocked = () => null } = {}) {
       const campaign = find(id);
       if (!campaign) throw new CampaignError("Такої кампанії немає.", { code: "not_found", status: 404 });
       if (campaign.state === "done") throw new CampaignError("Кампанія завершена.", { code: "done", status: 409 });
       const all = enrollments();
-      const live = new Map(all.filter((row) => LIVE_ENROLMENT.has(row.status)).map((row) => [row.email, row]));
+      const elsewhere = new Map(all.filter((row) => row.campaignId !== id).map((row) => [row.email, row]));
       const here = new Set(all.filter((row) => row.campaignId === id).map((row) => row.email));
       const load = new Map(campaign.senders.map((email) => [email, 0]));
       for (const row of all) if (row.campaignId === id && LIVE_ENROLMENT.has(row.status) && load.has(row.sender)) load.set(row.sender, load.get(row.sender) + 1);
@@ -234,10 +236,10 @@ export function campaignStore({ read, write, readEnrollments, writeEnrollments, 
         const lead = cleanLead(raw);
         if (!lead) { skipped.push({ email: String(raw?.email ?? ""), reason: "not_an_email" }); continue; }
         if (here.has(lead.email)) { skipped.push({ email: lead.email, reason: "already_in_campaign" }); continue; }
-        const elsewhere = live.get(lead.email);
-        if (elsewhere) {
-          const other = find(elsewhere.campaignId);
-          skipped.push({ email: lead.email, reason: "in_other_campaign", campaign: other?.name || elsewhere.campaignId });
+        const before = elsewhere.get(lead.email);
+        if (before) {
+          const other = find(before.campaignId);
+          skipped.push({ email: lead.email, reason: "in_other_campaign", campaign: other?.name || before.campaignId });
           continue;
         }
         const stop = blocked(lead.email);
@@ -253,7 +255,6 @@ export function campaignStore({ read, write, readEnrollments, writeEnrollments, 
         };
         added.push(enrollment);
         here.add(lead.email);
-        live.set(lead.email, enrollment);
       }
       await writeEnrollments([...all, ...added]);
       return { added, skipped };
