@@ -13,13 +13,10 @@
   min-width: 0;
 }
 
-/* Довгий список папок прокручується всередині колонки (висоту ставить fitLeadsTable, 02.11). */
-@media (min-width: 901px) {
-  #leadsSide {
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    align-content: start;
-  }
+/* Таблиця лідів — без своєї прокрутки, на всю висоту; прокручується сторінка
+   (власник 02.11: «на табличці з контактами треба було виключити скрол»). */
+#leadsMain .leads-table-wrap {
+  max-height: none;
 }
 
 .leads-side-empty {
