@@ -32,7 +32,7 @@ import { networkStore } from "./warmup/network.mjs";
 import { adoptNetwork, networkFolderName } from "./warmup/network-contacts.mjs";
 import { inboxLabeler } from "./warmup/inbox-labels.mjs";
 import { adoptionFolderName, setContactOwnerOf } from "./warmup/people.mjs";
-import { handleEspApi } from "./esp/api.mjs";
+import { forgetFolderRows, handleEspApi } from "./esp/api.mjs";
 import { connectorFromEnv } from "./esp/gmail.mjs";
 import { GmailOAuthConnector, NotConnectedConnector, googleSignIn, grantStore, oauthConfigFromEnv, redirectUriFor } from "./esp/google-oauth.mjs";
 import { MicrosoftGraphConnector, providerOfFromEnv, providerRouter } from "./esp/provider.mjs";
@@ -660,7 +660,10 @@ const esp = (() => {
     crm: warmupCrm,
     idsOf: (folderId) => (isCompanyFolder(folderId) ? companyFolders.ids(folderId) : null),
     // The check wrote each address's provider: the company folder's people are read again for the filter (02.11).
-    onFinished: (folderId) => { if (isCompanyFolder(folderId)) void companyFolders.refresh(folderId); }
+    onFinished: (folderId) => {
+      forgetFolderRows(folderId);
+      if (isCompanyFolder(folderId)) void companyFolders.refresh(folderId);
+    }
   });
   return { connector, oauth, keyError, gate, templates, signature, unsubscribe, campaigns, leads, crmLeads, folderCheck, halt, halted, tick, filters, pollInbox, checkAlerts, runMonitor, warmupTick, alertsTelegram: telegram.configured, sequenceOn: process.env.ESP_SEQUENCE === "on" };
 })();

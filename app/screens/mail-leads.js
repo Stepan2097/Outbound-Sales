@@ -57,7 +57,8 @@ export const leadsState = {
   folderName: "",
   check: null,       // { run, deep, providers } — перевірка адрес відкритої папки CRM
   provider: "",      // фільтр папки CRM за поштовим провайдером; "unchecked" — ще не перевірені
-  split: null        // папка за провайдерами з CRM: [{ key, label, total, available, valid }]
+  split: null,       // папка за провайдерами з CRM: [{ key, label, total, available, valid, tones }]
+  splitTones: null   // точки перевірки для всієї папки (02.11), а не лише сторінки
 };
 
 const providerWord = (key) => leadsState.check?.providers?.[key] || key;
@@ -129,6 +130,7 @@ async function loadSplit(folderId) {
     const answer = await api(`/api/esp/leads/providers?folder=${encodeURIComponent(folderId)}`, { stale: true });
     if (leadsState.view !== `crm:${folderId}`) return;
     leadsState.split = answer.providers || [];
+    leadsState.splitTones = answer.verification || null;
     renderLeads();
   } catch { /* The split is extra: the page works without it. */ }
 }
@@ -283,11 +285,14 @@ function listHtml() {
       <option value="unknown"${leadsState.provider === "unknown" ? " selected" : ""}>Не визначено</option>
       <option value="unchecked"${leadsState.provider === "unchecked" ? " selected" : ""}>Ще не перевірені</option>
     </select>` : "";
+  // The dots for the whole folder (or its provider), not this page's 50 (02.11); a search counts its page.
+  const folderDots = crmFolder && !leadsState.q && leadsState.splitTones
+    ? (leadsState.provider ? leadsState.split?.find((row) => row.key === leadsState.provider)?.tones : leadsState.splitTones) || null : null;
   const toolbar = crmFolder ? `
     <div class="leads-toolbar">
       ${providerFilter}
       ${folderAddHtml(crmFolder, pickedCount)}
-      ${chipsHtml(page?.verification, page?.verificationScope)}
+      ${folderDots ? chipsHtml(folderDots) : chipsHtml(page?.verification, page?.verificationScope)}
     </div>
     <div class="leads-toolbar leads-check">${checkHtml(crmFolder)}</div>` : `
     <div class="leads-toolbar">
@@ -308,20 +313,22 @@ function listHtml() {
   const notice = leadsState.notice ? `<p class="esp-notice ${leadsState.error ? "is-bad" : ""}">${escapeHtml(leadsState.notice)}</p>` : "";
   const from = page?.total ? page.offset + 1 : 0;
   const to = (page?.offset || 0) + rows.length;
+  // «Вибрати всіх у папці» — у тому ж рядку, що пошук і сторінки (02.11: «ці 2 рядки можна обєднати в один»).
+  const more = crmFolder && allChecked && page && page.total > rows.length
+    ? `<div class="leads-select-all">${leadsState.allInFolder
+      ? `Вибрано всіх ${page.total.toLocaleString("uk-UA")}${leadsState.q ? " знайдених" : ""} · <button type="button" class="text-button" data-leads-all-folder="0">Лише цю сторінку</button>`
+      : `Вибрано ${rows.length} · <button type="button" class="text-button" data-leads-all-folder="1">Вибрати всіх ${page.total.toLocaleString("uk-UA")}${leadsState.q ? " знайдених" : " у папці"}</button>`}</div>` : "";
   const bar = `
     <div class="mail-list-bar">
       <input type="checkbox" id="leadsAll" aria-label="Вибрати всіх на сторінці"${allChecked ? " checked" : ""}${rows.length ? "" : " disabled"} />
       <label class="mail-search leads-search"><i data-lucide="search"></i><input type="search" id="leadsSearch" placeholder="Ім'я, адреса, компанія, країна, джерело" value="${escapeAttr(leadsState.q)}" autocomplete="off" /></label>
+      ${more}
       <div class="mail-pager">
         <span>${from}–${to} з ${page?.total ?? 0}</span>
         <button type="button" class="icon-button" data-leads-page="-1" aria-label="Попередня сторінка"${page?.offset > 0 ? "" : " disabled"}><i data-lucide="chevron-left"></i></button>
         <button type="button" class="icon-button" data-leads-page="1" aria-label="Наступна сторінка"${page && to < page.total ? "" : " disabled"}><i data-lucide="chevron-right"></i></button>
       </div>
     </div>`;
-  const more = crmFolder && allChecked && page && page.total > rows.length
-    ? `<div class="leads-select-all">${leadsState.allInFolder
-      ? `Вибрано всіх ${page.total.toLocaleString("uk-UA")}${leadsState.q ? ", кого знайшов пошук" : " у папці"}. <button type="button" class="text-button" data-leads-all-folder="0">Лише цю сторінку</button>`
-      : `Вибрано ${rows.length} на цій сторінці. <button type="button" class="text-button" data-leads-all-folder="1">Вибрати всіх ${page.total.toLocaleString("uk-UA")}${leadsState.q ? ", кого знайшов пошук" : " у папці"}</button>`}</div>` : "";
   const empty = !page ? '<div class="empty-state">Читаємо список...</div>'
     : page.loading ? '<div class="empty-state">Збираю контакти компаній цієї папки — до хвилини, сторінка оновиться сама.</div>'
     : !rows.length ? `<div class="empty-state">${leadsState.q ? "Нікого не знайдено." : crmFolder ? "У цій папці CRM немає людей з поштою." : list ? "У списку нікого немає — «Додати лідів»." : meta?.lists.length ? "Лідів ще немає." : "Виберіть папку CRM ліворуч — або створіть список і вставте лідів."}</div>` : "";
@@ -340,7 +347,7 @@ function listHtml() {
           <td class="leads-date">${escapeHtml(day(row.addedAt))}</td>
         </tr>`).join("")}</tbody>
     </table></div>` : "";
-  return `${head}${toolbar}${adding}${notice}<div class="mail-main">${bar}${more}${empty}${table}</div>`;
+  return `${head}${toolbar}${adding}${notice}<div class="mail-main">${bar}${empty}${table}</div>`;
 }
 
 function timelineItem(event, card) {
@@ -523,7 +530,7 @@ async function act(work) {
 
 function showView(view) {
   // The table empties at once: the old list's rows must not stand under the new one's name.
-  Object.assign(leadsState, { view, card: null, offset: 0, adding: false, renaming: false, notice: "", error: "", page: null, allInFolder: false, check: null, provider: "", split: null });
+  Object.assign(leadsState, { view, card: null, offset: 0, adding: false, renaming: false, notice: "", error: "", page: null, allInFolder: false, check: null, provider: "", split: null, splitTones: null });
   leadsState.selected.clear();
   renderLeads();
   if (view !== EXCLUSIONS && view !== PRIVACY) void loadPage();

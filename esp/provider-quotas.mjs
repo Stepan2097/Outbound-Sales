@@ -23,13 +23,21 @@ export function available(row) {
   return Boolean(row.email) && !row.excluded && !(row.campaigns || []).length && row.verification !== "invalid" && row.provider !== "none";
 }
 
-/** The folder by provider: how many can still go, how many of them are checked «є»; biggest first. */
+const TONES = ["valid", "risky", "invalid", "unknown", "none"];
+const noTones = () => Object.fromEntries(TONES.map((tone) => [tone, 0]));
+
+/**
+ * The folder by provider: how many can still go, how many of them are checked
+ * «є», and the verifier's dots for each (`tones`, as the table shows them —
+ * decorateLeads); biggest first.
+ */
 export function providerBreakdown(rows) {
   const out = new Map();
   for (const row of rows) {
     const key = providerKey(row);
-    const entry = out.get(key) || { key, label: providerLabel(key), total: 0, available: 0, valid: 0 };
+    const entry = out.get(key) || { key, label: providerLabel(key), total: 0, available: 0, valid: 0, tones: noTones() };
     entry.total += 1;
+    if (row.tone in entry.tones) entry.tones[row.tone] += 1;
     if (available(row)) {
       entry.available += 1;
       if (row.verification === "valid") entry.valid += 1;
@@ -37,6 +45,13 @@ export function providerBreakdown(rows) {
     out.set(key, entry);
   }
   return [...out.values()].sort((left, right) => right.available - left.available || right.total - left.total || left.label.localeCompare(right.label));
+}
+
+/** The verifier's dots for the whole folder (02.11: «показує тільки сторінку а не всі перевірені пошти»). */
+export function folderTones(rows) {
+  const tones = noTones();
+  for (const row of rows) if (row.tone in tones) tones[row.tone] += 1;
+  return tones;
 }
 
 /**

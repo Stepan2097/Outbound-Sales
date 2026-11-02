@@ -498,12 +498,29 @@
   color: var(--danger, #b42318);
 }
 
+/* У рядку пошуку, між ним і сторінками (02.11). */
 .leads-select-all {
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--line);
-  background: var(--surface-soft, var(--surface));
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 13px;
   text-align: center;
+  white-space: nowrap;
+}
+
+/* Вузький екран: «Вибрати всіх» переходить на свій рядок, а не налазить на сторінки. */
+#leadsMain .mail-list-bar {
+  flex-wrap: wrap;
+  row-gap: 6px;
+  padding-block: 8px;
+}
+
+.leads-select-all .text-button {
+  min-height: 0;
+  padding: 0;
+}
+
+.leads-search {
+  min-width: 180px;
 }
 
 /* Провайдер пошти: колонка, фільтр, розклад по провайдерах у перевірці (16.10). */

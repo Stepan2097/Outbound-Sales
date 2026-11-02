@@ -16,7 +16,7 @@ import { ReplyError, conversations, quickReply } from "./conversations.mjs";
 import { REPLY_LABELS } from "./replies.mjs";
 import { LeadError, decorateLeads, leadPage } from "./leads.mjs";
 import { PROVIDER_LABEL } from "./folder-check.mjs";
-import { pickByProvider, providerBreakdown } from "./provider-quotas.mjs";
+import { folderTones, pickByProvider, providerBreakdown } from "./provider-quotas.mjs";
 import { PLAN_BOUNDS, cleanPlan, mailboxHistory, removedFromWarmup, warmupLog, warmupMode, warmupPlan, warmupView } from "./mail-warmup.mjs";
 import { UNIBOX_FOLDERS, uniboxList, uniboxProblems, uniboxThread } from "./unibox.mjs";
 import { recordAboutContact, recordFailed, recordSending, recordSent } from "./messages.mjs";
@@ -89,6 +89,11 @@ export function espRouteRight(method, path) {
 // A «Лідів» folder whole, for its split by mail provider (02.11): read once in two minutes.
 const FOLDER_ROWS_TTL = 2 * 60_000;
 const folderRows = new Map();
+
+/** A folder check has just written its answers: the next split reads them. */
+export function forgetFolderRows(folderId) {
+  folderRows.delete(String(folderId || ""));
+}
 
 async function leadsOfFolder(esp, folderId) {
   const known = folderRows.get(folderId);
@@ -488,7 +493,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
         const rows = decorateLeads(await leadsOfFolder(esp, String(url.searchParams.get("folder") || "")), {
           enrollments: esp.campaigns?.enrollments() || [], excluded: await exclusions(await allEntries())
         });
-        sendJson(response, 200, { success: true, total: rows.length, providers: providerBreakdown(rows) });
+        sendJson(response, 200, { success: true, total: rows.length, providers: providerBreakdown(rows), verification: folderTones(rows) });
       } catch (error) {
         sendJson(response, error.status || 502, { success: false, error: error.status ? error.message : `CRM не відповіла: ${error.message}` });
       }

@@ -155,6 +155,7 @@ test("папка за провайдерами й «10 гугл, 1 яхо» у �
   };
   const split = await call("GET", `/leads/providers?folder=${FOLDER_B}`);
   assert.deepEqual(split.payload.providers.map((row) => [row.key, row.total, row.available, row.valid]), [["google", 3, 2, 1], ["yahoo", 1, 1, 1]]);
+  assert.deepEqual(split.payload.verification, { valid: 2, risky: 0, invalid: 1, unknown: 0, none: 1 }, "точки — по всій папці");
   const sent = await call("POST", "/campaigns/leads-by-provider", { id: campaign.id, folder: FOLDER_B, quotas: { google: 10, yahoo: 1 } });
   assert.equal(sent.payload.added, 2);
   assert.deepEqual(state.enrollments.map((row) => row.email), ["g1@gco.com", "g2@gco.com"], "першими — перевірені «є»");
