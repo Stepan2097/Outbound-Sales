@@ -16,7 +16,7 @@ import { ReplyError, conversations, quickReply } from "./conversations.mjs";
 import { REPLY_LABELS } from "./replies.mjs";
 import { LeadError, decorateLeads, leadPage } from "./leads.mjs";
 import { PROVIDER_LABEL } from "./folder-check.mjs";
-import { folderTones, pickByProvider, providerBreakdown } from "./provider-quotas.mjs";
+import { folderTones, groupKey, pickByProvider, providerBreakdown } from "./provider-quotas.mjs";
 import { PLAN_BOUNDS, cleanPlan, mailboxHistory, removedFromWarmup, warmupLog, warmupMode, warmupPlan, warmupView } from "./mail-warmup.mjs";
 import { UNIBOX_FOLDERS, uniboxList, uniboxProblems, uniboxThread } from "./unibox.mjs";
 import { recordAboutContact, recordFailed, recordSending, recordSent } from "./messages.mjs";
@@ -395,6 +395,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
     const filters = esp.filters || defaultFilters();
     const context = await filters.context(await allEntries(), new Date());
     const { picked, short } = await pickByProvider(rows, body.quotas, {
+      keyOf: groupKey,
       accept: async (lead) => {
         const verdict = await filters.check(campaignLead(lead), context);
         return refusedAtEnrolment(verdict) ? SKIP_REASON_LABEL[verdict.reason] || verdict.reason : true;
@@ -404,7 +405,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
       sendJson(response, 400, { success: false, error: "З цих провайдерів не підійшов ніхто.", short });
       return true;
     }
-    return enrolChecked(String(body.id || ""), picked.map(campaignLead), [], { short, byProvider: Object.fromEntries(Object.keys(body.quotas || {}).map((key) => [key, picked.filter((row) => (row.provider || "unchecked") === key).length])) });
+    return enrolChecked(String(body.id || ""), picked.map(campaignLead), [], { short, byProvider: Object.fromEntries(Object.keys(body.quotas || {}).map((key) => [key, picked.filter((row) => groupKey(row) === key).length])) });
   }
 
   if (method === "GET" && path === "/campaigns/people") {
@@ -493,7 +494,8 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
         const rows = decorateLeads(await leadsOfFolder(esp, String(url.searchParams.get("folder") || "")), {
           enrollments: esp.campaigns?.enrollments() || [], excluded: await exclusions(await allEntries())
         });
-        sendJson(response, 200, { success: true, total: rows.length, providers: providerBreakdown(rows), verification: folderTones(rows) });
+        // `groups` — the main providers and «Інші», for a campaign's quotas (02.11).
+        sendJson(response, 200, { success: true, total: rows.length, providers: providerBreakdown(rows), groups: providerBreakdown(rows, { keyOf: groupKey }), verification: folderTones(rows) });
       } catch (error) {
         sendJson(response, error.status || 502, { success: false, error: error.status ? error.message : `CRM не відповіла: ${error.message}` });
       }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { available, folderTones, pickByProvider, providerBreakdown } from "../esp/provider-quotas.mjs";
+import { available, folderTones, groupKey, pickByProvider, providerBreakdown } from "../esp/provider-quotas.mjs";
 
 // Власник 02.11: «при виборі в кампанії я міг вписати наприклад 10 пошт гугл 1 яхо тощо».
 
@@ -39,4 +39,11 @@ test("точки перевірки — для всієї папки й для �
   const rows = [{ email: "a@g.com", provider: "google", tone: "valid" }, { email: "b@g.com", provider: "google", tone: "invalid" }, { email: "c@y.com", provider: "yahoo", tone: "risky" }, { email: "d@n.com", provider: "", tone: "none" }];
   assert.deepEqual(folderTones(rows), { valid: 1, risky: 1, invalid: 1, unknown: 0, none: 1 });
   assert.deepEqual(providerBreakdown(rows).find((row) => row.key === "google").tones, { valid: 1, risky: 0, invalid: 1, unknown: 0, none: 0 });
+});
+
+test("у кампанії — основні провайдери, решта одним рядком «Інші», останнім (02.11: «скороти список до основних»)", async () => {
+  const rows = [lead("a@g.com", "google"), lead("b@m.com", "mimecast"), lead("c@o.com", "own"), lead("d@n.com", ""), lead("e@y.com", "yahoo")];
+  assert.deepEqual(providerBreakdown(rows, { keyOf: groupKey }).map((row) => [row.key, row.label, row.available]), [["google", "Google", 1], ["yahoo", "Yahoo", 1], ["other", "Інші", 3]]);
+  const { picked } = await pickByProvider(rows, { other: 2 }, { keyOf: groupKey });
+  assert.deepEqual(picked.map((row) => row.email), ["b@m.com", "c@o.com"]);
 });

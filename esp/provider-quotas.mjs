@@ -16,7 +16,13 @@ export const UNCHECKED = "unchecked";
 const ORDER = { valid: 0, catch_all: 1, "": 2, unknown: 3 };
 
 export const providerKey = (row) => row.provider || UNCHECKED;
-export const providerLabel = (key) => (key === UNCHECKED ? "Ще не перевірені" : PROVIDER_LABEL[key] || key);
+export const providerLabel = (key) => (key === UNCHECKED ? "Ще не перевірені" : key === OTHER ? "Інші" : PROVIDER_LABEL[key] || key);
+
+// У кампанії — лише основні провайдери, решта одним рядком (власник 02.11: «скороти список
+// до основних а інші то вже інші»): власні сервери, шлюзи, хостинги, ще не перевірені.
+export const OTHER = "other";
+export const MAIN_PROVIDERS = ["google", "microsoft", "yahoo", "zoho", "privateemail", "amazon"];
+export const groupKey = (row) => (MAIN_PROVIDERS.includes(row.provider) ? row.provider : OTHER);
 
 /** Whether this person can still be put into a campaign. */
 export function available(row) {
@@ -31,10 +37,10 @@ const noTones = () => Object.fromEntries(TONES.map((tone) => [tone, 0]));
  * «є», and the verifier's dots for each (`tones`, as the table shows them —
  * decorateLeads); biggest first.
  */
-export function providerBreakdown(rows) {
+export function providerBreakdown(rows, { keyOf = providerKey } = {}) {
   const out = new Map();
   for (const row of rows) {
-    const key = providerKey(row);
+    const key = keyOf(row);
     const entry = out.get(key) || { key, label: providerLabel(key), total: 0, available: 0, valid: 0, tones: noTones() };
     entry.total += 1;
     if (row.tone in entry.tones) entry.tones[row.tone] += 1;
@@ -44,7 +50,7 @@ export function providerBreakdown(rows) {
     }
     out.set(key, entry);
   }
-  return [...out.values()].sort((left, right) => right.available - left.available || right.total - left.total || left.label.localeCompare(right.label));
+  return [...out.values()].sort((left, right) => (left.key === OTHER) - (right.key === OTHER) || right.available - left.available || right.total - left.total || left.label.localeCompare(right.label));
 }
 
 /** The verifier's dots for the whole folder (02.11: «показує тільки сторінку а не всі перевірені пошти»). */
@@ -60,14 +66,14 @@ export function folderTones(rows) {
  * over. One person per address. Returns the picked leads and, per provider
  * that came up short, how many are missing and why the others were passed.
  */
-export async function pickByProvider(rows, quotas, { accept = async () => true } = {}) {
+export async function pickByProvider(rows, quotas, { accept = async () => true, keyOf = providerKey } = {}) {
   const picked = [];
   const short = {};
   const seen = new Set();
   for (const [key, wanted] of Object.entries(quotas || {})) {
     const need = Math.max(0, Math.min(5000, Math.floor(Number(wanted) || 0)));
     if (!need) continue;
-    const candidates = rows.filter((row) => providerKey(row) === key && available(row))
+    const candidates = rows.filter((row) => keyOf(row) === key && available(row))
       .sort((left, right) => (ORDER[left.verification] ?? 2) - (ORDER[right.verification] ?? 2));
     const passed = {};
     let got = 0;

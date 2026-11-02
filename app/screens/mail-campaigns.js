@@ -472,7 +472,7 @@ async function loadPickProviders() {
   try {
     const answer = await api(`/api/esp/leads/providers?folder=${encodeURIComponent(folder)}`);
     if (page.pick.folder !== folder) return;
-    page.pick.providers = answer.providers || [];
+    page.pick.providers = answer.groups || answer.providers || [];
   } catch (error) {
     if (page.pick.folder === folder) page.pick.error = error.message || "Не вдалося порахувати.";
   }
