@@ -16,6 +16,7 @@ import { ReplyError, conversations, quickReply } from "./conversations.mjs";
 import { REPLY_LABELS } from "./replies.mjs";
 import { LeadError, decorateLeads, leadPage } from "./leads.mjs";
 import { PROVIDER_LABEL } from "./folder-check.mjs";
+import { pickByProvider, providerBreakdown } from "./provider-quotas.mjs";
 import { PLAN_BOUNDS, cleanPlan, mailboxHistory, removedFromWarmup, warmupLog, warmupMode, warmupPlan, warmupView } from "./mail-warmup.mjs";
 import { UNIBOX_FOLDERS, uniboxList, uniboxProblems, uniboxThread } from "./unibox.mjs";
 import { recordAboutContact, recordFailed, recordSending, recordSent } from "./messages.mjs";
@@ -84,6 +85,21 @@ export function espRouteRight(method, path) {
   if (path.startsWith("/oauth/google")) return "replies.read";
   return "registry.change";
 }
+
+// A «Лідів» folder whole, for its split by mail provider (02.11): read once in two minutes.
+const FOLDER_ROWS_TTL = 2 * 60_000;
+const folderRows = new Map();
+
+async function leadsOfFolder(esp, folderId) {
+  const known = folderRows.get(folderId);
+  if (known && Date.now() - known.at < FOLDER_ROWS_TTL) return known.rows;
+  const rows = await esp.crmLeads.everyone(folderId);
+  folderRows.set(folderId, { at: Date.now(), rows });
+  return rows;
+}
+
+/** A lead as a campaign takes it: without the page's own fields. */
+const campaignLead = ({ id, listId, addedAt, addedBy, crmId, folderId, linkedin, tone, campaigns, excluded, ...lead }) => lead;
 
 /** The CRM's folders for «Ліди», or why there are none — never a broken page. */
 async function crmFoldersFor(esp) {
@@ -318,7 +334,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
    * People into a campaign, every one through the pre-send checks first (ESP 6).
    * From pasted rows (`/campaigns/leads`) and from a lead list (`/leads/to-campaign`).
    */
-  async function enrolChecked(campaignId, leads, rejected = []) {
+  async function enrolChecked(campaignId, leads, rejected = [], extra = {}) {
     const filters = esp.filters || defaultFilters();
     const context = await filters.context(await allEntries(), new Date());
     const verdicts = new Map();
@@ -331,7 +347,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
       const result = await esp.campaigns.enroll(campaignId, leads, { blocked: (email) => (refusedAtEnrolment(verdicts.get(email)) ? verdicts.get(email).reason : null) });
       await logged("campaign_leads_added", { id: campaignId, added: result.added.length });
       sendJson(response, 200, {
-        success: true, added: result.added.length, skipped: result.skipped, rejected, waiting,
+        success: true, added: result.added.length, skipped: result.skipped, rejected, waiting, ...extra,
         labels: Object.fromEntries(result.skipped.map((row) => [row.email, SKIP_REASON_LABEL[row.reason] || row.reason]))
       });
     } catch (error) {
@@ -352,6 +368,38 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
     const { leads, rejected } = parseLeadLines(body.text);
     return enrolChecked(String(body.id || ""), leads, rejected);
     return true;
+  }
+
+  /**
+   * People from a «Лідів» folder by mail provider (02.11: «вписати наприклад 10
+   * пошт гугл 1 яхо»): `quotas` — { provider: how many } (esp/provider-quotas.mjs).
+   */
+  if (method === "POST" && path === "/campaigns/leads-by-provider") {
+    const body = await readJson(request);
+    if (!body) return badRequest(sendJson, response, "Некоректне тіло JSON");
+    if (!esp.crmLeads?.configured()) return badRequest(sendJson, response, "CRM не підключено — папок не прочитати.");
+    let rows;
+    try {
+      rows = decorateLeads(await leadsOfFolder(esp, String(body.folder || "")), {
+        enrollments: esp.campaigns?.enrollments() || [], excluded: await exclusions(await allEntries())
+      });
+    } catch (error) {
+      sendJson(response, error.status || 502, { success: false, error: error.status ? error.message : `CRM не відповіла: ${error.message}` });
+      return true;
+    }
+    const filters = esp.filters || defaultFilters();
+    const context = await filters.context(await allEntries(), new Date());
+    const { picked, short } = await pickByProvider(rows, body.quotas, {
+      accept: async (lead) => {
+        const verdict = await filters.check(campaignLead(lead), context);
+        return refusedAtEnrolment(verdict) ? SKIP_REASON_LABEL[verdict.reason] || verdict.reason : true;
+      }
+    });
+    if (!picked.length) {
+      sendJson(response, 400, { success: false, error: "З цих провайдерів не підійшов ніхто.", short });
+      return true;
+    }
+    return enrolChecked(String(body.id || ""), picked.map(campaignLead), [], { short, byProvider: Object.fromEntries(Object.keys(body.quotas || {}).map((key) => [key, picked.filter((row) => (row.provider || "unchecked") === key).length])) });
   }
 
   if (method === "GET" && path === "/campaigns/people") {
@@ -428,6 +476,19 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
         const verification = { valid: 0, risky: 0, invalid: 0, unknown: 0, none: 0 };
         for (const row of rows) verification[row.tone] += 1;
         sendJson(response, 200, { success: true, ...page, rows, verification, verificationScope: "page" });
+      } catch (error) {
+        sendJson(response, error.status || 502, { success: false, error: error.status ? error.message : `CRM не відповіла: ${error.message}` });
+      }
+      return true;
+    }
+    // The folder split by mail provider: how many of each can still go into a campaign (02.11).
+    if (method === "GET" && path === "/leads/providers") {
+      if (!esp.crmLeads?.configured()) return badRequest(sendJson, response, "CRM не підключено — папок не прочитати.");
+      try {
+        const rows = decorateLeads(await leadsOfFolder(esp, String(url.searchParams.get("folder") || "")), {
+          enrollments: esp.campaigns?.enrollments() || [], excluded: await exclusions(await allEntries())
+        });
+        sendJson(response, 200, { success: true, total: rows.length, providers: providerBreakdown(rows) });
       } catch (error) {
         sendJson(response, error.status || 502, { success: false, error: error.status ? error.message : `CRM не відповіла: ${error.message}` });
       }

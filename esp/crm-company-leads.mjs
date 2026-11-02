@@ -154,6 +154,12 @@ export function companyFolderSource({ crm, now = () => Date.now(), store = null 
       if (!known?.people || now() - known.at >= TTL) { void people(id).catch(() => {}); return Boolean(known?.people); }
       return true;
     },
+    /** Read the folder again (its people stay shown meanwhile) — after a check wrote their providers. */
+    refresh(id) {
+      const known = cache.get(String(id).slice(COMPANY_PREFIX.length));
+      if (known?.people) known.at = 0;
+      return people(id).catch(() => {});
+    },
     /** Collect every folder, one after another — at start, so the first visitor sees counts. */
     async warm() {
       for (const folder of await listFolders()) {

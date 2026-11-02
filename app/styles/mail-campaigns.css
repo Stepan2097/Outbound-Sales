@@ -910,6 +910,40 @@
   cursor: pointer;
 }
 
+/* Одержувачі з папки «Лідів» за провайдерами (02.11). */
+.mc-pick {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.mc-pick-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.mc-pick-head select {
+  width: auto;
+  min-width: 240px;
+  max-width: 100%;
+}
+
+.mc-pick-table {
+  min-width: 0;
+}
+
+.mc-pick-table input[type="number"] {
+  width: 84px;
+  text-align: right;
+}
+
+.mc-pick .table-wrap {
+  max-height: 360px;
+}
+
 .mc-import-result {
   padding: 12px 14px;
   border-radius: 10px;

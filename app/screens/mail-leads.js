@@ -56,7 +56,8 @@ export const leadsState = {
   folderTarget: "",   // куди додати вибраних: "" — нова папка, інакше id папки CRM
   folderName: "",
   check: null,       // { run, deep, providers } — перевірка адрес відкритої папки CRM
-  provider: ""       // фільтр папки CRM за поштовим провайдером; "unchecked" — ще не перевірені
+  provider: "",      // фільтр папки CRM за поштовим провайдером; "unchecked" — ще не перевірені
+  split: null        // папка за провайдерами з CRM: [{ key, label, total, available, valid }]
 };
 
 const providerWord = (key) => leadsState.check?.providers?.[key] || key;
@@ -113,12 +114,23 @@ async function loadCheck() {
     leadsState.check = null;
   }
   renderLeads();
+  if (leadsState.check?.run?.state !== "running") void loadSplit(folderId);
   if (leadsState.check?.run?.state === "running") checkTimer = window.setTimeout(async () => {
     const wasRunning = leadsState.check?.run?.state === "running";
     await loadCheck();
     // Finished while the page was open: the dots on the page change too.
     if (wasRunning && leadsState.check?.run?.state !== "running" && !leadsState.card) void loadPage();
   }, 3000);
+}
+
+/** The folder by mail provider, from what the CRM holds — it stays after the check and after a restart (02.11). */
+async function loadSplit(folderId) {
+  try {
+    const answer = await api(`/api/esp/leads/providers?folder=${encodeURIComponent(folderId)}`, { stale: true });
+    if (leadsState.view !== `crm:${folderId}`) return;
+    leadsState.split = answer.providers || [];
+    renderLeads();
+  } catch { /* The split is extra: the page works without it. */ }
 }
 
 async function loadPage() {
@@ -205,7 +217,8 @@ function checkHtml(crmFolder) {
   const button = run?.state === "running"
     ? `<button type="button" class="text-button" data-leads-check-stop><i data-lucide="square"></i><span>Зупинити перевірку</span></button>`
     : `<button type="button" class="text-button" data-leads-check${crmFolder.withEmail ? "" : " disabled"}><i data-lucide="shield-check"></i><span>Перевірити адреси (${crmFolder.withEmail ?? 0})</span></button>`;
-  if (!check) return button;
+  const split = run?.state !== "running" && leadsState.split?.length ? `<div class="leads-providers" aria-label="Пошти за провайдерами">${leadsState.split.map((row) => `<button type="button" class="leads-chip leads-provider-chip${leadsState.provider === row.key ? " is-on" : ""}" data-leads-provider="${escapeAttr(row.key)}" title="Показати лише ці">${escapeHtml(row.label)} <b>${row.total.toLocaleString("uk-UA")}</b></button>`).join("")}</div>` : "";
+  if (!check) return `${button}${split}`;
   const n = (value) => Number(value || 0).toLocaleString("uk-UA");
   const line = run ? (() => {
     const c = run.counts;
@@ -216,7 +229,7 @@ function checkHtml(crmFolder) {
       `<span class="leads-chip" title="${TONE_WORD.unknown}"><i class="leads-dot is-unknown"></i>${n(c.unknown)}</span>`
     ].join("");
     const progress = `${n(run.done)} з ${run.total == null ? "…" : n(run.total)}`;
-    const providers = Object.entries(c.providers || {}).sort((left, right) => right[1] - left[1])
+    const providers = run.state !== "running" && leadsState.split ? "" : Object.entries(c.providers || {}).sort((left, right) => right[1] - left[1])
       .map(([key, count]) => `<button type="button" class="leads-chip leads-provider-chip${leadsState.provider === key ? " is-on" : ""}" data-leads-provider="${escapeAttr(key)}" title="Показати лише ці">${escapeHtml(providerWord(key))} <b>${n(count)}</b></button>`).join("");
     const extra = [
       c.domainOk ? `домен приймає пошту: ${n(c.domainOk)} (скриньку не перевірено)` : "",
@@ -229,7 +242,7 @@ function checkHtml(crmFolder) {
     return `<div class="leads-check-line"><span>Перевірка ${CHECK_STATE_WORD[run.state] || run.state}: ${progress}</span><div class="leads-chips">${parts}</div>${providers ? `<div class="leads-providers">${providers}</div>` : ""}${extra ? `<small>${escapeHtml(extra)}</small>` : ""}${run.error ? `<small class="is-bad">${escapeHtml(run.error)}</small>` : ""}</div>`;
   })() : "";
   const hint = check.deep ? `<small class="leads-check-hint">Кожну адресу питаємо в її поштового сервера, чи є така скринька, — як MillionVerifier, листів не надсилаємо. Сервери, що відповідають «так» на будь-яку адресу, — жовті (catch-all); що не відповіли — сірі з обідком. По одному запиту на домен, тож велика папка перевіряється кілька годин.</small>` : `<small class="leads-check-hint">Перевіряється: формат адреси, опечатки в домені (gmial.com), одноразові пошти, чи існує домен і чи приймає пошту, хто провайдер пошти (Google, Microsoft, Zoho, Private Email, Amazon SES…), особиста чи загальна (info@) адреса. Чи існує сама скринька — не перевіряється: з нашого сервера поштові сервери не питаються.</small>`;
-  return `${button}${line}${hint}`;
+  return `${button}${line}${split}${hint}`;
 }
 
 function folderAddHtml(crmFolder, count) {
@@ -510,7 +523,7 @@ async function act(work) {
 
 function showView(view) {
   // The table empties at once: the old list's rows must not stand under the new one's name.
-  Object.assign(leadsState, { view, card: null, offset: 0, adding: false, renaming: false, notice: "", error: "", page: null, allInFolder: false, check: null, provider: "" });
+  Object.assign(leadsState, { view, card: null, offset: 0, adding: false, renaming: false, notice: "", error: "", page: null, allInFolder: false, check: null, provider: "", split: null });
   leadsState.selected.clear();
   renderLeads();
   if (view !== EXCLUSIONS && view !== PRIVACY) void loadPage();

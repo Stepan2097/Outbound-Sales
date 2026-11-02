@@ -656,7 +656,12 @@ const esp = (() => {
   });
   if (warmupCrm.configured() && process.env.WARMUP_SCHEDULER_DISABLED !== "1") setTimeout(() => void companyFolders.warm().catch(() => {}), 20_000).unref?.();
   const crmLeads = crmLeadSource({ crm: warmupCrm, listFolders: () => listContactFolders(), companies: companyFolders });
-  const folderCheck = folderChecker({ crm: warmupCrm, idsOf: (folderId) => (isCompanyFolder(folderId) ? companyFolders.ids(folderId) : null) });
+  const folderCheck = folderChecker({
+    crm: warmupCrm,
+    idsOf: (folderId) => (isCompanyFolder(folderId) ? companyFolders.ids(folderId) : null),
+    // The check wrote each address's provider: the company folder's people are read again for the filter (02.11).
+    onFinished: (folderId) => { if (isCompanyFolder(folderId)) void companyFolders.refresh(folderId); }
+  });
   return { connector, oauth, keyError, gate, templates, signature, unsubscribe, campaigns, leads, crmLeads, folderCheck, halt, halted, tick, filters, pollInbox, checkAlerts, runMonitor, warmupTick, alertsTelegram: telegram.configured, sequenceOn: process.env.ESP_SEQUENCE === "on" };
 })();
 

@@ -140,6 +140,36 @@ export function crmLeadSource({ crm, listFolders, companies = null, now = () => 
       return { folder: { id: folderId, name }, total, offset: from, limit: size, rows: rows.map((row) => leadFromContact(row, name)) };
     },
 
+    /**
+     * The whole folder as leads, read fresh — the provider and the verdict the
+     * folder check has just written (02.11: «вписати 10 пошт гугл 1 яхо»).
+     * A company folder: its ids from the cache, the rows by id, 120 at a time.
+     */
+    async everyone(folderId) {
+      if (companies && isCompanyFolder(folderId)) {
+        const name = await companies.name(folderId);
+        const ids = await companies.ids(folderId);
+        const rows = [];
+        for (let at = 0; at < ids.length; at += 120) {
+          const slice = ids.slice(at, at + 120);
+          rows.push(...await twice(() => crm.from("contacts").select(COLUMNS).in("id", slice).rows()));
+        }
+        return rows.map((row) => leadFromContact(row, name));
+      }
+      mustFolder(folderId);
+      const name = (await listFolders()).find((folder) => folder.id === folderId)?.name || "";
+      const rows = [];
+      let after = "";
+      for (;;) {
+        let query = inFolder(COLUMNS, folderId);
+        if (after) query = query.gt("id", after);
+        const page = await twice(() => query.order("id").limit(1000).rows());
+        rows.push(...page);
+        if (page.length < 1000) return rows.map((row) => leadFromContact(row, name));
+        after = page.at(-1).id;
+      }
+    },
+
     /** The contacts picked on the page, for «Надіслати в кампанію» — only those with an address. */
     async byIds(ids) {
       const clean = [...new Set(ids.filter((id) => UUID.test(String(id))))].slice(0, 500);

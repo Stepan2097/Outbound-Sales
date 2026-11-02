@@ -225,6 +225,8 @@ export function millionVerifier({ key = process.env.MILLIONVERIFIER_API_KEY || "
 export function smtpVerifier({ check = checkEmail, helo = process.env.EMAIL_CHECK_HELO || (process.env.PUBLIC_URL ? new URL(process.env.PUBLIC_URL).hostname : undefined), pauseMs = 400, env = process.env } = {}) {
   if (/^(0|off|false|no)$/i.test(String(env.EMAIL_CHECK_SMTP || ""))) return null;
   const catchAll = new Set();
+  // Mail servers that never greeted us in this run (contacts/email-check.mjs skips them).
+  const deadHosts = new Map();
   const lanes = new Map();
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   return async (email) => {
@@ -237,7 +239,7 @@ export function smtpVerifier({ check = checkEmail, helo = process.env.EMAIL_CHEC
     await before;
     try {
       if (catchAll.has(domain)) return { status: "catch_all", reason: "сервер приймає будь-яку адресу — існування не перевірити", by: "smtp" };
-      const answer = await check(email, helo ? { helo } : {});
+      const answer = await check(email, { ...(helo ? { helo } : {}), deadHosts });
       if (answer.status === "catch_all") catchAll.add(domain);
       return { status: answer.status, reason: answer.reason, role: Boolean(answer.role), by: "smtp" };
     } finally {
@@ -256,7 +258,7 @@ export function defaultDeep() {
  * The folder runs, one at a time per folder, kept in memory with their counts.
  * `crm` — the CRM REST client; `deep` — millionVerifier() or null.
  */
-export function folderChecker({ crm, deep = defaultDeep, domainOf = domainChecker(), now = () => new Date(), concurrency = 8, idsOf = null }) {
+export function folderChecker({ crm, deep = defaultDeep, domainOf = domainChecker(), now = () => new Date(), concurrency = 8, idsOf = null, onFinished = null }) {
   const runs = new Map();
   const IN_FOLDER = "m:contact_folder_memberships!inner(folder_id)";
 
@@ -366,6 +368,7 @@ export function folderChecker({ crm, deep = defaultDeep, domainOf = domainChecke
     if (run.state === "running") run.state = "done";
     if (run.error && run.state !== "failed") run.state = "stopped";
     run.finishedAt = now().toISOString();
+    try { onFinished?.(run.folderId); } catch { /* What follows a run is extra. */ }
   }
 
   return {

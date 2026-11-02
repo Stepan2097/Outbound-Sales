@@ -69,3 +69,20 @@ test("a bad address and a domain that takes no mail fail before any server is as
   assert.equal(noMx.status, "invalid");
   assert.match(noMx.reason, /не приймає пошту/);
 });
+
+test("сервер, що двічі мовчить, у цьому проході вже не чекається (02.11: перевірка Casino brands стояла на таких)", async () => {
+  let connects = 0;
+  // A socket that connects and never greets.
+  const connect = () => {
+    connects += 1;
+    return Object.assign(new net.Socket(), { setEncoding: () => {} });
+  };
+  const deadHosts = new Map();
+  const options = { resolveMx: async () => [{ exchange: "mx.silent.test", priority: 1 }], connect, deadHosts };
+  const started = Date.now();
+  for (const email of ["a@silent.test", "b@silent.test", "c@silent.test", "d@silent.test"]) {
+    assert.equal((await checkEmail(email, { ...options, timeoutMs: 60 })).status, "unknown");
+  }
+  assert.equal(connects, 2, "третю й четверту адресу не чекали");
+  assert.ok(Date.now() - started < 1000);
+});

@@ -42,6 +42,8 @@ const page = {
   // Конструктор: відкрита кампанія і крок.
   openId: null, step: "sequence", people: [], peopleLoaded: false, peopleResult: null, peopleText: "", plan: null, previews: {}, sampleEmail: "",
   chooser: null, editor: null, busy: false,
+  // «Одержувачі» з папки «Лідів» за провайдерами пошти (02.11): папки, обрана, її розбивка, вписані кількості.
+  pick: { folders: null, foldersLoading: false, folder: "", providers: null, loading: false, error: "", quotas: {} },
   // Фільтр пошт за тегом у «Параметрах відправки»; null — ще не обрано (тоді «Розсилка», якщо така є).
   senderTag: null
 };
@@ -447,6 +449,73 @@ function sequenceHtml(campaign) {
   </section>`;
 }
 
+// ── одержувачі з папки «Лідів» за провайдерами (власник 02.11: «вписати
+// наприклад 10 пошт гугл 1 яхо тощо») ───────────────────────────────────────
+
+async function loadPickFolders() {
+  page.pick.foldersLoading = true;
+  try {
+    const meta = await api("/api/esp/leads/lists", { stale: true });
+    page.pick.folders = (meta.crmFolders || []).filter((folder) => folder.withEmail !== 0);
+  } catch (error) {
+    page.pick.error = error.message || "Папки не прочитались.";
+  }
+  page.pick.foldersLoading = false;
+  if (page.step === "recipients") renderCampaignsPage();
+}
+
+async function loadPickProviders() {
+  const folder = page.pick.folder;
+  Object.assign(page.pick, { providers: null, loading: Boolean(folder), error: "" });
+  renderCampaignsPage();
+  if (!folder) return;
+  try {
+    const answer = await api(`/api/esp/leads/providers?folder=${encodeURIComponent(folder)}`);
+    if (page.pick.folder !== folder) return;
+    page.pick.providers = answer.providers || [];
+  } catch (error) {
+    if (page.pick.folder === folder) page.pick.error = error.message || "Не вдалося порахувати.";
+  }
+  page.pick.loading = false;
+  if (page.step === "recipients") renderCampaignsPage();
+}
+
+const pickTotal = () => Object.values(page.pick.quotas).reduce((sum, value) => sum + (Number(value) || 0), 0);
+const providerName = (key) => page.pick.providers?.find((row) => row.key === key)?.label || key;
+
+function pickHtml() {
+  if (page.pick.folders === null && !page.pick.foldersLoading) void loadPickFolders();
+  const pick = page.pick;
+  const rows = (pick.providers || []).filter((row) => row.available > 0);
+  const options = (pick.folders || []).map((folder) => `<option value="${escapeAttr(folder.id)}"${pick.folder === folder.id ? " selected" : ""}>${escapeHtml(folder.name)}${folder.withEmail != null ? ` · ${folder.withEmail}` : ""}</option>`).join("");
+  const table = pick.loading ? `<p class="mc-subtle">Рахую провайдерів${String(pick.folder).startsWith("c:") ? " — папка компаній, до хвилини" : ""}…</p>`
+    : pick.error ? `<p class="mc-subtle is-bad">${escapeHtml(pick.error)}</p>`
+    : pick.providers && !rows.length ? '<p class="mc-subtle">У цій папці немає кого додати: усі вже в кампаніях, у виключеннях або з адресою, якої немає.</p>'
+    : rows.length ? `<div class="table-wrap"><table class="mc-table mc-pick-table">
+      <thead><tr><th>Провайдер</th><th class="is-number">Можна додати</th><th class="is-number">З них перевірено «є»</th><th class="is-number">Скільки взяти</th></tr></thead>
+      <tbody>${rows.map((row) => `<tr>
+        <td>${escapeHtml(row.label)}</td><td class="is-number">${row.available}</td><td class="is-number">${row.valid}</td>
+        <td class="is-number"><input type="number" min="0" max="${row.available}" step="1" inputmode="numeric" data-mc-input="pick-quota" data-key="${escapeAttr(row.key)}" value="${escapeAttr(pick.quotas[row.key] || "")}" placeholder="0" aria-label="Скільки взяти: ${escapeAttr(row.label)}" /></td>
+      </tr>`).join("")}</tbody></table></div>
+      <p class="mc-subtle">Беруться ті, кого ще немає в жодній кампанії; першими — перевірені «є». Хто не пройде перевірок перед додаванням, замість нього береться наступний.</p>` : "";
+  const total = pickTotal();
+  return `<form class="mc-import mc-pick" data-mc-form="pick">
+    <div class="mc-pick-head"><strong>З папки «Лідів» — за провайдерами пошти</strong>
+      <select data-mc-input="pick-folder" aria-label="Папка лідів"><option value="">${pick.folders === null ? "Читаю папки…" : pick.folders.length ? "Виберіть папку CRM…" : "Папок CRM з поштою немає"}</option>${options}</select></div>
+    ${table}
+    ${rows.length ? `<div class="mc-import-actions"><button type="submit" class="primary-button" data-mc-pick-submit ${page.busy || !total ? "disabled" : ""}><i data-lucide="user-plus"></i><span>Додати в кампанію${total ? ` (${total})` : ""}</span></button></div>` : ""}
+  </form>`;
+}
+
+/** What could not be taken from each provider, and why. */
+function shortHtml(short) {
+  const lines = Object.entries(short || {}).map(([key, row]) => {
+    const why = Object.entries(row.passed || {}).sort((left, right) => right[1] - left[1]).map(([reason, count]) => `${reason} — ${count}`).join(", ");
+    return `${escapeHtml(providerName(key))}: не добрано ${row.missing}${why ? ` (пропущено: ${escapeHtml(why)})` : " — більше немає кого"}`;
+  });
+  return lines.length ? `<p>${lines.join("<br>")}</p>` : "";
+}
+
 function recipientsHtml(campaign) {
   const counts = page.people.reduce((map, person) => ({ ...map, [person.status]: (map[person.status] || 0) + 1 }), {});
   const result = page.peopleResult;
@@ -457,6 +526,7 @@ function recipientsHtml(campaign) {
       <span><b>${page.people.length}</b> у кампанії</span>
       ${Object.entries(counts).map(([status, count]) => `<span><b>${count}</b> ${escapeHtml(PERSON_STATE[status] || status)}</span>`).join("")}
     </div>
+    ${campaign.state === "done" ? "" : pickHtml()}
     ${campaign.state === "done" ? "" : `<form class="mc-import" data-mc-form="people">
       <textarea data-mc-input="people" rows="5" placeholder="Рядок на людину: email, ім'я, компанія, країна, часовий пояс, джерело, дата джерела, верифікація, дата перевірки&#10;або вставте таблицю з рядком заголовків (email, name, company, country, source, source_date, verification, verified_at)">${escapeHtml(page.peopleText)}</textarea>
       <div class="mc-import-actions">
@@ -466,6 +536,7 @@ function recipientsHtml(campaign) {
     </form>`}
     ${result ? `<div class="mc-import-result">
       <strong>Додано ${result.added}.</strong>
+      ${shortHtml(result.short)}
       ${result.skipped.length ? `<p>Не додано ${result.skipped.length}: ${result.skipped.slice(0, 12).map((row) => `${escapeHtml(row.email)} — ${escapeHtml(row.reason === "in_other_campaign" ? `уже в «${row.campaign}»` : result.labels?.[row.email] || row.reason)}`).join("; ")}${result.skipped.length > 12 ? "…" : ""}</p>` : ""}
       ${result.waiting.length ? `<p>Додано, але чекають даних ${result.waiting.length}: ${result.waiting.slice(0, 12).map((row) => `${escapeHtml(row.email)} — ${escapeHtml(row.label)}`).join("; ")}${result.waiting.length > 12 ? "…" : ""}</p>` : ""}
       ${result.rejected.length ? `<p>Рядків без адреси: ${result.rejected.length}.</p>` : ""}
@@ -1040,6 +1111,18 @@ function onClick(event) {
 
 function onInput(event) {
   const input = event.target;
+  if (input.dataset.mcInput === "pick-quota") {
+    // Без перемальовування — лише сума на кнопці: курсор лишається в полі.
+    const value = Math.max(0, Math.min(Number(input.max) || 0, Math.floor(Number(input.value) || 0)));
+    if (value) page.pick.quotas[input.dataset.key] = value; else delete page.pick.quotas[input.dataset.key];
+    const button = rootEl()?.querySelector("[data-mc-pick-submit]");
+    const total = pickTotal();
+    if (button) {
+      button.disabled = page.busy || !total;
+      button.querySelector("span").textContent = `Додати в кампанію${total ? ` (${total})` : ""}`;
+    }
+    return undefined;
+  }
   if (input.dataset.mcInput === "search") {
     page.search = input.value;
     const caret = input.selectionStart;
@@ -1053,6 +1136,10 @@ function onInput(event) {
 
 async function onChange(event) {
   const input = event.target;
+  if (input.dataset.mcInput === "pick-folder") {
+    Object.assign(page.pick, { folder: input.value, quotas: {} });
+    return loadPickProviders();
+  }
   if (input.dataset.mcSelect) {
     if (input.checked) page.selected.add(input.dataset.mcSelect); else page.selected.delete(input.dataset.mcSelect);
     return renderCampaignsPage();
@@ -1092,6 +1179,20 @@ async function onSubmit(event) {
   if (!form) return;
   event.preventDefault();
   const campaign = current();
+  if (form.dataset.mcForm === "pick") {
+    const quotas = { ...page.pick.quotas };
+    if (!page.pick.folder || !pickTotal()) return;
+    await act(async () => {
+      try {
+        page.peopleResult = await api("/api/esp/campaigns/leads-by-provider", { method: "POST", body: JSON.stringify({ id: campaign.id, folder: page.pick.folder, quotas }) });
+      } catch (error) {
+        if (error.payload?.short) page.peopleResult = { added: 0, skipped: [], waiting: [], rejected: [], short: error.payload.short };
+        throw error;
+      }
+      page.pick.quotas = {};
+    }, { success: "" });
+    return loadPickProviders();
+  }
   if (form.dataset.mcForm === "people") {
     const text = form.querySelector("[data-mc-input=people]").value;
     if (!text.trim()) return;

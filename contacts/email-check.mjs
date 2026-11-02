@@ -35,7 +35,7 @@ function result(email, status, reason, extra = {}) {
 }
 
 /** One SMTP conversation: banner, EHLO, MAIL FROM, RCPT TO for each address, QUIT. Codes by address. */
-function smtpProbe({ host, port = 25, helo, from = "", addresses, timeoutMs = 12000, connect = net.connect }) {
+function smtpProbe({ host, port = 25, helo, from = "", addresses, timeoutMs = 12000, bannerMs = 6000, connect = net.connect }) {
   return new Promise((resolve) => {
     const socket = connect({ host, port });
     const replies = [];
@@ -44,12 +44,15 @@ function smtpProbe({ host, port = 25, helo, from = "", addresses, timeoutMs = 12
     const commands = [`EHLO ${helo}`, `MAIL FROM:<${from}>`, ...addresses.map((address) => `RCPT TO:<${address}>`), "QUIT"];
     const done = (outcome) => {
       clearTimeout(timer);
+      clearTimeout(silent);
       socket.removeAllListeners();
       socket.on?.("error", () => {});
       socket.destroy?.();
       resolve(outcome);
     };
     const timer = setTimeout(() => done({ error: "timeout", replies }), timeoutMs);
+    // A server that has not even greeted in this long will not: no use waiting the whole conversation's time.
+    const silent = setTimeout(() => { if (!replies.length) done({ error: "timeout", replies }); }, bannerMs);
     socket.setEncoding?.("utf8");
     socket.on("error", (error) => done({ error: error.code || error.message, replies }));
     socket.on("data", (chunk) => {
@@ -79,7 +82,7 @@ function smtpProbe({ host, port = 25, helo, from = "", addresses, timeoutMs = 12
  * `port` are for tests; `helo` and `from` default to this host and a null
  * sender, the way a bounce-checking server introduces itself.
  */
-export async function checkEmail(value, { resolveMx = dnsResolveMx, resolveA = resolve4, connect, port = 25, helo = process.env.EMAIL_CHECK_HELO || os.hostname(), from = process.env.EMAIL_CHECK_FROM || "", timeoutMs = 12000 } = {}) {
+export async function checkEmail(value, { resolveMx = dnsResolveMx, resolveA = resolve4, connect, port = 25, helo = process.env.EMAIL_CHECK_HELO || os.hostname(), from = process.env.EMAIL_CHECK_FROM || "", timeoutMs = 12000, deadHosts = null } = {}) {
   const email = String(value ?? "").trim().toLowerCase();
   if (!ADDRESS.test(email) || email.length > 254) return result(email, "invalid", "неправильний формат адреси");
   const [local, domain] = email.split("@");
@@ -100,7 +103,12 @@ export async function checkEmail(value, { resolveMx = dnsResolveMx, resolveA = r
 
   const decoy = `${randomBytes(6).toString("hex")}-nobody@${domain}`;
   for (const host of exchanges.slice(0, 2)) {
+    // A mail server that did not answer earlier in this run is not waited on again (02.11: a folder of
+    // 4308 spent most of its time on servers that never greet us). `deadHosts` — host → silences in a row.
+    // Two silences in a row, not one: a shared server (Google, Microsoft) can miss a single greeting.
+    if ((deadHosts?.get(host) || 0) >= 2) continue;
     const probe = await smtpProbe({ host, port, helo, from, addresses: [email, decoy], timeoutMs, connect });
+    deadHosts?.set(host, probe.replies.length ? 0 : (deadHosts.get(host) || 0) + 1);
     // banner, EHLO, MAIL FROM, RCPT real, RCPT decoy
     const real = probe.replies[3];
     const fake = probe.replies[4];

@@ -121,3 +121,44 @@ test("маршрути: папки CRM у списках, сторінка па�
   assert.equal(state.enrollments.some((row) => "crmId" in row.lead), false, "у кампанію — лише поля ліда");
   assert.equal(leadFromContact({ id: "x", email: " A@B.co " }).email, "a@b.co");
 });
+
+test("папка за провайдерами й «10 гугл, 1 яхо» у кампанію (02.11): розбивка з CRM, квоти, чого не добрано й чому", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "esp-crm-quotas-"));
+  useJournal(join(dir, "journal.jsonl"));
+  t.after(async () => { useJournal(null); await rm(dir, { recursive: true, force: true }); });
+  const meta = (email, provider, status) => ({ custom_fields: { email_meta: { email, provider }, ...(status ? { email_check: { [email]: { status, checkedAt: "2026-11-02T10:00:00Z" } } } : {}) } });
+  ROWS.push(
+    contact("bbbbbbbb-0000-4000-8000-000000000001", FOLDER_B, "g1@gco.com", meta("g1@gco.com", "google", "valid")),
+    contact("bbbbbbbb-0000-4000-8000-000000000002", FOLDER_B, "g2@gco.com", meta("g2@gco.com", "google", "")),
+    contact("bbbbbbbb-0000-4000-8000-000000000003", FOLDER_B, "g3@gco.com", meta("g3@gco.com", "google", "invalid")),
+    contact("bbbbbbbb-0000-4000-8000-000000000004", FOLDER_B, "y1@yco.com", meta("y1@yco.com", "yahoo", "valid"))
+  );
+  t.after(() => { ROWS.splice(-4, 4); });
+  const state = { lists: [], leads: [], campaigns: [], enrollments: [] };
+  const leads = leadStore({ readLists: () => state.lists, writeLists: async (value) => { state.lists = value; }, readLeads: () => state.leads, writeLeads: async (value) => { state.leads = value; } });
+  const campaigns = campaignStore({
+    read: () => state.campaigns, write: async (value) => { state.campaigns = value; },
+    readEnrollments: () => state.enrollments, writeEnrollments: async (value) => { state.enrollments = value; },
+    templates: () => [{ id: "t1", name: "First", subject: "Hi", body: "Hello" }]
+  });
+  const campaign = await campaigns.create({ name: "Mix", steps: [{ templateId: "t1", delayDays: 0 }], senders: ["anna@send.com"] });
+  // The pilot filter as it is: only Google mail goes.
+  const filters = { context: async () => ({}), check: async (lead) => (lead.provider === "google" ? { ok: true } : { ok: false, reason: "not_google_mx", permanent: true }) };
+  const esp = { leads, campaigns, crmLeads: crmLeadSource({ crm: fakeCrm(), listFolders: FOLDERS }), filters };
+  const call = async (method, path, body = {}) => {
+    let captured = null;
+    await handleEspApi({
+      request: { method, auth: { profile: { email: "admin@x.com", role: "admin" } } }, response: {}, url: new URL(`http://x/api/esp${path}`),
+      sendJson: (_r, status, payload) => { captured = { status, payload }; }, readJson: async () => body, esp
+    });
+    return captured;
+  };
+  const split = await call("GET", `/leads/providers?folder=${FOLDER_B}`);
+  assert.deepEqual(split.payload.providers.map((row) => [row.key, row.total, row.available, row.valid]), [["google", 3, 2, 1], ["yahoo", 1, 1, 1]]);
+  const sent = await call("POST", "/campaigns/leads-by-provider", { id: campaign.id, folder: FOLDER_B, quotas: { google: 10, yahoo: 1 } });
+  assert.equal(sent.payload.added, 2);
+  assert.deepEqual(state.enrollments.map((row) => row.email), ["g1@gco.com", "g2@gco.com"], "першими — перевірені «є»");
+  assert.deepEqual(sent.payload.short, { google: { missing: 8, passed: {} }, yahoo: { missing: 1, passed: { "пошта не на Google": 1 } } });
+  const again = await call("POST", "/campaigns/leads-by-provider", { id: campaign.id, folder: FOLDER_B, quotas: { google: 1 } });
+  assert.equal(again.status, 400, "ті, хто вже в кампанії, вдруге не беруться");
+});
