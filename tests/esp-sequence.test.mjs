@@ -109,6 +109,26 @@ test("three letters on day 0, +3 and +4 working days, from one mailbox, in one t
   assert.match(firstSending.data.text, /How we handle your data: https:\/\/advantage-mail\.com\/privacy/);
 });
 
+test("a follow-up answers the Message-ID Gmail actually gave the letter before it, not the one we wrote", async (t) => {
+  // 02.11 test letters: Gmail replaced <…@trafboost.com> with <CA…@mail.gmail.com>,
+  // and at the recipient the follow-ups fell out of the first letter's thread.
+  class RewritingGmail extends StubGmailConnector {
+    async messageIdOf(_mailbox, id) { return `<${id}@mail.gmail.com>`; }
+  }
+  const w = await world(t, { connector: new RewritingGmail() });
+  const campaign = await w.campaigns.create({ name: "Northwind", steps: w.steps, senders: ["anna@advantage-mail.com"] });
+  await w.campaigns.enroll(campaign.id, [LEAD]);
+  await w.campaigns.setState(campaign.id, "running");
+  await w.tick(TUESDAY);
+  await w.tick(at(3));
+  await w.tick(at(9));
+
+  const [one, two, three] = w.connector.sent;
+  assert.equal(header(two.raw, "In-Reply-To"), `<${one.id}@mail.gmail.com>`);
+  assert.equal(header(three.raw, "In-Reply-To"), `<${two.id}@mail.gmail.com>`);
+  assert.equal(header(three.raw, "References"), `<${one.id}@mail.gmail.com> <${two.id}@mail.gmail.com>`);
+});
+
 test("людину з однієї кампанії не взяти в іншу — і коли та кампанія вже завершилась (02.11)", async (t) => {
   const w = await world(t);
   const a = await w.campaigns.create({ name: "A", steps: w.steps, senders: ["anna@advantage-mail.com"] });

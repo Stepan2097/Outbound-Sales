@@ -324,8 +324,11 @@ export async function runTick({ now = new Date(), dryRun = false, ...deps }) {
         const result = await deps.gate.send(enrollment.sender, letter.raw, { threadId: enrollment.lastSent?.threadId || null });
         const sent = await deps.journal.recordSent(sending, { messageId: result.id, threadId: result.threadId }, "esp-sequence");
         remember(sent);
+        // Gmail swaps our Message-ID for its own; the next follow-up must answer
+        // the one the person actually has, or it falls out of their thread.
+        const realId = deps.gate.messageIdOf ? await deps.gate.messageIdOf(enrollment.sender, result.id).catch(() => null) : null;
         await deps.campaigns.saveEnrollment(advance(enrollment, campaign, {
-          messageId: letter.messageId, threadId: result.threadId, subject: letter.subject, references: letter.references, at: now.toISOString()
+          messageId: realId || letter.messageId, threadId: result.threadId, subject: letter.subject, references: letter.references, at: now.toISOString()
         }, today));
         if (company) countCompany(companyToday, companyDomains, company, domain);
         summary.sent += 1;

@@ -80,6 +80,11 @@ export class SenderGate {
     this.now = now;
   }
 
+  /** The Message-ID the provider gave a sent letter (Gmail replaces ours), or null. */
+  async messageIdOf(value, id) {
+    return this.connector.messageIdOf ? this.connector.messageIdOf(normalizeMailbox(value), id) : null;
+  }
+
   async send(value, raw, options = {}) {
     // «Стоп усе» first: nothing else is worth asking once the system is stopped.
     if (this.halted()) throw new SendingHalted();
