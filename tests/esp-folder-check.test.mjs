@@ -16,6 +16,8 @@ const OTHER = "22222222-2222-4222-8222-222222222222";
 const id = (n) => `aaaaaaaa-0000-4000-8000-${String(n).padStart(12, "0")}`;
 
 /** An in-memory CRM: contacts, folders, memberships — the filters these features use. */
+const inSizes = [];
+
 function memoryCrm(contacts) {
   const tables = {
     contacts,
@@ -35,6 +37,7 @@ function memoryCrm(contacts) {
       select: () => self,
       eq: (column, value) => { filters.push((row) => (column === "m.folder_id" ? tables.contact_folder_memberships.some((m) => m.contact_id === row.id && m.folder_id === value) : String(row[column]) === String(value))); return self; },
       neq: (column, value) => { filters.push((row) => row[column] !== value); return self; },
+      in: (column, values) => { inSizes.push(values.length); filters.push((row) => values.includes(row[column])); return self; },
       notNull: (column) => { filters.push((row) => row[column] != null); return self; },
       gt: (column, value) => { filters.push((row) => String(row[column]) > String(value)); return self; },
       or: (clause) => { const term = clause.match(/\*(.+?)\*/)[1].toLowerCase(); filters.push((row) => ["name", "email"].some((key) => String(row[key] || "").toLowerCase().includes(term))); return self; },
@@ -243,4 +246,17 @@ test("власний аналог MillionVerifier: питає поштовий �
   assert.equal(maxSameDomain, 2, "різні домени паралельно, один домен — по одному");
   assert.equal(smtpVerifier({ check, env: { EMAIL_CHECK_SMTP: "off" } }), null);
   assert.equal(typeof defaultDeep(), "function", "без ключа MillionVerifier — власна перевірка");
+});
+
+test("папка компаній на тисячі людей (02.11, Casino brands — «URI too long»): контакти читаються порціями по 120 id", async () => {
+  const contacts = Array.from({ length: 300 }, (_, index) => ({ id: id(index + 1), email: `p${index}@live.com` }));
+  const crm = memoryCrm(contacts);
+  inSizes.length = 0;
+  const checker = folderChecker({ crm, deep: () => null, domainOf: dns({}), idsOf: async () => contacts.map((row) => row.id) });
+  checker.start("c:folder");
+  await checker.finished("c:folder");
+  const run = checker.status("c:folder");
+  assert.equal(run.state, "done");
+  assert.equal(run.done, 300);
+  assert.deepEqual(inSizes, [120, 120, 60]);
 });

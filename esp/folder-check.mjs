@@ -22,6 +22,7 @@
 import { resolve4, resolve6, resolveMx } from "node:dns/promises";
 
 import { checkEmail } from "../contacts/email-check.mjs";
+import { CONTACT_ID_BATCH } from "../warmup/db.mjs";
 
 const ADDRESS = /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/i;
 const ROLE = /^(info|sales|support|hello|contact|admin|office|marketing|hr|jobs|careers|team|help|noreply|no-reply|billing|press|partners?)$/i;
@@ -35,6 +36,8 @@ const DISPOSABLE = new Set([
 const FRESH_DAYS = 30;
 const DEFINITE = new Set(["valid", "invalid", "catch_all"]);
 const BATCH = 500;
+// Ids go into the address of the read: 500 of them was «URI too long» (02.11, Casino brands).
+const ID_BATCH = CONTACT_ID_BATCH;
 const BY = "folder-check";
 
 // Personal mailboxes: a person, not a company domain — said, not refused.
@@ -325,8 +328,8 @@ export function folderChecker({ crm, deep = defaultDeep, domainOf = domainChecke
         if (run.stopRequested) { run.state = "stopped"; break; }
         let rows;
         if (listed) {
-          const slice = listed.slice(from, from + BATCH);
-          from += BATCH;
+          const slice = listed.slice(from, from + ID_BATCH);
+          from += ID_BATCH;
           rows = slice.length ? await crm.from("contacts").select("id,email,custom_fields").in("id", slice).rows() : [];
           if (!slice.length) { run.state = run.stopRequested ? "stopped" : "done"; break; }
         } else {
