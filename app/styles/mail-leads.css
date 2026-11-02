@@ -13,6 +13,15 @@
   min-width: 0;
 }
 
+/* Довгий список папок прокручується всередині колонки (висоту ставить fitLeadsTable, 02.11). */
+@media (min-width: 901px) {
+  #leadsSide {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    align-content: start;
+  }
+}
+
 .leads-side-empty {
   margin: 4px 10px 8px;
   color: var(--muted);

@@ -478,7 +478,11 @@ export function renderLeads() {
   const privacyPane = document.getElementById("leadsPrivacy");
   if (!side || !main || !exclusions || !privacyPane) return;
   const typing = document.activeElement?.id === "leadsSearch" ? document.activeElement.selectionStart : null;
+  // The folder column scrolls inside itself now: a redraw keeps where it was.
+  const restoreSide = keepScroll(side.parentElement, ["#leadsSide"]);
   side.innerHTML = sideHtml();
+  fitLeadsTable();
+  restoreSide();
   const pane = leadsState.card ? "card" : leadsState.view === EXCLUSIONS ? EXCLUSIONS : leadsState.view === PRIVACY ? PRIVACY : "list";
   exclusions.hidden = pane !== EXCLUSIONS;
   privacyPane.hidden = pane !== PRIVACY;
@@ -503,6 +507,12 @@ export function renderLeads() {
  * висота — усе місце під таблицею, а не 560 px.
  */
 function fitLeadsTable() {
+  // The folder column too (02.11: «чому тут досі простір» — a long list of folders made the page
+  // scroll, and under the table stood empty space): it scrolls inside, down to the screen's bottom.
+  const side = document.getElementById("leadsSide");
+  if (side && window.matchMedia("(min-width: 901px)").matches) {
+    side.style.maxHeight = `${Math.max(240, window.innerHeight - (side.getBoundingClientRect().top + window.scrollY) - 24)}px`;
+  } else if (side) side.style.maxHeight = "";
   const wrap = document.querySelector("#leadsMain .leads-table-wrap");
   if (!wrap) return;
   const top = wrap.getBoundingClientRect().top + window.scrollY;
