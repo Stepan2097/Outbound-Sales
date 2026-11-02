@@ -220,3 +220,65 @@ export function cachedRead(key, loader, { ttlMs = 60_000, signal } = {}) {
     if (signal?.aborted) cancel();
   });
 }
+
+// ── Збережені відповіді сторінок (власник 02.11: «всі сторінки мають кешуватися
+// щоб постійно не завантажуватися з нуля») ──────────────────────────────────
+//
+// Остання відповідь читання, яке сторінка позначила `stale` (core.js, api),
+// лежить у localStorage цієї людини: нова вкладка й перезавантаження одразу
+// малюють її, а свіжа відповідь приходить слідом. Лише для показу; запис нічого
+// звідси не бере. Чужі збережені відповіді стираються, щойно входить інша людина.
+const READ_PREFIX = "outbound:read:v1:";
+const MAX_SAVED_READ_CHARS = 400_000;
+const MAX_SAVED_READS_CHARS = 3_000_000;
+const SAVED_READ_DAYS = 7;
+
+function localKeys() {
+  const keys = [];
+  try {
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index);
+      if (key?.startsWith(READ_PREFIX)) keys.push(key);
+    }
+  } catch { /* No storage — nothing saved. */ }
+  return keys;
+}
+
+/** The saved answer to this read, or undefined. */
+export function recallRead(path) {
+  if (!scope) return undefined;
+  try {
+    const raw = window.localStorage.getItem(READ_PREFIX + scope + ":" + path);
+    if (!raw) return undefined;
+    const saved = JSON.parse(raw);
+    if (!Number.isFinite(saved?.at) || Date.now() - saved.at > SAVED_READ_DAYS * 86_400_000) return undefined;
+    return saved.value;
+  } catch { return undefined; }
+}
+
+export function rememberRead(path, value) {
+  if (!scope) return;
+  try {
+    const raw = JSON.stringify({ at: Date.now(), value });
+    if (raw.length > MAX_SAVED_READ_CHARS) return;
+    const own = READ_PREFIX + scope + ":";
+    // Somebody else's answers never stay beside this person's.
+    const keys = localKeys();
+    for (const key of keys) if (!key.startsWith(own)) window.localStorage.removeItem(key);
+    const mine = keys.filter((key) => key.startsWith(own) && key !== own + path)
+      .map((key) => { const text = window.localStorage.getItem(key) || ""; let at = 0; try { at = JSON.parse(text).at || 0; } catch {} return { key, at, size: text.length }; })
+      .sort((left, right) => left.at - right.at);
+    let total = mine.reduce((sum, row) => sum + row.size, 0) + raw.length;
+    while (total > MAX_SAVED_READS_CHARS && mine.length) {
+      const oldest = mine.shift();
+      window.localStorage.removeItem(oldest.key);
+      total -= oldest.size;
+    }
+    window.localStorage.setItem(own + path, raw);
+  } catch { /* Storage full or blocked: the page just loads. */ }
+}
+
+/** Sign-out and a change of person forget every saved answer. */
+export function forgetReads() {
+  try { for (const key of localKeys()) window.localStorage.removeItem(key); } catch { /* Nothing to forget. */ }
+}

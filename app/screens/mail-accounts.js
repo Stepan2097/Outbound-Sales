@@ -31,7 +31,7 @@ export function readAccountsReturn() {
 
 export async function loadAccounts() {
   try {
-    accounts.data = await api("/api/esp/oauth/google");
+    accounts.data = await api("/api/esp/oauth/google", { stale: true });
     accounts.error = "";
   } catch (error) {
     accounts.error = error.message || "Не вдалося прочитати підключення пошт.";

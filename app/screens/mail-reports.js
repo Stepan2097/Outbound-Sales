@@ -48,7 +48,7 @@ export async function loadReports() {
   if (campaign) params.set("campaign", campaign);
   if (sender) params.set("sender", sender);
   try {
-    reportsState.data = await api(`/api/esp/reports/summary?${params}`);
+    reportsState.data = await api(`/api/esp/reports/summary?${params}`, { stale: true });
     reportsState.error = "";
   } catch (error) {
     reportsState.error = error?.status === 403 ? "Звіти бачить команда з правом читати відповіді — його дає адміністратор." : error?.message || "Звіти не прочиталися.";

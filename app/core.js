@@ -3,7 +3,7 @@
 // the four screens by name only — each screen registers what opening it means
 // (`onScreen`), so nothing here imports a screen.
 
-import { forgetScreens, getCacheEpoch, getCacheScope, invalidateReads, invalidateScreens, setCacheScope } from "./cache.js";
+import { forgetReads, forgetScreens, getCacheEpoch, getCacheScope, invalidateReads, invalidateScreens, recallRead, rememberRead, setCacheScope } from "./cache.js";
 
 export let state = null;
 
@@ -41,7 +41,67 @@ export const uaPlural = (count, one, few, many) => {
   return many;
 };
 
+/**
+ * Читання, яке сторінка позначила `stale: true` (власник 02.11: «всі сторінки
+ * мають кешуватися щоб постійно не завантажуватися з нуля»): уперше за життя
+ * вкладки воно одразу віддає збережену минулого разу відповідь (cache.js), а
+ * справжнє читання йде фоном. Коли свіжа відповідь інша, сторінку, з якої
+ * читали, відкривається знову — і те саме читання бере свіжу відповідь, уже
+ * без мережі. Далі — звичайні читання: сторінка, на яку повертаються, і так
+ * показує, що було, поки читає нове.
+ */
+const staleServed = new Set();
+// path → { payload, at }: the fresh answer the reopened page takes.
+const staleFresh = new Map();
+// path → { promise, taken }: the background read behind a saved answer.
+const staleFlights = new Map();
+const STALE_FRESH_MS = 60_000;
+let shownView = "";
+let reopenTimer = null;
+const reopenViews = new Set();
+
+function reopenLater(view) {
+  reopenViews.add(view);
+  window.clearTimeout(reopenTimer);
+  reopenTimer = window.setTimeout(() => {
+    const views = [...reopenViews];
+    reopenViews.clear();
+    if (views.includes(shownView)) for (const hooks of screenHooks.get(shownView) || []) hooks.open?.();
+  }, 150);
+}
+
+async function staleRead(path, options) {
+  const { stale, ...rest } = options;
+  const fresh = staleFresh.get(path);
+  staleFresh.delete(path);
+  if (fresh && Date.now() - fresh.at < STALE_FRESH_MS) return fresh.payload;
+  const flight = staleFlights.get(path);
+  if (flight) {
+    flight.taken = true;
+    return flight.promise;
+  }
+  const saved = staleServed.has(path) ? undefined : recallRead(path);
+  staleServed.add(path);
+  if (saved === undefined) {
+    const payload = await api(path, rest);
+    rememberRead(path, payload);
+    return payload;
+  }
+  const view = shownView;
+  const entry = { taken: false, promise: api(path, rest) };
+  staleFlights.set(path, entry);
+  entry.promise.then((payload) => {
+    staleFlights.delete(path);
+    rememberRead(path, payload);
+    if (entry.taken || JSON.stringify(payload) === JSON.stringify(saved)) return;
+    staleFresh.set(path, { payload, at: Date.now() });
+    reopenLater(view);
+  }, () => staleFlights.delete(path));
+  return saved;
+}
+
 export async function api(path, options = {}) {
+  if (options.stale) return staleRead(path, options);
   const requestEpoch = getCacheEpoch();
   const init = {
     ...options,
@@ -92,6 +152,8 @@ export async function api(path, options = {}) {
     throw failure;
   }
   if (!["GET", "HEAD"].includes(String(options.method || "GET").toUpperCase()) && path !== "/api/account/heartbeat") {
+    // A fresh answer read before this write is no longer fresh.
+    staleFresh.clear();
     invalidateReads("", { retryPending: true });
     invalidateScreens();
   }
@@ -140,6 +202,7 @@ function showAuthGate() {
   // the screens the last person left in memory.
   if (getCacheScope()) setCacheScope("");
   else forgetScreens();
+  forgetReads();
   state = null;
   window.clearInterval(heartbeatTimer);
   heartbeatTimer = null;
@@ -357,6 +420,7 @@ function setView(viewName) {
       account: "Налаштування"
     }[viewName] || "Outbound Sales OS";
   rememberView(viewName);
+  shownView = viewName;
   for (const hooks of screenHooks.get(viewName) || []) hooks.open?.();
 }
 

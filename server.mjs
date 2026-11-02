@@ -645,7 +645,16 @@ const esp = (() => {
   };
   // «Ліди»: the CRM's folders, read through the same cached folder list «Контакти» uses.
   // Папки компаній CRM — теж папки «Лідів» (21.10): контакти компаній папки.
-  const companyFolders = companyFolderSource({ crm: warmupCrm });
+  // What was collected survives a restart (02.11): the first visitor after a deploy sees the counts.
+  const companyFoldersPath = process.env.COMPANY_FOLDERS_PATH || join(dirname(stateFilePath), "company-folders.json");
+  const companyFolders = companyFolderSource({
+    crm: warmupCrm,
+    store: {
+      read: async () => (existsSync(companyFoldersPath) ? JSON.parse(await readFile(companyFoldersPath, "utf8")) : null),
+      write: (snapshot) => writeFileAtomic(companyFoldersPath, JSON.stringify(snapshot))
+    }
+  });
+  if (warmupCrm.configured() && process.env.WARMUP_SCHEDULER_DISABLED !== "1") setTimeout(() => void companyFolders.warm().catch(() => {}), 20_000).unref?.();
   const crmLeads = crmLeadSource({ crm: warmupCrm, listFolders: () => listContactFolders(), companies: companyFolders });
   const folderCheck = folderChecker({ crm: warmupCrm, idsOf: (folderId) => (isCompanyFolder(folderId) ? companyFolders.ids(folderId) : null) });
   return { connector, oauth, keyError, gate, templates, signature, unsubscribe, campaigns, leads, crmLeads, folderCheck, halt, halted, tick, filters, pollInbox, checkAlerts, runMonitor, warmupTick, alertsTelegram: telegram.configured, sequenceOn: process.env.ESP_SEQUENCE === "on" };

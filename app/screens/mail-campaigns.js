@@ -66,10 +66,10 @@ export async function loadCampaignsPage() {
   if (!rootEl()) return;
   try {
     const [campaigns, halt, templates, limits, alerts] = await Promise.all([
-      api("/api/esp/campaigns"),
+      api("/api/esp/campaigns", { stale: true }),
       api("/api/esp/halt"),
-      api("/api/esp/templates").catch(() => ({ templates: [], variables: [] })),
-      api("/api/esp/limits").catch(() => null),
+      api("/api/esp/templates", { stale: true }).catch(() => ({ templates: [], variables: [] })),
+      api("/api/esp/limits", { stale: true }).catch(() => null),
       api("/api/esp/alerts").catch(() => ({ alerts: [] }))
     ]);
     page.campaigns = campaigns.campaigns || [];

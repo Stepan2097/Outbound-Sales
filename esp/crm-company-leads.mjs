@@ -11,6 +11,11 @@
  * Папка тут має id «c:<uuid папки компаній>», щоб її не сплутати з папкою
  * контактів; решта «Лідів» (пошук, фільтр провайдера, «Додати в папку»,
  * «Перевірити адреси») працює з нею так само.
+ *
+ * Зібране пам'ятається у файлі (`store`) і переживає перезапуск (власник 02.11:
+ * «чому тут немає кількості» — після кожного деплою папки рахувались з нуля,
+ * Casino brands — 38 с, і сторінка показувала «…»). Застарілий список
+ * віддається одразу, а новий збирається фоном.
  */
 
 import { likeLiteral } from "../warmup/rest.mjs";
@@ -28,9 +33,28 @@ function anyPattern(name) {
   return `"${likeLiteral(name).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
-export function companyFolderSource({ crm, now = () => Date.now() }) {
+export function companyFolderSource({ crm, now = () => Date.now(), store = null }) {
   const cache = new Map(); // folder uuid → { at, people, pending }
   let folderList = null;
+  let restored = null;
+  let saving = Promise.resolve();
+
+  /** What the last run collected, once — before the first answer. */
+  function restore() {
+    if (!store) return Promise.resolve();
+    restored ||= Promise.resolve().then(() => store.read()).then((saved) => {
+      for (const [uuid, entry] of Object.entries(saved || {})) {
+        if (!cache.has(uuid) && Array.isArray(entry?.people) && Number.isFinite(entry.at)) cache.set(uuid, { at: entry.at, people: entry.people });
+      }
+    }).catch(() => {});
+    return restored;
+  }
+
+  function persist() {
+    if (!store) return;
+    const snapshot = Object.fromEntries([...cache].filter(([, entry]) => entry.people).map(([uuid, entry]) => [uuid, { at: entry.at, people: entry.people }]));
+    saving = saving.then(() => store.write(snapshot)).catch(() => {});
+  }
 
   async function listFolders() {
     if (folderList && now() - folderList.at < TTL) return folderList.rows;
@@ -80,21 +104,29 @@ export function companyFolderSource({ crm, now = () => Date.now() }) {
     }
   }
 
-  /** The folder's people, from the cache when fresh; one read at a time per folder. */
-  function people(id) {
+  /** The folder's people: fresh from the cache; stale — at once, while a new read runs; one read at a time per folder. */
+  async function people(id) {
+    await restore();
     const uuid = String(id).slice(COMPANY_PREFIX.length);
     const known = cache.get(uuid);
-    if (known?.people && now() - known.at < TTL) return Promise.resolve(known.people);
-    if (known?.pending) return known.pending;
-    const pending = companyNames(uuid).then(contactsOf).then((rows) => {
-      cache.set(uuid, { at: now(), people: rows, companies: null });
-      return rows;
-    }, (error) => {
-      cache.delete(uuid);
-      throw error;
-    });
-    cache.set(uuid, { ...(known || {}), pending });
-    return pending;
+    if (known?.people && now() - known.at < TTL) return known.people;
+    if (!known?.pending) {
+      const pending = companyNames(uuid).then(contactsOf).then((rows) => {
+        cache.set(uuid, { at: now(), people: rows });
+        persist();
+        return rows;
+      }, (error) => {
+        if (known?.people) cache.set(uuid, { at: known.at, people: known.people });
+        else cache.delete(uuid);
+        throw error;
+      });
+      cache.set(uuid, { ...(known || {}), pending });
+    }
+    if (known?.people) {
+      cache.get(uuid).pending?.catch(() => {});
+      return known.people;
+    }
+    return cache.get(uuid).pending;
   }
 
   const matches = (row, q, provider) => {
@@ -108,10 +140,11 @@ export function companyFolderSource({ crm, now = () => Date.now() }) {
   return {
     /** The company folders as «Лідів» folders: counted once their people are read (in the background). */
     async folders() {
+      await restore();
       const rows = await listFolders();
       return rows.map((folder) => {
         const known = cache.get(folder.id);
-        if (!known) void people(`${COMPANY_PREFIX}${folder.id}`).catch(() => {});
+        if (!known?.people || now() - known.at >= TTL) void people(`${COMPANY_PREFIX}${folder.id}`).catch(() => {});
         return { id: `${COMPANY_PREFIX}${folder.id}`, name: folder.name, kind: "company", contacts: null, withEmail: known?.people ? known.people.length : null };
       });
     },
@@ -120,6 +153,13 @@ export function companyFolderSource({ crm, now = () => Date.now() }) {
       const known = cache.get(String(id).slice(COMPANY_PREFIX.length));
       if (!known?.people || now() - known.at >= TTL) { void people(id).catch(() => {}); return Boolean(known?.people); }
       return true;
+    },
+    /** Collect every folder, one after another — at start, so the first visitor sees counts. */
+    async warm() {
+      for (const folder of await listFolders()) {
+        await people(`${COMPANY_PREFIX}${folder.id}`).catch(() => {});
+        await cache.get(folder.id)?.pending?.catch(() => {});
+      }
     },
     async name(id) {
       return (await listFolders()).find((folder) => `${COMPANY_PREFIX}${folder.id}` === id)?.name || "";

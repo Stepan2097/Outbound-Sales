@@ -79,7 +79,7 @@ async function openLeads() {
 
 async function loadMeta() {
   try {
-    leadsState.meta = await api("/api/esp/leads/lists");
+    leadsState.meta = await api("/api/esp/leads/lists", { stale: true });
     const known = (view) => [EXCLUSIONS, PRIVACY].includes(view) || leadsState.meta.lists.some((row) => row.id === view) || (leadsState.meta.crmFolders || []).some((row) => `crm:${row.id}` === view);
     if (leadsState.view && !known(leadsState.view)) leadsState.view = "";
     leadsState.error = "";
@@ -87,6 +87,18 @@ async function loadMeta() {
     leadsState.error = error?.status === 403 ? "Лідів бачить команда з правом читати відповіді — його дає адміністратор." : error?.message || "Списки не прочиталися.";
   }
   renderLeads();
+  recountLater();
+}
+
+let recountTimer = null;
+
+/** A company folder the server is still collecting shows «…»; its count comes in by itself (02.11). */
+function recountLater() {
+  window.clearTimeout(recountTimer);
+  if (!(leadsState.meta?.crmFolders || []).some((row) => row.kind === "company" && row.withEmail == null)) return;
+  recountTimer = window.setTimeout(() => {
+    if (document.getElementById("view-leads")?.classList.contains("active")) void loadMeta();
+  }, 5000);
 }
 
 async function loadCheck() {
@@ -116,7 +128,7 @@ async function loadPage() {
   if (leadsState.q) params.set("q", leadsState.q);
   if (leadsState.provider && leadsState.view.startsWith("crm:")) params.set("provider", leadsState.provider);
   try {
-    leadsState.page = await api(`/api/esp/leads?${params}`);
+    leadsState.page = await api(`/api/esp/leads?${params}`, { stale: true });
     leadsState.offset = leadsState.page.offset;
     // A company folder's people are being gathered on the server: ask again shortly.
     if (leadsState.page.loading) {

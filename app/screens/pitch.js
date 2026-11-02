@@ -36,7 +36,7 @@ async function openPitch() {
   }
   if (!book) drawShell("Завантажую смисли…");
   try {
-    book = await api("/api/pitch");
+    book = await api("/api/pitch", { stale: true });
     loadError = "";
   } catch (error) {
     if (error?.name === "AbortError") return;

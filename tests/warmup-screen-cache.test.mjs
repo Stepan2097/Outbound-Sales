@@ -102,7 +102,10 @@ test("signing out (or a lapsed session) forgets every screen the tab remembered"
   assert.match(gate, /forgetScreens\(\)/);
   const cache = readFileSync(new URL("../app/cache.js", import.meta.url), "utf8");
   assert.match(cache, /sessionStorage/, "the tab's memory, not the browser's: it goes when the tab does");
-  assert.doesNotMatch(cache, /localStorage/);
+  // 02.11 («всі сторінки мають кешуватися»): pages' saved answers live in the
+  // browser so a new tab opens at once — and go at sign-out with everything else.
+  assert.match(gate, /forgetReads\(\)/);
+  assert.equal([...cache.matchAll(/localStorage/g)].length > 0 && !/rememberScreen[^}]*localStorage/.test(cache), true, "screen snapshots stay in the tab");
 });
 
 // 16.10 (Марко): автозапити й «Як іде розсилка» — механіка прогріву, лишаються на «Прогріві»;

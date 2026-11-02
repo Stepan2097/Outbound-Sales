@@ -19,7 +19,7 @@ async function loadStats() {
   const params = new URLSearchParams(stats.from && stats.to ? { from: stats.from, to: stats.to } : { preset: stats.preset });
   if (stats.user !== "all") params.set("user", stats.user);
   try {
-    stats.data = await api(`/api/stats?${params}`);
+    stats.data = await api(`/api/stats?${params}`, { stale: true });
     stats.error = "";
   } catch (error) {
     stats.error = error?.message || "Статистика не прочиталась.";

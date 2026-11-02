@@ -10,7 +10,7 @@ function harness(fetch) {
   const invalidationOptions = [];
   let renders = 0;
   const openedScopes = [];
-  const main = loadMain(["api", "state", "authState", "authMode", "bootApplication", "enterWorkspace", "refresh", "setAuthState"], {
+  const main = loadMain(["staleFresh", "api", "state", "authState", "authMode", "bootApplication", "enterWorkspace", "refresh", "setAuthState"], {
     fetch, getCacheEpoch: () => epoch,
     getCacheScope: () => scope,
     setCacheScope: (next) => { if (scope !== next) epoch += 1; scope = next; },

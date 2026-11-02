@@ -18,7 +18,7 @@ const lead = {
 export async function loadLeadCampaigns() {
   try {
     const [campaigns, folders] = await Promise.all([
-      api("/api/lead-campaigns"),
+      api("/api/lead-campaigns", { stale: true }),
       lead.folders.length ? { folders: lead.folders } : api("/api/warmup/folders").catch(() => ({ folders: [] })),
       loadPitchProducts(),
       loadScenarios()

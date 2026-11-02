@@ -23,9 +23,9 @@ export async function loadEspReports() {
   const state = espReportsState;
   try {
     const [daily, campaigns, retention] = await Promise.all([
-      api(`/api/esp/reports/senders?from=${fromDate(state.days)}`),
-      api("/api/esp/reports/campaigns"),
-      api("/api/esp/retention").catch(() => null)
+      api(`/api/esp/reports/senders?from=${fromDate(state.days)}`, { stale: true }),
+      api("/api/esp/reports/campaigns", { stale: true }),
+      api("/api/esp/retention", { stale: true }).catch(() => null)
     ]);
     Object.assign(state, { daily, campaigns: campaigns.campaigns, retention, error: "" });
   } catch (error) {

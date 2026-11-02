@@ -59,7 +59,7 @@ export async function loadUniboxList() {
   for (const [key, value] of Object.entries(unibox.filters)) if (value) params.set(key, value);
   unibox.loading = true;
   try {
-    unibox.list = await api(`/api/esp/unibox?${params}`);
+    unibox.list = await api(`/api/esp/unibox?${params}`, { stale: true });
     unibox.offset = unibox.list.offset;
     unibox.error = "";
   } catch (error) {

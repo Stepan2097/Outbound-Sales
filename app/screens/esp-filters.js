@@ -18,7 +18,7 @@ export const espFiltersState = { data: null, error: "", notice: "", busy: false,
 
 export async function loadEspFilters() {
   try {
-    espFiltersState.data = await api("/api/esp/filters");
+    espFiltersState.data = await api("/api/esp/filters", { stale: true });
     espFiltersState.error = "";
   } catch (error) {
     espFiltersState.error = error?.message || "Фільтри пошти не прочиталися.";

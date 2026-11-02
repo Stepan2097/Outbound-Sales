@@ -51,3 +51,33 @@ test("папка компаній: її люди — контакти з пош�
   assert.deepEqual(await source.ids(folder.id, "", "unchecked"), ["p2"]);
   assert.equal(source.ready(folder.id), true);
 });
+
+test("папка компаній після перезапуску (02.11): лічильник — одразу зі збереженого, застаріле віддається одразу, а нове збирається фоном", async () => {
+  let saved = null;
+  const store = { read: async () => saved, write: async (snapshot) => { saved = snapshot; } };
+  let clock = Date.parse("2026-11-02T10:00:00Z");
+  const first = companyFolderSource({ crm: fakeCrm(), store, now: () => clock });
+  assert.deepEqual(await first.ids(`c:${FOLDER}`), ["p2", "p1"]);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(saved[FOLDER].people.length, 2, "зібране — у файлі");
+
+  // A restart: nothing in memory, the CRM is slow — the saved count shows at once.
+  let release;
+  const slow = fakeCrm();
+  const from = slow.from;
+  slow.from = (table) => {
+    const query = from(table);
+    if (table !== "companies") return query;
+    const rows = query.rows;
+    query.rows = () => new Promise((resolve) => { release = () => resolve(rows()); });
+    return query;
+  };
+  clock += 60 * 60_000;
+  const second = companyFolderSource({ crm: slow, store, now: () => clock });
+  const [folder] = await second.folders();
+  assert.equal(folder.withEmail, 2, "без «…» після деплою");
+  assert.equal(second.ready(folder.id), true);
+  assert.deepEqual(await second.ids(folder.id), ["p2", "p1"], "застаріле — одразу, не чекаючи CRM");
+  assert.equal(typeof release, "function", "нове збирається фоном");
+  release();
+});

@@ -44,8 +44,9 @@ const dayWord = (date) => {
 };
 
 async function openWork() {
+  // Back on the page: what was there stays while today is read again (02.11 — pages keep their data).
   if (!work.data) await load();
-  else render();
+  else { render(); void load({ quiet: true }); }
   clearInterval(work.timer);
   // New answers show up while the page is open: today's list is read again every minute.
   work.timer = setInterval(() => {
@@ -67,8 +68,8 @@ async function load({ quiet = false } = {}) {
     // Тиждень — лише звіт; день — звіт і журнал дня. Кожне — окремо: якщо одне не відповіло,
     // друге однаково показується (таск de89bd49).
     const [report, day] = await Promise.allSettled([
-      api(`/api/work/report?${asked}`),
-      work.period === "day" || !work.data ? api(`/api/work/day?${query}`) : Promise.resolve(work.data)
+      api(`/api/work/report?${asked}`, { stale: true }),
+      work.period === "day" || !work.data ? api(`/api/work/day?${query}`, { stale: true }) : Promise.resolve(work.data)
     ]);
     // Обидва не відповіли — помилка на всю сторінку; одне — друге показується (суддя 23.10).
     if (day.status === "rejected" && report.status === "rejected") throw day.reason;

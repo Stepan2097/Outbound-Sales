@@ -18,7 +18,7 @@ const report = { data: null, error: "", open: "", replies: {}, saving: "" };
 
 async function loadCampaignReport() {
   try {
-    report.data = await api("/api/campaign-report");
+    report.data = await api("/api/campaign-report", { stale: true });
     report.error = "";
   } catch (error) {
     report.error = error?.message || "Звіт кампаній не прочитався.";

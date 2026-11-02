@@ -79,7 +79,7 @@ export async function loadMailWarmup() {
   // The mailboxes' connections (what was the «Пошти» page) come with the table.
   readAccountsReturn();
   try {
-    [mailWarmupState.data] = await Promise.all([api("/api/esp/warmup"), loadAccounts()]);
+    [mailWarmupState.data] = await Promise.all([api("/api/esp/warmup", { stale: true }), loadAccounts()]);
     mailWarmupState.error = "";
   } catch (error) {
     mailWarmupState.error = error?.status === 403 ? "Прогрів бачить команда з правом читати відповіді — його дає адміністратор." : error?.message || "Прогрів не прочитався.";

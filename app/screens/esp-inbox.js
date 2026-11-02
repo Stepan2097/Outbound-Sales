@@ -33,7 +33,7 @@ function detail(event) {
 export async function loadEspInbox() {
   if (!document.getElementById("espInboxBody")) return;
   try {
-    const answer = await api("/api/esp/inbox");
+    const answer = await api("/api/esp/inbox", { stale: true });
     const rows = answer.events.length
       ? `<ul class="esp-inbox-list">${answer.events.map((event) => {
           const [label, tone] = KIND[event.type] || [event.type, "tone-muted"];
