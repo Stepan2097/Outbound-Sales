@@ -466,6 +466,7 @@ export function renderLeads() {
   if (!main.hidden) {
     const restore = keepScroll(main, [".leads-table-wrap"]);
     main.innerHTML = pane === "card" ? cardHtml() : listHtml();
+    fitLeadsTable();
     restore();
   }
   if (typing !== null) {
@@ -475,6 +476,20 @@ export function renderLeads() {
   }
   refreshIcons(document.getElementById("leadsPage"));
 }
+
+/**
+ * Таблиця лідів — до низу екрана (власник 02.11: «тут скрол зайвий бо знизу ще
+ * повно місця»): своя прокрутка лишається (сторінка не тягнеться, 19.10), але
+ * висота — усе місце під таблицею, а не 560 px.
+ */
+function fitLeadsTable() {
+  const wrap = document.querySelector("#leadsMain .leads-table-wrap");
+  if (!wrap) return;
+  const top = wrap.getBoundingClientRect().top + window.scrollY;
+  wrap.style.maxHeight = `${Math.max(320, window.innerHeight - top - 24)}px`;
+}
+
+window.addEventListener("resize", fitLeadsTable);
 
 // ── дії ───────────────────────────────────────────────────────────────────
 
