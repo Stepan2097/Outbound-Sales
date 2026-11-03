@@ -86,3 +86,24 @@ test('a portal that does not answer in time is named, with the call', async () =
     await assert.rejects(portal.log('x', 'y'), /портал Outbound не відповів за 30 с \(\/api\/warmup\/agent → /);
   } finally { globalThis.fetch = realFetch; }
 });
+
+// 03.11: one GET of 30 s, the next 38 ms — a read is asked again once; a write never is.
+test('a read that timed out is asked once more; a write is not', async () => {
+  const { Portal } = await import('./lib/portal.mjs');
+  const realFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init = {}) => {
+    calls.push(init.method || 'GET');
+    if (calls.length === 1 || init.method) { const error = new Error('timeout'); error.name = 'TimeoutError'; throw error; }
+    return new Response(JSON.stringify({ success: true, window: { open: true } }), { status: 200 });
+  };
+  try {
+    const portal = new Portal('http://127.0.0.1:1', { token: 't' });
+    portal.accountId = 'a1';
+    assert.equal((await portal.window()).success, true);
+    assert.deepEqual(calls, ['GET', 'GET']);
+    calls.length = 0;
+    await assert.rejects(portal.log('x', 'y'), /не відповів/);
+    assert.deepEqual(calls, ['POST']);
+  } finally { globalThis.fetch = realFetch; }
+});

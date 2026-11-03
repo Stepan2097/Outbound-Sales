@@ -34,6 +34,9 @@ export class Portal {
         // Who did not answer, and to what (28.10: a bare «aborted due to timeout»
         // was read as the browser's runtime when it was the portal).
         if (error?.name !== 'TimeoutError') throw error;
+        // A read asked again once: it changes nothing, and one slow moment of
+        // the portal should not end a visit (03.11: a GET of 30 s, then 38 ms).
+        if (!init.method && attempt === 0) continue;
         const action = (() => { try { return JSON.parse(init.body || '{}').action; } catch { return null; } })();
         throw new Error(`портал Outbound не відповів за ${Math.round(this.timeoutMs / 1000)} с (${path.split('?')[0]}${action ? ` → ${action}` : ''})`);
       }
