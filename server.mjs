@@ -8246,6 +8246,9 @@ function saveAccountDossier(prospect) {
     if (prospect[field]) dossier[field] = prospect[field];
     else if (previous[field]) dossier[field] = previous[field];
   }
+  // The model's brief lives on the dossier only; a signals refresh must not drop it
+  // (03.11: the card fell back to the site's raw English text).
+  if (previous.brief) dossier.brief = previous.brief;
   state.accountDossiers[key] = dossier;
   // A workspace does not need every company it has ever opened, and the file
   // this lives in is read on every boot.

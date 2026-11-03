@@ -261,7 +261,7 @@ export async function collectSignals({ post = null, run = null, company, domain 
       costUsd += personOut.costUsd;
       if (!personOut.results.length) gaps.push(`${person || "Людина"} за 3 місяці нічого не публікувала в LinkedIn.`);
     }
-  } else if (run) gaps.push("Профілю людини в LinkedIn немає — її пости не читали.");
+  } else if (run && person) gaps.push("Профілю людини в LinkedIn немає — її пости не читали.");
   const unique = (rows) => [...new Map(rows.map((row) => [row.url, row])).values()].sort((left, right) => right.published_at.localeCompare(left.published_at));
   return {
     checkedAt: now.toISOString(),
