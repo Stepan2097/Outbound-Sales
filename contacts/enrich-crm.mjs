@@ -68,11 +68,13 @@ export function knownCompanyDomain(contact) {
   return "";
 }
 
-/** A found site with no known domain to check against: its name must be the company's name, and not a short acronym. */
+/** A found site with no known domain to check against: its name (with the zone, if that is the name's last word) must be the company's name, and not a short acronym. */
 export function siteNamedAfter(company, domain) {
   const name = lower(company).normalize("NFKD").replace(/\p{M}+/gu, "").split(/[^\p{L}\p{N}]+/u).filter((word) => word && !LEGAL.has(word)).join("");
   const label = domain.split(".")[0].replace(/[^a-z0-9]/g, "");
-  return name.length >= 5 && label === name;
+  // whitepixel.media is «White Pixel Media»: the zone can be the last word of the name.
+  const whole = domain.split(".").slice(0, 2).join("").replace(/[^a-z0-9]/g, "");
+  return name.length >= 5 && (label === name || whole === name);
 }
 
 /**

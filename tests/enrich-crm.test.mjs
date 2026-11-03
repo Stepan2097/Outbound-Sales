@@ -122,3 +122,9 @@ test("a work address the mail sweep removed as dead still names the company: Ron
   const sarah = { id: "fb98", company: "UMC", email: null, website: null, custom_fields: { emails: [], removed_email: { email: "sarah@umc.co.nz" } } };
   assert.deepEqual(crmPatch(sarah, { candidates: [{ type: "website", value: "https://umc.org", confidence: 86 }, { type: "email", value: "newsdesk@umnews.org" }], checks: [check("newsdesk@umnews.org", "valid")], company: "UMC" }).patch, {});
 });
+
+test("the zone can be the name's last word: whitepixel.media is White Pixel Media, bigmouth.agency is not big mouth advertising", () => {
+  const site = (value) => [{ type: "website", value, confidence: 86 }];
+  assert.equal(crmPatch({ id: "w", website: "" }, { candidates: site("https://whitepixel.media"), company: "White Pixel Media" }).patch.website, "https://whitepixel.media");
+  assert.equal(crmPatch({ id: "b", website: "" }, { candidates: site("https://bigmouth.agency"), company: "big mouth advertising" }).patch.website, undefined);
+});
