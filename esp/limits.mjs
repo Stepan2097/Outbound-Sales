@@ -156,26 +156,23 @@ export function seeded(seed, min, max) {
 }
 
 // Owner 03.11: «ліміт відправки листів я маю вибирати в інтерфейсі в стовпчику
-// "Холодних листів" … за замовчуванням постав всюди 5» — and «перший день 3
-// листа (це завжди для всіх кампаній) з пошти, 2 день +2 листів, 3 день теж +2
-// якщо дозволяє ліміт і тд».
-export const COLD_LIMIT_DEFAULT = 5;
-export const COLD_RAMP = { first: 3, step: 2 };
+// "Холодних листів"» — and then «орієнтуйся на той файл, Старт 5 на день, ціль
+// 35. На домен краще не більше ~105» (the strategy, «Outbound-машина» §2–3):
+// a mailbox starts at 5 a day and climbs +5 a week on a clean week (esp/ramp.mjs)
+// up to 35; the number typed in the table is a ceiling over that.
+export const COLD_LIMIT_DEFAULT = SENDER_DAILY_CAP;
 
-/** A mailbox's cold limit per day, as set on «Прогрів пошт» (5 until somebody sets it). */
+/** A mailbox's cold ceiling per day, as set on «Прогрів пошт» (35, the target, until somebody sets it). */
 export function senderDailyLimit(sender) {
   const set = sender?.coldLimit;
   if (set === undefined || set === null || set === "") return COLD_LIMIT_DEFAULT;
   return Math.min(Math.max(0, Math.floor(Number(set)) || 0), SENDER_DAILY_CAP);
 }
 
-/**
- * The cold letters a mailbox may send today, across all campaigns: 3 on its
- * first day of cold mail, 2 more on each day after that it wrote cold mail,
- * never above its limit. `row` is the mailbox's line of `sendLedger`.
- */
-export function coldAllowance(sender, row) {
-  return Math.min(senderDailyLimit(sender), COLD_RAMP.first + COLD_RAMP.step * (row?.coldDays || 0));
+/** The cold letters a mailbox may send today, across all campaigns: its ramp stage (5 → 35), never above its ceiling. */
+export function coldAllowance(sender) {
+  const stage = Number(sender?.rampStage);
+  return Math.min(senderDailyLimit(sender), RAMP_LIMITS.includes(stage) ? stage : RAMP_LIMITS[0]);
 }
 
 /**
@@ -235,14 +232,14 @@ export function sendDecision({ sender, recipient = {}, ledger, now = new Date(),
   const warmup = purpose === "warmup";
   // Cold mail answers to the mailbox's limit and its daily ramp; the warm-up to
   // its own plan (checked by the warm-up), with the sender's cap as a ceiling.
-  const limit = warmup ? SENDER_DAILY_CAP : coldAllowance(sender, mine);
+  const limit = warmup ? SENDER_DAILY_CAP : coldAllowance(sender);
   const used = warmup ? (mine.warmup ?? mine.today) : (mine.cold ?? mine.today);
   const tomorrow = () => nextCountingDay(now);
 
   if (used >= limit) {
     return refuse("sender_daily_limit", warmup
       ? `${email} сьогодні вже надіслав ${used} листів прогріву — більше не можна.`
-      : `${email} сьогодні вже надіслав ${used} з ${limit} холодних листів (перший день 3, далі щодня +2, до ліміту ${senderDailyLimit(sender)}).`, tomorrow());
+      : `${email} сьогодні вже надіслав ${used} з ${limit} холодних листів (старт 5, щотижня +5 до 35, якщо тиждень чистий; стеля ${senderDailyLimit(sender)}).`, tomorrow());
   }
   const domainToday = warmup ? 0 : ledger.domains.get(domain) || 0;
   if (domainToday >= domainLimit && !PUBLIC_MAIL_DOMAINS.has(domain)) {

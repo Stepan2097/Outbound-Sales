@@ -10,7 +10,7 @@ import {
  * random gaps, and no catching up.
  */
 
-const SENDER = { email: "anna@advantage-mail.com", coldLimit: 10 };
+const SENDER = { email: "anna@advantage-mail.com", rampStage: 10 };
 const POLAND = { country: "Poland" };
 // Tuesday 13.10.2026, 11:00 in Warsaw (09:00 UTC), 12:00 in Kyiv.
 const TUESDAY = new Date("2026-10-13T09:00:00Z");
@@ -28,26 +28,21 @@ const before = (from, days) => Array.from({ length: days }, (_, index) => sent(f
 
 // ── limits ──────────────────────────────────────────────────────────────────
 
-test("a mailbox's cold limit is what was set for it, 5 until then, never above 35 (03.11)", () => {
-  assert.equal(COLD_LIMIT_DEFAULT, 5);
-  assert.equal(senderDailyLimit({}), 5);
-  assert.equal(senderDailyLimit({ rampStage: 35 }), 5, "the ramp stage no longer sets it");
+test("a mailbox's ceiling is what was set for it, 35 (the target) until then, never above 35 (03.11)", () => {
+  assert.equal(COLD_LIMIT_DEFAULT, 35);
+  assert.equal(senderDailyLimit({}), 35);
   assert.equal(senderDailyLimit({ coldLimit: 12 }), 12);
   assert.equal(senderDailyLimit({ coldLimit: 0 }), 0);
   assert.equal(senderDailyLimit({ coldLimit: 80 }), 35);
 });
 
-test("a mailbox's day: 3 on its first day of cold mail, +2 on each day after it wrote, never above its limit (03.11)", () => {
-  assert.deepEqual([0, 1, 2, 3, 4, 5].map((coldDays) => coldAllowance({ coldLimit: 10 }, { coldDays })), [3, 5, 7, 9, 10, 10]);
-  assert.deepEqual([0, 1, 2].map((coldDays) => coldAllowance({}, { coldDays })), [3, 5, 5]);
-  assert.equal(coldAllowance({ coldLimit: 2 }, { coldDays: 0 }), 2);
-  assert.equal(coldAllowance({}, undefined), 3, "a mailbox that never wrote starts at 3");
-  // The ledger counts the days before today it wrote cold mail — not today, not the warm-up's.
-  const rows = [...before(SENDER.email, 2), sent(SENDER.email, TUESDAY.getTime() - 3600_000),
-    [{ seq: 9001, type: "warmup.sending", at: "2026-10-12T09:00:00Z", data: { from: SENDER.email } }]];
-  assert.equal(ledgerOf(rows).senders.get(SENDER.email).coldDays, 2);
-  const third = sendDecision({ sender: SENDER, recipient: POLAND, ledger: ledgerOf(rows), now: TUESDAY });
-  assert.equal(third.limit, 7);
+test("a mailbox's day is its ramp stage — start 5, +5 a clean week, to 35 — under its ceiling (03.11, the strategy)", () => {
+  assert.equal(coldAllowance({}), 5, "a new mailbox starts at 5");
+  assert.deepEqual([5, 10, 15, 35].map((rampStage) => coldAllowance({ rampStage })), [5, 10, 15, 35]);
+  assert.equal(coldAllowance({ rampStage: 20, coldLimit: 12 }), 12, "the ceiling typed in the table wins");
+  assert.equal(coldAllowance({ rampStage: 50 }), 5, "an unknown stage is the first one");
+  const answer = sendDecision({ sender: { email: SENDER.email, rampStage: 15 }, recipient: POLAND, ledger: ledgerOf([]), now: TUESDAY });
+  assert.equal(answer.limit, 15);
 });
 
 test("the limit counts every campaign's letters of the day; a failed attempt does not count, one in flight does", () => {
@@ -182,7 +177,7 @@ test("yesterday's unsent letters do not make today's limit bigger", () => {
 });
 
 test("a mailbox's cold letters are spread over the working day, not sent in its first hour (03.11)", () => {
-  // A new mailbox: 3 today, so about three hours apart (9-hour window ÷ 3, ± a quarter).
+  // A new mailbox: 5 today, so about 1¾ hours apart (9-hour window ÷ 5, ± a quarter).
   const fresh = { email: "anna@advantage-mail.com" };
   const rows = [];
   let now = new Date("2026-10-13T06:00:00Z"); // 08:00 in Warsaw
@@ -191,10 +186,10 @@ test("a mailbox's cold letters are spread over the working day, not sent in its 
     now = new Date(now.getTime() + 5 * 60_000);
   }
   const times = rows.map((row) => new Date(row[0].at).getTime());
-  assert.equal(times.length, 3);
+  assert.ok(times.length >= 4 && times.length <= 5, `sent ${times.length}`);
   for (let index = 1; index < times.length; index += 1) {
     const gap = (times[index] - times[index - 1]) / 60_000;
-    assert.ok(gap >= 135 && gap <= 230, `gap ${gap}`);
+    assert.ok(gap >= 81 && gap <= 140, `gap ${gap}`);
   }
 });
 
@@ -227,7 +222,7 @@ test("/api/esp/limits reads the registry and the journal: each sender's day agai
   });
   assert.equal(answer.status, 200);
   const anna = answer.payload.senders.find((row) => row.email === "anna@advantage-mail.com");
-  assert.deepEqual([anna.today, anna.limit, anna.coldLimit], [3, 3, 10], "its first day: 3 of a limit of 10");
+  assert.deepEqual([anna.today, anna.limit, anna.coldLimit], [3, 5, 10], "a new mailbox: 5 a day under a ceiling of 10");
   assert.deepEqual(answer.payload.domains.map((row) => [row.domain, row.today, row.limit]), [["advantage-mail.com", 3, 105]]);
 });
 

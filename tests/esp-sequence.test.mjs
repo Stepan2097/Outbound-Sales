@@ -284,9 +284,9 @@ test("a big queue still goes out within the mailbox's day and its gaps; the dry 
   assert.equal(w.connector.sent.length, 0, "a dry run sent something");
 
   for (let minute = 0; minute < 8 * 60; minute += 5) await w.tick(at(0, minute - 120));
-  assert.equal(w.connector.sent.length, 3, "a mailbox's first day of cold mail is 3, whatever the queue (03.11)");
+  assert.equal(w.connector.sent.length, 5, "a new mailbox sends 5 a day, whatever the queue");
   const times = (await allEntries()).filter((entry) => entry.type === "message.sent").map((entry) => new Date(entry.at).getTime());
-  assert.equal(times.length, 3);
+  assert.equal(times.length, 5);
   for (let index = 1; index < times.length; index += 1) {
     assert.ok((times[index] - times[index - 1]) / 60_000 >= 12, "two letters closer than 12 minutes");
   }

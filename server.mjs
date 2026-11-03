@@ -46,6 +46,7 @@ import { applyAlerts, reviewAlerts, telegramNotifier } from "./esp/alerts.mjs";
 import { compareSenders, runDailyMonitor } from "./esp/monitor.mjs";
 import { runRetention } from "./esp/retention.mjs";
 import { defaultFilters } from "./esp/filters.mjs";
+import { applyRampReviews } from "./esp/ramp.mjs";
 import { campaignStore } from "./esp/campaigns.mjs";
 import { leadStore } from "./esp/leads.mjs";
 import { crmLeadSource } from "./esp/crm-leads.mjs";
@@ -887,6 +888,14 @@ server.listen(port, listenHost, () => {
     startSequence({ tick: async () => { const summary = await esp.tick(); await esp.checkAlerts(); return summary; } });
     // ESP 7: the inboxes every five minutes — an unsubscribe is honoured the same day, a reply stops the chain before its next letter.
     startSequence({ intervalMs: 5 * 60_000, tick: async () => { const summary = await esp.pollInbox(); await esp.checkAlerts(); return summary; } });
+    // ESP 13 (back 03.11, «орієнтуйся на той файл»): each mailbox's week is looked at hourly — a clean
+    // week is +5 a day, up to 35; a held week stays where it is, silently (no «рампа не росте» alert).
+    setInterval(() => {
+      void Promise.all([espRegistry(), allEntries()])
+        .then(([{ senders }, entries]) => applyRampReviews({ senders, entries, updateSender: espUpdateSender, append: espAppend }))
+        .then((results) => { if (results.length) console.log("[esp] ramp", JSON.stringify(results.map((row) => [row.email, row.action, row.reasons]))); })
+        .catch((error) => console.error("[esp] ramp review failed:", error.message));
+    }, 3600_000).unref?.();
   }
   // Лідгенам у Telegram: ранковий рядок о 09:00 за Києвом у робочі дні — дивимось
   // кожні п'ять хвилин. LEADGEN_TELEGRAM=off вимикає.

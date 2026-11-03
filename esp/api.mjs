@@ -987,7 +987,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
         return {
           email: sender.email, domain: sender.domain, status: sender.effectiveStatus, rampStage: sender.rampStage,
           // Today's count is cold letters against the cold limit; the warm-up's are apart (14.10).
-          limit: coldAllowance(sender, row), coldLimit: senderDailyLimit(sender), today: row.cold ?? row.today, warmupToday: row.warmup || 0, lastAt: row.lastAt ? row.lastAt.toISOString() : null,
+          limit: coldAllowance(sender), coldLimit: senderDailyLimit(sender), today: row.cold ?? row.today, warmupToday: row.warmup || 0, lastAt: row.lastAt ? row.lastAt.toISOString() : null,
           tags: sender.tags || [], role: sender.role || null
         };
       }),

@@ -260,7 +260,7 @@ export function warmupView(entries, { senders = [], domains = [], now = new Date
       : !["aging", "ramp", "active"].includes(domainStatus) ? `домен у стані «${DOMAIN_LABEL[domainStatus] || domainStatus || "немає"}»` : null;
     const limit = senderDailyLimit(sender);
     const coldToday = ledger.senders.get(sender.email)?.cold || 0;
-    const coldAllowed = coldAllowance(sender, ledger.senders.get(sender.email));
+    const coldAllowed = coldAllowance(sender);
     return {
       email: sender.email, domain: sender.domain, domainStatus, person: sender.person || sender.displayName || "", role: sender.role || null, tags: sender.tags || [],
       status: blocked ? "blocked" : mine.running ? "running" : mine.startedAt ? "paused" : "never",
