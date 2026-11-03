@@ -24,6 +24,9 @@ import { createSign, randomUUID } from "node:crypto";
 
 import { MailboxError, SendingLocked, normalizeMailbox } from "./provider.mjs";
 
+/** At most this many new letters are fetched one by one in a pass; more — the last two days instead. */
+export const INBOX_CATCH_UP_MAX = 150;
+
 const TOKEN_URI = "https://oauth2.googleapis.com/token";
 const GMAIL = "https://gmail.googleapis.com/gmail/v1/users/me";
 
@@ -221,6 +224,14 @@ export class GmailApiConnector {
         } while (pageToken);
       } catch (error) {
         if (error.status !== 404) throw error;
+        from = null;
+        ids = [];
+      }
+      // A mailbox not read for hours has thousands of additions behind its cursor;
+      // fetching each one runs into Gmail's per-minute quota and the read never
+      // finishes (03.11). Past the cap the last two days' inbox is read instead —
+      // the same as a forgotten cursor; what is older was already seen or is not a reply worth acting on now.
+      if (ids.length > INBOX_CATCH_UP_MAX) {
         from = null;
         ids = [];
       }

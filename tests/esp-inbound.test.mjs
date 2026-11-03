@@ -234,6 +234,24 @@ test("Gmail: history from the cursor, raw messages, our own sent mail left out; 
   assert.ok(calls.some((url) => url.includes(encodeURIComponent("in:inbox newer_than:2d"))));
 });
 
+test("Gmail: a mailbox far behind is not read letter by letter — past the cap the last two days are read (03.11)", async () => {
+  const raw = (text) => Buffer.from(text).toString("base64url");
+  let fetched = 0;
+  const fetch = async (url) => {
+    const answer = url.includes("oauth2") ? { access_token: "t", expires_in: 3600 }
+      : url.includes("/history?") ? { history: Array.from({ length: 400 }, (_, index) => ({ messagesAdded: [{ message: { id: `old${index}` } }] })), historyId: "900" }
+      : url.endsWith("/profile") ? { historyId: "950" }
+      : url.includes("/messages?q=") ? { messages: [{ id: "recent1" }, { id: "recent2" }] }
+      : (fetched += 1, { id: url.match(/messages\/([a-z0-9]+)/)[1], threadId: "t", labelIds: ["INBOX"], raw: raw("From: b@y.com\r\n\r\nhi") });
+    return { ok: true, status: 200, json: async () => answer };
+  };
+  const { generateKeyPairSync } = await import("node:crypto");
+  const key = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({ type: "pkcs8", format: "pem" });
+  const gmail = new GmailApiConnector({ serviceAccount: { type: "service_account", client_email: "x@y.iam.gserviceaccount.com", private_key: key }, fetch });
+  const read = await gmail.inboxSince("a@x.com", "100");
+  assert.deepEqual([read.messages.map((message) => message.id), read.cursor, fetched], [["recent1", "recent2"], "950", 2]);
+});
+
 test("Gmail: a letter deleted before it was read (404) is skipped — the rest of the inbox is still read (03.11)", async () => {
   const raw = (text) => Buffer.from(text).toString("base64url");
   const fetch = async (url) => {
