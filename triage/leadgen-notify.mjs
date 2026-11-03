@@ -71,6 +71,24 @@ export function replyText({ name, headline = "", account = "", messages = [], ur
   ].filter(Boolean).join("\n");
 }
 
+/**
+ * A good answer to a cold letter (owner 03.11: «коли приходить хороша відповідь
+ * треба писати в телеграм»): who, which campaign and mailbox, the first lines,
+ * where to answer. Only a person's positive answer or a referral — never an
+ * auto-reply, a help desk, a «no» or an unsubscribe.
+ */
+export const GOOD_REPLY_LABELS = { positive: "позитивна", referral: "переадресація" };
+
+export function coldReplyText({ name = "", company = "", email = "", campaign = "", sender = "", label = "", text = "", url = "" }) {
+  return [
+    `✅ Хороша відповідь на холодний лист (${GOOD_REPLY_LABELS[label] || label})`,
+    `${[cleanName(name || email), company].filter(Boolean).join(" · ")}${name && email ? ` (${email})` : ""}`,
+    [campaign ? `Кампанія: ${clip(campaign, 80)}` : "", sender ? `пошта ${sender}` : ""].filter(Boolean).join(" · "),
+    text ? `«${clip(text, 300)}»` : "",
+    url ? `Відповісти: ${url}` : ""
+  ].filter(Boolean).join("\n");
+}
+
 const plural = (count, one, few, many) => {
   const tens = count % 100;
   const units = count % 10;

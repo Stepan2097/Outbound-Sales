@@ -18,7 +18,7 @@ import { LeadError, decorateLeads, leadPage } from "./leads.mjs";
 import { PROVIDER_LABEL } from "./folder-check.mjs";
 import { folderTones, groupKey, pickByProvider, providerBreakdown } from "./provider-quotas.mjs";
 import { PLAN_BOUNDS, cleanPlan, mailboxHistory, removedFromWarmup, warmupLog, warmupMode, warmupPlan, warmupView } from "./mail-warmup.mjs";
-import { UNIBOX_FOLDERS, uniboxList, uniboxProblems, uniboxThread } from "./unibox.mjs";
+import { UNIBOX_FOLDERS, isAutoAck, uniboxList, uniboxProblems, uniboxThread } from "./unibox.mjs";
 import { recordAboutContact, recordFailed, recordSending, recordSent } from "./messages.mjs";
 import { allEntries, append, contactKey } from "./journal.mjs";
 import { applyRampReviews, reviewRamp } from "./ramp.mjs";
@@ -1229,6 +1229,9 @@ function badRequest(sendJson, response, error) {
 function campaignSummary(campaign, enrollments, entries) {
   const people = new Map(enrollments.map((row) => [row.email, row]));
   const counts = { sent: 0, replied: 0, bounced: 0, unsubscribed: 0 };
+  // «Відповіді» are people's answers; what came back by itself is counted apart
+  // and shown on hover (owner 03.11: «чому тут пише 1 відповідь якщо є 2 автовідповіді»).
+  const replyKinds = { positive: 0, neutral: 0, negative: 0, referral: 0, unlabelled: 0, auto: 0 };
   // Per sender too (task 5283abdd: a campaign row opens into its senders). A
   // reply, bounce or unsubscribe belongs to the mailbox it came back to — or,
   // when the event does not say, the one that last wrote to that person here.
@@ -1250,15 +1253,20 @@ function campaignSummary(campaign, enrollments, entries) {
     }
     const row = entry.contact ? people.get(entry.contact) : null;
     if (!row || new Date(entry.at) < new Date(row.enrolledAt)) continue;
+    if (entry.type === "message.autoreplied" || (entry.type === "message.replied" && isAutoAck({ kind: "replied", text: entry.data?.text }, entry.contact))) {
+      replyKinds.auto += 1;
+      continue;
+    }
     const key = entry.type === "message.replied" ? "replied" : entry.type === "message.bounced" ? "bounced" : entry.type === "contact.unsubscribed" ? "unsubscribed" : null;
     if (!key) continue;
+    if (key === "replied") replyKinds[Object.hasOwn(replyKinds, entry.data?.label) && entry.data.label !== "auto" ? entry.data.label : "unlabelled"] += 1;
     counts[key] += 1;
     const owner = sender(entry.data?.sender || writer.get(entry.contact) || row.sender);
     if (owner) owner[key] += 1;
   }
   const byStatus = {};
   for (const row of enrollments) byStatus[row.status] = (byStatus[row.status] || 0) + 1;
-  return { ...campaign, people: enrollments.length, byStatus, ...counts, bySender: [...bySender.entries()].map(([email, stats]) => ({ email, ...stats })) };
+  return { ...campaign, people: enrollments.length, byStatus, ...counts, replyKinds, bySender: [...bySender.entries()].map(([email, stats]) => ({ email, ...stats })) };
 }
 
 /** A report as a file to save. */

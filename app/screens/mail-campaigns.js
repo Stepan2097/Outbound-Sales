@@ -179,6 +179,18 @@ function foldersHtml() {
   </nav>`;
 }
 
+/** What «Відповіді» is made of, on hover (owner 03.11): people's answers by label, and auto-replies apart. */
+function repliesTip(kinds) {
+  if (!kinds) return "";
+  const people = kinds.positive + kinds.neutral + kinds.negative + kinds.referral + kinds.unlabelled;
+  return [
+    `Відповіли люди: ${people}`,
+    `позитивні — ${kinds.positive}`, `переадресація — ${kinds.referral}`, `нейтральні — ${kinds.neutral}`, `негативні — ${kinds.negative}`,
+    kinds.unlabelled ? `без мітки — ${kinds.unlabelled}` : "",
+    `Автовідповіді (не в офісі, служба підтримки) — ${kinds.auto}; у «Відповіді» не рахуються`
+  ].filter(Boolean).join("\n");
+}
+
 function campaignRowHtml(campaign) {
   const done = (campaign.byStatus?.done || 0) + (campaign.byStatus?.stopped || 0);
   const progress = percent(done, campaign.people);
@@ -200,7 +212,7 @@ function campaignRowHtml(campaign) {
     </td>
     <td><span class="pill ${STATE_TONE[campaign.state]}">${STATE_LABEL[campaign.state]}</span></td>
     <td class="mc-num">${stat(campaign.sent)}</td>
-    <td class="mc-num">${stat(campaign.replied, campaign.sent)}</td>
+    <td class="mc-num"><span class="mc-tip-target" data-mc-tip="${escapeAttr(repliesTip(campaign.replyKinds))}">${stat(campaign.replied, campaign.sent)}</span></td>
     <td class="mc-num">${stat(campaign.bounced, campaign.sent)}</td>
     <td class="mc-num">${stat(campaign.unsubscribed, campaign.sent)}</td>
     <td class="mc-row-menu">
@@ -1232,6 +1244,19 @@ async function onSubmit(event) {
 
 const root = document.getElementById("mailCampaignsRoot");
 root?.addEventListener("click", (event) => void onClick(event));
+// Hover tips that show at once and are not clipped by the table's scroll box.
+let tipBox = null;
+root?.addEventListener("mouseover", (event) => {
+  const target = event.target.closest?.("[data-mc-tip]");
+  if (!target || !target.dataset.mcTip) { tipBox?.remove(); tipBox = null; return; }
+  tipBox ||= Object.assign(document.createElement("div"), { className: "mc-tip" });
+  tipBox.textContent = target.dataset.mcTip;
+  document.body.append(tipBox);
+  const box = target.getBoundingClientRect();
+  tipBox.style.top = `${Math.round(box.bottom + 6)}px`;
+  tipBox.style.left = `${Math.round(Math.max(8, Math.min(window.innerWidth - tipBox.offsetWidth - 8, box.right - tipBox.offsetWidth)))}px`;
+});
+root?.addEventListener("mouseleave", () => { tipBox?.remove(); tipBox = null; });
 root?.addEventListener("input", onInput);
 root?.addEventListener("change", (event) => void onChange(event));
 root?.addEventListener("submit", (event) => void onSubmit(event));

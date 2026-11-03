@@ -20,7 +20,7 @@ import { allEntries, append as espAppend, useJournal } from "./esp/journal.mjs";
 import { channelsFor as triageChannels, nextContact as nextTriageContact } from "./triage/queue.mjs";
 import { AUTO_TACTIC, tacticData, tacticForPrompt, tacticLabel, tacticOptions } from "./triage/tactics.mjs";
 import { LINKEDIN_POSTS_ACTOR, SIGNAL_MODEL, SIGNAL_WINDOW_DAYS, collectSignals, postsToSignals, productKind } from "./triage/account-signals.mjs";
-import { digestDue, digestText, freshReplies, leadgenTelegram, replyText, troubleText } from "./triage/leadgen-notify.mjs";
+import { GOOD_REPLY_LABELS, coldReplyText, digestDue, digestText, freshReplies, leadgenTelegram, replyText, troubleText } from "./triage/leadgen-notify.mjs";
 import { readWindow, reportRange, REPORT_PERIODS, teamReport } from "./triage/team-report.mjs";
 import { accountAlerts, requestRecheck } from "./triage/account-alerts.mjs";
 import { addSendsToDays, contactKeyOf, contactWork, dayActivity, dayOf, daysAround, linkedinSends, logWork, useWorkLog, withLinkedinSends, workEntries, workUsers } from "./triage/work-log.mjs";
@@ -49,6 +49,7 @@ import { runRetention } from "./esp/retention.mjs";
 import { defaultFilters } from "./esp/filters.mjs";
 import { applyRampReviews } from "./esp/ramp.mjs";
 import { campaignStore } from "./esp/campaigns.mjs";
+import { isAutoAck } from "./esp/unibox.mjs";
 import { leadStore } from "./esp/leads.mjs";
 import { crmLeadSource } from "./esp/crm-leads.mjs";
 import { folderChecker } from "./esp/folder-check.mjs";
@@ -618,7 +619,16 @@ const esp = (() => {
       read: (mailbox) => state.espInboxCursors?.[mailbox] || null,
       write: async (mailbox, cursor) => { state.espInboxCursors = { ...state.espInboxCursors, [mailbox]: cursor }; await writePersistentWorkspaceState(); }
     },
-    journal: { allEntries, recordAboutContact, append: espAppend },
+    journal: {
+      allEntries,
+      // A good answer goes to the team's Telegram the moment it is read (owner 03.11).
+      recordAboutContact: async (type, contact, data, ...rest) => {
+        const recorded = await recordAboutContact(type, contact, data, ...rest);
+        if (type === "message.replied") void announceColdReply(contact, data).catch((error) => console.warn(`[esp] good reply → Telegram: ${error.message}`));
+        return recorded;
+      },
+      append: espAppend
+    },
     postpone
   });
   // ESP 8: the automatic pauses and the alarms, after every pass of the chain
@@ -3860,6 +3870,23 @@ async function answerFor(item, base, journal) {
 
 const leadgenBot = leadgenTelegram(process.env);
 const appUrl = () => String(process.env.PUBLIC_URL || process.env.COOLIFY_URL || "").split(",")[0].trim().replace(/\/$/, "");
+
+/**
+ * A person answered a cold letter well — positive, or pointing to who to talk
+ * to: one Telegram message to the team's group (the bot and chat the LinkedIn
+ * notices use). Help desks and auto-replies never count (esp/unibox.mjs).
+ */
+async function announceColdReply(contact, data = {}) {
+  if (!GOOD_REPLY_LABELS[data.label] || isAutoAck({ kind: "replied", text: data.text }, contact)) return;
+  if (!leadgenBot.configured || process.env.LEADGEN_TELEGRAM === "off") return;
+  const campaign = esp.campaigns?.find(String(data.campaignId || "")) || null;
+  const lead = (campaign ? esp.campaigns.enrollmentsOf(campaign.id) : []).find((row) => row.email === contact)?.lead || {};
+  await leadgenBot.send(coldReplyText({
+    name: lead.name || [lead.firstName, lead.lastName].filter(Boolean).join(" "), company: lead.company || "", email: contact,
+    campaign: campaign?.name || "", sender: data.sender || "", label: data.label, text: data.text || "",
+    url: appUrl() ? `${appUrl()}/#mail-inbox` : ""
+  }));
+}
 
 /** A lead answered in LinkedIn: one Telegram message per thread, with where to answer. */
 async function announceReply({ account, participant, inbound }) {

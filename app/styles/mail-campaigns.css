@@ -1571,3 +1571,25 @@ div.mc-subject {
   padding-top: 14px;
   border-top: 1px solid var(--line);
 }
+
+/* «Відповіді» — розбивка при наведенні (власник 03.11). */
+.mc-tip-target {
+  display: inline-block;
+  cursor: help;
+}
+
+.mc-tip {
+  position: fixed;
+  z-index: 50;
+  max-width: 300px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-strong);
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-line;
+  box-shadow: var(--shadow);
+  pointer-events: none;
+}
