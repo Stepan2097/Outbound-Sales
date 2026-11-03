@@ -123,13 +123,13 @@ test("outside the window or on a weekend the answer names when it opens; an unkn
 test("12–40 minutes between one sender's letters, the same gap on every tick", () => {
   const last = new Date(TUESDAY.getTime() - 5 * 60_000);
   const ledger = ledgerOf([sent(SENDER.email, last)]);
-  const soon = sendDecision({ sender: SENDER, recipient: POLAND, ledger, now: TUESDAY });
+  const soon = sendDecision({ sender: SENDER, recipient: POLAND, ledger, now: TUESDAY, spreadDay: false });
   assert.equal(soon.reason, "too_soon");
   const gap = (new Date(soon.retryAt) - last) / 60_000;
   assert.ok(gap >= GAP_MINUTES.min && gap <= GAP_MINUTES.max, `gap ${gap}`);
-  const again = sendDecision({ sender: SENDER, recipient: POLAND, ledger, now: new Date(TUESDAY.getTime() + 60_000) });
+  const again = sendDecision({ sender: SENDER, recipient: POLAND, ledger, now: new Date(TUESDAY.getTime() + 60_000), spreadDay: false });
   assert.equal(again.retryAt, soon.retryAt, "the gap was re-rolled between two ticks");
-  assert.equal(sendDecision({ sender: SENDER, recipient: POLAND, ledger, now: new Date(soon.retryAt) }).ok, true);
+  assert.equal(sendDecision({ sender: SENDER, recipient: POLAND, ledger, now: new Date(soon.retryAt), spreadDay: false }).ok, true);
 
   const gaps = new Set(Array.from({ length: 200 }, (_, index) => seeded(`x|${index}`, GAP_MINUTES.min, GAP_MINUTES.max)));
   assert.ok(Math.min(...gaps) >= 12 && Math.max(...gaps) <= 40);
@@ -160,7 +160,7 @@ test("yesterday's unsent letters do not make today's limit bigger", () => {
   let now = new Date("2026-10-13T07:00:00Z");
   let sentTuesday = 0;
   for (let tick = 0; tick < 200 && now < new Date("2026-10-13T15:00:00Z"); tick += 1) {
-    const decision = sendDecision({ sender: SENDER, recipient: POLAND, ledger: ledgerOf(rows, now), now });
+    const decision = sendDecision({ sender: SENDER, recipient: POLAND, ledger: ledgerOf(rows, now), now, spreadDay: false });
     if (decision.ok) {
       rows.push(sent(SENDER.email, now));
       sentTuesday += 1;
@@ -171,11 +171,28 @@ test("yesterday's unsent letters do not make today's limit bigger", () => {
   }
   // …and stops at ten, not at eighteen.
   assert.equal(sentTuesday, 10);
-  const after = sendDecision({ sender: SENDER, recipient: POLAND, ledger: ledgerOf(rows, now), now });
+  const after = sendDecision({ sender: SENDER, recipient: POLAND, ledger: ledgerOf(rows, now), now, spreadDay: false });
   assert.equal(after.reason, "sender_daily_limit");
   const times = rows.slice(5).map((row) => new Date(row[0].at));
   for (let index = 1; index < times.length; index += 1) {
     assert.ok((times[index] - times[index - 1]) / 60_000 >= GAP_MINUTES.min, "two letters closer than 12 minutes");
+  }
+});
+
+test("a mailbox's cold letters are spread over the working day, not sent in its first hour (03.11)", () => {
+  // A new mailbox: 3 today, so about three hours apart (9-hour window ÷ 3, ± a quarter).
+  const fresh = { email: "anna@advantage-mail.com" };
+  const rows = [];
+  let now = new Date("2026-10-13T06:00:00Z"); // 08:00 in Warsaw
+  while (now < new Date("2026-10-13T15:00:00Z")) {
+    if (sendDecision({ sender: fresh, recipient: POLAND, ledger: ledgerOf(rows, now), now }).ok) rows.push(sent(fresh.email, now));
+    now = new Date(now.getTime() + 5 * 60_000);
+  }
+  const times = rows.map((row) => new Date(row[0].at).getTime());
+  assert.equal(times.length, 3);
+  for (let index = 1; index < times.length; index += 1) {
+    const gap = (times[index] - times[index - 1]) / 60_000;
+    assert.ok(gap >= 135 && gap <= 230, `gap ${gap}`);
   }
 });
 

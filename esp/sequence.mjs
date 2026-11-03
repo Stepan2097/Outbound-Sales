@@ -227,7 +227,7 @@ export async function runTick({ now = new Date(), dryRun = false, ...deps }) {
       if (!allowed.ok) { skip("sender_unavailable"); continue; }
       if (await deps.gate.store.pausedFor(enrollment.sender)) { skip("sender_paused"); continue; }
 
-      const decision = sendDecision({ sender, recipient: enrollment.lead, ledger, now });
+      const decision = sendDecision({ sender, recipient: enrollment.lead, ledger, now, spreadDay: deps.spreadDay ?? true });
       if (!decision.ok) {
         if (decision.reason === "unknown_timezone") {
           if (!dryRun) {

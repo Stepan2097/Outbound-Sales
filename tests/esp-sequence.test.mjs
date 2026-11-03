@@ -64,7 +64,7 @@ async function world(t, { rampStage = 35, connector = new StubGmailConnector() }
   };
   const tick = (now, extra = {}) => {
     t.mock.timers.setTime(now.getTime());
-    return runTick({ now, ...deps, ...extra });
+    return runTick({ spreadDay: false, now, ...deps, ...extra });
   };
   return { campaigns, templates, connector, gate, halt, tick, steps: [first, nudge, last].map((template, index) => ({ templateId: template.id, delayDays: [0, 3, 4][index] })) };
 }

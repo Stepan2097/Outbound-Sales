@@ -214,7 +214,7 @@ export function sendLedger(entries, { now = new Date(), zone = COUNTING_ZONE } =
  * answer). Limits are checked before the clock: a sender that is done for the
  * day is told so, not told to wait twelve minutes.
  */
-export function sendDecision({ sender, recipient = {}, ledger, now = new Date(), domainLimit = DOMAIN_DAILY_LIMIT, window = WINDOW, purpose = "cold" }) {
+export function sendDecision({ sender, recipient = {}, ledger, now = new Date(), domainLimit = DOMAIN_DAILY_LIMIT, window = WINDOW, purpose = "cold", spreadDay = true }) {
   const email = String(sender?.email || "").toLowerCase();
   const domain = email.split("@")[1] || "";
   const mine = ledger.senders.get(email) || { today: 0, cold: 0, warmup: 0, lastAt: null };
@@ -257,7 +257,11 @@ export function sendDecision({ sender, recipient = {}, ledger, now = new Date(),
     const from = new Date(opened.getTime() + offset * 60_000);
     if (now < from) return refuse("too_soon", "Перший лист дня — не одразу на відкритті вікна.", from);
   } else {
-    const gap = seeded(`${email}|${mine.lastAt.toISOString()}`, GAP_MINUTES.min, GAP_MINUTES.max);
+    // Cold mail is spread over the working day (owner 03.11: «кількість розділяється
+    // на цілий день»): a mailbox's letters of the day sit about window ÷ its day's
+    // letters apart, give or take a quarter — three a day, about three hours apart.
+    const spread = warmup || !spreadDay ? 0 : Math.round(((window.endHour - window.startHour) * 60 / Math.max(1, limit)) * seeded(`${email}|${mine.lastAt.toISOString()}|spread`, 75, 125) / 100);
+    const gap = Math.max(seeded(`${email}|${mine.lastAt.toISOString()}`, GAP_MINUTES.min, GAP_MINUTES.max), spread);
     const from = new Date(mine.lastAt.getTime() + gap * 60_000);
     if (now < from) return refuse("too_soon", `Між листами одного сендера — ${gap} хв.`, from);
   }

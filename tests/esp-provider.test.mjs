@@ -84,7 +84,7 @@ test("the chain and the inbox run unchanged on a provider that is not Google", a
   await cstore.setState(campaign.id, "running");
   const tick = (at) => {
     t.mock.timers.setTime(at.getTime());
-    return runTick({ now: at, campaigns: cstore, templates: tstore, gate, halted: () => false, journal: { allEntries, recordSending, recordSent, recordFailed, recordAboutContact }, registry: { senders: async () => (await registry()).senders, canSend }, signature: () => ({ name: "Anna" }), unsubscribe: { secret: "test-unsubscribe-secret-0123456789" } });
+    return runTick({ spreadDay: false, now: at, campaigns: cstore, templates: tstore, gate, halted: () => false, journal: { allEntries, recordSending, recordSent, recordFailed, recordAboutContact }, registry: { senders: async () => (await registry()).senders, canSend }, signature: () => ({ name: "Anna" }), unsubscribe: { secret: "test-unsubscribe-secret-0123456789" } });
   };
   assert.equal((await tick(new Date("2026-10-13T08:30:00Z"))).sent, 1);
   assert.equal((await tick(new Date("2026-10-16T08:30:00Z"))).sent, 1);

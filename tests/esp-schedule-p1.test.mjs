@@ -47,7 +47,7 @@ async function world(t) {
   const gate = new SenderGate({ connector, store: stateSenderStore({ read: () => pauses, write: async (value) => { pauses = value; } }) });
   const tick = (now) => {
     t.mock.timers.setTime(now.getTime());
-    return runTick({
+    return runTick({ spreadDay: false,
       now, campaigns: cstore, templates: store, gate,
       journal: { allEntries, recordSending, recordSent, recordFailed, recordAboutContact },
       registry: { senders: async () => (await registry()).senders, canSend },
