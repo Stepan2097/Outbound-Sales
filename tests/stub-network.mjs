@@ -17,7 +17,8 @@
  *   STUB_ANTHROPIC_JSON   — те саме для api.anthropic.com/v1/messages
  *                           (без нього — STUB_OPENROUTER_JSON);
  *   STUB_ANTHROPIC_STATUS — код відповіді Anthropic (напр. 401), щоб
- *                           перевірити запасний шлях.
+ *                           перевірити запасний шлях;
+ *   (вебпошук сигналів пише ще рядок «anthropic web_search brief=…» — що просили шукати).
  *
  * Будь-яка адреса, якої тут немає, кидає помилку: тест, що непомітно пішов у
  * справжній інтернет, — це тест, який одного дня спише гроші.
@@ -76,6 +77,10 @@ globalThis.fetch = async (input, init = {}) => {
     try { body = JSON.parse(init.body || "{}"); } catch { /* лишиться порожнім */ }
     const roles = (body.messages || []).map((message) => message.role).join(",");
     note(`anthropic messages model=${body.model} version=${headers.get("anthropic-version")} key=${headers.get("x-api-key") ? "present" : "absent"} system=${body.system ? "yes" : "no"} roles=${roles} temperature=${"temperature" in body ? "sent" : "none"}`);
+    // The signal search (таск 92abd9df): what it was asked to look for, on one line.
+    if ((body.tools || []).some((tool) => tool?.name === "web_search")) {
+      note(`anthropic web_search brief=${String(body.messages?.[0]?.content || "").replace(/\s+/g, " ").slice(0, 600)}`);
+    }
     if (ANTHROPIC_STATUS !== 200) {
       return json({ type: "error", error: { type: "authentication_error", message: "invalid x-api-key" } }, ANTHROPIC_STATUS);
     }

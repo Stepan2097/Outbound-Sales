@@ -239,7 +239,7 @@ async function loadCompany(id, { force = false } = {}) {
   triage.companyError = "";
   renderTriage();
   try {
-    const answer = await api("/api/triage/company", { method: "POST", body: JSON.stringify({ contactId: id, force }) });
+    const answer = await api("/api/triage/company", { method: "POST", body: JSON.stringify({ contactId: id, force, productId: triage.productId || "" }) });
     if (triage.item?.contact?.id === id) triage.item.company = answer.company;
   } catch (error) {
     if (triage.item?.contact?.id === id) triage.companyError = error.message || "Не вдалося зібрати відомості про компанію.";
@@ -720,7 +720,7 @@ async function enrich() {
     if (node) node.textContent = String(Math.round((Date.now() - triage.enrichingSince) / 1000));
   }, 1000);
   try {
-    const answer = await api("/api/triage/enrich", { method: "POST", body: JSON.stringify({ contactId: contact.id }) });
+    const answer = await api("/api/triage/enrich", { method: "POST", body: JSON.stringify({ contactId: contact.id, productId: triage.productId || "" }) });
     if (triage.item?.contact?.id !== contact.id) return;
     triage.enrich = answer;
     if (answer.contact) triage.item.contact = { ...triage.item.contact, ...answer.contact };

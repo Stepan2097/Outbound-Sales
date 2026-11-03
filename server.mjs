@@ -1527,7 +1527,7 @@ async function handleApi(request, response, url) {
         const body = await readJson(request);
         const contact = await readContact(cleanText(body.contactId || ""), { cacheScope, fresh: true });
         if (!contact) { sendJson(response, 404, { error: "Контакт не знайдено в базі." }); return; }
-        const found = await enrichTriageContact(contact);
+        const found = await enrichTriageContact(contact, { productId: cleanText(body.productId || "") });
         await logWork(profile, { action: "enriched", contactId: contact.id, name: contact.name, detail: found.added.map((row) => `${row.field}: ${row.value}`).join("; ") || "нічого нового" });
         await writePersistentWorkspaceState();
         rememberPrepEnrich(contact.id, found);
@@ -1542,7 +1542,7 @@ async function handleApi(request, response, url) {
         const body = await readJson(request);
         const contact = await readContact(cleanText(body.contactId || ""), { cacheScope });
         if (!contact) { sendJson(response, 404, { error: "Контакт не знайдено в базі." }); return; }
-        const { note, company } = await researchTriageCompany(contact, { force: Boolean(body.force) });
+        const { note, company } = await researchTriageCompany(contact, { force: Boolean(body.force), productId: cleanText(body.productId || "") });
         await writePersistentWorkspaceState();
         sendJson(response, 200, { success: true, note, company });
         return;
@@ -2759,7 +2759,7 @@ async function handleApi(request, response, url) {
       return;
     }
 
-    prospect.contactDiscovery = await enrichProspectContacts(prospect);
+    prospect.contactDiscovery = await enrichProspectContacts(prospect, { product: body.productId ? signalProductText(cleanText(body.productId)) : "" });
     recordLeadResearch(prospect, {
       stage: "contact_enriched",
       summary: `${prospect.contactDiscovery.candidates.length} contact candidates reviewed for ${prospect.name}.`,
@@ -3152,11 +3152,11 @@ async function emailedAddresses() {
  * mail server and dropped if it fails (owner 12.10); what passed, and a found
  * site, phone or profile the source is sure of, goes into the CRM.
  */
-async function enrichTriageContact(contact) {
+async function enrichTriageContact(contact, { productId = "" } = {}) {
   const taken = takeCrmContactIntoQueue(contact);
   if (!taken.prospect) throw Object.assign(new Error(taken.warning), { statusCode: 400 });
   const prospect = taken.prospect;
-  prospect.contactDiscovery = await enrichProspectContacts(prospect, { phase: "contacts" });
+  prospect.contactDiscovery = await enrichProspectContacts(prospect, { phase: "contacts", product: productId ? signalProductText(productId) : "" });
   prospect.updatedAt = new Date().toISOString();
   const discovery = prospect.contactDiscovery || {};
   const candidates = (discovery.candidates || []).slice(0, 30).map((item) => ({
@@ -3254,11 +3254,11 @@ function enrichCostView(discovery) {
  * the rest of the app keeps per company), a short brief by the connected
  * model, and the company written into the CRM.
  */
-async function researchTriageCompany(contact, { force = false } = {}) {
+async function researchTriageCompany(contact, { force = false, productId = "" } = {}) {
   const taken = takeCrmContactIntoQueue(contact);
   if (!taken.prospect) throw Object.assign(new Error(taken.warning), { statusCode: 400 });
   const prospect = taken.prospect;
-  const note = await researchCompanyForProspect(prospect, { force });
+  const note = await researchCompanyForProspect(prospect, { force, product: productId ? signalProductText(productId) : "" });
   const dossier = state.accountDossiers[accountKeyForProspect(prospect)];
   if (dossier && (force || !dossier.brief)) {
     try { dossier.brief = await writeCompanyBrief(prospect) || dossier.brief || null; }
@@ -3334,6 +3334,27 @@ function signalSources() {
   };
 }
 
+/**
+ * What the signal search is for (суддя 03.11, кр. 2): the campaign's product
+ * card — its name and pitch — or, with no product chosen, the team's whole
+ * «Смисли» catalogue. Never empty, so a lead with no gambling word in its name
+ * or industry is still searched as the operator it is when we sell to operators.
+ */
+function signalProductText(productId = "") {
+  const card = productId ? pitchCardForPrompt(productId) : null;
+  if (card) return `${card.name}. ${card.pitch || ""}`;
+  return pitchCatalogForPrompt().map((row) => `${row.name}. ${row.pitch || ""} ${row.whom || ""}`).join(" ");
+}
+
+function signalKindFor(prospect, product = "") {
+  return productKind({ product: product || signalProductText(), company: prospect.company || "", industry: (prospect.companyEnrichment?.industries || [])[0] || prospect.industry || "" });
+}
+
+/** Signals searched for another kind of product — or before products counted — are searched again. */
+function signalsFitProduct(signals, prospect, product = "") {
+  return Boolean(signals?.kind) && signals.kind === signalKindFor(prospect, product);
+}
+
 function companyLinkedinUrl(prospect) {
   const url = [prospect.companyLinkedin, prospect.companyEnrichment?.companyLinkedinUrl, prospect.publicCompanyResearch?.linkedinCompanyUrl]
     .map((value) => cleanText(value || "")).find((value) => /linkedin\.com\/company\//i.test(value));
@@ -3380,10 +3401,12 @@ async function buildBeforeCall(contact, { productId = "", force = false } = {}) 
   if (!force && cached && (cached.productId || "") === productId && freshWithin(cached.checkedAt, BEFORE_CALL_FRESH_DAYS)) return cached;
   const card = productId ? pitchCardForPrompt(productId) : null;
   const product = card?.name || "";
+  const searchFor = signalProductText(productId);
   if (contact.company) {
-    await researchCompanyForProspect(prospect);
+    // The dossier re-searches its signals itself when they were for another kind of product.
+    await researchCompanyForProspect(prospect, { product: searchFor });
     if (anthropicEnrichKey() && (force || prospect.publicAccountSignals?.source !== "claude_web_search")) {
-      prospect.publicAccountSignals = await researchPublicAccountSignals(prospect, { product });
+      prospect.publicAccountSignals = await researchPublicAccountSignals(prospect, { product: searchFor });
       saveAccountDossier(prospect);
     }
   }
@@ -3586,7 +3609,7 @@ function prepareTriageContact(contactId, options = {}, { redraft = false, cacheS
           await step("enrich", async () => {
             const why = enrichNeeded(contact);
             if (why) return { skipped: true, note: why };
-            const found = await enrichTriageContact(contact);
+            const found = await enrichTriageContact(contact, { productId: wanted.productId });
             contact = found.contact;
             job.contact = contact;
             job.enrich = found;
@@ -3599,7 +3622,7 @@ function prepareTriageContact(contactId, options = {}, { redraft = false, cacheS
           let note;
           if (fresh?.brief) { job.company = companyView(fresh); note = "уже в досьє"; }
           else {
-            const { company } = await researchTriageCompany(contact);
+            const { company } = await researchTriageCompany(contact, { productId: wanted.productId });
             job.company = company;
             note = company?.summary ? "досьє зібрано" : "у відкритих джерелах майже нічого";
           }
@@ -8273,16 +8296,16 @@ function saveAccountDossier(prospect) {
  * between "searched" and "read from memory" is the thing the seller is owed an
  * explanation of — a stage that completes in 200ms with no note looks broken.
  */
-async function researchCompanyForProspect(prospect, { force = false } = {}) {
+async function researchCompanyForProspect(prospect, { force = false, product = "" } = {}) {
   if (!force) {
     const dossier = accountDossierFor(prospect);
     if (dossier) {
       applyAccountDossier(prospect, dossier);
       // The company keeps, its news does not. When the saved signals are older
-      // than a week only that one search is repeated — the rest of the dossier
-      // stands.
-      if (!accountSignalsAreFresh(dossier)) {
-        prospect.publicAccountSignals = await researchPublicAccountSignals(prospect);
+      // than a week — or were searched for another kind of product — only that
+      // one search is repeated; the rest of the dossier stands.
+      if (!accountSignalsAreFresh(dossier) || !signalsFitProduct(dossier.publicAccountSignals, prospect, product)) {
+        prospect.publicAccountSignals = await researchPublicAccountSignals(prospect, { product });
         saveAccountDossier(prospect);
         prospect.companyResearchSource.reused = true;
         return `${dossier.company || "Компанію"} взято з бази, оновлено лише свіжі сигнали.`;
@@ -8290,7 +8313,7 @@ async function researchCompanyForProspect(prospect, { force = false } = {}) {
       return `${dossier.company || "Компанію"} уже досліджували ${new Date(dossier.researchedAt).toLocaleDateString("uk-UA")} — узято з бази, у вебі не шукали.`;
     }
   }
-  await enrichPublicWebSignals(prospect);
+  await enrichPublicWebSignals(prospect, { product });
   await researchAppPortfolio(prospect, { force: true });
   saveAccountDossier(prospect);
   return `${prospect.appPortfolio?.apps?.length || 0} застосунків або ігор знайдено; компанію записано в базу.`;
@@ -8663,7 +8686,7 @@ function normalizeClientProfile(data = {}, fallback, modelUsed) {
 function researchSteps(job, prospect, product) {
   return [
     ["company", "Шукаємо сайт, продукти, релізи, гео і модель монетизації.", async () => {
-      const companyDetail = await researchCompanyForProspect(prospect, { force: job.force });
+      const companyDetail = await researchCompanyForProspect(prospect, { force: job.force, product: [product?.name, product?.positioning, product?.category].filter(Boolean).join(". ") });
       prospect.companyProfile = buildCompanyProfile(prospect, product);
       return companyDetail;
     }],
@@ -9235,7 +9258,7 @@ function isIsoWithinMinutes(value, minutes) {
 
 async function enrichProspectContacts(prospect, options = {}) {
   const phase = ["people", "contacts"].includes(options.phase) ? options.phase : "all";
-  const publicCandidates = await enrichPublicWebSignals(prospect);
+  const publicCandidates = await enrichPublicWebSignals(prospect, { product: options.product || "" });
   const discovery = buildContactDiscovery(prospect);
   discovery.candidates = mergeContactCandidates([
     ...(prospect.contactDiscovery?.candidates || []),
@@ -9439,9 +9462,9 @@ function phoneMessengerCheckInput(prospect, phoneDigits) {
   };
 }
 
-async function enrichPublicWebSignals(prospect) {
+async function enrichPublicWebSignals(prospect, { product = "" } = {}) {
   if (!prospect.company) return [];
-  if (isRecentPublicWebResearch(prospect) && isRecentAccountSignalResearch(prospect)) {
+  if (isRecentPublicWebResearch(prospect) && isRecentAccountSignalResearch(prospect) && signalsFitProduct(prospect.publicAccountSignals, prospect, product)) {
     ensureCompanyLinkedInResearch(prospect);
     return publicCandidatesFromResearch(prospect.publicCompanyResearch, prospect.publicSocialResearch);
   }
@@ -9507,7 +9530,7 @@ async function enrichPublicWebSignals(prospect) {
       evidence: [facebook.title, facebook.snippet, "requires_manual_identity_review"].filter(Boolean).slice(0, 3)
     });
   }
-  prospect.publicAccountSignals = await researchPublicAccountSignals(prospect);
+  prospect.publicAccountSignals = await researchPublicAccountSignals(prospect, { product });
   return candidates;
 }
 
@@ -9526,6 +9549,7 @@ function isRecentAccountSignalResearch(prospect, days = 7) {
 }
 
 async function researchPublicAccountSignals(prospect, { product = "" } = {}) {
+  product = product || signalProductText();
   const company = cleanText(prospect.company || "");
   const person = cleanText(prospect.name || "");
   const domain = normalizeDomain(prospect.website || prospect.publicCompanyResearch?.domain || "");
@@ -9586,6 +9610,7 @@ async function researchPublicAccountSignals(prospect, { product = "" } = {}) {
   return {
     checkedAt: new Date().toISOString(),
     windowDays: 90,
+    kind: igaming ? "igaming" : signalKindFor(prospect, product),
     queries,
     results,
     gaps: results.length ? [] : ["No current public account signal was returned by the configured web-search path."]
