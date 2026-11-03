@@ -67,15 +67,15 @@ test("the composed letter carries the picked sentences and says which ones in va
   assert.equal(plain.variantIds.group, "plain");
 });
 
-test("a lead in the EU or the UK gets the short notice under the signature, linking the sender's own domain, with its version", () => {
+test("no data notice in letters — not for the EU or the UK either (owner 03.11: «не треба це писати в листах»); the notice itself still answers who would need one", () => {
   for (const country of ["Poland", "Germany", "United Kingdom", "UK", "Іспанія", "es"]) assert.equal(needsNotice(country), true, country);
   for (const country of ["Ukraine", "USA", "Switzerland", "Norway", ""]) assert.equal(needsNotice(country), false, country);
   const template = prepareTemplate({ subject: "Hi", body: "Hi {{first_name}}." });
   const letter = composeLetter({ template, sender: SENDER, lead: { email: "o@northwind.de", name: "Olena", country: "Germany" }, unsubscribe: UNSUB, campaignId: "c-1" });
-  assert.equal(letter.variantIds.notice, NOTICE_VERSION);
+  assert.equal(letter.variantIds.notice, null);
   const [, tail] = letter.text.split("Anna Koval");
-  assert.match(tail, /How we handle your data: https:\/\/advantage-mail\.com\/privacy/);
-  assert.match(tail, /public professional sources/);
+  assert.doesNotMatch(tail, /How we handle your data|public professional sources/);
+  assert.ok(NOTICE_VERSION);
   const notice = noticeFor({ sender: "anna@advantage-mail.com", country: "UK", base: "https://go.advantage-mail.com" });
   assert.match(notice.text, /https:\/\/go\.advantage-mail\.com\/privacy/);
   assert.equal(noticeFor({ sender: "anna@advantage-mail.com", country: "USA" }), null);

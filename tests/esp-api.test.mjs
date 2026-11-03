@@ -106,9 +106,9 @@ test("the preview is the real letter for one lead — plain text with the signat
   assert.equal(preview.payload.ok, true);
   assert.equal(preview.payload.subject, "Hi Olena");
   assert.ok(preview.payload.text.startsWith("Hi Olena, a question about your team.\n\nAnna Koval\nPartnerships\nADvantage\nadvantage.agency"));
-  // Poland is in the EU: the ESP 12 notice follows the signature, and the preview says which version.
-  assert.match(preview.payload.text, /How we handle your data: https:\/\/advantage-mail\.com\/privacy/);
-  assert.equal(preview.payload.variantIds.notice, "eu-uk-2026-10-v1");
+  // Poland is in the EU, but no data notice follows the signature (owner 03.11).
+  assert.doesNotMatch(preview.payload.text, /How we handle your data/);
+  assert.equal(preview.payload.variantIds.notice, null);
   assert.equal(preview.payload.contentType, "text/plain; charset=UTF-8");
   assert.equal(esp.connector.sent.length, 0, "a preview sent something");
 

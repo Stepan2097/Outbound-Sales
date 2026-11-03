@@ -7,7 +7,6 @@ import { LetterError, buildLetter, messageIdFor, signatureText } from "./letter.
 import { TemplateError, renderTemplate } from "./template.mjs";
 import { firstSubject, followUpOf } from "./thread.mjs";
 import { unsubscribeHeaders } from "./unsubscribe.mjs";
-import { noticeFor } from "./notice.mjs";
 import { spin, spinGroup } from "./spintax.mjs";
 
 /**
@@ -38,10 +37,10 @@ export function composeLetter({ template, sender, lead, previous = null, unsubsc
     // A follow-up's subject is the thread's, whatever its template says; a
     // first letter's is its own and may not pretend to be a reply.
     const subject = thread ? thread.subject : firstSubject(rendered.subject);
-    // ESP 12: under the signature, for the EU and the UK, where the address
-    // came from and the data policy on the sender's own domain.
-    const notice = noticeFor({ sender: sender.email, country: lead.country, base: unsubscribe?.base });
-    const signature = [signatureText(sender, { country: lead.country }), notice?.text].filter(Boolean).join("\n\n");
+    // ESP 12 put a data notice under the signature for the EU and the UK; owner
+    // 03.11: «не треба це писати в листах» — letters end with the signature.
+    const notice = null;
+    const signature = signatureText(sender, { country: lead.country });
     const messageId = messageIdFor(sender.email);
     const raw = buildLetter({
       from: { email: sender.email, name: sender.name },
