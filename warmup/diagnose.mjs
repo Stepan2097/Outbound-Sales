@@ -62,7 +62,9 @@ async function askModel({ shot = null, prompt }, {
     const response = await fetchImpl("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-      body: JSON.stringify({ model, max_tokens: 2000, output_config: { effort: "low" }, messages: [{ role: "user", content }] }),
+      // Room for the thinking that comes before the answer: with 2000 the
+      // failure explanation (longer input) came back with no text at all (03.11).
+      body: JSON.stringify({ model, max_tokens: 8000, output_config: { effort: "low" }, messages: [{ role: "user", content }] }),
       signal: AbortSignal.timeout(timeoutMs)
     });
     if (!response.ok) {
@@ -70,7 +72,9 @@ async function askModel({ shot = null, prompt }, {
       return null;
     }
     const payload = await response.json();
-    return (payload.content || []).filter((block) => block.type === "text").map((block) => block.text).join("");
+    const text = (payload.content || []).filter((block) => block.type === "text").map((block) => block.text).join("");
+    if (!text) onFail(`empty answer (stop_reason ${payload.stop_reason}, ${payload.usage?.output_tokens ?? "?"} tokens out)`);
+    return text;
   } catch (error) {
     onFail(error?.message || String(error));
     return null;
@@ -91,11 +95,11 @@ export async function diagnoseScreen({ shot, text = "", url = "" }, options = {}
   return seen;
 }
 
-const EXPLAIN_PROMPT = `Ти пояснюєш власнику, чому сесія серверного агента LinkedIn для акаунта не вдалася. Нижче — помилка, хід сесії (що агент встиг зробити), що система вже зробила сама, і знімок екрана в момент збою (якщо є).
+const EXPLAIN_PROMPT = `Це звіт системи моніторингу внутрішнього інструменту команди продажів. Робоча сесія браузера для одного з акаунтів команди завершилась помилкою, і керівнику треба коротко пояснити, що сталося. Нижче — текст помилки, журнал сесії, що система вже зробила сама, і знімок екрана в момент помилки (якщо є).
 Поверни лише JSON без пояснень:
 {"cause": "...", "next": "..."}
-cause — одне-два речення українською простими словами: що саме пішло не так і чому, з того, що видно на знімку й у даних; нічого не вигадуй; без технічних слів, назв файлів і адрес.
-next — одне речення: що система зробить далі сама, і лише якщо без людини ніяк — що саме має зробити людина (конкретно: який профіль, що натиснути). Не проси людину «перевірити» чи «глянути».`;
+cause — одне-два речення українською простими словами: що саме пішло не так, з того, що видно на знімку й у даних; нічого не вигадуй; без технічних слів, назв файлів і адрес.
+next — одне речення: що система зробить далі сама; і лише якщо без людини ніяк — яку саму дію має зробити людина (наприклад, увійти в акаунт у його профілі браузера). Не проси «перевірити» чи «глянути».`;
 
 /** { cause, next } from a JSON answer, or null. */
 export function parseExplanation(text) {
@@ -118,8 +122,13 @@ export function parseExplanation(text) {
  */
 export async function explainFailure({ shot = null, label = "", error = "", record = "", done = "" }, options = {}) {
   const onFail = options.onFail ?? ((why) => console.warn(`[diagnose] ${why}`));
-  const prompt = `${EXPLAIN_PROMPT}\n\nАкаунт: ${String(label).slice(0, 100)}\nПомилка: ${String(error).slice(0, 600)}\nЩо система вже зробила: ${String(done || "нічого").slice(0, 300)}\nХід сесії:\n${String(record).slice(0, 4000)}`;
-  const answer = await askModel({ shot, prompt }, { ...options, onFail });
+  // The screenshot is read on its own first and handed over as words: the
+  // picture of a sign-in page in the same question as «why did the session
+  // fail» was refused outright (03.11, stop_reason refusal), the reading of the
+  // screen alone never was.
+  const seen = shot ? await diagnoseScreen({ shot, text: error }, { ...options, onFail }) : null;
+  const prompt = `${EXPLAIN_PROMPT}\n\nАкаунт: ${String(label).slice(0, 100)}\nПомилка: ${String(error).slice(0, 600)}\nЩо система вже зробила: ${String(done || "нічого").slice(0, 300)}\nНа знімку екрана: ${seen?.sentence || "знімка немає"}\nЖурнал сесії:\n${String(record).slice(0, 4000)}`;
+  const answer = await askModel({ prompt }, { ...options, onFail });
   if (answer == null) return null;
   const said = parseExplanation(answer);
   if (!said) onFail(`no JSON in the answer: ${answer.slice(0, 200)}`);

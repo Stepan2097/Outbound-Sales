@@ -50,14 +50,21 @@ test("пояснення збою: модель отримує помилку, �
     sent = JSON.parse(init.body);
     return { ok: true, json: async () => ({ content: [{ type: "text", text: '{"cause":"Сервер Outbound завис на пів хвилини, поки агент надсилав запити.","next":"Агент спробує знову сам за кілька хвилин."}' }] }) };
   };
-  const said = await explainFailure({ shot: "/9j/AAAA", label: "Profile 42", error: "портал Outbound не відповів за 30 с", record: "зроблено: invite — Antoine", done: "закрив браузер" }, { key: "k", fetchImpl });
+  const said = await explainFailure({ label: "Profile 42", error: "портал Outbound не відповів за 30 с", record: "зроблено: invite — Antoine", done: "закрив браузер" }, { key: "k", fetchImpl });
   assert.deepEqual(said, { cause: "Сервер Outbound завис на пів хвилини, поки агент надсилав запити.", next: "Агент спробує знову сам за кілька хвилин." });
-  const [image, text] = sent.messages[0].content;
-  assert.equal(image.type, "image");
+  const [text] = sent.messages[0].content;
   assert.match(text.text, /Помилка: портал Outbound не відповів за 30 с/);
   assert.match(text.text, /Що система вже зробила: закрив браузер/);
   assert.equal(parseExplanation('{"next":"x"}'), null);
-  // Без знімка — лише текст.
-  await explainFailure({ error: "e" }, { key: "k", fetchImpl });
-  assert.equal(sent.messages[0].content.length, 1);
+  // Знімок читається окремим запитом, а пояснення отримує його словами — без картинки (03.11: картинка входу + «чому збій» = відмова).
+  const bodies = [];
+  const twoStep = async (url, init) => {
+    const body = JSON.parse(init.body); bodies.push(body);
+    const text = body.messages[0].content[0].type === "image" ? '{"kind":"password","sentence":"LinkedIn просить пароль."}' : '{"cause":"Сесію LinkedIn завершено.","next":"Увійти в профілі."}';
+    return { ok: true, json: async () => ({ content: [{ type: "text", text }] }) };
+  };
+  assert.deepEqual(await explainFailure({ shot: "/9j/AAAA", error: "e" }, { key: "k", fetchImpl: twoStep }), { cause: "Сесію LinkedIn завершено.", next: "Увійти в профілі." });
+  assert.equal(bodies.length, 2);
+  assert.equal(bodies[1].messages[0].content.length, 1);
+  assert.match(bodies[1].messages[0].content[0].text, /На знімку екрана: LinkedIn просить пароль\./);
 });
