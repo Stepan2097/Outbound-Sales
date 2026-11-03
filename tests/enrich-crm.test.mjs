@@ -113,3 +113,12 @@ test("no known domain: a work address goes in only on the accepted site's domain
   assert.deepEqual(Object.keys(patch.custom_fields.email_check), ["seth@growingideas.net"], "the other company's check is not kept either");
   assert.deepEqual(skipped.map((row) => row.value), ["info@otherco.com"]);
 });
+
+test("a work address the mail sweep removed as dead still names the company: Ronald's bigmouthadvertising.com rules out bigmouth.agency", () => {
+  const ronald = { id: "ff89", company: "big mouth advertising", email: null, website: null, custom_fields: { removed_email: { email: "rkaminsky@bigmouthadvertising.com", reason: "домен заявляє, що не приймає пошту" } } };
+  const { patch, skipped } = crmPatch(ronald, { candidates: [{ type: "website", value: "https://bigmouth.agency", confidence: 86 }], company: "big mouth advertising" });
+  assert.deepEqual(patch, {});
+  assert.match(skipped[0].reason, /bigmouthadvertising\.com/);
+  const sarah = { id: "fb98", company: "UMC", email: null, website: null, custom_fields: { emails: [], removed_email: { email: "sarah@umc.co.nz" } } };
+  assert.deepEqual(crmPatch(sarah, { candidates: [{ type: "website", value: "https://umc.org", confidence: 86 }, { type: "email", value: "newsdesk@umnews.org" }], checks: [check("newsdesk@umnews.org", "valid")], company: "UMC" }).patch, {});
+});

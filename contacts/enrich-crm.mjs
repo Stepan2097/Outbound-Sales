@@ -50,12 +50,19 @@ const domainOf = (value) => lower(value).replace(/^mailto:/, "").replace(/^[^@]*
 const sameDomain = (left, right) => Boolean(left && right) && (left === right || left.endsWith(`.${right}`) || right.endsWith(`.${left}`));
 const LEGAL = new Set(["inc", "llc", "ltd", "limited", "gmbh", "corp", "corporation", "co", "company", "group", "holding", "holdings", "sa", "srl", "plc", "pty", "the"]);
 
-/** The company's own domain the CRM already knows: its site, else a work address. */
+/**
+ * The company's own domain the CRM already knows: its site, else a work
+ * address — also one the 16.10 mail sweep took off as dead (`removed_email`):
+ * a dead mailbox still says which company the person is from (Sarah Henderson,
+ * UMC, @umc.co.nz; Ronald Kaminsky, @bigmouthadvertising.com).
+ */
 export function knownCompanyDomain(contact) {
   const site = domainOf(contact?.website);
   if (site.includes(".")) return site;
-  for (const row of contactEmails(contact)) {
-    const domain = domainOf(row.address);
+  const removed = customFields(contact).removed_email;
+  const addresses = [...contactEmails(contact).map((row) => row.address), typeof removed === "string" ? removed : removed?.email];
+  for (const address of addresses) {
+    const domain = domainOf(address);
     if (domain.includes(".") && !isFreeMail(domain)) return domain;
   }
   return "";
