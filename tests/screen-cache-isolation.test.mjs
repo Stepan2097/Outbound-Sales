@@ -64,14 +64,16 @@ test("identical concurrent safe reads share one upstream and TTL starts after su
   const gate = deferred();
   let calls = 0;
   const load = () => { calls += 1; return gate.promise; };
-  const first = cachedRead("folders", load, { ttlMs: 15 });
-  const second = cachedRead("folders", load, { ttlMs: 15 });
+  // The load outlasts the TTL; the TTL is wide enough that a busy machine (the
+  // deploy gate) still reads again inside it — 15 ms made the gate red on 03.11.
+  const first = cachedRead("folders", load, { ttlMs: 500 });
+  const second = cachedRead("folders", load, { ttlMs: 500 });
   assert.equal(calls, 1);
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await new Promise((resolve) => setTimeout(resolve, 600));
   gate.resolve({ folders: ["fresh"] });
   assert.deepEqual(await first, { folders: ["fresh"] });
   assert.deepEqual(await second, { folders: ["fresh"] });
-  await cachedRead("folders", load, { ttlMs: 15 });
+  await cachedRead("folders", load, { ttlMs: 500 });
   assert.equal(calls, 1, "slow initial load consumed the result TTL");
 });
 
