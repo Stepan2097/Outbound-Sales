@@ -128,8 +128,8 @@ function roleHtml(row, canChange) {
 
 /** «Холодних листів»: the mailbox's cold limit per day, typed in place (owner 03.11). */
 function coldLimitHtml(row, canChange) {
-  if (!canChange) return `<b>${row.limit}</b> на день`;
-  return `<label class="warmup-mail-cold-limit"><input type="number" min="0" max="35" step="1" value="${row.limit}" data-warmup-cold-limit="${escapeAttr(row.email)}" aria-label="Холодних листів на день з ${escapeAttr(row.email)}"${mailWarmupState.busy ? " disabled" : ""} /><span>на день</span></label>`;
+  if (!canChange) return String(row.limit);
+  return `<input class="warmup-mail-cold-limit" type="number" min="0" max="35" step="1" value="${row.limit}" data-warmup-cold-limit="${escapeAttr(row.email)}" title="Ліміт холодних листів на день — натисніть, щоб змінити" aria-label="Холодних листів на день з ${escapeAttr(row.email)}"${mailWarmupState.busy ? " disabled" : ""} />`;
 }
 
 function tableHtml(data) {
@@ -170,7 +170,7 @@ function tableHtml(data) {
           <td class="is-number">${row.status === "running" ? `<div class="warmup-mail-progress"><span style="width:${share}%"></span></div>` : ""}${row.firstsToday} / ${row.plannedToday}</td>
           <td class="is-number warmup-mail-pair"><span title="Скільки відповідей прийшло на листи цієї пошти"><b>${row.repliesReceived}</b> отримала</span><small title="На скільки чужих листів прогріву відповіла вона сама">відповіла сама: ${row.repliesSent}</small></td>
           <td class="is-number warmup-mail-pair" title="Листи цієї пошти, що в інших наших пошт потрапили у «Спам». Прогрів виймає їх усі й позначає важливими."><span class="${spamShare(row) >= 10 ? "is-bad" : ""}"><b>${row.landedInSpam}</b> з ${row.sent}</span><small>${row.sent ? `${spamShare(row)}%` : "—"}</small></td>
-          <td class="is-number warmup-mail-cold">${coldLimitHtml(row, canChange)}<small title="Перший день холодних листів — 3, далі щодня +2, поки не дійде до ліміту. Усі кампанії разом.">сьогодні ${row.coldToday} з ${row.coldAllowed ?? row.limit}</small></td>
+          <td class="is-number warmup-mail-cold">${row.coldToday} / ${coldLimitHtml(row, canChange)}<small title="Перший день холодних листів — 3, далі щодня +2, поки не дійде до ліміту. Усі кампанії разом.">${(row.coldAllowed ?? row.limit) < row.limit ? `сьогодні можна ${row.coldAllowed}` : "сьогодні з ліміту"}</small></td>
           <td class="warmup-mail-action">${action(row)}${accountActionsHtml(row.email)}${canChange && row.status !== "removed" ? `<button type="button" class="icon-button warmup-mail-remove" data-warmup-remove="${escapeAttr(row.email)}" title="Прибрати з прогріву" aria-label="Прибрати ${escapeAttr(row.email)} з прогріву"${mailWarmupState.busy ? " disabled" : ""}><i data-lucide="trash-2"></i></button>` : ""}${row.lastError && row.status === "running" ? `<small class="is-bad" title="${escapeAttr(row.lastError.error)}">остання відмова ${escapeHtml(when(row.lastError.at))}</small>` : ""}</td>
         </tr>${mailWarmupState.open === row.email ? `<tr class="warmup-mail-history-row"><td colspan="8">${historyHtml(row.email)}</td></tr>` : ""}${tagEditorHtml(row.email) ? `<tr class="warmup-mail-tag-row"><td colspan="8">${tagEditorHtml(row.email)}</td></tr>` : ""}`;
       }).join("")}</tbody>

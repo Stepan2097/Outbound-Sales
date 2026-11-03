@@ -538,26 +538,39 @@
 .warmup-mail-about summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 .warmup-mail-about p { margin: 6px 0 0; max-width: 90ch; color: var(--muted); font-size: 13px; }
 
-/* «Холодних листів» — ліміт на день вписується прямо в таблиці (власник 03.11). */
-.warmup-mail-cold-limit {
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 6px;
-  color: var(--muted);
-  font-size: 12px;
-  white-space: nowrap;
+/* «Холодних листів»: «0 / 5», де 5 — ліміт, що міняється просто в рядку (власник 03.11). */
+.warmup-mail-table .warmup-mail-cold-limit {
+  width: 3ch;
+  min-height: 0;
+  height: auto;
+  padding: 0 1px;
+  line-height: inherit;
+  vertical-align: baseline;
+  border: 0;
+  border-bottom: 1px dashed var(--muted);
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: center;
+  appearance: textfield;
+  -moz-appearance: textfield;
+  cursor: text;
 }
 
-.warmup-mail-cold-limit input {
-  width: 64px;
-  padding: 4px 6px;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
+.warmup-mail-table .warmup-mail-cold-limit::-webkit-inner-spin-button,
+.warmup-mail-table .warmup-mail-cold-limit::-webkit-outer-spin-button {
+  margin: 0;
+  -webkit-appearance: none;
+}
+
+.warmup-mail-table .warmup-mail-cold-limit:hover,
+.warmup-mail-table .warmup-mail-cold-limit:focus {
+  border-bottom-color: var(--teal);
+  outline: none;
 }
 
 .warmup-mail-cold small {
   display: block;
-  margin-top: 4px;
   white-space: nowrap;
 }
