@@ -105,10 +105,21 @@ function isZone(zone) {
 }
 
 /** Weekday (1 = Monday … 7 = Sunday), hour and minute of an instant in a zone, and its date. */
+// One formatter per zone: building one costs far more than using it, and the
+// warm-up asks this for every journal line on every pass (03.11: 80 of 150 s of
+// the portal's CPU went here, and the LinkedIn agents' calls timed out behind it).
+const zoneFormats = new Map();
+function zoneFormat(zone) {
+  if (!zoneFormats.has(zone)) {
+    zoneFormats.set(zone, new Intl.DateTimeFormat("en-US", {
+      timeZone: zone, weekday: "short", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23"
+    }));
+  }
+  return zoneFormats.get(zone);
+}
+
 export function localTime(instant, zone) {
-  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", {
-    timeZone: zone, weekday: "short", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23"
-  }).formatToParts(instant).map((part) => [part.type, part.value]));
+  const parts = Object.fromEntries(zoneFormat(zone).formatToParts(instant).map((part) => [part.type, part.value]));
   const weekday = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 }[parts.weekday];
   return { weekday, hour: Number(parts.hour), minute: Number(parts.minute), date: `${parts.year}-${parts.month}-${parts.day}` };
 }

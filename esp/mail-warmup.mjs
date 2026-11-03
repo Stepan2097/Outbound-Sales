@@ -530,9 +530,13 @@ export async function runWarmupTick({ journal, senders, connector, gate, now = n
   };
   // The plan counts first letters; a reply goes when it is due — still inside
   // ESP 4's limits and gaps, which `sendDecision` keeps.
+  // Today's letters as the journal read at the start of the pass says — the same
+  // for every mailbox, so read once, not once per mailbox and kind (03.11).
+  let freshLedger = null;
   const mayWrite = (sender, kind = "first") => {
     const plan = rows.get(sender.email);
-    const today = warmupLedger(fresh, { now }).rows.get(sender.email)?.firstsToday || 0;
+    freshLedger ??= warmupLedger(fresh, { now });
+    const today = freshLedger.rows.get(sender.email)?.firstsToday || 0;
     if (usedThisPass.has(sender.email)) return { ok: false, reason: "one_per_pass" };
     // After a refusal the mailbox rests half an hour, not one failure line per pass.
     const error = plan?.lastError;

@@ -44,11 +44,26 @@ export function domainKey(value) {
   return /^(?=.{3,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(text) ? text : null;
 }
 
+// The last fold and the journal it was made from. Pages, the warm-up and the
+// sequences ask for the registry many times a minute, and folding the whole
+// journal each time held the portal's one thread for seconds (03.11: 26 of 150 s
+// of CPU) — the LinkedIn agents' calls timed out behind it.
+let folded = null;
+
 /** The registry as of now: every domain and sender with its state and its own history. */
 export async function registry() {
+  const entries = await allEntries();
+  const last = entries.at(-1);
+  const key = `${entries.length}:${last?.seq ?? 0}:${last?.hash ?? ""}`;
+  if (folded?.key !== key) folded = { key, value: foldRegistry(entries) };
+  // A copy: callers add to what they get (tags, checks), and the next caller must not see it.
+  return structuredClone(folded.value);
+}
+
+function foldRegistry(entries) {
   const domains = new Map();
   const senders = new Map();
-  for (const entry of await allEntries()) {
+  for (const entry of entries) {
     const data = entry.data || {};
     const stamp = { seq: entry.seq, at: entry.at, actor: entry.actor, type: entry.type };
     if (entry.type === "domain.added") {

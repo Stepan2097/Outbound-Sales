@@ -71,10 +71,12 @@ const SUPERSEDED = "superseded";
 /* ── дати ───────────────────────────────────────────────────────────────── */
 
 /** Календарний день у часовому поясі команди: «2026-10-16». */
+const dayFormats = new Map();
 export function dayIn(at, tz = TEAM_TZ) {
   const date = at instanceof Date ? at : new Date(at);
   if (Number.isNaN(date.getTime())) return "";
-  return new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
+  if (!dayFormats.has(tz)) dayFormats.set(tz, new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }));
+  return dayFormats.get(tz).format(date);
 }
 
 function dayPlus(day, n) {
