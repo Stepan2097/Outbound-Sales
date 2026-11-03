@@ -227,6 +227,8 @@ export async function collectSignals({ post = null, run = null, company, domain 
   const searched = [];
   const gaps = [];
   let costUsd = 0;
+  // Таск 10b3bb63 (суддя 03.11): «скільки пішло» — токени Claude й запуски Apify окремо.
+  const spend = { tokens: 0, searches: 0, aiUsd: 0, apifyUsd: 0, apifyRuns: 0 };
   const web = post ? researchSignals({ post, company, domain, person, title, product, industry, now }).catch((error) => ({ failed: error.message })) : null;
   const posts = (url, kind) => (run && url ? run(LINKEDIN_POSTS_ACTOR, { targetUrls: [url], maxPosts: 10, postedLimit: "3months" }).then(
     (items) => ({ results: postsToSignals(items, { kind, now }), costUsd: Number(items?.run?.costUsd || 0) }),
@@ -241,6 +243,9 @@ export async function collectSignals({ post = null, run = null, company, domain 
       company_.push(...webOut.results);
       searched.push(`вебпошук: ${webOut.queries.join("; ")}`);
       costUsd += webOut.costUsd;
+      spend.tokens += Number(webOut.usage?.input || 0) + Number(webOut.usage?.output || 0);
+      spend.searches += Number(webOut.usage?.searches || 0);
+      spend.aiUsd += webOut.costUsd;
       if (!webOut.results.length) gaps.push(...webOut.gaps);
     }
   } else gaps.push("Вебпошук не підключено (немає ANTHROPIC_API_KEY).");
@@ -250,6 +255,8 @@ export async function collectSignals({ post = null, run = null, company, domain 
       company_.push(...companyOut.results);
       searched.push(`пости компанії в LinkedIn (${companyLinkedin}) за 3 місяці`);
       costUsd += companyOut.costUsd;
+      spend.apifyUsd += companyOut.costUsd;
+      spend.apifyRuns += 1;
       if (!companyOut.results.length) gaps.push("Компанія за 3 місяці нічого не публікувала в LinkedIn.");
     }
   } else gaps.push(run ? "Сторінки компанії в LinkedIn немає — її пости не читали." : "Apify не підключено — пости LinkedIn не читали.");
@@ -259,6 +266,8 @@ export async function collectSignals({ post = null, run = null, company, domain 
       person_.push(...personOut.results);
       searched.push(`пости ${person || "людини"} в LinkedIn за 3 місяці`);
       costUsd += personOut.costUsd;
+      spend.apifyUsd += personOut.costUsd;
+      spend.apifyRuns += 1;
       if (!personOut.results.length) gaps.push(`${person || "Людина"} за 3 місяці нічого не публікувала в LinkedIn.`);
     }
   } else if (run && person) gaps.push("Профілю людини в LinkedIn немає — її пости не читали.");
@@ -271,6 +280,7 @@ export async function collectSignals({ post = null, run = null, company, domain 
     person: unique(person_).slice(0, 8),
     searched,
     gaps,
-    costUsd: Number(costUsd.toFixed(4))
+    costUsd: Number(costUsd.toFixed(4)),
+    spend: { ...spend, aiUsd: Number(spend.aiUsd.toFixed(4)), apifyUsd: Number(spend.apifyUsd.toFixed(4)) }
   };
 }

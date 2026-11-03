@@ -20,11 +20,12 @@ test("після пошуку — завжди явний підсумок: до
   assert.match(CARD, /Нічого нового\$\{where\.length \? `, шукали в: /);
   assert.match(CARD, /Пошук не вдався: /);
   assert.match(CARD, /Сховано \$\{enrich\.hiddenEmails\.length\}/, "сховане — з причиною");
-  assert.match(SERVER, /hiddenEmails,\n    searched: enrichSearchedView\(discovery, candidates\),\n    cost: enrichCostView\(discovery\),/);
+  assert.match(SERVER, /hiddenEmails,\n    searched: enrichSearchedView\(discovery, candidates\),\n    cost: enrichCostView\(discovery, signalsSpend\),/);
 });
 
 test("дрібно — токени й гроші цього пошуку", () => {
-  assert.match(CARD, /<p class="triage-enrich-cost">AI: \$\{Number\(cost\.tokens \|\| 0\)\} токенів · \$\{money\}/);
+  assert.match(CARD, /<p class="triage-enrich-cost">\$\{ai\} · \$\{money\}/);
+  assert.match(CARD, /токенів\$\{cost\.webSearches \? ` і \$\{cost\.webSearches\} вебпошуків` : ""\} на сигнали компанії/);
   assert.match(SERVER, /costUsd: actorRuns\.some\(\(run\) => run\.costUsd != null\)/);
   assert.match(SERVER, /Object\.defineProperty\(items, "run", \{ value: apifyRunView\(run\), enumerable: false \}\)/);
 });
@@ -40,4 +41,13 @@ test("перейшли на іншу картку під час пошуку —
   const body = CARD.slice(CARD.indexOf("const ticker = setInterval"), CARD.indexOf("function tookNewContact"));
   assert.ok(body.indexOf("clearInterval(ticker)") < body.indexOf("if (moved) return;"), "лічильник знято до виходу");
   assert.doesNotMatch(body.slice(0, body.indexOf("clearInterval(ticker)")), /\breturn;/);
+});
+
+test("суддя 03.11 (коло 2): сигнали, перешукані цим натисканням, — у ціні: токени Claude і запуски постів Apify", () => {
+  assert.match(SERVER, /const signalsBefore = prospect\.publicAccountSignals;/);
+  assert.match(SERVER, /prospect\.publicAccountSignals !== signalsBefore \? prospect\.publicAccountSignals\.spend \|\| null : null/);
+  assert.match(SERVER, /cost: enrichCostView\(discovery, signalsSpend\),/);
+  assert.match(SERVER, /tokens: Number\(signals\?\.tokens \|\| 0\),/);
+  assert.match(SERVER, /runs: contactRuns \+ signalRuns,/);
+  assert.match(SERVER, /costUsd: found\.costUsd,\n      spend: found\.spend/);
 });

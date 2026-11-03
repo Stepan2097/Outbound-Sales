@@ -81,3 +81,17 @@ test("all sources together: a failed one is said in the gaps, the others still c
   const none = await collectSignals({ company: "Betflag", now: NOW });
   assert.deepEqual(none.gaps, ["Вебпошук не підключено (немає ANTHROPIC_API_KEY).", "Apify не підключено — пости LinkedIn не читали."]);
 });
+
+test("таск 10b3bb63 (суддя 03.11): пошук сигналів каже, скільки пішло окремо — токени й вебпошуки Claude, запуски й долари Apify", async () => {
+  const post = async () => ({ stop_reason: "end_turn", usage: { input_tokens: 12000, output_tokens: 800, server_tool_use: { web_search_requests: 3 } }, content: [{ type: "text", text: '{"signals":[]}' }] });
+  const run = async () => {
+    const items = [];
+    Object.defineProperty(items, "run", { value: { costUsd: 0.004 } });
+    return items;
+  };
+  const out = await collectSignals({ post, run, company: "Betflag", person: "Anna", companyLinkedin: "https://www.linkedin.com/company/betflag", personLinkedin: "https://www.linkedin.com/in/anna", now: NOW });
+  const aiUsd = Number((12000 * 0.1 / 1e6 + 800 * 0.5 / 1e6 + 3 * 0.01).toFixed(4));
+  assert.deepEqual(out.spend, { tokens: 12800, searches: 3, aiUsd, apifyUsd: 0.008, apifyRuns: 2 });
+  assert.equal(out.costUsd, Number((aiUsd + 0.008).toFixed(4)));
+  assert.deepEqual((await collectSignals({ company: "Betflag", now: NOW })).spend, { tokens: 0, searches: 0, aiUsd: 0, apifyUsd: 0, apifyRuns: 0 });
+});

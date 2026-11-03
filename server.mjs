@@ -3158,7 +3158,10 @@ async function enrichTriageContact(contact, { productId = "" } = {}) {
   const taken = takeCrmContactIntoQueue(contact);
   if (!taken.prospect) throw Object.assign(new Error(taken.warning), { statusCode: 400 });
   const prospect = taken.prospect;
+  const signalsBefore = prospect.publicAccountSignals;
   prospect.contactDiscovery = await enrichProspectContacts(prospect, { phase: "contacts", product: productId ? signalProductText(productId) : "" });
+  // Сигнали, перешукані саме цим натисканням (застарілі чи під інший продукт), — теж ціна цього пошуку.
+  const signalsSpend = prospect.publicAccountSignals && prospect.publicAccountSignals !== signalsBefore ? prospect.publicAccountSignals.spend || null : null;
   prospect.updatedAt = new Date().toISOString();
   const discovery = prospect.contactDiscovery || {};
   const candidates = (discovery.candidates || []).slice(0, 30).map((item) => ({
@@ -3188,7 +3191,7 @@ async function enrichTriageContact(contact, { productId = "" } = {}) {
     // Таск 10b3bb63: що сховано і чому, де шукали і скільки коштувало — підсумок завжди явний.
     hiddenEmails,
     searched: enrichSearchedView(discovery, candidates),
-    cost: enrichCostView(discovery),
+    cost: enrichCostView(discovery, signalsSpend),
     added,
     contact: updated,
     emails: contactEmails(updated),
@@ -3244,13 +3247,21 @@ function enrichSearchedView(discovery, candidates) {
 }
 
 /** Ціна пошуку: моделі тут не кличуться (0 токенів), гроші — лише запуски Apify. */
-function enrichCostView(discovery) {
+function enrichCostView(discovery, signals = null) {
   const budget = discovery.enrichmentBudget;
+  const contactUsd = budget && !budget.cacheHit ? budget.costUsd ?? null : 0;
+  const contactRuns = budget && !budget.cacheHit ? (budget.actorsRun || []).filter((run) => !String(run.source || "").startsWith("companyPeople")).length : 0;
+  // Суддя 03.11 (таск 10b3bb63): пошук сигналів (вебпошук Claude, пости LinkedIn через Apify) іде в
+  // тому самому натисканні, коли сигнали застаріли чи шукались під інший продукт, — його токени й запуски теж тут.
+  const signalRuns = Number(signals?.apifyRuns || 0);
   return {
-    tokens: 0,
-    apifyUsd: budget && !budget.cacheHit ? budget.costUsd ?? null : 0,
+    tokens: Number(signals?.tokens || 0),
+    webSearches: Number(signals?.searches || 0),
+    aiUsd: Number(signals?.aiUsd || 0),
+    apifyUsd: contactUsd == null && !signalRuns ? null : Number(((contactUsd || 0) + Number(signals?.apifyUsd || 0)).toFixed(4)),
     ceilingUsd: budget && !budget.cacheHit ? budget.chargeCeilingUsd || 0 : 0,
-    runs: budget && !budget.cacheHit ? (budget.actorsRun || []).filter((run) => !String(run.source || "").startsWith("companyPeople")).length : 0
+    runs: contactRuns + signalRuns,
+    signalRuns
   };
 }
 
@@ -9576,7 +9587,8 @@ async function researchPublicAccountSignals(prospect, { product = "" } = {}) {
       queries: found.searched,
       results: found.company,
       gaps: found.company.length ? [] : found.gaps,
-      costUsd: found.costUsd
+      costUsd: found.costUsd,
+      spend: found.spend
     };
   }
   const year = new Date().getUTCFullYear();

@@ -444,7 +444,11 @@ function enrichCostHtml(cost) {
   const money = cost.runs
     ? `Apify: ${cost.apifyUsd != null ? `$${Number(cost.apifyUsd).toFixed(3)}` : "ціну Apify не повернув"} за ${cost.runs} ${cost.runs === 1 ? "запуск" : "запуски"}${cost.ceilingUsd ? ` (стеля $${Number(cost.ceilingUsd).toFixed(2)})` : ""}`
     : "Apify: $0 — платних запусків не було";
-  return `<p class="triage-enrich-cost">AI: ${Number(cost.tokens || 0)} токенів · ${money} · перевірка пошт безкоштовна</p>`;
+  const tokens = Number(cost.tokens || 0);
+  const ai = tokens
+    ? `AI: ${tokens.toLocaleString("uk-UA")} токенів${cost.webSearches ? ` і ${cost.webSearches} вебпошуків` : ""} на сигнали компанії ($${Number(cost.aiUsd || 0).toFixed(3)})`
+    : "AI: 0 токенів";
+  return `<p class="triage-enrich-cost">${ai} · ${money}${cost.signalRuns ? ` (з них ${cost.signalRuns} — пости LinkedIn)` : ""} · перевірка пошт безкоштовна</p>`;
 }
 
 function enrichSummaryHtml(enrich, others) {
