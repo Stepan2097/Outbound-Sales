@@ -71,6 +71,8 @@ test("відповіді, дзвінки й ручні пінги з вихід�
   assert.equal(dayOf("manual:2026-11-01T00:00:00Z"), "2026-11-09");
   assert.equal(dayOf("silent:b:none:1"), "2026-11-09");
   assert.equal(dayOf("reply:old0:2026-10-20"), "2026-10-20", "бекліг відповідей не рухається — його розбирають окремо");
+  const oldWeekend = [ping("reply:sat:2026-10-24", "2026-10-24")];
+  assert.equal(after(oldWeekend, levelPings(oldWeekend, { today: TODAY })).at(0).day, "2026-10-26", "стара відповідь із суботи — на понеділок, лишається в беклозі");
   assert.equal(placed.filter(({ day }) => day === TODAY).length, 30, "старі відповіді не витісняють сьогоднішні нагадування");
   assert.ok(placed.every(({ day }) => day < TODAY || !weekend(day)));
 });

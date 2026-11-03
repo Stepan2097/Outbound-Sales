@@ -463,7 +463,8 @@ export function levelPings(tasks, { today, capacity = DEFAULT_CAPACITY }) {
     if (!from) continue;
     const rank = moveRank(task);
     if (rank === null) {
-      const due = from < today ? from : workday(from);
+      // Із вихідного — на понеділок, і для старих теж: дата лишається минулою, але будньою.
+      const due = workday(from);
       if (due !== from) changes.push({ task, from, due });
       if (due >= start) fixed.set(due, (fixed.get(due) || 0) + 1);
       continue;
