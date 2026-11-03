@@ -52,9 +52,9 @@ test("По днях, ліди пошти і черга «До роботи» п�
   assert.match(inboxCss, /@media \(max-width: 900px\) \{\n  \.inbox-list \{ max-height: 65vh; overflow-y: auto; \}\n\}/);
 });
 
-test("the cold-mail list on «Вхідні» is full height — no inner scroll, the page scrolls (owner 03.11)", () => {
+test("the cold-mail list on «Вхідні» scrolls inside itself and reaches the bottom of the screen (owner 03.11)", () => {
   const inbox = readFileSync(new URL("../app/styles/mail-inbox.css", import.meta.url), "utf8");
-  assert.match(inbox, /#unibox \.unibox-list \{\n  max-height: none;\n  overflow: visible;\n\}/);
+  assert.match(inbox, /#unibox \.unibox-list \{\n  max-height: max\(320px, calc\(100dvh - 150px\)\);\n  overflow-y: auto;/);
 });
 
 test("a conversation somebody on the team already read has an open, muted envelope; unread — the closed one (owner 03.11)", () => {
