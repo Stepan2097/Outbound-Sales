@@ -3352,7 +3352,9 @@ function signalKindFor(prospect, product = "") {
 
 /** Signals searched for another kind of product — or before products counted — are searched again. */
 function signalsFitProduct(signals, prospect, product = "") {
-  return Boolean(signals?.kind) && signals.kind === signalKindFor(prospect, product);
+  // Saved before kinds were kept: worth searching again only where the search now knows the product.
+  if (!signals?.kind) return !anthropicEnrichKey();
+  return signals.kind === signalKindFor(prospect, product);
 }
 
 function companyLinkedinUrl(prospect) {
@@ -9464,7 +9466,9 @@ function phoneMessengerCheckInput(prospect, phoneDigits) {
 
 async function enrichPublicWebSignals(prospect, { product = "" } = {}) {
   if (!prospect.company) return [];
-  if (isRecentPublicWebResearch(prospect) && isRecentAccountSignalResearch(prospect) && signalsFitProduct(prospect.publicAccountSignals, prospect, product)) {
+  if (isRecentPublicWebResearch(prospect) && isRecentAccountSignalResearch(prospect)) {
+    // The site and profiles keep; only signals searched for another kind of product are searched again.
+    if (!signalsFitProduct(prospect.publicAccountSignals, prospect, product)) prospect.publicAccountSignals = await researchPublicAccountSignals(prospect, { product });
     ensureCompanyLinkedInResearch(prospect);
     return publicCandidatesFromResearch(prospect.publicCompanyResearch, prospect.publicSocialResearch);
   }
