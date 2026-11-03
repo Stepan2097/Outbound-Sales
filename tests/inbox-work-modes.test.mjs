@@ -127,3 +127,10 @@ test("Богдан 22.10 (таск b0eb7c3a): акаунт, що просить 
   assert.match(api, /health: healthOf\.get\(account\.accountId\)\?\.health \|\| null,/);
   assert.match(api, /select\("id,label,status,health,health_changed_at"\)/);
 });
+
+test("адмін без власних пінгів одразу бачить пінги команди, а список каже, чиї вони (власник 03.11: «тут чомусь по нулях»)", () => {
+  const today = readFileSync(new URL("../app/screens/today.js", import.meta.url), "utf8");
+  assert.match(today, /today\.data\?\.canSeeAll && today\.scope === "mine" && !today\.scopeChosen && !allItems\(\)\.length/);
+  assert.match(today, /today\.scopeChosen = true;/);
+  assert.match(today, / · пінги команди" : " · мої пінги"/);
+});

@@ -369,6 +369,12 @@ async function openToday({ keepSelection = false } = {}) {
   render();
   try {
     today.data = await api(`/api/today?scope=${today.scope}`);
+    // Адмін без власних пінгів (власник 03.11: «тут чомусь по нулях» — усі пінги в лідгенів): одразу
+    // пінги команди, доки сам не вибрав «Мої» на цьому екрані.
+    if (today.data?.canSeeAll && today.scope === "mine" && !today.scopeChosen && !allItems().length && !(today.data.later || []).length) {
+      today.scope = "all";
+      today.data = await api(`/api/today?scope=all`);
+    }
     today.loadedAt = Date.now();
     today.error = "";
   } catch (error) {
@@ -1037,7 +1043,7 @@ function filterHtml(counts, threads, totalThreads, unreadCount) {
     </button>
     <button type="button" class="today-help-button${today.helpOpen ? " active" : ""}" data-today="help-toggle" aria-expanded="${today.helpOpen}" title="Як працювати з фільтрами" aria-label="Як працювати з фільтрами">?</button>
     ${today.filterOpen ? `<div class="today-filter-menu" role="menu" aria-label="Що показати">
-      <p class="today-filter-group">Щодня — по черзі</p>
+      <p class="today-filter-group">Щодня — по черзі${today.data?.canSeeAll ? (today.scope === "all" ? " · пінги команди" : " · мої пінги") : ""}</p>
       ${item("", "До роботи", total)}
       ${counts.map(([block, title, number]) => item(block, title, number)).join("")}
       <p class="today-filter-group">Перевіряти час від часу</p>
@@ -1153,6 +1159,7 @@ document.addEventListener("click", (event) => {
   }
   if (act === "scope") {
     today.scope = target.dataset.scope === "all" ? "all" : "mine";
+    today.scopeChosen = true;
     try { window.localStorage.setItem(SCOPE_KEY, today.scope); } catch {}
     return void openToday();
   }
