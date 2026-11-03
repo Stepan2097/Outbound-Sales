@@ -45,3 +45,24 @@ test("a good answer in Telegram: who, campaign and mailbox, the words, where to 
   assert.match(text, /«Yes, let's talk on Tuesday»/);
   assert.match(text, /Відповісти: https:\/\/app\/#mail-inbox/);
 });
+
+test("a pause somebody already lifted is no longer shown as an alert; one still on is (03.11, tomas@trafpush.com)", async (t) => {
+  const { addDomain, addSender, setDomainStatus, setSenderStatus } = await import("../esp/registry.mjs");
+  const dir = await mkdtemp(join(tmpdir(), "esp-alerts-view-"));
+  useJournal(join(dir, "journal.jsonl"));
+  t.after(async () => { useJournal(null); await rm(dir, { recursive: true, force: true }); });
+  await addDomain({ domain: "send.com" }, "test");
+  await setDomainStatus({ domain: "send.com", status: "ramp" }, "test");
+  for (const email of ["tomas@send.com", "anna@send.com"]) {
+    await addSender({ email }, "test");
+    await setSenderStatus({ email, status: "paused", reason: "bounce", code: "bounce_rate_7d" }, "esp-alerts");
+    await append({ type: "esp.alert", actor: "esp-alerts", data: { key: `sender:${email}`, kind: "pause_sender", email, title: `Сендер ${email} на паузі` } });
+  }
+  await setSenderStatus({ email: "tomas@send.com", status: "active", reason: "знято" }, "owner@x.com");
+  let answer = null;
+  await handleEspApi({
+    request: { method: "GET", auth: { profile: { role: "admin" } } }, response: {}, url: new URL("http://x/api/esp/alerts"),
+    sendJson: (_r, status, payload) => { answer = { status, payload }; }, readJson: async () => null, esp: { campaigns: { list: () => [] } }
+  });
+  assert.deepEqual(answer.payload.alerts.map((row) => row.email), ["anna@send.com"]);
+});

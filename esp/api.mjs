@@ -926,7 +926,15 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
   // ── ESP 8: the automatic pauses and the alarms ─────────────────────────
   if (method === "GET" && path === "/alerts") {
     const weekAgo = Date.now() - 7 * 86_400_000;
-    const alerts = (await allEntries()).filter((entry) => entry.type === "esp.alert" && entry.data?.kind !== "ramp_held" && new Date(entry.at).getTime() >= weekAgo)
+    // A pause somebody already lifted is not news (03.11: «tomas на паузі» stayed up after it was resumed).
+    const { senders, domains } = await registry();
+    const senderStatus = new Map(senders.map((row) => [row.email, row.status]));
+    const domainStatus = new Map(domains.map((row) => [row.domain, row.status]));
+    const campaignState = new Map((esp.campaigns?.list() || []).map((row) => [row.id, row.state]));
+    const stillTrue = (data) => data.kind === "pause_sender" ? senderStatus.get(data.email) === "paused"
+      : data.kind === "pause_domain" ? domainStatus.get(data.domain) === "paused"
+        : data.kind === "pause_campaign" ? campaignState.get(data.campaignId) === "paused" : true;
+    const alerts = (await allEntries()).filter((entry) => entry.type === "esp.alert" && entry.data?.kind !== "ramp_held" && new Date(entry.at).getTime() >= weekAgo && stillTrue(entry.data || {}))
       .reverse().map((entry) => ({ at: entry.at, ...entry.data }));
     sendJson(response, 200, { success: true, alerts, telegram: Boolean(esp.alertsTelegram) });
     return true;
