@@ -28,6 +28,9 @@ async function openContactsScreen() {
   // the CRM is read again right behind them.
   if (recallContacts()) renderContacts();
   const stale = Date.now() - contactsLoadedAt > CONTACTS_STALE_MS;
+  // «…/#contacts/<id>» — одна людина відкривається одразу (таск 92abd9df: показати збережене без підготовки).
+  const linked = String(globalThis.location?.hash || "").match(/^#contacts\/([\w-]+)/)?.[1];
+  if (linked) selectedContactId = linked;
   const selectedAtOpen = selectedContactId;
   try {
     await loadContactFolders({ force: stale });
@@ -89,6 +92,8 @@ let contactMailNotice = "";
 // LinkedIn. Сервер зберігає їх на людину, тож вони чекають на картці, поки їх
 // не напишуть наново.
 let contactDrafts = null;
+// «Перед розмовою», зібране на Головній, — картка контакту лише показує (таск 92abd9df).
+let contactBeforeCall = null;
 
 let contactDraftsBusy = false;
 
@@ -475,10 +480,26 @@ function renderContactCard() {
     <dl class="contact-fields">${rows || `<div><dt>Порожньо</dt><dd>CRM не знає про цю людину нічого, крім імені</dd></div>`}</dl>
     ${contact.description ? `<div class="contact-note"><strong>Нотатка з CRM</strong><p>${escapeHtml(contact.description)}</p></div>` : ""}
     ${custom}
+    ${contactBeforeCallHtml()}
     ${contactMessagesHtml()}
     ${contactHistoryFor && contactHistoryFor === String(contact.id) ? contactConversationHtml() : ""}
     ${contact.email ? contactMailHtml(contact.email) : ""}
   `));
+}
+
+/**
+ * «Перед розмовою» (таск 92abd9df) як уже зібрано для цієї людини на Головній —
+ * лише читання: картка контакту нічого не шукає й не платить.
+ */
+function contactBeforeCallHtml() {
+  const data = contactBeforeCall;
+  if (!data) return "";
+  const body = data.empty
+    ? `<p><b>Сигналів не знайдено</b> — за 90 днів ні новин компанії, ні постів людини з датою й посиланням.</p>
+       <ul>${[...(data.searched || []).map((row) => `Шукали: ${row}`), ...(data.gaps || [])].map((row) => `<li>${escapeHtml(row)}</li>`).join("")}</ul>`
+    : `<ol>${(data.facts || []).map((row) => `<li>${escapeHtml(row.text)} <small>${escapeHtml([row.whose === "person" ? "пост людини" : row.publisher, row.date].filter(Boolean).join(" · "))} · <a href="${escapeAttr(row.url)}" target="_blank" rel="noopener">джерело</a></small></li>`).join("")}</ol>
+       ${(data.questions || []).length ? `<strong>Питання${data.productName ? ` · ${escapeHtml(data.productName)}` : ""}</strong><ul>${data.questions.map((row) => `<li title="${escapeAttr(row.basis || "")}">${escapeHtml(row.text)}</li>`).join("")}</ul>` : ""}`;
+  return `<section class="contact-history contact-before-call"><strong>Перед розмовою</strong>${body}<small>зібрано ${escapeHtml(new Date(data.checkedAt).toLocaleDateString([], { dateStyle: "medium" }))}</small></section>`;
 }
 
 const MAIL_EVENT_LABEL = {
@@ -856,6 +877,7 @@ async function openContact(contactId, { keepDraftForm = false } = {}) {
   if (!keepDraftForm) {
     contactRecord = null;
     contactDrafts = null;
+    contactBeforeCall = null;
     contactDraftsBusy = false;
     contactDraftsError = "";
     contactDraftForm = { productId: "", language: "", instruction: "" };
@@ -870,6 +892,7 @@ async function openContact(contactId, { keepDraftForm = false } = {}) {
     if (selectedContactId !== contactId || generation !== contactReads.cardGeneration) return;
     contactRecord = payload.contact;
     contactDrafts = payload.drafts || null;
+    contactBeforeCall = payload.beforeCall || null;
     // Продукт, мова й побажання беруться з того, що вже писали цій людині, щоб
     // повтор не починався з чужих налаштувань.
     if (contactDrafts && !keepDraftForm) {

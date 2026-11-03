@@ -33,10 +33,10 @@ const NAMES = [
   "contactMail", "contactMailFor", "contactMailNotice", "MAIL_EVENT_LABEL", "contactMailHtml", "loadContactMail",
   "fetchContactFolders", "loadContactFolders", "loadContactPage", "selectContactFolder", "openContact",
   "loadContactHistory", "openContactsScreen", "contactsRecalled", "rememberContacts", "recallContacts",
-  "contactDrafts", "contactDraftsBusy", "contactDraftsError", "contactDraftLanguage", "CONTACT_DRAFT_LANGUAGE_LABEL",
+  "contactDrafts", "contactBeforeCall", "contactDraftsBusy", "contactDraftsError", "contactDraftLanguage", "CONTACT_DRAFT_LANGUAGE_LABEL",
   "contactDraftForm", "CONTACT_DRAFT_LANGUAGES", "contactDraftChoice", "renderKeepingFocus", "rememberContactDraftField",
   "CONTACT_PRODUCT_KEY", "rememberedContactProduct", "rememberContactProduct",
-  "wordCountLabel", "contactDraftHtml", "contactMessagesHtml", "generateContactMessages"
+  "wordCountLabel", "contactDraftHtml", "contactMessagesHtml", "contactBeforeCallHtml", "generateContactMessages"
 ];
 
 const LISTENERS = [
@@ -669,4 +669,20 @@ test("папка — власний випадаючий список: друз�
   await s.handlers["contactFolderOptions:click"]({ target: { closest: () => ({ dataset: { folder: "f-big" } }) } });
   assert.equal(s.get("contactFolderId"), "f-big");
   assert.ok(INDEX.includes('id="contactFolderButton"') && INDEX.includes('id="contactFolderQuery"'));
+});
+
+test("«Перед розмовою» на картці контакту — лише збережене з Головної, з джерелами; порожнє — прямо «Сигналів не знайдено» (таск 92abd9df)", () => {
+  const s = screen();
+  s.set("contactBeforeCall", { checkedAt: "2026-11-03T12:00:00Z", productName: "Google Ads for iGaming", empty: false,
+    facts: [{ text: "Отримали нагороду на SiGMA", date: "2026-11-03", url: "https://www.linkedin.com/posts/x", publisher: "linkedin.com", whose: "company" }],
+    questions: [{ text: "Як ви тестуєте нові канали?", basis: "f1 + Кому" }] });
+  const html = s.get("contactBeforeCallHtml()");
+  assert.match(html, /Перед розмовою/);
+  assert.match(html, /Отримали нагороду на SiGMA/);
+  assert.match(html, /href="https:\/\/www.linkedin.com\/posts\/x"/);
+  assert.match(html, /Як ви тестуєте нові канали\?/);
+  s.set("contactBeforeCall", { checkedAt: "2026-11-03T12:00:00Z", empty: true, facts: [], questions: [], searched: ["вебпошук: WeltBet news"], gaps: [] });
+  assert.match(s.get("contactBeforeCallHtml()"), /Сигналів не знайдено[\s\S]*Шукали: вебпошук: WeltBet news/);
+  s.set("contactBeforeCall", null);
+  assert.equal(s.get("contactBeforeCallHtml()"), "");
 });

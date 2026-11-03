@@ -1408,6 +1408,8 @@ async function handleApi(request, response, url) {
           sendJson(response, 200, {
             contact,
             drafts: state.contactDrafts[contactId] || null,
+            // Лише збережене (таск 92abd9df): відкриття картки нічого не шукає й не платить.
+            beforeCall: prospectForCrmContact(contactId)?.beforeCall || null,
             prospectId: prospectForCrmContact(contactId)?.id || null
           });
           return;
