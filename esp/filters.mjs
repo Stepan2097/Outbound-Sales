@@ -203,21 +203,14 @@ export async function checkLead(lead, { exclusions: excluded, countries, reconta
   // Unknown country (owner 03.11): written to in European working hours; the domain's TLD above still catches an excluded country.
   if (banned.includes(code)) return no("country_excluded", code, { permanent: true });
 
-  if (ROLE_LOCAL_PARTS.has(local.replace(/[+].*$/, "")) ) return no("role_address", `${local}@`, { permanent: true });
+  // Owner 03.11: «мені треба розіслати на всіх крім Microsoft» — service
+  // addresses, catch-all domains, not yet verified addresses and mail outside
+  // Google go too (Microsoft is left out where people are picked). What stays:
+  // the exclusions, the 90 days, the source, excluded countries, blocked
+  // domains and an address the check found does not exist.
   if (BLOCKED_RECIPIENT_DOMAINS.has(domain)) return no("blocked_domain", domain, { permanent: true });
-
   const status = String(lead.verification ?? "").trim().toLowerCase();
-  if (status === "catch_all" || status === "catch-all" || status === "accept_all") return no("catch_all", domain, { permanent: true });
   if (status === "invalid") return no("invalid", "", { permanent: true });
-  if (status !== "valid" || !validDate(lead.verifiedAt)) {
-    return no("not_verified", "адресу не перевірено", { needsRecheck: true });
-  }
-  const age = Math.floor((now.getTime() - Date.parse(lead.verifiedAt)) / dayMs);
-  if (age > VERIFICATION_MAX_DAYS) return no("verification_stale", `перевірено ${age} дн тому`, { needsRecheck: true });
-
-  const google = await mailOnGoogle(domain, { dns, now: now.getTime() });
-  if (google === null) return no("mx_unknown", "DNS не відповів — спробуємо пізніше");
-  if (!google) return no("not_google_mx", domain, { permanent: true });
 
   return { ok: true, reason: null, detail: "", permanent: false, needsRecheck: false };
 }

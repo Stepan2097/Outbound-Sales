@@ -366,23 +366,6 @@ test("ESP 6: виключення, додане посеред ланцюжка,
   assert.equal(w.connector.sent.length, 1, "другого листа немає");
 });
 
-test("ESP 6: застаріла верифікація — лист не йде, лід позначено на повторну перевірку один раз, ланцюжок не зупинено", async (t) => {
-  forgetMx();
-  const w = await world(t);
-  const filters = defaultFilters({ dns: GOOGLE_MX });
-  const campaign = await w.campaigns.create({ name: "Northwind", steps: w.steps, senders: ["anna@advantage-mail.com"] });
-  await w.campaigns.enroll(campaign.id, [{ ...CHECKED_LEAD, verifiedAt: "2026-08-01" }]);
-  await w.campaigns.setState(campaign.id, "running");
-  const first = await w.tick(TUESDAY, { filters });
-  assert.equal(first.sent, 0);
-  assert.equal(first.skipped.verification_stale, 1);
-  await w.tick(at(0, 30), { filters });
-  const [row] = w.campaigns.enrollmentsOf(campaign.id);
-  assert.deepEqual([row.status, row.recheck], ["active", "verification_stale"]);
-  assert.equal((await allEntries()).filter((entry) => entry.type === "contact.skipped").length, 1, "позначено один раз, а не щохвилини");
-  assert.equal(w.connector.sent.length, 0);
-});
-
 test("ESP 6: без джерела лист не йде навіть у вже запущеній кампанії", async (t) => {
   forgetMx();
   const w = await world(t);

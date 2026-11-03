@@ -65,28 +65,12 @@ test("глобальні виключення — назавжди: відпис
   assert.equal((await exclusions()).get("no@x-corp.com").actor, "ira@advantage-agency.co");
 });
 
-test("верифікація: лише «valid» і не старша 30 днів; інакше лід чекає й позначається на повторну перевірку", async () => {
-  assert.equal((await check({ verifiedAt: "2026-09-10" })).ok, true, "рівно 30 днів — ще можна");
-  const stale = await check({ verifiedAt: "2026-09-09" });
-  assert.deepEqual([stale.reason, stale.needsRecheck, stale.permanent], ["verification_stale", true, false]);
-  assert.match(stale.detail, /31 дн/);
-  const none = await check({ verification: "", verifiedAt: "" });
-  assert.deepEqual([none.reason, none.needsRecheck], ["not_verified", true]);
-  assert.equal((await check({ verification: "unknown" })).reason, "not_verified");
-  assert.deepEqual([(await check({ verification: "invalid" })).reason, (await check({ verification: "invalid" })).permanent], ["invalid", true]);
-});
-
-test("фільтри пілоту: без catch-all, без службових адрес, без пошти Apple, лише MX на Google", async () => {
-  assert.equal((await check({ verification: "catch_all" })).reason, "catch_all");
-  assert.equal((await check({ verification: "accept_all" })).reason, "catch_all");
-  for (const local of ["abuse", "postmaster", "admin", "info", "noreply", "sales"]) {
-    const verdict = await check({ email: `${local}@northwind.co.uk` });
-    assert.deepEqual([verdict.reason, verdict.permanent], ["role_address", true], local);
+test("на всіх, крім Microsoft (03.11): не перевірені, застарілі, catch-all, службові й не на Google — ідуть; не існуюча адреса й заблоковані домени — ні", async () => {
+  for (const lead of [{ verifiedAt: "2026-08-01" }, { verification: "", verifiedAt: "" }, { verification: "unknown" }, { verification: "catch_all" }, { email: "info@northwind.co.uk" }, { email: "olena@outlook-co.com" }]) {
+    assert.equal((await check(lead)).ok, true, JSON.stringify(lead));
   }
-  assert.equal((await check({ email: "info+uk@northwind.co.uk" })).reason, "role_address", "з тегом після + — теж");
+  assert.deepEqual([(await check({ verification: "invalid" })).reason, (await check({ verification: "invalid" })).permanent], ["invalid", true]);
   for (const domain of ["icloud.com", "me.com", "mac.com"]) assert.equal((await check({ email: `olena@${domain}` })).reason, "blocked_domain");
-  const outlook = await check({ email: "olena@outlook-co.com" });
-  assert.deepEqual([outlook.reason, outlook.permanent], ["not_google_mx", true]);
 });
 
 test("MX: Google — так; інше — ні; DNS без відповіді — «невідомо», і таке не запам'ятовується", async () => {
@@ -95,7 +79,6 @@ test("MX: Google — так; інше — ні; DNS без відповіді �
   assert.equal(await mailOnGoogle("northwind.co.uk", { dns: flaky }), null);
   assert.equal(await mailOnGoogle("northwind.co.uk", { dns: flaky }), null);
   assert.equal(asked, 2, "невдачу не закешовано");
-  assert.equal((await check({}, { dns: flaky })).reason, "mx_unknown");
   assert.equal(await mailOnGoogle("nowhere.example", { dns: { resolveMx: async () => { throw Object.assign(new Error("nx"), { code: "ENOTFOUND" }); } } }), false);
   assert.equal(await mailOnGoogle("mixed.example", { dns: { resolveMx: async () => [{ exchange: "aspmx.l.google.com" }, { exchange: "mx.other.net" }] } }), false, "змішані MX — не Google");
   let calls = 0;
@@ -190,8 +173,8 @@ test("маршрути: виключити може кожен, хто бачи�
     ["no@x-corp.com", "no", true],
     ["hans@firma.com", "country_excluded", true],
     ["fresh@northwind.co.uk", "no_source", false],
-    ["old@northwind.co.uk", "verification_stale", false]
+    ["old@northwind.co.uk", "ok", false]
   ]);
-  assert.deepEqual(checked.payload.counts, { ok: 1, refused: 2, waiting: 2 });
+  assert.deepEqual(checked.payload.counts, { ok: 2, refused: 2, waiting: 1 });
   assert.equal((await allEntries()).filter((row) => row.type.startsWith("message.")).length, 0, "перевірка нічого не надсилає й не пише");
 });
