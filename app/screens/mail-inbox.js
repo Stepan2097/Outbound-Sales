@@ -11,6 +11,13 @@ import { api, escapeAttr, escapeHtml, onScreen, refreshIcons } from "../core.js"
 
 const CHANNEL_KEY = "unibox:channel";
 const LABEL_TONE = { positive: "tone-live", negative: "tone-warn", referral: "tone-done", neutral: "tone-muted" };
+/** Bounced; not opened yet by anyone on the team; or already read — an open envelope (owner 03.11). */
+function rowIconHtml(row) {
+  if (row.bounced && row.lastDirection === "in") return '<span class="unibox-icon is-bounced" title="Не доставлено"><i data-lucide="mail-x"></i></span>';
+  if (row.unread) return '<span class="unibox-icon is-mail" title="Ще не прочитано"><i data-lucide="mail"></i></span>';
+  return '<span class="unibox-icon is-read" title="Прочитано"><i data-lucide="mail-open"></i></span>';
+}
+
 const KIND_LABEL = { sent: "Ми написали", replied: "Відповідь", autoreplied: "Автовідповідь", bounced: "Не доставлено", unsubscribed: "Відписка" };
 const FOLDER_ICON = { inbox: "inbox", auto: "bot", unsubscribed: "user-x", sent: "send", starred: "star", bounced: "mail-x" };
 
@@ -185,7 +192,7 @@ function listHtml() {
       <input type="checkbox" data-unibox-pick="${escapeAttr(row.key)}" aria-label="Вибрати розмову з ${escapeAttr(who(row))}"${unibox.selected.has(row.key) ? " checked" : ""} />
       <button type="button" class="unibox-star${row.starred ? " is-on" : ""}" data-unibox-star="${escapeAttr(row.key)}" aria-pressed="${row.starred}" aria-label="${row.starred ? "Зняти зірочку" : "Позначити зірочкою"}"><i data-lucide="star"></i></button>
       <button type="button" class="unibox-open" data-unibox-open="${escapeAttr(row.key)}">
-        <span class="unibox-icon is-${row.bounced && row.lastDirection === "in" ? "bounced" : "mail"}"><i data-lucide="${row.bounced && row.lastDirection === "in" ? "mail-x" : "mail"}"></i></span>
+        ${rowIconHtml(row)}
         <span class="unibox-who" title="${escapeAttr(row.contact)}">${escapeHtml(who(row))}<small>${row.count}</small></span>
         <span class="unibox-text"><span class="unibox-subject">${escapeHtml(row.subject || "(без теми)")}</span>${row.snippet ? `<span class="unibox-dot">•</span><span class="unibox-snippet">${escapeHtml(row.snippet)}</span>` : ""}</span>
         <span class="unibox-meta">${labelPill(row.label)}</span>

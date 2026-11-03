@@ -283,3 +283,9 @@
   max-height: none;
   overflow: visible;
 }
+
+/* Прочитана розмова — відкритий конверт, приглушений (власник 03.11). */
+.unibox-icon.is-read {
+  background: var(--surface-sunk);
+  color: var(--muted);
+}

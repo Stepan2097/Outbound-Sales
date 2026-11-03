@@ -56,3 +56,11 @@ test("the cold-mail list on «Вхідні» is full height — no inner scroll,
   const inbox = readFileSync(new URL("../app/styles/mail-inbox.css", import.meta.url), "utf8");
   assert.match(inbox, /#unibox \.unibox-list \{\n  max-height: none;\n  overflow: visible;\n\}/);
 });
+
+test("a conversation somebody on the team already read has an open, muted envelope; unread — the closed one (owner 03.11)", () => {
+  const screen = readFileSync(new URL("../app/screens/mail-inbox.js", import.meta.url), "utf8");
+  const inbox = readFileSync(new URL("../app/styles/mail-inbox.css", import.meta.url), "utf8");
+  assert.match(screen, /if \(row\.unread\) return '<span class="unibox-icon is-mail"[^']*><i data-lucide="mail"><\/i><\/span>';/);
+  assert.match(screen, /return '<span class="unibox-icon is-read"[^']*><i data-lucide="mail-open"><\/i><\/span>';/);
+  assert.match(inbox, /\.unibox-icon\.is-read \{/);
+});
