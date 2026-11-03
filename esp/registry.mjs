@@ -1,6 +1,7 @@
 import { resolve4, resolveMx, resolveTxt } from "node:dns/promises";
 
 import { allEntries, append, contactKey } from "./journal.mjs";
+import { SENDER_DAILY_CAP } from "./limits.mjs";
 
 /**
  * The registry of sending domains and senders.
@@ -70,7 +71,7 @@ export async function registry() {
       });
     } else if (entry.type === "sender.updated" && senders.has(data.email)) {
       const sender = senders.get(data.email);
-      for (const field of ["person", "rampStage", "mailboxRef", "displayName"]) {
+      for (const field of ["person", "rampStage", "mailboxRef", "displayName", "coldLimit"]) {
         if (data[field] !== undefined) sender[field] = data[field];
       }
       sender.history.push({ ...stamp, changed: Object.keys(data).filter((key) => key !== "email") });
@@ -163,7 +164,7 @@ export async function addSender({ email, displayName = "", mailboxRef = "", pers
  * stage moves one step at a time — up only by the ramp rule (ESP 4/8), down at
  * any time — and every move is a line with its author.
  */
-export async function updateSender({ email, person, rampStage, mailboxRef, displayName }, actor) {
+export async function updateSender({ email, person, rampStage, mailboxRef, displayName, coldLimit }, actor) {
   const key = contactKey(email);
   const { senders } = await registry();
   const found = senders.find((row) => row.email === key);
@@ -186,6 +187,12 @@ export async function updateSender({ email, person, rampStage, mailboxRef, displ
       throw fail("Рампа йде по одному етапу вгору: перестрибнути не можна.", 409);
     }
     change.rampStage = stage;
+  }
+  // Its cold letters a day (owner 03.11), set on «Прогрів пошт».
+  if (coldLimit !== undefined && Number(coldLimit) !== found.coldLimit) {
+    const limit = Number(coldLimit);
+    if (!Number.isInteger(limit) || limit < 0 || limit > SENDER_DAILY_CAP) throw fail(`Ліміт холодних листів — ціле число від 0 до ${SENDER_DAILY_CAP} на день.`);
+    change.coldLimit = limit;
   }
   if (!Object.keys(change).length) return null;
   return append({ type: "sender.updated", actor, data: { email: key, ...change } });

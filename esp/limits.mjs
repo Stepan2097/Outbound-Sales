@@ -141,16 +141,27 @@ export function seeded(seed, min, max) {
   return min + (value % (max - min + 1));
 }
 
+// Owner 03.11: «ліміт відправки листів я маю вибирати в інтерфейсі в стовпчику
+// "Холодних листів" … за замовчуванням постав всюди 5» — and «перший день 3
+// листа (це завжди для всіх кампаній) з пошти, 2 день +2 листів, 3 день теж +2
+// якщо дозволяє ліміт і тд».
+export const COLD_LIMIT_DEFAULT = 5;
+export const COLD_RAMP = { first: 3, step: 2 };
+
+/** A mailbox's cold limit per day, as set on «Прогрів пошт» (5 until somebody sets it). */
+export function senderDailyLimit(sender) {
+  const set = sender?.coldLimit;
+  if (set === undefined || set === null || set === "") return COLD_LIMIT_DEFAULT;
+  return Math.min(Math.max(0, Math.floor(Number(set)) || 0), SENDER_DAILY_CAP);
+}
+
 /**
- * The cold letters a sender may send today: its ramp stage, but never below the
- * workspace's floor — `ESP_COLD_LIMIT_FLOOR` (owner 15.10: «постав у всіх 0 / 20»).
- * The ramp still climbs above the floor (25, 30, 35) on clean weeks.
+ * The cold letters a mailbox may send today, across all campaigns: 3 on its
+ * first day of cold mail, 2 more on each day after that it wrote cold mail,
+ * never above its limit. `row` is the mailbox's line of `sendLedger`.
  */
-export function senderDailyLimit(sender, env = process.env) {
-  const stage = Number(sender?.rampStage);
-  const ramp = RAMP_LIMITS.includes(stage) ? stage : RAMP_LIMITS[0];
-  const floor = Math.min(Math.max(0, Number(env.ESP_COLD_LIMIT_FLOOR) || 0), SENDER_DAILY_CAP);
-  return Math.min(Math.max(ramp, floor), SENDER_DAILY_CAP);
+export function coldAllowance(sender, row) {
+  return Math.min(senderDailyLimit(sender), COLD_RAMP.first + COLD_RAMP.step * (row?.coldDays || 0));
 }
 
 /**
@@ -172,9 +183,15 @@ export function sendLedger(entries, { now = new Date(), zone = COUNTING_ZONE } =
     const from = String(entry.data?.from || "").toLowerCase();
     if (!from) continue;
     const at = new Date(entry.at);
-    const row = senders.get(from) || { today: 0, cold: 0, warmup: 0, lastAt: null };
+    const row = senders.get(from) || { today: 0, cold: 0, warmup: 0, lastAt: null, coldDays: 0, coldDates: new Set() };
     if (!row.lastAt || at > row.lastAt) row.lastAt = at;
-    if (localTime(at, zone).date === today) {
+    const date = localTime(at, zone).date;
+    // The days before today it wrote cold mail: how far its daily ramp has gone.
+    if (entry.type === "message.sending" && date < today && !row.coldDates.has(date)) {
+      row.coldDates.add(date);
+      row.coldDays = row.coldDates.size;
+    }
+    if (date === today) {
       row.today += 1;
       const cold = entry.type === "message.sending";
       if (cold) row.cold += 1; else row.warmup += 1;
@@ -202,16 +219,16 @@ export function sendDecision({ sender, recipient = {}, ledger, now = new Date(),
   const domain = email.split("@")[1] || "";
   const mine = ledger.senders.get(email) || { today: 0, cold: 0, warmup: 0, lastAt: null };
   const warmup = purpose === "warmup";
-  // Cold mail answers to the ramp's limit; the warm-up to its own plan (checked
-  // by the warm-up), with the sender's cap as a ceiling.
-  const limit = warmup ? SENDER_DAILY_CAP : senderDailyLimit(sender);
+  // Cold mail answers to the mailbox's limit and its daily ramp; the warm-up to
+  // its own plan (checked by the warm-up), with the sender's cap as a ceiling.
+  const limit = warmup ? SENDER_DAILY_CAP : coldAllowance(sender, mine);
   const used = warmup ? (mine.warmup ?? mine.today) : (mine.cold ?? mine.today);
   const tomorrow = () => nextCountingDay(now);
 
   if (used >= limit) {
     return refuse("sender_daily_limit", warmup
       ? `${email} сьогодні вже надіслав ${used} листів прогріву — більше не можна.`
-      : `${email} сьогодні вже надіслав ${used} з ${limit} холодних листів (етап рампи).`, tomorrow());
+      : `${email} сьогодні вже надіслав ${used} з ${limit} холодних листів (перший день 3, далі щодня +2, до ліміту ${senderDailyLimit(sender)}).`, tomorrow());
   }
   const domainToday = warmup ? 0 : ledger.domains.get(domain) || 0;
   if (domainToday >= domainLimit && !PUBLIC_MAIL_DOMAINS.has(domain)) {

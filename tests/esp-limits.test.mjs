@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  DOMAIN_DAILY_LIMIT, GAP_MINUTES, inWindow, localTime, nextWindowOpen, seeded, sendDecision, sendLedger, senderDailyLimit, zonesFor
+  COLD_LIMIT_DEFAULT, DOMAIN_DAILY_LIMIT, GAP_MINUTES, coldAllowance, inWindow, localTime, nextWindowOpen, seeded, sendDecision, sendLedger, senderDailyLimit, zonesFor
 } from "../esp/limits.mjs";
 
 /**
@@ -10,7 +10,7 @@ import {
  * random gaps, and no catching up.
  */
 
-const SENDER = { email: "anna@advantage-mail.com", rampStage: 10 };
+const SENDER = { email: "anna@advantage-mail.com", coldLimit: 10 };
 const POLAND = { country: "Poland" };
 // Tuesday 13.10.2026, 11:00 in Warsaw (09:00 UTC), 12:00 in Kyiv.
 const TUESDAY = new Date("2026-10-13T09:00:00Z");
@@ -22,18 +22,36 @@ function sent(from, at, { failed = false } = {}) {
   return failed ? [sending, { seq: seq + 1000, type: "message.failed", at: sending.at, data: { sendingSeq: seq } }] : [sending];
 }
 const ledgerOf = (rows, now = TUESDAY) => sendLedger(rows.flat(), { now });
+// One cold letter on each of `days` days of the week before: a mailbox that has
+// written cold mail that many days, so its daily ramp has climbed.
+const before = (from, days) => Array.from({ length: days }, (_, index) => sent(from, new Date("2026-10-05T09:00:00Z").getTime() + index * 86_400_000));
 
 // ── limits ──────────────────────────────────────────────────────────────────
 
-test("a sender's daily limit is its ramp stage, never above 35", () => {
-  assert.equal(senderDailyLimit({ rampStage: 5 }), 5);
-  assert.equal(senderDailyLimit({ rampStage: 35 }), 35);
-  assert.equal(senderDailyLimit({ rampStage: 50 }), 5, "an unknown stage is the first one, not the target");
+test("a mailbox's cold limit is what was set for it, 5 until then, never above 35 (03.11)", () => {
+  assert.equal(COLD_LIMIT_DEFAULT, 5);
   assert.equal(senderDailyLimit({}), 5);
+  assert.equal(senderDailyLimit({ rampStage: 35 }), 5, "the ramp stage no longer sets it");
+  assert.equal(senderDailyLimit({ coldLimit: 12 }), 12);
+  assert.equal(senderDailyLimit({ coldLimit: 0 }), 0);
+  assert.equal(senderDailyLimit({ coldLimit: 80 }), 35);
+});
+
+test("a mailbox's day: 3 on its first day of cold mail, +2 on each day after it wrote, never above its limit (03.11)", () => {
+  assert.deepEqual([0, 1, 2, 3, 4, 5].map((coldDays) => coldAllowance({ coldLimit: 10 }, { coldDays })), [3, 5, 7, 9, 10, 10]);
+  assert.deepEqual([0, 1, 2].map((coldDays) => coldAllowance({}, { coldDays })), [3, 5, 5]);
+  assert.equal(coldAllowance({ coldLimit: 2 }, { coldDays: 0 }), 2);
+  assert.equal(coldAllowance({}, undefined), 3, "a mailbox that never wrote starts at 3");
+  // The ledger counts the days before today it wrote cold mail — not today, not the warm-up's.
+  const rows = [...before(SENDER.email, 2), sent(SENDER.email, TUESDAY.getTime() - 3600_000),
+    [{ seq: 9001, type: "warmup.sending", at: "2026-10-12T09:00:00Z", data: { from: SENDER.email } }]];
+  assert.equal(ledgerOf(rows).senders.get(SENDER.email).coldDays, 2);
+  const third = sendDecision({ sender: SENDER, recipient: POLAND, ledger: ledgerOf(rows), now: TUESDAY });
+  assert.equal(third.limit, 7);
 });
 
 test("the limit counts every campaign's letters of the day; a failed attempt does not count, one in flight does", () => {
-  const rows = [];
+  const rows = before(SENDER.email, 4);
   for (let index = 0; index < 9; index += 1) rows.push(sent(SENDER.email, TUESDAY.getTime() - (index + 1) * 50 * 60_000));
   rows.push(sent(SENDER.email, TUESDAY.getTime() - 20 * 60_000, { failed: true }));
   const ledger = ledgerOf(rows);
@@ -136,8 +154,8 @@ test("no burst at the opening: senders start their day at different minutes, nev
 
 test("yesterday's unsent letters do not make today's limit bigger", () => {
   const monday = new Date("2026-10-12T09:00:00Z");
-  // On Monday the sender managed only 2 of its 10.
-  const rows = [sent(SENDER.email, monday.getTime()), sent(SENDER.email, monday.getTime() + 30 * 60_000)];
+  // On Monday the sender managed only 2 of its 10 (it had written cold mail for three days before).
+  const rows = [...before(SENDER.email, 3), sent(SENDER.email, monday.getTime()), sent(SENDER.email, monday.getTime() + 30 * 60_000)];
   // On Tuesday it sends its ten through the day, gap by gap…
   let now = new Date("2026-10-13T07:00:00Z");
   let sentTuesday = 0;
@@ -155,7 +173,7 @@ test("yesterday's unsent letters do not make today's limit bigger", () => {
   assert.equal(sentTuesday, 10);
   const after = sendDecision({ sender: SENDER, recipient: POLAND, ledger: ledgerOf(rows, now), now });
   assert.equal(after.reason, "sender_daily_limit");
-  const times = rows.slice(2).map((row) => new Date(row[0].at));
+  const times = rows.slice(5).map((row) => new Date(row[0].at));
   for (let index = 1; index < times.length; index += 1) {
     assert.ok((times[index] - times[index - 1]) / 60_000 >= GAP_MINUTES.min, "two letters closer than 12 minutes");
   }
@@ -165,12 +183,12 @@ test("local time is read in the zone asked for", () => {
   assert.deepEqual(localTime(new Date("2026-10-13T21:30:00Z"), "Europe/Kyiv"), { weekday: 3, hour: 0, minute: 30, date: "2026-10-14" });
 });
 
-test("/api/esp/limits reads the registry and the journal: each sender's day against its ramp, each domain's against 105", async (t) => {
+test("/api/esp/limits reads the registry and the journal: each sender's day against its limit and ramp, each domain's against 105", async (t) => {
   const { mkdtemp, rm } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
   const { append, useJournal } = await import("../esp/journal.mjs");
-  const { addDomain, addSender, setDomainStatus } = await import("../esp/registry.mjs");
+  const { addDomain, addSender, setDomainStatus, updateSender } = await import("../esp/registry.mjs");
   const { handleEspApi } = await import("../esp/api.mjs");
   const dir = await mkdtemp(join(tmpdir(), "esp-limits-"));
   useJournal(join(dir, "journal.jsonl"));
@@ -178,7 +196,8 @@ test("/api/esp/limits reads the registry and the journal: each sender's day agai
 
   await addDomain({ domain: "advantage-mail.com" }, "test");
   await setDomainStatus({ domain: "advantage-mail.com", status: "ramp" }, "test");
-  await addSender({ email: "anna@advantage-mail.com", rampStage: 10 }, "test");
+  await addSender({ email: "anna@advantage-mail.com" }, "test");
+  await updateSender({ email: "anna@advantage-mail.com", coldLimit: 10 }, "test");
   for (let index = 0; index < 3; index += 1) {
     await append({ type: "message.sending", contact: `lead${index}@example.com`, data: { from: "anna@advantage-mail.com", to: `lead${index}@example.com` } });
   }
@@ -189,7 +208,7 @@ test("/api/esp/limits reads the registry and the journal: each sender's day agai
   });
   assert.equal(answer.status, 200);
   const anna = answer.payload.senders.find((row) => row.email === "anna@advantage-mail.com");
-  assert.deepEqual([anna.today, anna.limit], [3, 10]);
+  assert.deepEqual([anna.today, anna.limit, anna.coldLimit], [3, 3, 10], "its first day: 3 of a limit of 10");
   assert.deepEqual(answer.payload.domains.map((row) => [row.domain, row.today, row.limit]), [["advantage-mail.com", 3, 105]]);
 });
 
@@ -201,9 +220,32 @@ test("a mail provider's own domain is not one sender: many @gmail.com mailboxes 
   assert.notEqual(answer.reason, "domain_daily_limit");
 });
 
-test("нижня межа ліміту холодних листів — ESP_COLD_LIMIT_FLOOR: усі пошти щонайменше 20 на день, рампа над нею росте далі (15.10)", async () => {
-  const { senderDailyLimit } = await import("../esp/limits.mjs");
-  assert.equal(senderDailyLimit({ rampStage: 5 }, { ESP_COLD_LIMIT_FLOOR: "20" }), 20);
-  assert.equal(senderDailyLimit({ rampStage: 30 }, { ESP_COLD_LIMIT_FLOOR: "20" }), 30);
-  assert.equal(senderDailyLimit({ rampStage: 5 }, {}), 5);
+test("«Холодних листів»: the limit is typed per mailbox and kept in the registry; outside 0–35 it is refused (03.11)", async (t) => {
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { useJournal } = await import("../esp/journal.mjs");
+  const { addDomain, addSender, registry, setDomainStatus } = await import("../esp/registry.mjs");
+  const { handleEspApi } = await import("../esp/api.mjs");
+  const dir = await mkdtemp(join(tmpdir(), "esp-cold-limit-"));
+  useJournal(join(dir, "journal.jsonl"));
+  t.after(async () => { useJournal(null); await rm(dir, { recursive: true, force: true }); });
+  await addDomain({ domain: "advantage-mail.com" }, "test");
+  await setDomainStatus({ domain: "advantage-mail.com", status: "ramp" }, "test");
+  await addSender({ email: "anna@advantage-mail.com" }, "test");
+
+  const post = async (body) => {
+    let answer = null;
+    await handleEspApi({
+      request: { method: "POST", auth: { profile: { role: "admin", email: "owner@advantage.agency" } } }, response: {}, url: new URL("http://x/api/esp/warmup/cold-limit"),
+      sendJson: (_r, status, payload) => { answer = { status, payload }; }, readJson: async () => body, esp: {}
+    });
+    return answer;
+  };
+  assert.equal((await post({ mailbox: "anna@advantage-mail.com", limit: 12 })).status, 200);
+  const anna = (await registry()).senders.find((row) => row.email === "anna@advantage-mail.com");
+  assert.deepEqual([anna.coldLimit, senderDailyLimit(anna)], [12, 12]);
+  assert.equal((await post({ mailbox: "anna@advantage-mail.com", limit: 36 })).status, 400);
+  assert.equal((await post({ mailbox: "anna@advantage-mail.com", limit: 2.5 })).status, 400);
+  assert.equal((await post({ mailbox: "nobody@advantage-mail.com", limit: 5 })).status, 404);
 });

@@ -537,3 +537,27 @@
 /* Розвантаження (аудит 16.10, D11): пояснення прогріву пошт — згорнуте. */
 .warmup-mail-about summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 .warmup-mail-about p { margin: 6px 0 0; max-width: 90ch; color: var(--muted); font-size: 13px; }
+
+/* «Холодних листів» — ліміт на день вписується прямо в таблиці (власник 03.11). */
+.warmup-mail-cold-limit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.warmup-mail-cold-limit input {
+  width: 64px;
+  padding: 4px 6px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.warmup-mail-cold small {
+  display: block;
+  margin-top: 4px;
+  white-space: nowrap;
+}

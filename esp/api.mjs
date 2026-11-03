@@ -22,7 +22,7 @@ import { UNIBOX_FOLDERS, uniboxList, uniboxProblems, uniboxThread } from "./unib
 import { recordAboutContact, recordFailed, recordSending, recordSent } from "./messages.mjs";
 import { allEntries, append, contactKey } from "./journal.mjs";
 import { applyRampReviews, reviewRamp } from "./ramp.mjs";
-import { DOMAIN_DAILY_LIMIT, GAP_MINUTES, WINDOW, sendDecision, sendLedger, senderDailyLimit } from "./limits.mjs";
+import { DOMAIN_DAILY_LIMIT, GAP_MINUTES, WINDOW, coldAllowance, sendDecision, sendLedger, senderDailyLimit } from "./limits.mjs";
 import { canSend, isDisconnected, registry, setSenderRole, tagCatalog, updateSender } from "./registry.mjs";
 import { LetterError, assertPlainLetter } from "./letter.mjs";
 import { TEMPLATE_VARIABLES, TemplateError, prepareTemplate } from "./template.mjs";
@@ -714,6 +714,21 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
     return true;
   }
 
+  // «Холодних листів» (owner 03.11): a mailbox's cold limit per day, typed in the table.
+  if (method === "POST" && path === "/warmup/cold-limit") {
+    const body = (await readJson(request)) || {};
+    try {
+      await updateSender({ email: body.mailbox, coldLimit: body.limit }, actor);
+    } catch (error) {
+      if (!error?.statusCode) throw error;
+      sendJson(response, error.statusCode, { success: false, error: error.message });
+      return true;
+    }
+    await logged("mailbox_cold_limit", { mailbox: String(body.mailbox || ""), limit: Number(body.limit) });
+    sendJson(response, 200, { success: true });
+    return true;
+  }
+
   // «Прибрати з прогріву» / «Повернути» (13.10): the mailbox stops warming and
   // leaves the table; coming back, it is paused until somebody presses «Старт».
   if (method === "POST" && (path === "/warmup/remove" || path === "/warmup/restore")) {
@@ -972,7 +987,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
         return {
           email: sender.email, domain: sender.domain, status: sender.effectiveStatus, rampStage: sender.rampStage,
           // Today's count is cold letters against the cold limit; the warm-up's are apart (14.10).
-          limit: senderDailyLimit(sender), today: row.cold ?? row.today, warmupToday: row.warmup || 0, lastAt: row.lastAt ? row.lastAt.toISOString() : null,
+          limit: coldAllowance(sender, row), coldLimit: senderDailyLimit(sender), today: row.cold ?? row.today, warmupToday: row.warmup || 0, lastAt: row.lastAt ? row.lastAt.toISOString() : null,
           tags: sender.tags || [], role: sender.role || null
         };
       }),

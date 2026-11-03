@@ -14,6 +14,7 @@ import { addDomain, addSender, canSend, registry, setDomainStatus } from "../esp
 import { SenderGate, stateSenderStore } from "../esp/senders.mjs";
 import { postponedDue, runTick } from "../esp/sequence.mjs";
 import { templateStore } from "../esp/templates.mjs";
+import { seasoned } from "./esp-cold-history.mjs";
 
 /**
  * ESP 7 — the inboxes: a reply stops the chain, an auto-reply moves the next
@@ -24,7 +25,7 @@ const TUESDAY = new Date("2026-10-13T08:30:00Z");
 const at = (days, minutes = 0) => new Date(TUESDAY.getTime() + days * 86_400_000 + minutes * 60_000);
 const ANNA = "anna@advantage-mail.com";
 
-async function world(t) {
+async function world(t, { coldDays = 0 } = {}) {
   t.mock.timers.enable({ apis: ["Date"], now: TUESDAY.getTime() - 3600_000 });
   const dir = await mkdtemp(join(tmpdir(), "esp-in-"));
   useJournal(join(dir, "journal.jsonl"));
@@ -32,6 +33,7 @@ async function world(t) {
   await addDomain({ domain: "advantage-mail.com" }, "test");
   await setDomainStatus({ domain: "advantage-mail.com", status: "ramp" }, "test");
   await addSender({ email: ANNA, rampStage: 35 }, "test");
+  if (coldDays) await seasoned(t, [ANNA], { days: coldDays, now: new Date(TUESDAY.getTime() - 3600_000) });
   let templates = [];
   const tstore = templateStore({ read: () => templates, write: async (value) => { templates = value; } });
   const steps = [];
@@ -141,7 +143,8 @@ test("bounces by code: 5.1.1 stops the chain and excludes the address; 5.7.x rai
 });
 
 test("unsubscribe the same day: the mailto, a word in the reply, a short «no» — and «no problem» is a reply, not an unsubscribe", async (t) => {
-  const w = await world(t);
+  // Four first letters on one day: a mailbox past its first days.
+  const w = await world(t, { coldDays: 3 });
   const sent = await started(w, ["mailto", "word", "short", "fine"]);
   w.connector.deliver(ANNA, reply(ANNA, { from: "mailto@mailto-co.com", subject: "unsubscribe", body: "" }));
   w.connector.deliver(ANNA, reply(ANNA, { from: "word@word-co.com", body: "Please remove me from your list." }), { threadId: sent.word.threadId });

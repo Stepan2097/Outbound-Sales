@@ -1,6 +1,6 @@
 import { isHoliday } from "./holidays.mjs";
 import { buildLetter, messageIdFor } from "./letter.mjs";
-import { COUNTING_ZONE, SENDER_DAILY_CAP, localTime, seeded, sendDecision, sendLedger, senderDailyLimit } from "./limits.mjs";
+import { COUNTING_ZONE, SENDER_DAILY_CAP, coldAllowance, localTime, seeded, sendDecision, sendLedger, senderDailyLimit } from "./limits.mjs";
 import { DOMAIN_LABEL } from "./registry.mjs";
 import { replySubject } from "./thread.mjs";
 
@@ -260,11 +260,12 @@ export function warmupView(entries, { senders = [], domains = [], now = new Date
       : !["aging", "ramp", "active"].includes(domainStatus) ? `домен у стані «${DOMAIN_LABEL[domainStatus] || domainStatus || "немає"}»` : null;
     const limit = senderDailyLimit(sender);
     const coldToday = ledger.senders.get(sender.email)?.cold || 0;
+    const coldAllowed = coldAllowance(sender, ledger.senders.get(sender.email));
     return {
       email: sender.email, domain: sender.domain, domainStatus, person: sender.person || sender.displayName || "", role: sender.role || null, tags: sender.tags || [],
       status: blocked ? "blocked" : mine.running ? "running" : mine.startedAt ? "paused" : "never",
       blocked, day: mine.day, plannedToday: mine.plannedToday, planOfDay: mine.plannedToday,
-      sentToday: mine.sentToday, firstsToday: mine.firstsToday, repliesToday: mine.repliesToday, coldToday, limit,
+      sentToday: mine.sentToday, firstsToday: mine.firstsToday, repliesToday: mine.repliesToday, coldToday, coldAllowed, limit,
       sent: mine.sent, repliesReceived: mine.repliesReceived, repliesSent: mine.repliesSent, received: mine.received,
       rescued: mine.rescued, rescuedOwn: mine.rescuedOwn, landedInSpam: mine.landedInSpam, failedToday: mine.failedToday, lastError: mine.lastError,
       startedAt: mine.startedAt, pausedAt: mine.pausedAt, by: mine.by

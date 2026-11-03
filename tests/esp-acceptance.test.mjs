@@ -16,6 +16,7 @@ import { addDomain, addSender, canSend, registry, setDomainStatus } from "../esp
 import { SenderGate, stateSenderStore } from "../esp/senders.mjs";
 import { postponedDue, runTick } from "../esp/sequence.mjs";
 import { templateStore } from "../esp/templates.mjs";
+import { seasoned } from "./esp-cold-history.mjs";
 
 /**
  * ESP 11 — the gate before the first cold letter, the part a machine can do.
@@ -41,7 +42,7 @@ const MONDAY = new Date("2026-10-12T07:30:00Z"); // 09:30 in Warsaw, 10:30 in Ky
 const at = (days, minutes = 0) => new Date(MONDAY.getTime() + days * 86_400_000 + minutes * 60_000);
 const LINK = "https://advantage.agency/case";
 
-async function world(t, { senders = ["anna", "boris"], rampStage = 35, connector = new StubGmailConnector() } = {}) {
+async function world(t, { senders = ["anna", "boris"], rampStage = 35, coldDays = 0, connector = new StubGmailConnector() } = {}) {
   t.mock.timers.enable({ apis: ["Date"], now: MONDAY.getTime() - 3600_000 });
   const dir = await mkdtemp(join(tmpdir(), "esp-acc-"));
   useJournal(join(dir, "journal.jsonl"));
@@ -49,6 +50,7 @@ async function world(t, { senders = ["anna", "boris"], rampStage = 35, connector
   await addDomain({ domain: "advantage-mail.com" }, "acceptance");
   await setDomainStatus({ domain: "advantage-mail.com", status: "ramp" }, "acceptance");
   for (const name of senders) await addSender({ email: `${name}@advantage-mail.com`, displayName: name, rampStage }, "acceptance");
+  if (coldDays) await seasoned(t, senders.map((name) => `${name}@advantage-mail.com`), { days: coldDays, now: new Date(MONDAY.getTime() - 3600_000) });
   let templates = [];
   const tstore = templateStore({ read: () => templates, write: async (value) => { templates = value; } });
   const steps = [];
@@ -93,7 +95,8 @@ const internal = (count) => Array.from({ length: count }, (_, index) => ({ email
 const inbound = (from, to, body, extra = "") => `From: ${from}\r\nTo: ${to}\r\nSubject: Re: test\r\nMessage-ID: <${Math.random().toString(36).slice(2)}@qa>\r\n${extra}Content-Type: text/plain; charset=UTF-8\r\n\r\n${body}`;
 
 test("ESP 11 · 1 — test campaign on 12 internal mailboxes: three letters in one thread, a reply stops, out-of-office moves the step, an unsubscribe the same day", async (t) => {
-  const w = await world(t);
+  // Mailboxes that have written cold mail for a while: six letters each on day 0.
+  const w = await world(t, { coldDays: 5 });
   const campaign = await w.cstore.create({ name: "Acceptance", steps: w.steps, senders: ["anna@advantage-mail.com", "boris@advantage-mail.com"] });
   const people = internal(12);
   await w.cstore.enroll(campaign.id, people);
