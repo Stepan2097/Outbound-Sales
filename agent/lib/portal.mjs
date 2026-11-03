@@ -27,7 +27,7 @@ export class Portal {
     for (let attempt = 0; ; attempt += 1) {
       try {
         res = await fetch(`${this.base}${path}`, {
-          ...init, signal: AbortSignal.timeout(this.timeoutMs),
+          ...init, signal: AbortSignal.timeout(init.timeoutMs ?? this.timeoutMs),
           headers: { ...(init.headers ?? {}), ...(this.token ? { 'X-Agent-Token': this.token } : {}) }
         });
       } catch (error) {
@@ -38,7 +38,7 @@ export class Portal {
         // the portal should not end a visit (03.11: a GET of 30 s, then 38 ms).
         if (!init.method && attempt === 0) continue;
         const action = (() => { try { return JSON.parse(init.body || '{}').action; } catch { return null; } })();
-        throw new Error(`портал Outbound не відповів за ${Math.round(this.timeoutMs / 1000)} с (${path.split('?')[0]}${action ? ` → ${action}` : ''})`);
+        throw new Error(`портал Outbound не відповів за ${Math.round((init.timeoutMs ?? this.timeoutMs) / 1000)} с (${path.split('?')[0]}${action ? ` → ${action}` : ''})`);
       }
       if (![502, 503].includes(res.status) || attempt >= this.gatewayWaitsMs.length) break;
       await res.body?.cancel?.().catch(() => {});
@@ -50,8 +50,8 @@ export class Portal {
     return { ...body, ok: res.ok, status: res.status, success: res.ok && body.success === true,
       ...(!res.ok && !body.error ? { error: `HTTP ${res.status}` } : {}) };
   }
-  #post(payload) {
-    return this.#json(this.prefix, { method: 'POST', headers: { 'content-type': 'application/json' },
+  #post(payload, timeoutMs) {
+    return this.#json(this.prefix, { method: 'POST', headers: { 'content-type': 'application/json' }, ...(timeoutMs ? { timeoutMs } : {}),
       body: JSON.stringify({ accountId: this.accountId, ...(this.leaseId ? { leaseId: this.leaseId } : {}), ...payload }) });
   }
   async agentPath() { return this.prefix; }
@@ -92,8 +92,13 @@ export class Portal {
   log(type, message, meta, level) { return this.#post({ action: 'log', type, message, meta, level }); }
   /** `screen` — { shot, text, url } of the tab, for the portal to read what LinkedIn showed. */
   health(health, note, screen = null) { return this.#post({ action: 'health', health, note, ...(screen ?? {}) }); }
+  /** Why a session failed, written by the portal's model: { cause, next } or null. Waits for the model. */
+  async explain({ shot = null, error = '', record = '', done = '' }) {
+    const answer = await this.#post({ action: 'explain', shot, error, record, done }, 60000);
+    return answer?.success ? answer.explanation ?? null : null;
+  }
   /** The screen a parked account stops on, for the portal to read into its note; health stays as it is. */
-  screen({ shot, text = '', url = '' }) { return this.#post({ action: 'screen', shot, text, url }); }
+  screen({ shot, text = '', url = '' }) { return this.#post({ action: 'screen', shot, text, url }, 60000); }
   /** What somebody asked to have looked at, by opening the link in the group. */
   async loginChecks() {
     const answer = await this.#json(`${this.prefix}/login-checks`);

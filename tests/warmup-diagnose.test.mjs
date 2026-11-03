@@ -42,3 +42,22 @@ test("агент шле знімок з health, портал пише прочи
   assert.match(api, /\.eq\("health_changed_at", now\)/);
   assert.match(ui, /const what = read \|\| /);
 });
+
+test("пояснення збою: модель отримує помилку, хід сесії, що вже зроблено, і знімок — повертає причину й що далі", async () => {
+  const { explainFailure, parseExplanation } = await import("../warmup/diagnose.mjs");
+  let sent = null;
+  const fetchImpl = async (url, init) => {
+    sent = JSON.parse(init.body);
+    return { ok: true, json: async () => ({ content: [{ type: "text", text: '{"cause":"Сервер Outbound завис на пів хвилини, поки агент надсилав запити.","next":"Агент спробує знову сам за кілька хвилин."}' }] }) };
+  };
+  const said = await explainFailure({ shot: "/9j/AAAA", label: "Profile 42", error: "портал Outbound не відповів за 30 с", record: "зроблено: invite — Antoine", done: "закрив браузер" }, { key: "k", fetchImpl });
+  assert.deepEqual(said, { cause: "Сервер Outbound завис на пів хвилини, поки агент надсилав запити.", next: "Агент спробує знову сам за кілька хвилин." });
+  const [image, text] = sent.messages[0].content;
+  assert.equal(image.type, "image");
+  assert.match(text.text, /Помилка: портал Outbound не відповів за 30 с/);
+  assert.match(text.text, /Що система вже зробила: закрив браузер/);
+  assert.equal(parseExplanation('{"next":"x"}'), null);
+  // Без знімка — лише текст.
+  await explainFailure({ error: "e" }, { key: "k", fetchImpl });
+  assert.equal(sent.messages[0].content.length, 1);
+});

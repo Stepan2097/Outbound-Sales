@@ -1,6 +1,6 @@
 import { LABELS as INBOX_LABELS, LABEL_ORDER as INBOX_LABEL_ORDER } from "./inbox-labels.mjs";
 import { scenarioForPrompt } from "./scenarios.mjs";
-import { diagnoseScreen } from "./diagnose.mjs";
+import { diagnoseScreen, explainFailure } from "./diagnose.mjs";
 import { LIVE_ACCOUNT_STATUSES, withAccountQuota } from "./store.mjs";
 import { applyResolved, profilesToResolve } from "./profile-resolve.mjs";
 import { connectCeiling, weeklyAllowance, weeklyConnectAllowance, weeklyConnectCounts } from "./weekly.mjs";
@@ -3976,13 +3976,33 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       // The screen a parked account stops on, from the login watch: read by a
       // model into the note the alert shows. Health and its date stay — this
       // says what LinkedIn shows, not that anything changed.
+      // Why a session failed, in a person's words: the worker hands over the
+      // error, the session's record and the screenshot, the model answers
+      // before the report goes to the group (власник 03.11).
+      if (action === "explain") {
+        const said = await explainFailure({
+          shot: typeof body.shot === "string" ? body.shot : null,
+          label: account.label,
+          error: body.error,
+          record: body.record,
+          done: body.done
+        }, { timeoutMs: 40000 });
+        sendJson(response, 200, { success: true, explanation: said });
+        return true;
+      }
+
       if (action === "screen") {
         if (typeof body.shot !== "string" || !body.shot) return fail(response, sendJson, 400, "No screenshot");
-        sendJson(response, 200, { success: true });
         const health = account.health;
-        if (!["needs_login", "captcha"].includes(health)) return true;
-        diagnoseScreen({ shot: body.shot, text: body.text, url: body.url }).then(async (seen) => {
-          if (!seen) return;
+        if (!["needs_login", "captcha"].includes(health)) {
+          sendJson(response, 200, { success: true, seen: null });
+          return true;
+        }
+        // Answered with what the model read, so the watch's message to the group says it too.
+        const seen = await diagnoseScreen({ shot: body.shot, text: body.text, url: body.url }, { timeoutMs: 40000 });
+        sendJson(response, 200, { success: true, seen });
+        if (!seen) return true;
+        try {
           await anty.from("wl_accounts").update({ health_note: seen.sentence }).eq("id", account.id).eq("health", health).rows();
           await logEvent({
             accountId: account.id,
@@ -3991,7 +4011,9 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
             message: `Знімок екрана: ${seen.sentence}`,
             meta: { kind: seen.kind, sentence: seen.sentence, health, source: "login-watch" }
           });
-        }).catch((error) => console.warn(`[diagnose] ${account.label}: ${error.message}`));
+        } catch (error) {
+          console.warn(`[diagnose] ${account.label}: ${error.message}`);
+        }
         return true;
       }
 

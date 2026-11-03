@@ -37,3 +37,12 @@ export function humanReason(raw) {
   for (const [pattern, said] of KNOWN) if (pattern.test(text)) return said;
   return text.slice(0, 300);
 }
+
+/** The session's own record, short: what it did, what went wrong, how the tab fared. */
+export function sessionRecord(result) {
+  return [
+    ...(result.actions || []).slice(-15).map((action) => `зроблено: ${action.kind} — ${action.detail || ''}`),
+    ...(result.errors || []).map((error) => `помилка: ${error}`),
+    ...(result.memory || []).slice(-3).map((row) => `пам'ять вкладки: ${typeof row === 'string' ? row : JSON.stringify(row)}`)
+  ].join('\n').slice(0, 4000);
+}

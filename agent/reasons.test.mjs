@@ -13,3 +13,17 @@ test('a failure is said in words, and an unknown one as it came', () => {
   assert.equal(humanReason('щось зовсім нове'), 'щось зовсім нове');
   assert.match(humanReason(''), /причини агент не записав/);
 });
+
+// 03.11: the model explains a failure from the session's record — what it did, the errors, the tab's memory.
+test('the session record handed to the model is short and says what happened', async () => {
+  const { sessionRecord } = await import('./lib/reasons.mjs');
+  const record = sessionRecord({
+    actions: [{ kind: 'profile_view', detail: 'переглянув профіль x' }],
+    errors: ['портал Outbound не відповів за 30 с (/api/warmup/agent → invite)'],
+    memory: ['240 МБ JS']
+  });
+  assert.match(record, /зроблено: profile_view — переглянув профіль x/);
+  assert.match(record, /помилка: портал Outbound не відповів/);
+  assert.match(record, /пам'ять вкладки: 240 МБ JS/);
+  assert.equal(sessionRecord({}), '');
+});

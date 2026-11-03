@@ -43,34 +43,26 @@ export function parseDiagnosis(text) {
 }
 
 /**
- * Ask the model. `shot` is a base64 JPEG/PNG of the tab, `text` the page's
- * innerText. Resolves to { kind, sentence } or null; never throws.
+ * One question to the model with a picture (optional) and text; the answer's
+ * text, or null. Never throws — a failure is said through `onFail`.
  */
-export async function diagnoseScreen({ shot, text = "", url = "" }, {
+async function askModel({ shot = null, prompt }, {
   key = String(process.env.ANTHROPIC_API_KEY || "").trim(),
   model = String(process.env.ANTHROPIC_DIAGNOSE_MODEL || "").trim() || "claude-sonnet-5-5",
   fetchImpl = fetch,
   timeoutMs = 45000,
   onFail = (why) => console.warn(`[diagnose] ${why}`)
 } = {}) {
-  if (!key || !shot) return null;
-  const mediaType = String(shot).startsWith("iVBOR") ? "image/png" : "image/jpeg";
+  if (!key) return null;
+  const content = [
+    ...(shot ? [{ type: "image", source: { type: "base64", media_type: String(shot).startsWith("iVBOR") ? "image/png" : "image/jpeg", data: shot } }] : []),
+    { type: "text", text: prompt }
+  ];
   try {
     const response = await fetchImpl("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-      body: JSON.stringify({
-        model,
-        max_tokens: 2000,
-        output_config: { effort: "low" },
-        messages: [{
-          role: "user",
-          content: [
-            { type: "image", source: { type: "base64", media_type: mediaType, data: shot } },
-            { type: "text", text: `${PROMPT}\n\nАдреса: ${String(url).slice(0, 300)}\nТекст сторінки:\n${String(text).slice(0, 3000)}` }
-          ]
-        }]
-      }),
+      body: JSON.stringify({ model, max_tokens: 2000, output_config: { effort: "low" }, messages: [{ role: "user", content }] }),
       signal: AbortSignal.timeout(timeoutMs)
     });
     if (!response.ok) {
@@ -78,12 +70,58 @@ export async function diagnoseScreen({ shot, text = "", url = "" }, {
       return null;
     }
     const payload = await response.json();
-    const answer = (payload.content || []).filter((block) => block.type === "text").map((block) => block.text).join("");
-    const seen = parseDiagnosis(answer);
-    if (!seen) onFail(`no JSON in the answer: ${answer.slice(0, 200)}`);
-    return seen;
+    return (payload.content || []).filter((block) => block.type === "text").map((block) => block.text).join("");
   } catch (error) {
     onFail(error?.message || String(error));
     return null;
   }
+}
+
+/**
+ * Ask the model. `shot` is a base64 JPEG/PNG of the tab, `text` the page's
+ * innerText. Resolves to { kind, sentence } or null; never throws.
+ */
+export async function diagnoseScreen({ shot, text = "", url = "" }, options = {}) {
+  if (!shot) return null;
+  const onFail = options.onFail ?? ((why) => console.warn(`[diagnose] ${why}`));
+  const answer = await askModel({ shot, prompt: `${PROMPT}\n\nАдреса: ${String(url).slice(0, 300)}\nТекст сторінки:\n${String(text).slice(0, 3000)}` }, { ...options, onFail });
+  if (answer == null) return null;
+  const seen = parseDiagnosis(answer);
+  if (!seen) onFail(`no JSON in the answer: ${answer.slice(0, 200)}`);
+  return seen;
+}
+
+const EXPLAIN_PROMPT = `Ти пояснюєш власнику, чому сесія серверного агента LinkedIn для акаунта не вдалася. Нижче — помилка, хід сесії (що агент встиг зробити), що система вже зробила сама, і знімок екрана в момент збою (якщо є).
+Поверни лише JSON без пояснень:
+{"cause": "...", "next": "..."}
+cause — одне-два речення українською простими словами: що саме пішло не так і чому, з того, що видно на знімку й у даних; нічого не вигадуй; без технічних слів, назв файлів і адрес.
+next — одне речення: що система зробить далі сама, і лише якщо без людини ніяк — що саме має зробити людина (конкретно: який профіль, що натиснути). Не проси людину «перевірити» чи «глянути».`;
+
+/** { cause, next } from a JSON answer, or null. */
+export function parseExplanation(text) {
+  const match = String(text || "").match(/\{[\s\S]*\}/);
+  if (!match) return null;
+  try {
+    const data = JSON.parse(match[0]);
+    const cause = String(data.cause || "").replace(/\s+/g, " ").trim().slice(0, 400);
+    const next = String(data.next || "").replace(/\s+/g, " ").trim().slice(0, 300);
+    return cause ? { cause, next } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Why a session failed, said by the model from everything the worker has:
+ * the error, the session's own record, what was already done, the screenshot
+ * (власник 03.11: «аі має всюди бути запхана де тільки можна спростити життя людині»).
+ */
+export async function explainFailure({ shot = null, label = "", error = "", record = "", done = "" }, options = {}) {
+  const onFail = options.onFail ?? ((why) => console.warn(`[diagnose] ${why}`));
+  const prompt = `${EXPLAIN_PROMPT}\n\nАкаунт: ${String(label).slice(0, 100)}\nПомилка: ${String(error).slice(0, 600)}\nЩо система вже зробила: ${String(done || "нічого").slice(0, 300)}\nХід сесії:\n${String(record).slice(0, 4000)}`;
+  const answer = await askModel({ shot, prompt }, { ...options, onFail });
+  if (answer == null) return null;
+  const said = parseExplanation(answer);
+  if (!said) onFail(`no JSON in the answer: ${answer.slice(0, 200)}`);
+  return said;
 }

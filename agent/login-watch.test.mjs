@@ -317,3 +317,12 @@ test('знімок розлогіненого акаунта йде портал
   await checkParked({ portal: fakePortal([parked]), telegram, probe: signedOut, state: normalizeState(null), today: '2026-10-31', nowMs: AT, portalUrl: PORTAL });
   assert.deepEqual(portal.written, []);
 });
+
+test('повідомлення вартового в групу каже те, що модель прочитала на знімку (власник 03.11)', async () => {
+  const portal = fakePortal([parked]);
+  portal.screen = async () => ({ success: true, seen: { kind: 'password', sentence: 'LinkedIn просить пароль для Mary Lindsay.' } });
+  const telegram = fakeTelegram();
+  const withShot = async () => ({ signedIn: false, reason: 'сторінка входу', screenshot: Buffer.from('jpeg') });
+  await checkParked({ portal, telegram, probe: withShot, state: normalizeState(null), today: '2026-11-03', nowMs: AT, portalUrl: PORTAL });
+  assert.match(telegram.sent[0].text, /не працює: LinkedIn просить пароль для Mary Lindsay\./);
+});

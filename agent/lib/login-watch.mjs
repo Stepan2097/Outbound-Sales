@@ -90,6 +90,7 @@ async function readScreen({ portal, account, result, log }) {
   const shot = Buffer.isBuffer(result.screenshot) ? result.screenshot.toString('base64') : String(result.screenshot);
   try {
     const answer = await portal.screen({ shot, text: result.pageText || '', url: result.url || '' });
+    if (answer?.success && answer.seen?.sentence) result.seen = answer.seen.sentence;
     return answer?.success === true;
   } catch (error) {
     log(`${account.label}: знімок порталу не пішов — ${error.message}`);
@@ -190,7 +191,7 @@ export async function answerAsks({ portal, telegram, probe, state, nowMs = Date.
     log(`${account.label}: за посиланням із групи входу не видно (${result.reason})`);
     await readScreen({ portal, account, result, log });
     if (written && telegram.configured) {
-      const text = `${account.label}: входу ще не видно — ${describeLoginState(result)} Перевір, що залогінився саме в цьому профілі.`;
+      const text = `${account.label}: входу ще не видно — ${result.seen || describeLoginState(result)} Перевір, що залогінився саме в цьому профілі.`;
       if (result.screenshot && telegram.sendPhoto) await telegram.sendPhoto(result.screenshot, text).catch(() => telegram.send(text));
       else await telegram.send(text);
     }
@@ -244,7 +245,7 @@ export async function checkParked({
     }
     if (state.lastTold[account.id] === today) continue;
     if (telegram.configured) {
-      const text = `⚠️ ${account.label} не працює: ${describeLoginState(result)}\n`
+      const text = `⚠️ ${account.label} не працює: ${result.seen || describeLoginState(result)}\n`
         + `Прогрів по ньому стоїть. Відкрий профіль в Anty, залогінься — і натисни кнопку нижче, щоб я перевірив одразу.\n`
         + `Можна й не тиснути: перевіряю кожні 30 хвилин і сам продовжу прогрів, коли побачу вхід.`;
       const button = account.loginCheckPath ? { text: BUTTON_TEXT, url: `${portalUrl}${account.loginCheckPath}` } : null;

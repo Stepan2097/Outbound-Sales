@@ -47,7 +47,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Portal } from './lib/portal.mjs';
 import { AntyApi, stopLeftOpen } from './lib/anty-api.mjs';
-import { humanReason } from './lib/reasons.mjs';
+import { humanReason, sessionRecord } from './lib/reasons.mjs';
 import { writeFileAtomicSync } from './lib/atomic-write.mjs';
 import { cloudFromEnv } from './lib/anty-cloud.mjs';
 import { Telegram } from './lib/telegram.mjs';
@@ -419,6 +419,18 @@ async function closeLeftOpen() {
 const FAILURES_FILE = path.join(RUNS_DIR, 'worker-failures.json');
 const telegramTrouble = new Telegram();
 function readFailures() { try { return JSON.parse(fs.readFileSync(FAILURES_FILE, 'utf8')); } catch { return {}; } }
+async function explainTrouble({ accountId, label, raw, result, shot, done }) {
+  try {
+    const portal = new Portal(PORTAL);
+    portal.accountId = accountId;
+    const image = shot ? fs.readFileSync(shot).toString('base64') : null;
+    return await portal.explain({ shot: image, error: raw, record: sessionRecord(result), done });
+  } catch (error) {
+    log(`   пояснення моделі не вийшло: ${error.message} (${label})`);
+    return null;
+  }
+}
+
 async function tellTrouble({ accountId, label, ok, outcome, shots, closed }) {
   const failures = readFailures();
   const before = failures[accountId]?.count ?? 0;
@@ -435,11 +447,16 @@ async function tellTrouble({ accountId, label, ok, outcome, shots, closed }) {
   if (before + 1 !== 2 || !telegramTrouble.configured) return;
   const shot = ['failure.jpg', ...[...(result.shotFiles || [])].reverse().map((file) => path.basename(file))]
     .map((name) => path.join(shots, name)).find((file) => fs.existsSync(file));
+  const done = closed.length ? `закрив браузер, що лишився відкритим (${closed.join(', ')})` : '';
+  // The model reads the screenshot and the session's record and says why, in
+  // words (власник 03.11: «аі має всюди бути запхана»); the fixed sentence
+  // stays for when it cannot answer.
+  const said = await explainTrouble({ accountId, label, raw, result, shot, done });
   const text = [
     `⚠️ ${label} не працює — 2 сесії поспіль не вдалися.`,
-    `Причина: ${humanReason(raw)}`,
-    closed.length ? `Що я вже зробив: закрив браузер, що лишився відкритим (${closed.join(', ')}).` : null,
-    `Агент пробує знову сам.`,
+    `Причина: ${said?.cause || humanReason(raw)}`,
+    done ? `Що я вже зробив: ${done}.` : null,
+    said?.next ? `Далі: ${said.next}` : `Агент пробує знову сам.`,
     `Технічно: ${String(raw).replace(/\s+/g, ' ').slice(0, 200)}`
   ].filter(Boolean).join('\n');
   if (shot) await telegramTrouble.sendPhoto(fs.readFileSync(shot), text).catch(() => telegramTrouble.send(text));
