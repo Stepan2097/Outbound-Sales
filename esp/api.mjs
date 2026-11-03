@@ -1237,8 +1237,9 @@ function badRequest(sendJson, response, error) {
 function campaignSummary(campaign, enrollments, entries) {
   const people = new Map(enrollments.map((row) => [row.email, row]));
   const counts = { sent: 0, replied: 0, bounced: 0, unsubscribed: 0 };
-  // «Відповіді» are people's answers; what came back by itself is counted apart
-  // and shown on hover (owner 03.11: «чому тут пише 1 відповідь якщо є 2 автовідповіді»).
+  // «Відповіді» are everything that came back as an answer — people's and automatic
+  // alike; the hover tells relevant from auto-replies (owner 03.11: «це теж відповідь
+  // і при наведені має показувати кількість релевантних і кількість автовідповідей»).
   const replyKinds = { positive: 0, neutral: 0, negative: 0, referral: 0, unlabelled: 0, auto: 0 };
   // Per sender too (task 5283abdd: a campaign row opens into its senders). A
   // reply, bounce or unsubscribe belongs to the mailbox it came back to — or,
@@ -1261,13 +1262,11 @@ function campaignSummary(campaign, enrollments, entries) {
     }
     const row = entry.contact ? people.get(entry.contact) : null;
     if (!row || new Date(entry.at) < new Date(row.enrolledAt)) continue;
-    if (entry.type === "message.autoreplied" || (entry.type === "message.replied" && isAutoAck({ kind: "replied", text: entry.data?.text }, entry.contact))) {
-      replyKinds.auto += 1;
-      continue;
-    }
-    const key = entry.type === "message.replied" ? "replied" : entry.type === "message.bounced" ? "bounced" : entry.type === "contact.unsubscribed" ? "unsubscribed" : null;
+    const automatic = entry.type === "message.autoreplied" || (entry.type === "message.replied" && isAutoAck({ kind: "replied", text: entry.data?.text }, entry.contact));
+    const key = entry.type === "message.replied" || automatic ? "replied" : entry.type === "message.bounced" ? "bounced" : entry.type === "contact.unsubscribed" ? "unsubscribed" : null;
     if (!key) continue;
-    if (key === "replied") replyKinds[Object.hasOwn(replyKinds, entry.data?.label) && entry.data.label !== "auto" ? entry.data.label : "unlabelled"] += 1;
+    if (automatic) replyKinds.auto += 1;
+    else if (key === "replied") replyKinds[Object.hasOwn(replyKinds, entry.data?.label) && entry.data.label !== "auto" ? entry.data.label : "unlabelled"] += 1;
     counts[key] += 1;
     const owner = sender(entry.data?.sender || writer.get(entry.contact) || row.sender);
     if (owner) owner[key] += 1;

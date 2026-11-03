@@ -10,7 +10,7 @@ import { coldReplyText } from "../triage/leadgen-notify.mjs";
 
 // Owner 03.11: «чому тут пише 1 відповідь якщо є 2 автовідповіді, при наведені на
 // цифру має відкриватися детальна інформація … скільки хороших відповідей скільки автовідповідей».
-test("«Відповіді» in a campaign are people's answers; auto-replies and help desks are counted apart, with labels", async (t) => {
+test("«Відповіді» in a campaign count every answer; the relevant ones and the auto-replies are told apart for the hover", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "esp-replies-"));
   useJournal(join(dir, "journal.jsonl"));
   t.after(async () => { useJournal(null); await rm(dir, { recursive: true, force: true }); });
@@ -33,7 +33,7 @@ test("«Відповіді» in a campaign are people's answers; auto-replies an
     sendJson: (_r, status, payload) => { answer = { status, payload }; }, readJson: async () => null, esp
   });
   const [campaign] = answer.payload.campaigns;
-  assert.equal(campaign.replied, 2, "two people answered; the out-of-office and the help desk are not answers");
+  assert.equal(campaign.replied, 4, "every answer counts — two people, an out-of-office and a help desk");
   assert.deepEqual(campaign.replyKinds, { positive: 1, neutral: 0, negative: 1, referral: 0, unlabelled: 0, auto: 2 });
 });
 

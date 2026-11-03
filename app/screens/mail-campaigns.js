@@ -179,16 +179,11 @@ function foldersHtml() {
   </nav>`;
 }
 
-/** What «Відповіді» is made of, on hover (owner 03.11): people's answers by label, and auto-replies apart. */
+/** What «Відповіді» is made of, on hover (owner 03.11): the relevant answers and the auto-replies. */
 function repliesTip(kinds) {
   if (!kinds) return "";
-  const people = kinds.positive + kinds.neutral + kinds.negative + kinds.referral + kinds.unlabelled;
-  return [
-    `Відповіли люди: ${people}`,
-    `позитивні — ${kinds.positive}`, `переадресація — ${kinds.referral}`, `нейтральні — ${kinds.neutral}`, `негативні — ${kinds.negative}`,
-    kinds.unlabelled ? `без мітки — ${kinds.unlabelled}` : "",
-    `Автовідповіді (не в офісі, служба підтримки) — ${kinds.auto}; у «Відповіді» не рахуються`
-  ].filter(Boolean).join("\n");
+  const relevant = kinds.positive + kinds.neutral + kinds.negative + kinds.referral + kinds.unlabelled;
+  return `Релевантні відповіді: ${relevant}\nАвтовідповіді: ${kinds.auto}`;
 }
 
 function campaignRowHtml(campaign) {
