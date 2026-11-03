@@ -450,6 +450,7 @@ function enrichCostHtml(cost) {
 function enrichSummaryHtml(enrich, others) {
   if (enrich.added?.length) return `<p class="triage-added"><i data-lucide="database"></i> Додано в базу: ${enrich.added.map((row) => `${escapeHtml(FIELD_WORD[row.field] || row.field)} <b>${escapeHtml(row.value)}</b>`).join(", ")}</p>`;
   const where = (enrich.searched || []).filter((row) => row.state === "done").map((row) => row.source);
+  if (enrich.skipped?.length) return '<p class="triage-enrich-result">Нового не додано: знайдене схоже на іншу компанію — нижче чому.</p>';
   if (others.length) return '<p class="triage-enrich-result">Знайдене вже є в базі — нового не додано.</p>';
   return `<p class="triage-enrich-result">Нічого нового${where.length ? `, шукали в: ${escapeHtml(where.join(", "))}` : ""}${enrich.hidden ? "; знайдені пошти не пройшли перевірку — нижче чому" : ""}.</p>`;
 }
@@ -470,6 +471,7 @@ function enrichHtml() {
     ${others.length ? `<ul class="triage-found">${others.map((item) => `<li><span class="pill tone-muted">${escapeHtml(FIELD_WORD[item.type] || item.type)}</span> <b>${escapeHtml(item.value)}</b>
       ${foundMark(item)}
       <span class="triage-muted">${escapeHtml(item.source || "")}${item.confidence != null ? ` · ${escapeHtml(String(item.confidence))}` : ""}</span></li>`).join("")}</ul>` : ""}
+    ${(enrich.skipped || []).length ? `<details class="triage-enrich-more" open><summary>Не записано ${enrich.skipped.length} — схоже, інша компанія</summary><ul>${enrich.skipped.map((row) => `<li>${escapeHtml(FIELD_WORD[row.field] || row.field)} <b>${escapeHtml(row.value)}</b> — ${escapeHtml(row.reason)}</li>`).join("")}</ul></details>` : ""}
     ${(enrich.hiddenEmails || []).length ? `<details class="triage-enrich-more"><summary>Сховано ${enrich.hiddenEmails.length} ${enrich.hiddenEmails.length === 1 ? "пошту" : "пошти"} — не підтверджено</summary><ul>${enrich.hiddenEmails.map((row) => `<li><b>${escapeHtml(row.value)}</b> — ${escapeHtml(row.reason)}</li>`).join("")}</ul></details>`
       : enrich.hidden ? `<p class="triage-muted">${enrich.hidden === 1 ? "Ще одну знайдену адресу поштовий сервер не підтвердив — її" : `Ще ${enrich.hidden} знайдені адреси поштові сервери не підтвердили — їх`} не показано й не збережено.</p>` : ""}
     ${searched.length ? `<details class="triage-enrich-more"><summary>Де шукали</summary><ul>${searched.map((row) => `<li>${escapeHtml(row.source)}: ${row.state === "done" ? `${row.found || 0} знайдено${row.records != null ? ` (${row.records} записів)` : ""}` : escapeHtml(ENRICH_STATE[row.state] || row.state)}${row.note ? ` — ${escapeHtml(row.note)}` : ""}</li>`).join("")}</ul></details>` : ""}
@@ -719,20 +721,26 @@ async function enrich() {
     const node = document.querySelector("[data-enrich-seconds]");
     if (node) node.textContent = String(Math.round((Date.now() - triage.enrichingSince) / 1000));
   }, 1000);
+  let moved = false;
   try {
     const answer = await api("/api/triage/enrich", { method: "POST", body: JSON.stringify({ contactId: contact.id, productId: triage.productId || "" }) });
-    if (triage.item?.contact?.id !== contact.id) return;
-    triage.enrich = answer;
-    if (answer.contact) triage.item.contact = { ...triage.item.contact, ...answer.contact };
-    mergeAddresses(answer.emails);
-    tickConfirmed();
+    moved = triage.item?.contact?.id !== contact.id;
+    if (!moved) {
+      triage.enrich = answer;
+      if (answer.contact) triage.item.contact = { ...triage.item.contact, ...answer.contact };
+      mergeAddresses(answer.emails);
+      tickConfirmed();
+    }
   } catch (error) {
-    triage.enrich = { error: error.message || "Не вдалося збагатити.", candidates: [] };
+    moved = triage.item?.contact?.id !== contact.id;
+    if (!moved) triage.enrich = { error: error.message || "Не вдалося збагатити.", candidates: [] };
   }
+  // Перейшли на іншу картку під час пошуку — лічильник і «Шукаємо…» знімаються однаково.
   clearInterval(ticker);
   triage.enriching = false;
   triage.enrichingSince = 0;
   renderTriage();
+  if (moved) return;
   // Something new went into the base: the letter is written again with it.
   if (triage.enrich?.added?.length && triage.item?.contact?.id === contact.id && !triage.dirty.has("body")) await draftTexts();
 }

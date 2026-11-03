@@ -28,3 +28,16 @@ test("дрібно — токени й гроші цього пошуку", () =
   assert.match(SERVER, /costUsd: actorRuns\.some\(\(run\) => run\.costUsd != null\)/);
   assert.match(SERVER, /Object\.defineProperty\(items, "run", \{ value: apifyRunView\(run\), enumerable: false \}\)/);
 });
+
+test("суддя 03.11: знайдене іншої компанії не показується як знайдене — окремо «Не записано … схоже, інша компанія» з причиною", () => {
+  assert.match(SERVER, /crmPatch\(contact, \{ candidates, checks, company: prospect\.company \}\)/);
+  assert.match(SERVER, /!skipped\.some\(\(row\) => row\.value\.toLowerCase\(\) === String\(item\.value\)\.trim\(\)\.toLowerCase\(\)\)\),\n    skipped,/);
+  assert.match(CARD, /Не записано \$\{enrich\.skipped\.length\} — схоже, інша компанія/);
+  assert.match(CARD, /Нового не додано: знайдене схоже на іншу компанію — нижче чому\./);
+});
+
+test("перейшли на іншу картку під час пошуку — «Шукаємо…» і лічильник знімаються, а не крутяться без кінця", () => {
+  const body = CARD.slice(CARD.indexOf("const ticker = setInterval"), CARD.indexOf("function tookNewContact"));
+  assert.ok(body.indexOf("clearInterval(ticker)") < body.indexOf("if (moved) return;"), "лічильник знято до виходу");
+  assert.doesNotMatch(body.slice(0, body.indexOf("clearInterval(ticker)")), /\breturn;/);
+});

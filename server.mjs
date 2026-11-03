@@ -3167,7 +3167,7 @@ async function enrichTriageContact(contact, { productId = "" } = {}) {
     ...candidates.filter((item) => item.type === "email").map((item) => item.value)
   ]);
   const verdict = new Map(checks.map((check) => [check.email, check]));
-  const { patch, added } = crmPatch(contact, { candidates, checks });
+  const { patch, added, skipped } = crmPatch(contact, { candidates, checks, company: prospect.company });
   const updated = await writeContactPatch(contact, patch);
   addEvent("enrichment", `${prospect.name} enriched from Головна${added.length ? `; CRM: ${added.map((row) => row.field).join(", ")}` : ""}.`);
   const hiddenEmails = candidates.filter((item) => item.type === "email" && verdict.get(item.value.toLowerCase())?.status !== "valid")
@@ -3178,7 +3178,10 @@ async function enrichTriageContact(contact, { productId = "" } = {}) {
   return {
     prospectId: prospect.id,
     // Failed or unconfirmable guesses are not shown as found and not saved.
-    candidates: candidates.filter((item) => item.type !== "email" || verdict.get(item.value.toLowerCase())?.status === "valid"),
+    // Another company's site or address (crmPatch) is not shown as found either — it is under «skipped» with why.
+    candidates: candidates.filter((item) => (item.type !== "email" || verdict.get(item.value.toLowerCase())?.status === "valid")
+      && !skipped.some((row) => row.value.toLowerCase() === String(item.value).trim().toLowerCase())),
+    skipped,
     hidden: hiddenEmails.length,
     // Таск 10b3bb63: що сховано і чому, де шукали і скільки коштувало — підсумок завжди явний.
     hiddenEmails,
