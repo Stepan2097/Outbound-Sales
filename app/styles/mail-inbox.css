@@ -276,3 +276,10 @@
   .unibox-date { grid-area: date; }
   .unibox-meta { display: none; }
 }
+
+/* Список листів — на всю висоту, без своєї прокрутки; гортається сторінка
+   (власник 03.11: «тут ще є місце знизу» — 11 з 48 рядків і порожнеча під ними). */
+#unibox .unibox-list {
+  max-height: none;
+  overflow: visible;
+}

@@ -51,3 +51,8 @@ test("По днях, ліди пошти і черга «До роботи» п�
   assert.match(todayCss, /@media \(max-width: 900px\) \{\n  \.today-queue \{ max-height: 60vh; overflow-y: auto; \}/);
   assert.match(inboxCss, /@media \(max-width: 900px\) \{\n  \.inbox-list \{ max-height: 65vh; overflow-y: auto; \}\n\}/);
 });
+
+test("the cold-mail list on «Вхідні» is full height — no inner scroll, the page scrolls (owner 03.11)", () => {
+  const inbox = readFileSync(new URL("../app/styles/mail-inbox.css", import.meta.url), "utf8");
+  assert.match(inbox, /#unibox \.unibox-list \{\n  max-height: none;\n  overflow: visible;\n\}/);
+});
