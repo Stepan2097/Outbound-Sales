@@ -127,10 +127,15 @@ export async function explainFailure({ shot = null, label = "", error = "", reco
   // fail» was refused outright (03.11, stop_reason refusal), the reading of the
   // screen alone never was.
   const seen = shot ? await diagnoseScreen({ shot, text: error }, { ...options, onFail }) : null;
-  const prompt = `${EXPLAIN_PROMPT}\n\nАкаунт: ${String(label).slice(0, 100)}\nПомилка: ${String(error).slice(0, 600)}\nЩо система вже зробила: ${String(done || "нічого").slice(0, 300)}\nНа знімку екрана: ${seen?.sentence || "знімка немає"}\nЖурнал сесії:\n${String(record).slice(0, 4000)}`;
-  const answer = await askModel({ prompt }, { ...options, onFail });
-  if (answer == null) return null;
-  const said = parseExplanation(answer);
-  if (!said) onFail(`no JSON in the answer: ${answer.slice(0, 200)}`);
-  return said;
+  const ask = async (screen) => {
+    const prompt = `${EXPLAIN_PROMPT}\n\nАкаунт: ${String(label).slice(0, 100)}\nПомилка: ${String(error).slice(0, 600)}\nЩо система вже зробила: ${String(done || "нічого").slice(0, 300)}\nНа знімку екрана: ${screen || "знімка немає"}\nЖурнал сесії:\n${String(record).slice(0, 4000)}`;
+    const answer = await askModel({ prompt }, { ...options, onFail });
+    const said = answer == null ? null : parseExplanation(answer);
+    if (answer != null && !said) onFail(`no JSON in the answer: ${answer.slice(0, 200)}`);
+    return said;
+  };
+  // A refusal is not the end: once more without the screen's words, and at
+  // worst the screen's own reading is the cause (03.11: a sign-in page's
+  // words were refused one time in two).
+  return await ask(seen?.sentence) ?? (seen ? await ask("") : null) ?? (seen ? { cause: seen.sentence, next: "" } : null);
 }

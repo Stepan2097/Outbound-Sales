@@ -68,3 +68,15 @@ test("пояснення збою: модель отримує помилку, �
   assert.equal(bodies[1].messages[0].content.length, 1);
   assert.match(bodies[1].messages[0].content[0].text, /На знімку екрана: LinkedIn просить пароль\./);
 });
+
+test("модель відмовила поясненню — ще раз без слів зі знімка, а в найгіршому разі причина — прочитаний знімок", async () => {
+  const { explainFailure } = await import("../warmup/diagnose.mjs");
+  const refuse = { ok: true, json: async () => ({ stop_reason: "refusal", content: [] }) };
+  const read = { ok: true, json: async () => ({ content: [{ type: "text", text: '{"kind":"password","sentence":"LinkedIn просить пароль."}' }] }) };
+  const quiet = { key: "k", onFail: () => {} };
+  let calls = 0;
+  const fetchImpl = async (url, init) => { calls += 1; return JSON.parse(init.body).messages[0].content[0].type === "image" ? read : refuse; };
+  assert.deepEqual(await explainFailure({ shot: "/9j/AAAA", error: "e" }, { ...quiet, fetchImpl }), { cause: "LinkedIn просить пароль.", next: "" });
+  assert.equal(calls, 3);
+  assert.equal(await explainFailure({ error: "e" }, { ...quiet, fetchImpl: async () => refuse }), null);
+});
