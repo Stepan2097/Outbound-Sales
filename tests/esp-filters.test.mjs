@@ -105,12 +105,12 @@ test("MX: Google — так; інше — ні; DNS без відповіді �
   assert.equal(calls, 1, "відповідь DNS тримається добу");
 });
 
-test("країни: зараз Німеччина; невідома країна не йде; домен .de теж ловиться; список міняє адміністратор, і це в журналі дій", async () => {
+test("країни: зараз Німеччина; невідома країна йде за європейським часом (03.11); домен .de теж ловиться; список міняє адміністратор, і це в журналі дій", async () => {
   assert.deepEqual(await excludedCountries(), DEFAULT_EXCLUDED_COUNTRIES);
   for (const country of ["Germany", "Deutschland", "DE", "німеччина"]) assert.equal((await check({ country })).reason, "country_excluded", country);
   assert.equal((await check({ email: "hans@firma.de", country: "United Kingdom" })).reason, "country_excluded", "домен .de");
-  const unknown = await check({ country: "" });
-  assert.deepEqual([unknown.reason, unknown.permanent], ["country_unknown", false]);
+  assert.equal((await check({ country: "" })).ok, true, "невідома країна не зупиняє");
+  assert.equal((await check({ email: "hans@firma.de", country: "" })).reason, "country_excluded", "а домен .de — так");
   assert.equal((await check({ country: "Poland" })).ok, true);
 
   await setExcludedCountries(["Germany", "Poland", "AT"], "stepan@advantage-agency.co");

@@ -113,8 +113,10 @@ test("outside the window or on a weekend the answer names when it opens; an unkn
   const saturday = sendDecision({ sender: SENDER, recipient: POLAND, ledger: ledgerOf([]), now: new Date("2026-10-17T10:00:00Z") });
   assert.equal(saturday.reason, "weekend");
   assert.equal(saturday.retryAt, "2026-10-19T06:00:00.000Z", "Monday 08:00 in Warsaw");
-  const unknown = sendDecision({ sender: SENDER, recipient: { country: "Atlantis" }, ledger: ledgerOf([]), now: TUESDAY });
-  assert.deepEqual([unknown.reason, unknown.retryAt], ["unknown_timezone", null]);
+  // Unknown country: European working hours (03.11) — Berlin's 08–17.
+  assert.deepEqual(zonesFor({ country: "" }), ["Europe/Berlin"]);
+  assert.equal(sendDecision({ sender: SENDER, recipient: { country: "Atlantis" }, ledger: ledgerOf([]), now: TUESDAY, spreadDay: false }).reason !== "unknown_timezone", true);
+  assert.equal(sendDecision({ sender: SENDER, recipient: {}, ledger: ledgerOf([]), now: new Date("2026-10-13T16:30:00Z") }).reason, "outside_window", "18:30 in Berlin");
   assert.equal(nextWindowOpen(TUESDAY, []), null);
 });
 

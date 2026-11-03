@@ -85,11 +85,14 @@ const COUNTRY_ALIASES = {
   "viet nam": "vietnam", holland: "netherlands", deutschland: "germany", españa: "spain", brasil: "brazil", méxico: "mexico", "perú": "peru"
 };
 
+// Owner 03.11 on people whose country is unknown: «робочий час по європі».
+export const UNKNOWN_COUNTRY_ZONES = ["Europe/Berlin"];
+
 export function zonesFor({ timezone = "", country = "" } = {}) {
   const zone = String(timezone || "").trim();
   if (zone && isZone(zone)) return [zone];
   const key = String(country || "").trim().toLowerCase();
-  return COUNTRY_ZONES[COUNTRY_ALIASES[key] || key] || [];
+  return COUNTRY_ZONES[COUNTRY_ALIASES[key] || key] || UNKNOWN_COUNTRY_ZONES;
 }
 
 function isZone(zone) {

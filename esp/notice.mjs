@@ -33,7 +33,8 @@ export function needsNotice(country) {
 
 /** The notice for a letter from `sender`, or null when the lead is outside the EU and the UK. */
 export function noticeFor({ sender, country, base = null }) {
-  if (!needsNotice(country)) return null;
+  // A person of unknown country is written to as one in Europe (03.11) — so with the notice.
+  if (String(country ?? "").trim() && !needsNotice(country)) return null;
   const domain = String(sender).toLowerCase().split("@")[1] || "";
   const policy = `${(base || `https://${domain}`).replace(/\/$/, "")}/privacy`;
   return {

@@ -200,7 +200,7 @@ export async function checkLead(lead, { exclusions: excluded, countries, reconta
   const tld = domain.split(".").at(-1);
   const byTld = banned.find((country) => COUNTRY_TLD[country] && COUNTRY_TLD[country] === tld);
   if (byTld) return no("country_excluded", byTld, { permanent: true });
-  if (!code) return no("country_unknown", "країна невідома — фільтр країн не може пропустити");
+  // Unknown country (owner 03.11): written to in European working hours; the domain's TLD above still catches an excluded country.
   if (banned.includes(code)) return no("country_excluded", code, { permanent: true });
 
   if (ROLE_LOCAL_PARTS.has(local.replace(/[+].*$/, "")) ) return no("role_address", `${local}@`, { permanent: true });
