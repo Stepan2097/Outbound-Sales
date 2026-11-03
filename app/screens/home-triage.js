@@ -141,6 +141,7 @@ async function loadNext() {
   triage.error = "";
   triage.enrich = null;
   triage.companyError = "";
+  triage.beforeCallError = "";
   renderTriage();
   try {
     const params = new URLSearchParams({
@@ -196,6 +197,7 @@ function applyPrep(prep) {
   if (prep.contact) triage.item.contact = { ...triage.item.contact, ...prep.contact };
   if (prep.emails) { mergeAddresses(prep.emails); tickConfirmed(); }
   if (prep.company) triage.item.company = prep.company;
+  if (prep.beforeCall) triage.item.beforeCall = prep.beforeCall;
   if (prep.enrich && !triage.enrich) triage.enrich = prep.enrich;
   if (prep.drafts && prep.state === "done") {
     triage.item.drafts = prep.drafts;
@@ -272,6 +274,49 @@ function tacticHtml() {
     ${triage.tactic === "conference" ? `<label class="triage-field"><span>Конференція</span><input data-triage="event" placeholder="напр. SiGMA World, Рим, 2–5 листопада" value="${escapeAttr(triage.event)}" /></label>` : ""}
     <p class="triage-muted">${hint ? `${escapeHtml(hint)}. ` : ""}${used && triage.tactic === "auto" ? `Модель вибрала: <b>${escapeHtml(TACTIC_LIST.find(([id]) => id === used)?.[1] || used)}</b>.` : ""}</p>
   </div>`;
+}
+
+/** «Перед розмовою» (таск 92abd9df): факти за 90 днів з джерелом і питання від AI на «Смислах» продукту. */
+async function loadBeforeCall(id, { force = false } = {}) {
+  triage.beforeCallLoading = id;
+  triage.beforeCallError = "";
+  renderTriage();
+  try {
+    const answer = await api("/api/triage/before-call", { method: "POST", body: JSON.stringify({ contactId: id, productId: triage.productId || "", force }) });
+    if (triage.item?.contact?.id === id) triage.item.beforeCall = answer.beforeCall;
+  } catch (error) {
+    if (triage.item?.contact?.id === id) triage.beforeCallError = error.message || "Не вдалося зібрати факти.";
+  }
+  if (triage.beforeCallLoading === id) triage.beforeCallLoading = "";
+  renderTriage();
+}
+
+function beforeCallHtml(item) {
+  const data = item.beforeCall;
+  const loading = triage.beforeCallLoading === item.contact.id;
+  const head = '<h3><i data-lucide="message-circle-question"></i>Перед розмовою</h3>';
+  if (!data) {
+    if (loading) return `<section class="triage-before is-loading">${head}<p class="triage-muted">Шукаємо новини компанії й пости людини за 90 днів…</p></section>`;
+    const preparing = triage.prep && triage.prep.state !== "done";
+    return `<section class="triage-before">${head}${triage.beforeCallError ? `<p class="esp-notice is-bad">${escapeHtml(triage.beforeCallError)}</p>` : ""}
+      <p class="triage-muted">${preparing ? "Збирається разом із підготовкою…" : "Факти про компанію й людину за 90 днів і питання для розмови."}</p>
+      ${preparing ? "" : '<button type="button" data-triage="before-call"><i data-lucide="sparkles"></i><span>Підготуватися до розмови</span></button>'}</section>`;
+  }
+  const source = (row) => `<small>${escapeHtml([row.whose === "person" ? "пост людини" : row.publisher, row.date].filter(Boolean).join(" · "))} · <a href="${escapeAttr(row.url)}" target="_blank" rel="noopener">джерело</a></small>`;
+  const searched = data.searched?.length ? `<details class="triage-before-searched"><summary>Що шукали</summary><ul>${data.searched.map((row) => `<li>${escapeHtml(row)}</li>`).join("")}</ul>${data.gaps?.length ? `<ul class="triage-muted">${data.gaps.map((row) => `<li>${escapeHtml(row)}</li>`).join("")}</ul>` : ""}</details>` : "";
+  const body = data.empty
+    ? `<p class="triage-before-empty"><b>Сигналів не знайдено</b> — за ${90} днів ні новин компанії, ні постів людини з датою й посиланням.</p>
+       <ul class="triage-muted">${[...(data.searched || []).map((row) => `Шукали: ${row}`), ...(data.gaps || [])].map((row) => `<li>${escapeHtml(row)}</li>`).join("") || "<li>Шукати не було де: немає ні компанії, ні LinkedIn.</li>"}</ul>`
+    : `<ol class="triage-before-facts">${data.facts.map((row) => `<li><span>${escapeHtml(row.text)}</span>${source(row)}</li>`).join("")}</ol>
+       ${data.questions?.length ? `<div class="triage-before-questions"><small class="triage-muted">Питання${data.productName ? ` · ${escapeHtml(data.productName)}` : ""}</small><ul>${data.questions.map((row) => `<li title="${escapeAttr(row.basis || "")}">${escapeHtml(row.text)}</li>`).join("")}</ul></div>` : ""}
+       ${searched}`;
+  return `<section class="triage-before">
+    ${head}
+    ${triage.beforeCallError ? `<p class="esp-notice is-bad">${escapeHtml(triage.beforeCallError)}</p>` : ""}
+    ${body}
+    <footer class="triage-muted">зібрано ${escapeHtml(shortDate(data.checkedAt))}
+      <button type="button" class="text-button" data-triage="before-call-refresh" ${loading ? "disabled" : ""}><i data-lucide="refresh-cw"></i><span>${loading ? "Шукаємо…" : "Оновити"}</span></button></footer>
+  </section>`;
 }
 
 function companyHtml(item) {
@@ -570,6 +615,7 @@ function cardHtml(item) {
       ${prepHtml()}
       ${crmFieldsHtml(contact)}
       ${companyHtml(item)}
+      ${beforeCallHtml(item)}
       ${enrichHtml()}
       <div class="triage-decide">
         <button type="button" data-triage="draft" ${triage.drafting ? "disabled" : ""}><i data-lucide="wand-sparkles"></i><span>${triage.drafting ? "Пишемо…" : item.drafts ? "Переписати лист" : "Написати лист"}</span></button>
@@ -838,6 +884,8 @@ root?.addEventListener("click", (event) => {
     case "enrich": return void enrich();
     case "company": return void loadCompany(triage.item.contact.id);
     case "company-refresh": return void loadCompany(triage.item.contact.id, { force: true });
+    case "before-call": return void loadBeforeCall(triage.item.contact.id);
+    case "before-call-refresh": return void loadBeforeCall(triage.item.contact.id, { force: true });
     case "send-email": return void sendEmail();
     case "invite": return void invite();
     case "restart": Object.assign(triage, { cursor: 0, skip: [], notice: "" }); return void loadNext();

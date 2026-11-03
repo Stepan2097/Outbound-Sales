@@ -19,6 +19,7 @@ import { loadPitchBook, pitchCardForPrompt, pitchCatalogForPrompt, pitchFallback
 import { allEntries, append as espAppend, useJournal } from "./esp/journal.mjs";
 import { channelsFor as triageChannels, nextContact as nextTriageContact } from "./triage/queue.mjs";
 import { AUTO_TACTIC, tacticData, tacticForPrompt, tacticLabel, tacticOptions } from "./triage/tactics.mjs";
+import { LINKEDIN_POSTS_ACTOR, SIGNAL_MODEL, SIGNAL_WINDOW_DAYS, collectSignals, postsToSignals, productKind } from "./triage/account-signals.mjs";
 import { digestDue, digestText, freshReplies, leadgenTelegram, replyText, troubleText } from "./triage/leadgen-notify.mjs";
 import { readWindow, reportRange, REPORT_PERIODS, teamReport } from "./triage/team-report.mjs";
 import { accountAlerts, requestRecheck } from "./triage/account-alerts.mjs";
@@ -1491,6 +1492,7 @@ async function handleApi(request, response, url) {
           prep: answer.contact ? prepView(triagePrep.get(String(answer.contact.id))) : null,
           drafts: answer.contact ? state.contactDrafts[answer.contact.id] || null : null,
           company: answer.contact ? companyView(companyDossierForContact(answer.contact)) : null,
+          beforeCall: answer.contact ? prospectForCrmContact(answer.contact.id)?.beforeCall || null : null,
           prospectId: answer.contact ? prospectForCrmContact(answer.contact.id)?.id || null : null
         });
         return;
@@ -1543,6 +1545,19 @@ async function handleApi(request, response, url) {
         const { note, company } = await researchTriageCompany(contact, { force: Boolean(body.force) });
         await writePersistentWorkspaceState();
         sendJson(response, 200, { success: true, note, company });
+        return;
+      }
+
+      // «Перед розмовою» (таск 92abd9df): зібрати чи оновити факти й питання для цієї людини.
+      if (request.method === "POST" && url.pathname === "/api/triage/before-call") {
+        const body = await readJson(request);
+        const contact = await readContact(cleanText(body.contactId || ""), { cacheScope });
+        if (!contact) { sendJson(response, 404, { error: "Контакт не знайдено в базі." }); return; }
+        const beforeCall = await buildBeforeCall(contact, { productId: cleanText(body.productId || ""), force: Boolean(body.force) });
+        const job = triagePrep.get(contact.id);
+        if (job) job.beforeCall = beforeCall;
+        await writePersistentWorkspaceState();
+        sendJson(response, 200, { success: true, beforeCall });
         return;
       }
 
@@ -3281,6 +3296,152 @@ function researchForDrafts({ company = null, channels = null, enrich = null } = 
   return research;
 }
 
+// ── «Перед розмовою» (таск 92abd9df, 03.11): 3–5 фактів за 90 днів із датою й
+// посиланням — новини компанії, її пости й пости людини в LinkedIn — і 2–3
+// питання від моделі на «Смислах» продукту. Нічого не знайшлося — так і
+// написано, з тим, що шукали. Збирається разом із підготовкою картки, живе на
+// ліді тиждень.
+
+const BEFORE_CALL_FRESH_DAYS = 7;
+
+/** One Messages API request as is (tools included) — for the signal search and the before-call brief. */
+async function postAnthropicRaw(body, timeoutMs = 120000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": anthropicEnrichKey(), "anthropic-version": "2023-06-01", "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+    const text = await response.text();
+    if (!response.ok) throw new Error(`Anthropic HTTP ${response.status}: ${text.slice(0, 220)}`);
+    return JSON.parse(text);
+  } catch (error) {
+    if (error?.name === "AbortError") throw new Error(`Anthropic timed out after ${Math.round(timeoutMs / 1000)}s`);
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/** Where signals can come from on this server: Claude's web search, Apify's LinkedIn posts. */
+function signalSources() {
+  return {
+    post: anthropicEnrichKey() ? (body) => postAnthropicRaw(body) : null,
+    run: state.apifyVault && state.integrations.apify.configured ? (actor, input) => runApifyActor(actor, input, 0.3) : null
+  };
+}
+
+function companyLinkedinUrl(prospect) {
+  const url = [prospect.companyLinkedin, prospect.companyEnrichment?.companyLinkedinUrl, prospect.publicCompanyResearch?.linkedinCompanyUrl]
+    .map((value) => cleanText(value || "")).find((value) => /linkedin\.com\/company\//i.test(value));
+  return url || "";
+}
+
+function freshWithin(at, days) {
+  const ms = Date.now() - Date.parse(at || "");
+  return Number.isFinite(ms) && ms >= 0 && ms <= days * 86_400_000;
+}
+
+/** The person's own LinkedIn posts for 90 days — kept on the lead for a week. */
+async function personPostsFor(prospect, contact) {
+  const url = cleanText(contact.linkedin || prospect.linkedin || "");
+  if (!/linkedin\.com\/in\//i.test(url)) return { results: [], searched: [], gaps: ["Профілю людини в LinkedIn немає — її пости не читали."] };
+  const cached = prospect.personPosts;
+  if (cached?.url === url && freshWithin(cached.checkedAt, BEFORE_CALL_FRESH_DAYS)) return cached;
+  const { run } = signalSources();
+  if (!run) return { results: [], searched: [], gaps: ["Apify не підключено — пости LinkedIn не читали."] };
+  let found;
+  try {
+    const items = await run(LINKEDIN_POSTS_ACTOR, { targetUrls: [url], maxPosts: 10, postedLimit: "3months" });
+    const results = postsToSignals(items, { kind: "person" });
+    found = { url, checkedAt: new Date().toISOString(), results, searched: [`пости ${contact.name || "людини"} в LinkedIn за 3 місяці`],
+      gaps: results.length ? [] : [`${contact.name || "Людина"} за 3 місяці нічого не публікувала в LinkedIn.`], costUsd: Number(items?.run?.costUsd || 0) };
+  } catch (error) {
+    return { results: [], searched: [], gaps: [`Пости людини в LinkedIn не прочиталися: ${error.message}`] };
+  }
+  prospect.personPosts = found;
+  return found;
+}
+
+/**
+ * The block for one CRM contact. The company dossier is reused (its signals
+ * are refreshed when they came from the old web path); the facts are only the
+ * dated, linked ones; the model words them and asks the questions, it never
+ * adds a fact of its own — every fact it returns points at one we found.
+ */
+async function buildBeforeCall(contact, { productId = "", force = false } = {}) {
+  const taken = takeCrmContactIntoQueue(contact);
+  if (!taken.prospect) throw Object.assign(new Error(taken.warning), { statusCode: 400 });
+  const prospect = taken.prospect;
+  const cached = prospect.beforeCall;
+  if (!force && cached && (cached.productId || "") === productId && freshWithin(cached.checkedAt, BEFORE_CALL_FRESH_DAYS)) return cached;
+  const card = productId ? pitchCardForPrompt(productId) : null;
+  const product = card?.name || "";
+  if (contact.company) {
+    await researchCompanyForProspect(prospect);
+    if (anthropicEnrichKey() && (force || prospect.publicAccountSignals?.source !== "claude_web_search")) {
+      prospect.publicAccountSignals = await researchPublicAccountSignals(prospect, { product });
+      saveAccountDossier(prospect);
+    }
+  }
+  const companySignals = prospect.publicAccountSignals || {};
+  const person = await personPostsFor(prospect, contact);
+  const since = Date.now() - SIGNAL_WINDOW_DAYS * 86_400_000;
+  const pool = [
+    ...(companySignals.results || []).map((row) => ({ ...row, whose: "company" })),
+    ...(person.results || []).map((row) => ({ ...row, whose: "person" }))
+  ].filter((row) => row.url && Date.parse(row.published_at || "") >= since)
+    .sort((left, right) => String(right.published_at).localeCompare(String(left.published_at)))
+    .slice(0, 14)
+    .map((row, index) => ({ ...row, id: `f${index + 1}` }));
+  const searched = [...(companySignals.queries || []), ...(person.searched || [])];
+  const gaps = [...(companySignals.gaps || []), ...(person.gaps || [])];
+  const view = {
+    checkedAt: new Date().toISOString(), productId, productName: product,
+    facts: [], questions: [], searched, gaps, empty: !pool.length,
+    costUsd: Number(((companySignals.costUsd || 0) + (person.costUsd || 0)).toFixed(4))
+  };
+  if (pool.length) {
+    const asFact = (row, text) => ({ text, date: row.published_at.slice(0, 10), url: row.url, publisher: row.publisher || "", whose: row.whose });
+    view.facts = pool.slice(0, 5).map((row) => asFact(row, row.title));
+    if (anthropicEnrichKey()) {
+      try {
+        const answer = await postAnthropicRaw({
+          model: SIGNAL_MODEL,
+          max_tokens: 4000,
+          output_config: { effort: "low" },
+          system: "You prepare a B2B seller for a first conversation. Use only the facts given; never add a fact. Write in Ukrainian. Return JSON only.",
+          messages: [{
+            role: "user",
+            content: JSON.stringify({
+              task: "Pick the 3–5 facts most useful before a first conversation and say each in one plain Ukrainian sentence (keep names, brands and numbers as written). Then write 2–3 short questions the seller could ask this person: each grounded in one picked fact and in the product's own meanings below (who it is for, when it helps, proof), never a pitch. Answer {\"facts\":[{\"id\":\"f1\",\"text\":\"...\"}],\"questions\":[{\"text\":\"...\",\"basis\":\"which fact id and which product point\"}]}.",
+              person: { name: contact.name, title: contact.position || "", company: contact.company || "" },
+              facts: pool.map((row) => ({ id: row.id, date: row.published_at.slice(0, 10), whose: row.whose, source: row.publisher, title: row.title, text: row.snippet })),
+              product: card || { catalog: pitchCatalogForPrompt() }
+            })
+          }]
+        }, 60000);
+        const text = (answer.content || []).filter((block) => block.type === "text").map((block) => block.text).join("");
+        const parsed = parseJsonObject(text);
+        const byId = new Map(pool.map((row) => [row.id, row]));
+        const facts = (parsed.facts || []).filter((row) => byId.has(row.id) && cleanText(row.text)).slice(0, 5)
+          .map((row) => asFact(byId.get(row.id), cleanText(row.text).slice(0, 320)));
+        if (facts.length) view.facts = facts;
+        view.questions = (parsed.questions || []).map((row) => ({ text: cleanText(row.text || "").slice(0, 300), basis: cleanText(row.basis || "").slice(0, 160) })).filter((row) => row.text).slice(0, 3);
+        const [inPrice, outPrice] = [0.1, 0.5];
+        view.costUsd = Number((view.costUsd + (Number(answer.usage?.input_tokens || 0) * inPrice + Number(answer.usage?.output_tokens || 0) * outPrice) / 1e6).toFixed(4));
+      } catch (error) {
+        view.gaps.push(`Питання від AI не вийшли: ${error.message}`);
+      }
+    }
+  }
+  prospect.beforeCall = view;
+  return view;
+}
+
 // ── Головна: підготовка наперед (власник 15.10: «автоматично парсить дані про
 // користувача і компанію… наперед, щоб людина довго не чекала… листи писалися
 // після того як спарсяться всі дані»).
@@ -3333,6 +3494,7 @@ function prepView(job) {
     steps: PREP_STEPS.map(([id, label]) => ({ id, label, state: job.steps[id].state, note: job.steps[id].note || "" })),
     ...(job.contact ? { contact: job.contact, emails: contactEmails(job.contact) } : {}),
     company: job.company || null,
+    beforeCall: job.beforeCall || null,
     enrich: job.enrich || null,
     drafts: state.contactDrafts[job.contactId] || null,
     tactics: job.tactics || null
@@ -3434,10 +3596,19 @@ function prepareTriageContact(contactId, options = {}, { redraft = false, cacheS
         step("company", async () => {
           if (!contact.company) return { skipped: true, note: "у базі немає компанії" };
           const fresh = companyDossierForContact(contact);
-          if (fresh?.brief) { job.company = companyView(fresh); return { note: "уже в досьє" }; }
-          const { company } = await researchTriageCompany(contact);
-          job.company = company;
-          return { note: company?.summary ? "досьє зібрано" : "у відкритих джерелах майже нічого" };
+          let note;
+          if (fresh?.brief) { job.company = companyView(fresh); note = "уже в досьє"; }
+          else {
+            const { company } = await researchTriageCompany(contact);
+            job.company = company;
+            note = company?.summary ? "досьє зібрано" : "у відкритих джерелах майже нічого";
+          }
+          // «Перед розмовою» — з тим самим досьє; не вийшло — картка лишається як була.
+          try {
+            job.beforeCall = await buildBeforeCall(contact, { productId: wanted.productId });
+            job.company = companyView(companyDossierForContact(contact)) || job.company;
+          } catch (error) { console.warn(`[triage] before-call ${contactId}: ${error.message}`); }
+          return { note: `${note}${job.beforeCall ? (job.beforeCall.empty ? "; сигналів за 90 днів не знайдено" : `; фактів перед розмовою: ${job.beforeCall.facts.length}`) : ""}` };
         })
       ]);
     }
@@ -6736,6 +6907,9 @@ function normalizeProspect(input) {
     publicCompanyResearch: input.publicCompanyResearch || null,
     publicSocialResearch: input.publicSocialResearch || null,
     publicAccountSignals: input.publicAccountSignals && typeof input.publicAccountSignals === "object" ? input.publicAccountSignals : null,
+    // «Перед розмовою» (таск 92abd9df) і пости людини, з яких він зібраний.
+    beforeCall: input.beforeCall && typeof input.beforeCall === "object" ? input.beforeCall : null,
+    personPosts: input.personPosts && typeof input.personPosts === "object" ? input.personPosts : null,
     policyDecision: input.policyDecision && typeof input.policyDecision === "object" ? input.policyDecision : null,
     appPortfolio: input.appPortfolio && typeof input.appPortfolio === "object" ? input.appPortfolio : null,
     companyPeople: normalizeCompanyPeopleList(input.companyPeople || []),
@@ -9348,16 +9522,35 @@ function isRecentAccountSignalResearch(prospect, days = 7) {
   return Number.isFinite(ageMs) && ageMs >= 0 && ageMs <= days * 86_400_000;
 }
 
-async function researchPublicAccountSignals(prospect) {
+async function researchPublicAccountSignals(prospect, { product = "" } = {}) {
   const company = cleanText(prospect.company || "");
   const person = cleanText(prospect.name || "");
   const domain = normalizeDomain(prospect.website || prospect.publicCompanyResearch?.domain || "");
+  const industry = cleanText((prospect.companyEnrichment?.industries || [])[0] || prospect.industry || "");
+  // Таск 92abd9df (03.11): вебпошук Claude і пости компанії в LinkedIn (Apify) —
+  // запити під продукт кампанії; DuckDuckGo нижче лишається, коли ключа немає.
+  const sources = signalSources();
+  if (sources.post) {
+    const found = await collectSignals({ ...sources, company, domain, companyLinkedin: companyLinkedinUrl(prospect), product, industry });
+    return {
+      checkedAt: found.checkedAt,
+      windowDays: found.windowDays,
+      source: "claude_web_search",
+      kind: found.kind,
+      queries: found.searched,
+      results: found.company,
+      gaps: found.company.length ? [] : found.gaps,
+      costUsd: found.costUsd
+    };
+  }
   const year = new Date().getUTCFullYear();
+  const igaming = productKind({ product, company, industry }) === "igaming";
+  // Короткі запити, без лапок: довгі в лапках давали 2 результати замість 10.
   const queries = [
-    `"${company}" launch release update partnership acquisition funding ${year}`,
-    `"${company}" hiring user acquisition growth monetization product ${year}`,
-    domain ? `site:${domain} privacy advertising IDFA GAID AppsFlyer children family` : `"${company}" privacy advertising IDFA GAID AppsFlyer`,
-    person && person.toLowerCase() !== company.toLowerCase() ? `"${person}" "${company}" interview podcast conference` : `"${company}" leadership interview growth`
+    `${company} news ${year}`,
+    igaming ? `${company} licence new brand launch` : `${company} launch partnership acquisition ${year}`,
+    igaming ? `${company} hiring affiliate manager media buyer` : `${company} hiring growth marketing`,
+    person && person.toLowerCase() !== company.toLowerCase() ? `${person} ${company} interview conference` : `${company} conference interview`
   ];
   const groups = await Promise.all(queries.map((query) => publicSearchResults(query, 7)));
   const byUrl = new Map();
