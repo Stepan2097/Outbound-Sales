@@ -29,5 +29,6 @@ test("a mailbox that lost its Google access stays in the warm-up with «пере
   const rows = warmupView([], { senders: senders.filter((row) => !isDisconnected(row)), domains });
   assert.deepEqual(rows.map((row) => row.email), ["vlad@gmail.com"]);
   assert.equal(rows[0].status, "blocked");
-  assert.match(rows[0].blocked, /відключилася від платформи — перепідключіть/);
+  assert.equal(rows[0].blockedLabel, "відключилася");
+  assert.match(rows[0].blocked, /перепідключіть: «Увійти через Google»/);
 });

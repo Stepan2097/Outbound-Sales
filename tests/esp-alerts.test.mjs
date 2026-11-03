@@ -34,6 +34,13 @@ test("more than 2% permanent bounces in 7 days pauses the sender; 2% exactly doe
   assert.deepEqual(review([...sent, ...["l1@co1.com", "l2@co2.com", "l3@co3.com"].map((contact) => bounce(contact, "4.4.7"))]), []);
 });
 
+test("a new sender's first bounce is not «25%»: below 50 letters a week the rate does not pause, 3 bounces still do (03.11)", () => {
+  const four = sends(4);
+  assert.deepEqual(review([...four, bounce("l1@co1.com")]), [], "1 of 4 on the first day paused tomas@trafpush.com");
+  const ten = sends(10);
+  assert.deepEqual(review([...ten, bounce("l1@co1.com"), bounce("l2@co2.com"), bounce("l3@co3.com")]).map((row) => row.code), ["bounce_per_100"]);
+});
+
 test("3 bounces on the last 100 letters pauses the sender even when the week is bigger", () => {
   const old = sends(300, { hours: 24 * 6 });
   const recent = sends(100, { hours: 1 }).map((row, index) => ({ ...row, contact: `r${index}@r${index}.com` }));

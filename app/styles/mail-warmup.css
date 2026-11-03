@@ -574,3 +574,14 @@
   display: block;
   white-space: nowrap;
 }
+
+/* Чому прогрів тут не йде — під плашкою, з переносом, а не в колонці дій (03.11: «вилазить за межі»). */
+.warmup-mail-status .warmup-mail-why {
+  display: block;
+  max-width: 220px;
+  margin-top: 4px;
+  white-space: normal;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}

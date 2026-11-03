@@ -18,6 +18,10 @@
 // Only permanent bounces count (5.x.x); a 4.x.x is a delay (ESP 7).
 
 export const SENDER_BOUNCE_RATE = 0.02;
+// The 2% only speaks from this many letters a week: 1 bounce of 4 is «25%» and
+// paused a sender on its first day (03.11, tomas@trafpush.com). Below it, the
+// «3 bounces on the last 100 letters» rule is the guard.
+export const SENDER_RATE_MIN_SENT = 50;
 export const SENDER_BOUNCES_PER_100 = 3;
 export const CAMPAIGN_BOUNCE_RATE = 0.03;
 export const CAMPAIGN_EARLY = { min: 100, max: 300 };
@@ -35,7 +39,7 @@ function senderFindings(sender, entries, now) {
   const weekAgo = now.getTime() - 7 * DAY;
   const weekSent = sent.filter((entry) => new Date(entry.at).getTime() >= weekAgo).length;
   const weekBounced = bounces.filter((entry) => new Date(entry.at).getTime() >= weekAgo).length;
-  if (weekSent && weekBounced / weekSent > SENDER_BOUNCE_RATE) {
+  if (weekSent >= SENDER_RATE_MIN_SENT && weekBounced / weekSent > SENDER_BOUNCE_RATE) {
     findings.push({ code: "bounce_rate_7d", reason: `bounce ${(weekBounced / weekSent * 100).toFixed(1)}% за 7 днів (${weekBounced} з ${weekSent}) — більше 2%` });
   }
   // The last hundred letters, and the bounces about those letters' people.

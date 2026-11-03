@@ -256,15 +256,20 @@ export function warmupView(entries, { senders = [], domains = [], now = new Date
     .sort((left, right) => String(left.domain).localeCompare(String(right.domain)) || left.email.localeCompare(right.email)).map((sender) => {
     const mine = rows.get(sender.email) || { running: false, day: 0, plannedToday: 0, sentToday: 0, firstsToday: 0, repliesToday: 0, sent: 0, repliesReceived: 0, repliesSent: 0, received: 0, rescued: 0, rescuedOwn: 0, landedInSpam: 0, failedToday: 0, lastError: null, startedAt: null, pausedAt: null, by: "" };
     const domainStatus = domainState.get(sender.domain) || null;
-    const blocked = sender.status !== "active" ? (sender.status === "paused" ? (lostAccess(sender) ? "відключилася від платформи — перепідключіть: «Увійти через Google»" : "пошта на паузі") : "пошту виведено")
-      : !["aging", "ramp", "active"].includes(domainStatus) ? `домен у стані «${DOMAIN_LABEL[domainStatus] || domainStatus || "немає"}»` : null;
+    // Why the warm-up can't run here, short for the pill and whole for the line under it (03.11: «що означає не можна?»).
+    const pause = sender.status === "paused" ? [...(sender.history || [])].reverse().find((step) => step.status === "paused") : null;
+    const [blockedLabel, blocked] = sender.status !== "active"
+      ? (sender.status === "paused"
+        ? (lostAccess(sender) ? ["відключилася", "Доступ Google зник — перепідключіть: «Увійти через Google»."] : ["на паузі", pause?.reason ? `${pause.reason}.` : "Пошту поставлено на паузу."])
+        : ["виведена", "Пошту виведено з роботи."])
+      : !["aging", "ramp", "active"].includes(domainStatus) ? ["домен не готовий", `Домен у стані «${DOMAIN_LABEL[domainStatus] || domainStatus || "немає"}».`] : [null, null];
     const limit = senderDailyLimit(sender);
     const coldToday = ledger.senders.get(sender.email)?.cold || 0;
     const coldAllowed = coldAllowance(sender);
     return {
       email: sender.email, domain: sender.domain, domainStatus, person: sender.person || sender.displayName || "", role: sender.role || null, tags: sender.tags || [],
       status: blocked ? "blocked" : mine.running ? "running" : mine.startedAt ? "paused" : "never",
-      blocked, day: mine.day, plannedToday: mine.plannedToday, planOfDay: mine.plannedToday,
+      blocked, blockedLabel, day: mine.day, plannedToday: mine.plannedToday, planOfDay: mine.plannedToday,
       sentToday: mine.sentToday, firstsToday: mine.firstsToday, repliesToday: mine.repliesToday, coldToday, coldAllowed, limit,
       sent: mine.sent, repliesReceived: mine.repliesReceived, repliesSent: mine.repliesSent, received: mine.received,
       rescued: mine.rescued, rescuedOwn: mine.rescuedOwn, landedInSpam: mine.landedInSpam, failedToday: mine.failedToday, lastError: mine.lastError,
