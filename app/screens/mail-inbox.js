@@ -11,9 +11,16 @@ import { api, escapeAttr, escapeHtml, onScreen, refreshIcons } from "../core.js"
 
 const CHANNEL_KEY = "unibox:channel";
 const LABEL_TONE = { positive: "tone-live", negative: "tone-warn", referral: "tone-done", neutral: "tone-muted" };
-/** Bounced; not opened yet by anyone on the team; or already read — an open envelope (owner 03.11). */
+/**
+ * Not opened yet by anyone on the team — bright; already read — muted (owner 03.11:
+ * «я прочитав іконка не змінилася» — a bounce too). A bounce keeps its crossed envelope.
+ */
 function rowIconHtml(row) {
-  if (row.bounced && row.lastDirection === "in") return '<span class="unibox-icon is-bounced" title="Не доставлено"><i data-lucide="mail-x"></i></span>';
+  if (row.bounced && row.lastDirection === "in") {
+    return row.unread
+      ? '<span class="unibox-icon is-bounced" title="Не доставлено · ще не прочитано"><i data-lucide="mail-x"></i></span>'
+      : '<span class="unibox-icon is-read" title="Не доставлено · прочитано"><i data-lucide="mail-x"></i></span>';
+  }
   if (row.unread) return '<span class="unibox-icon is-mail" title="Ще не прочитано"><i data-lucide="mail"></i></span>';
   return '<span class="unibox-icon is-read" title="Прочитано"><i data-lucide="mail-open"></i></span>';
 }

@@ -63,4 +63,6 @@ test("a conversation somebody on the team already read has an open, muted envelo
   assert.match(screen, /if \(row\.unread\) return '<span class="unibox-icon is-mail"[^']*><i data-lucide="mail"><\/i><\/span>';/);
   assert.match(screen, /return '<span class="unibox-icon is-read"[^']*><i data-lucide="mail-open"><\/i><\/span>';/);
   assert.match(inbox, /\.unibox-icon\.is-read \{/);
+  // A bounce read by somebody is muted too, with its crossed envelope.
+  assert.match(screen, /: '<span class="unibox-icon is-read" title="Не доставлено · прочитано"><i data-lucide="mail-x"><\/i><\/span>';/);
 });
