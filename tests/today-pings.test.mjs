@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import test from "node:test";
 
 import { reconcilePings, setLeadgenStore, setManualPing, todayItem, todayList } from "../triage/today.mjs";
-import { addWorkingDays, dayIn, taskMarks } from "../triage/pings.mjs";
+import { addWorkingDays, dayIn, taskMarks, workday } from "../triage/pings.mjs";
 
 // «Сьогодні» і пінги в CRM (етап 1/6, таск 5f5343cb) — через звірку, на заглушці,
 // що грає обидві бази: прогрів (wl_*) і CRM (contacts, tasks, profiles).
@@ -298,7 +298,9 @@ test("кампанія: нагадування за її кроками; піс�
     await reconcilePings();
     const [ping] = openOf("c1");
     assert.equal(ping.title, "Нагадати: Lead One");
-    assert.equal(dayIn(ping.due_date), addWorkingDays(dayIn(new Date(Date.now() - 6 * 86400000 - 60000)), 1), "крок кампанії — 1 робочий день");
+    // Крок минув — вирівнювання за ємністю (таск cdfe0440) ставить прострочений «мовчить» на сьогодні.
+    const step = addWorkingDays(dayIn(new Date(Date.now() - 6 * 86400000 - 60000)), 1);
+    assert.equal(dayIn(ping.due_date), step < dayIn(new Date()) ? workday(dayIn(new Date())) : step, "крок кампанії — 1 робочий день");
 
     rows.wl_events.push(message("out", "follow-up", 60 * 24 * 5));
     await reconcilePings();
@@ -461,4 +463,61 @@ test("суддя 23.10 (таск e06c67c1): статус з Outbound підпи�
   const by = Object.fromEntries(rows.contact_status_history.map((row) => [row.id, row.changed_by]));
   assert.deepEqual(by, { "h-new": BOHDAN.id, "h-crm": "u-crm-user", "h-old": null }, "лише щойно вписаний і непідписаний рядок");
   assert.equal(await signStatusChange({ contactId: "c1", status: "qualified", viewer: {}, since: now }), 0, "без людини — нічого");
+});
+
+// Таск cdfe0440: денна ємність, без вихідних, «Не лід» з підставою, системні відправники.
+import { markNotLead, setCapacityStore } from "../triage/today.mjs";
+
+test("звірка тримає денну ємність лідгена й не лишає пінгів на вихідні; шапка бачить навантаження", async () => {
+  rows.wl_events = [];
+  const today = dayIn(new Date());
+  const saturday = (() => {
+    const date = new Date(`${today}T12:00:00Z`);
+    date.setUTCDate(date.getUTCDate() + ((6 - date.getUTCDay() + 7) % 7 || 7));
+    return date.toISOString().slice(0, 10);
+  })();
+  rows.tasks = [
+    ...Array.from({ length: 25 }, (_, index) => ({ id: `s${index}`, queue: "Outbound", contact_id: `x${index}`, assigned_to: "u-bohdan", owner_id: "u-bohdan", completed: false, task_type: "To-do", ping_key: `silent:x${index}:none:1`, due_date: new Date(Date.now() - 3 * 86400000).toISOString(), created_at: ago(9000 + index) })),
+    { id: "sat", queue: "Outbound", contact_id: "y1", assigned_to: "u-bohdan", owner_id: "u-bohdan", completed: false, task_type: "To-do", ping_key: "reply:y1:x", due_date: `${saturday}T07:00:00.000Z`, created_at: ago(100) }
+  ];
+  setCapacityStore({ read: () => ({ "bohdan@example.com": 10 }), write: async () => {} });
+  try {
+    const stats = await reconcilePings();
+    assert.ok(stats.moved > 0);
+    const counts = new Map();
+    for (const task of rows.tasks.filter((row) => !row.completed && row.id !== "sat")) counts.set(dayIn(task.due_date), (counts.get(dayIn(task.due_date)) || 0) + 1);
+    for (const [day, count] of counts) {
+      assert.ok(count <= 10, `${day}: ${count}`);
+      assert.ok(![0, 6].includes(new Date(`${day}T12:00:00Z`).getUTCDay()), `${day} — вихідний`);
+    }
+    assert.equal(dayIn(rows.tasks.find((row) => row.id === "sat").due_date), workday(saturday), "відповідь із суботи — на понеділок");
+    const list = await todayList({ viewerId: "u-bohdan", viewerEmail: "bohdan@example.com" });
+    assert.equal(list.load.capacity, 10);
+    assert.equal(list.load.days.length, 5);
+    assert.ok(list.load.days.every((row) => row.count <= 10 || row.day === workday(saturday)));
+  } finally {
+    setCapacityStore({ read: () => ({}), write: async () => {} });
+  }
+});
+
+test("«Не лід» з картки будь-якої відповіді: «Не ICP», підстава в історії CRM, пінги закриті, з «Відповідей» зник", async () => {
+  await reconcilePings();
+  assert.ok((await todayList({ viewerId: "u-bohdan" })).blocks.replies.some((item) => item.contactId === "c1"));
+  const result = await markNotLead({ contactId: "c1", basis: "recruiter", viewer: BOHDAN });
+  assert.equal(result.status, "not_icp");
+  const contact = rows.contacts.find((row) => row.id === "c1");
+  assert.equal(contact.lead_status, "not_icp");
+  assert.equal(contact.exit_reason, "not_icp");
+  assert.match(rows.activities.at(-1).content, /не лід — рекрутер/);
+  assert.equal(openOf("c1").length, 0, "пінги контакту закриті");
+  assert.ok(!(await todayList({ viewerId: "u-bohdan" })).blocks.replies.some((item) => item.contactId === "c1"));
+  await assert.rejects(markNotLead({ contactId: "c1", basis: "spam", viewer: BOHDAN }), /Оберіть підставу/);
+});
+
+test("лист від LinkedIn Team не стає «Відповіддю», а пінг, поставлений за ним раніше, закривається", async () => {
+  rows.wl_events = [{ ...message("in", "Welcome to LinkedIn", 30), meta: { threadKey: "t-li", crmContactId: "c1", body: "Welcome to LinkedIn", sentAt: ago(31), participant: { name: "LinkedIn Team" } } }];
+  rows.tasks = [{ id: "old", queue: "Outbound", contact_id: "c1", assigned_to: "u-bohdan", owner_id: "u-bohdan", completed: false, task_type: "To-do", ping_key: `reply:c1:${ago(30)}`, due_date: new Date().toISOString(), created_at: ago(29) }];
+  await reconcilePings();
+  assert.equal(openOf("c1").length, 0, "системний лист — не розмова");
+  assert.equal((await todayList({ viewerId: "u-bohdan" })).blocks.replies.length, 0);
 });

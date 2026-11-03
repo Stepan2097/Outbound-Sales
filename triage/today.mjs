@@ -13,12 +13,13 @@ import { repliesOf, sameText } from "../warmup/outbox.mjs";
 import { acceptedRows, firstMarks } from "../warmup/first-messages.mjs";
 import { INVITE_ACCEPTED } from "../warmup/invites.mjs";
 import { accountName } from "../warmup/activities.mjs";
-import { acceptOpenDialogs, openDialogs, suggestOpenDialogs } from "./open-dialogs.mjs";
+import { acceptOpenDialogs, allRows, openDialogs, suggestOpenDialogs } from "./open-dialogs.mjs";
 import { OUTREACH_ACTIONS, dayOf, workEntries } from "./work-log.mjs";
 import { CLOSING, DEFAULT_EXIT, EXIT_REASONS, LEAD_STATUSES, NOT_RELEVANT_FOLDER, ORIGIN, statusPatch } from "./statuses.mjs";
 import {
   DEFAULT_PING_STEPS, LATER_DAYS, PING_QUEUE, REASONS, blockOf, compareItems, currentPingSteps, dayIn, desiredPing, isPingSteps, laterPing, manualDueDay, usePingSteps,
-  REPLIED_STATUS, leadReplied, newContactsAllowed, planPingChanges, reasonOfKey, repliedStatusDue, stripMarks, taskDescription, taskMarks, taskReason, zonedIso
+  REPLIED_STATUS, leadReplied, newContactsAllowed, planPingChanges, reasonOfKey, repliedStatusDue, stripMarks, taskDescription, taskMarks, taskReason, zonedIso,
+  DEFAULT_CAPACITY, addCalendarDays, cleanCapacity, levelPings, loadAhead, workday
 } from "./pings.mjs";
 
 const TASK_COLUMNS = "id,title,description,contact_id,owner_id,assigned_to,due_date,completed,status,task_type,queue,created_at,updated_at,ping_key,ping_superseded";
@@ -63,6 +64,25 @@ export function setPingStepsStore(store) {
 export function setNewContactPolicyStore(store) {
   if (store?.read && store?.write) policyStore = store;
 }
+
+// Денна ємність лідгена (таск cdfe0440): { email: пінгів на робочий день }. Немає запису —
+// DEFAULT_CAPACITY. Звірка розкладає системні пінги так, щоб жоден день її не перевищив.
+let capacityStore = { read: () => ({}), write: async () => {} };
+export function setCapacityStore(store) {
+  if (store?.read && store?.write) capacityStore = store;
+}
+const capacityOf = (email) => cleanCapacity(capacityStore.read()[String(email || "").toLowerCase()] ?? DEFAULT_CAPACITY);
+
+/** «Не лід» (таск cdfe0440): статус CRM «Не ICP» і підстава — нотаткою в історії контакту. */
+export const NOT_LEAD_BASES = [
+  ["vendor", "Вендор"],
+  ["recruiter", "Рекрутер"],
+  ["job_seeker", "Шукає роботу"],
+  ["system", "Системне повідомлення"],
+  ["other", "Інше"]
+];
+/** Відповідь, що чекає довше за стільки днів, — бекліг: адміністратор розбирає його пачкою. */
+export const BACKLOG_DAYS = 3;
 export const NEW_CONTACT_MODES = ["gate", "limit", "open"];
 export const NEW_CONTACT_LIMIT_MAX = 100;
 
@@ -270,7 +290,8 @@ async function applyAction(action, { contactId, contact, owner, nowIso }) {
       owner_id: assignee,
       assigned_to: assignee,
       contact_id: contactId,
-      due_date: zonedIso(desired.due),
+      // Субота й неділя — понеділок (таск cdfe0440).
+      due_date: zonedIso(workday(desired.due)),
       completed: false,
       status: "todo",
       task_type: "To-do",
@@ -399,12 +420,50 @@ export async function reconcilePings({ now = new Date() } = {}) {
         console.error(`[pings] responded for ${contactId}: ${error.message}`);
       }
     }
+    // Денна ємність (таск cdfe0440): після всіх змін — розклад відкритих пінгів по днях.
+    try {
+      Object.assign(stats, await levelOpenPings({ now }));
+    } catch (error) {
+      stats.failed += 1;
+      console.error(`[pings] level: ${error.message}`);
+    }
     lastRunAt = Date.now();
     lastStats = { ...stats, at: nowIso };
-    if (stats.created || stats.superseded || stats.reopened || stats.reassigned || stats.noReply || stats.responded || stats.failed) console.log(`[pings] ${JSON.stringify(lastStats)}`);
+    if (stats.created || stats.superseded || stats.reopened || stats.reassigned || stats.noReply || stats.responded || stats.moved || stats.failed) console.log(`[pings] ${JSON.stringify(lastStats)}`);
     return lastStats;
   })().finally(() => { running = null; });
   return running;
+}
+
+// Скільки пінгів останнє вирівнювання зняло з сьогодні — по лідгену: «решта перенесена».
+const movedToday = new Map();
+
+/**
+ * Відкриті пінги черги — по лідгенах — у межах денної ємності: системні «перше
+ * повідомлення» і «мовчить» переходять на наступні робочі дні, вихідні дати — на понеділок.
+ * Одна зміна дати — один запит на групу пінгів з тим самим новим днем.
+ */
+export async function levelOpenPings({ now = new Date() } = {}) {
+  const open = await allRows(() => crm.from("tasks").select(TASK_COLUMNS).eq("queue", PING_QUEUE).eq("completed", false).order("id"));
+  const byAssignee = new Map();
+  for (const task of open) if (task.assigned_to) byAssignee.set(task.assigned_to, [...(byAssignee.get(task.assigned_to) || []), task]);
+  const emails = await emailsOf([...byAssignee.keys()]);
+  const today = dayIn(now);
+  const updatedAt = now.toISOString();
+  let moved = 0;
+  for (const [assignee, tasks] of byAssignee) {
+    const changes = levelPings(tasks, { today, capacity: capacityOf(emails.get(assignee)) });
+    movedToday.set(assignee, { count: changes.filter((change) => change.from <= today && change.due > today).length, at: updatedAt });
+    const byDay = new Map();
+    for (const change of changes) byDay.set(change.due, [...(byDay.get(change.due) || []), change.task.id]);
+    for (const [due, ids] of byDay) {
+      for (const part of chunks(ids)) {
+        await crm.from("tasks").update({ due_date: zonedIso(due), updated_at: updatedAt }).in("id", part).rows();
+        moved += part.length;
+      }
+    }
+  }
+  return { moved };
 }
 
 export function lastReconcile() {
@@ -497,12 +556,13 @@ function campaignOf(campaignId) {
 }
 
 /** Відкриті пінги лідгена (адмін — усіх), розкладені по блоках «Сьогодні». */
-export async function todayList({ viewerId, scope = "mine", now = new Date() }) {
+export async function todayList({ viewerId, viewerEmail = "", scope = "mine", now = new Date() }) {
   if (!pingsConfigured()) return { configured: false, blocks: { replies: [], overdue: [], today: [], first: [] }, later: [], newContactsAllowed: true };
   const gathered = await freshGather();
-  let query = crm.from("tasks").select(TASK_COLUMNS).eq("queue", PING_QUEUE).eq("completed", false);
-  if (scope !== "all") query = query.eq("assigned_to", viewerId);
-  const open = await query.order("due_date", { ascending: true }).limit(1000).rows();
+  const open = await allRows(() => {
+    const query = crm.from("tasks").select(TASK_COLUMNS).eq("queue", PING_QUEUE).eq("completed", false);
+    return (scope !== "all" ? query.eq("assigned_to", viewerId) : query).order("due_date", { ascending: true }).order("id");
+  });
   const contactIds = [...new Set(open.map((task) => task.contact_id).filter(Boolean).map(String))];
   const [contacts, emails] = await Promise.all([contactsOf(contactIds), emailsOf(open.map((task) => task.assigned_to))]);
   const today = dayIn(now);
@@ -512,8 +572,18 @@ export async function todayList({ viewerId, scope = "mine", now = new Date() }) 
   const blocks = { replies: [], overdue: [], today: [], first: [] };
   const later = [];
   for (const item of items) (blocks[item.block] || later).push(item);
+  // Бекліг: відповіді, що чекають довше за BACKLOG_DAYS, — адміністратор розбирає їх пачкою.
+  const staleBefore = addCalendarDays(today, -BACKLOG_DAYS);
+  for (const item of blocks.replies) item.stale = Boolean(item.dueDay && item.dueDay < staleBefore);
+  // Навантаження на 5 робочих днів (таск cdfe0440): за датами відкритих пінгів, проти ємності.
+  const assignees = [...new Set(open.map((task) => task.assigned_to).filter(Boolean))];
+  const mine = scope !== "all";
+  const capacity = mine ? capacityOf(emails.get(viewerId) || viewerEmail) : assignees.reduce((sum, id) => sum + capacityOf(emails.get(id)), 0);
+  const moved = mine ? movedToday.get(viewerId)?.count || 0 : assignees.reduce((sum, id) => sum + (movedToday.get(id)?.count || 0), 0);
   return {
     configured: true, today, scope, blocks, later,
+    load: { capacity, days: loadAhead(items.map((item) => item.dueDay).filter((day) => day && day >= today), { today }), moved },
+    notLeadBases: NOT_LEAD_BASES, backlogDays: BACKLOG_DAYS,
     newContactsAllowed: newContactsAllowed(blocks),
     statuses: LEAD_STATUSES, exitReasons: EXIT_REASONS, closing: [...CLOSING], defaultExit: DEFAULT_EXIT,
     reconciledAt: lastStats?.at || null
@@ -761,6 +831,36 @@ export async function setContactStatus({ contactId, status, exitReason = "", vie
   return { status: checked.patch.lead_status, exitReason: checked.patch.exit_reason, closedPings: closed, dealId, folderId: folder };
 }
 
+/**
+ * «Не лід» з картки будь-якої відповіді (таск cdfe0440): статус CRM «Не ICP» закриває пінги
+ * контакту, підстава — нотатка в історії контакту CRM («Outbound: не лід — рекрутер»).
+ * Причина виходу лишається not_icp: список причин у CRM закритий перевіркою в базі.
+ */
+export async function markNotLead({ contactId, basis, viewer, now = new Date() }) {
+  const label = NOT_LEAD_BASES.find(([key]) => key === basis)?.[1];
+  if (!label) throw refuse("Оберіть підставу: вендор, рекрутер, шукає роботу, системне чи інше.", 400);
+  const result = await setContactStatus({ contactId, status: "not_icp", exitReason: "not_icp", viewer, now });
+  await crm.from("activities").insert({
+    contact_id: String(contactId), type: "note", origin: ORIGIN, user_id: viewer?.id || null,
+    content: `Outbound: не лід — ${label.toLowerCase()}. Статус «Не ICP», пінги закрито.`
+  }).rows().catch((error) => console.warn(`[today] нотатка «не лід» ${contactId}: ${error.message}`));
+  return { ...result, basis };
+}
+
+/** Пачкою з беклогу (адміністратор): кожен — окремо, збій одного не зупиняє решту. */
+async function forEachOf(ids, run) {
+  const done = [];
+  const failed = [];
+  for (const id of [...new Set((Array.isArray(ids) ? ids : []).map(String).filter(Boolean))].slice(0, 200)) {
+    try {
+      done.push({ id, ...(await run(id)) });
+    } catch (error) {
+      failed.push({ id, error: error.message });
+    }
+  }
+  return { done, failed };
+}
+
 let notRelevantLookup = null;
 
 /** Папка «Не актуально»: жива з такою назвою, або нова — з власником, як в інших папок. */
@@ -820,7 +920,7 @@ export async function handleTodayApi({ request, response, url, sendJson, readJso
   try {
     if (request.method === "GET" && path === "/api/today") {
       const scope = isAdmin && url.searchParams.get("scope") === "all" ? "all" : "mine";
-      sendJson(response, 200, { ...(await todayList({ viewerId: viewer.id, scope })), canSeeAll: isAdmin });
+      sendJson(response, 200, { ...(await todayList({ viewerId: viewer.id, viewerEmail: viewer.email, scope })), canSeeAll: isAdmin });
       return true;
     }
     if (request.method === "GET" && path === "/api/today/gate") {
@@ -845,6 +945,43 @@ export async function handleTodayApi({ request, response, url, sendJson, readJso
       else next[email] = { ...rule, by: viewer.email || null, at: new Date().toISOString() };
       await policyStore.write(next);
       sendJson(response, 200, { policies: next });
+      return true;
+    }
+    // Денна ємність лідгена (таск cdfe0440): бачить і змінює адміністратор (Налаштування → Команда).
+    if (request.method === "GET" && path === "/api/today/capacity") {
+      if (!isAdmin) throw refuse("Ємність лідгенів бачить і змінює адміністратор.", 403);
+      sendJson(response, 200, { capacity: capacityStore.read(), defaultCapacity: DEFAULT_CAPACITY });
+      return true;
+    }
+    if (request.method === "POST" && path === "/api/today/capacity") {
+      if (!isAdmin) throw refuse("Ємність лідгена змінює адміністратор.", 403);
+      const body = await readJson(request);
+      const email = String(body?.email || "").trim().toLowerCase();
+      if (!/^[^@\s]+@[^@\s]+$/.test(email)) throw refuse("Потрібна пошта лідгена.", 400);
+      const next = { ...capacityStore.read() };
+      const value = cleanCapacity(body?.capacity);
+      if (value === DEFAULT_CAPACITY) delete next[email];
+      else next[email] = value;
+      await capacityStore.write(next);
+      reconcileSoon(500);
+      sendJson(response, 200, { capacity: next, defaultCapacity: DEFAULT_CAPACITY });
+      return true;
+    }
+    if (request.method === "POST" && path === "/api/today/not-lead") {
+      const body = await readJson(request);
+      const ids = Array.isArray(body?.contactIds) ? body.contactIds : [body?.contactId];
+      if (ids.length > 1 && !isAdmin) throw refuse("Пачкою розбирає адміністратор.", 403);
+      const result = await forEachOf(ids, (contactId) => markNotLead({ contactId, basis: String(body?.basis || ""), viewer }));
+      if (!result.done.length && result.failed.length === 1) throw refuse(result.failed[0].error, 400);
+      reconcileSoon(500);
+      sendJson(response, 200, result);
+      return true;
+    }
+    if (request.method === "POST" && path === "/api/today/postpone") {
+      if (!isAdmin) throw refuse("Пачкою переносить адміністратор.", 403);
+      const body = await readJson(request);
+      const result = await forEachOf(body?.pingIds, (pingId) => setManualPing({ pingId, when: body?.when, viewer }));
+      sendJson(response, 200, result);
       return true;
     }
     // Коли нагадувати тим, хто мовчить: бачать усі, змінює адміністратор (власник 20.10: «зробити ці поля редагованими»).

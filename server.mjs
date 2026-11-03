@@ -10,7 +10,7 @@ import { CHANNEL_RULES, LANGUAGES, buildFallbackDrafts, draftsPromptPayload, nor
 import { invalidateContactCaches, contactAsProspect, contactsConfigured, contactsMissingConfig, crmKeyKind, folderContactAt, listContactFolders, listFolderContacts, searchFolderContacts, readContact, supabaseKeyKind } from "./contacts/store.mjs";
 import { handleKnowledgeLibraryApi } from "./knowledge/api.mjs";
 import { handlePitchApi } from "./knowledge/pitch-api.mjs";
-import { handleTodayApi, todayList, reconcileSoon, setInboxLabelReader, setLeadgenStore, setNewContactPolicyStore, setPingStepsStore, startPingReconciler } from "./triage/today.mjs";
+import { handleTodayApi, todayList, reconcileSoon, setCapacityStore, setInboxLabelReader, setLeadgenStore, setNewContactPolicyStore, setPingStepsStore, startPingReconciler } from "./triage/today.mjs";
 import { setActivityAuthor } from "./warmup/activities.mjs";
 import { campaignsByContact, handleLeadCampaignApi, leadCampaigns, setCampaignSkipStore, setLeadCampaignStore } from "./triage/lead-campaigns.mjs";
 import { handleCampaignReportApi, setReportStores, startReplyLabeler } from "./triage/campaign-report.mjs";
@@ -316,6 +316,8 @@ const state = {
   // Скільки нових контактів лідген бере, коли в нього є живі розмови (Марко 19.10):
   // { email: { mode: "gate" | "limit" | "open", limit } }. Немає запису — правило як було.
   newContactPolicy: {},
+  // Денна ємність лідгена (таск cdfe0440): { email: пінгів на робочий день }. Немає запису — 30.
+  pingCapacity: {},
   // Кроки нагадувань тим, хто мовчить (власник 20.10); null — за замовчуванням [2, 3, 5, 7].
   pingSteps: null,
   // Мітки відповідей у звіті кампаній (етап 6/6): { contactId: { label, by: ai|human, basis, at } }.
@@ -806,6 +808,13 @@ server.listen(port, listenHost, () => {
     read: () => state.newContactPolicy || {},
     async write(value) {
       state.newContactPolicy = value;
+      await writePersistentWorkspaceState();
+    }
+  });
+  setCapacityStore({
+    read: () => state.pingCapacity || {},
+    async write(value) {
+      state.pingCapacity = value;
       await writePersistentWorkspaceState();
     }
   });
@@ -5314,6 +5323,9 @@ function applyPersistentWorkspaceState(saved = {}) {
   if (saved.newContactPolicy && typeof saved.newContactPolicy === "object" && !Array.isArray(saved.newContactPolicy)) {
     state.newContactPolicy = saved.newContactPolicy;
   }
+  if (saved.pingCapacity && typeof saved.pingCapacity === "object" && !Array.isArray(saved.pingCapacity)) {
+    state.pingCapacity = saved.pingCapacity;
+  }
   if (Array.isArray(saved.pingSteps)) {
     state.pingSteps = saved.pingSteps;
   }
@@ -5597,6 +5609,7 @@ async function writeWorkspaceStateNow() {
       warmupCampaigns: state.warmupCampaigns,
       accountLeadgens: state.accountLeadgens,
       newContactPolicy: state.newContactPolicy,
+      pingCapacity: state.pingCapacity,
       pingSteps: state.pingSteps,
       replyLabels: state.replyLabels,
       inboxLabels: state.inboxLabels,

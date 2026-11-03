@@ -99,6 +99,13 @@ export function addCalendarDays(day, n) {
   return dayPlus(day, n);
 }
 
+/** Робочий день: субота й неділя — найближчий понеділок, будній — він сам. */
+export function workday(day) {
+  if (!day) return day;
+  const weekday = new Date(`${day}T12:00:00Z`).getUTCDay();
+  return weekday === 6 ? dayPlus(day, 2) : weekday === 0 ? dayPlus(day, 1) : day;
+}
+
 /** Мить «день, година:00» у поясі команди — те, що лягає в `tasks.due_date`. */
 export function zonedIso(day, hour = DUE_HOUR, tz = TEAM_TZ) {
   const guess = new Date(`${day}T${String(hour).padStart(2, "0")}:00:00Z`);
@@ -226,8 +233,14 @@ export function desiredPing(contactId, state, { now = new Date() } = {}) {
   const windowStart = now.getTime() - WINDOW_DAYS * 86400000;
   // Тред заблокованого акаунта, з якого людину перепризначено (етап 4/6), — історія:
   // наступний крок веде новий акаунт.
-  const threads = (state.threads || []).filter((thread) => thread.lastMessage && !thread.moved);
+  const live = (state.threads || []).filter((thread) => thread.lastMessage && !thread.moved);
+  // Системні відправники LinkedIn (таск cdfe0440) — не розмова: ні «Відповідей», ні чернетки.
+  const threads = live.filter((thread) => !isSystemSender(thread.participant));
   const thread = threads.sort((left, right) => ms(right.lastStoredAt) - ms(left.lastStoredAt))[0] || null;
+  if (!thread && live.length && !state.accepted) {
+    // Лише системні треди: пінг, поставлений за ними раніше, закривається.
+    return { key: null, basisAt: live.map((item) => item.lastStoredAt).filter(Boolean).sort().at(-1) || null };
+  }
 
   if (thread) {
     const lastIn = thread.lastInboundStoredAt || null;
@@ -349,10 +362,11 @@ export function manualDueDay(when, today) {
   const text = String(when || "").trim();
   // Дата — лише повна й не в минулому й не далі року (суддя 19.10: ввід з клавіатури
   // давав 0002-10-19, і пінг падав у «Прострочені»).
-  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text >= today && text <= addCalendarDays(today, 365) ? text : "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text >= today && text <= addCalendarDays(today, 365) ? workday(text) : "";
   const days = Number(text.replace(/^\+/, ""));
   if (!Number.isInteger(days) || days < 0 || days > 365) return "";
-  return days === 0 ? today : addCalendarDays(today, days);
+  // Субота й неділя — понеділок (таск cdfe0440: пінги не стоять на вихідні).
+  return workday(days === 0 ? today : addCalendarDays(today, days));
 }
 
 /* ── Статус «Відповів» (Марко 17.10: «Ставити «Відповів» статус») ─────────── */
@@ -380,4 +394,116 @@ export function repliedStatusDue(state, leadStatus) {
   if (status !== "no_response") return false;
   const newest = [...(state?.threads || [])].filter((thread) => thread.lastMessage).sort((left, right) => lastMessageAt(right) - lastMessageAt(left))[0];
   return newest?.lastMessage?.direction === "in";
+}
+
+/* ── Системні відправники LinkedIn (таск cdfe0440) ──────────────────────── */
+
+const LINKEDIN_NAME = /(^|\s)linked\s?in(\s|$)/i;
+
+/**
+ * Тред з LinkedIn, а не з людиною: «LinkedIn», «LinkedIn Team», «Команда LinkedIn»… без
+ * профілю учасника, або сторінка компанії чи showcase (посилання не на /in/). Людина
+ * без імені, яке агент не прочитав, лишається людиною — її відповідь не губимо.
+ */
+export function isSystemSender(participant) {
+  if (!participant || participant.memberProfile) return false;
+  const name = String(participant.name || "");
+  if (LINKEDIN_NAME.test(name)) return true;
+  const slug = String(participant.slug || "");
+  return /(?:^|\/)(company|showcase|school)\//i.test(slug);
+}
+
+/* ── Денна ємність лідгена і згладжування пінгів (таск cdfe0440) ────────── */
+
+/** Скільки пінгів лідген встигає за робочий день, якщо адміністратор не змінив. */
+export const DEFAULT_CAPACITY = 30;
+export const CAPACITY_MIN = 5;
+export const CAPACITY_MAX = 200;
+
+export function cleanCapacity(value) {
+  const number = Math.round(Number(value));
+  return Number.isFinite(number) && number > 0 ? Math.min(CAPACITY_MAX, Math.max(CAPACITY_MIN, number)) : DEFAULT_CAPACITY;
+}
+
+/**
+ * Чи можна пересунути пінг на інший день і в якій черзі: системний «перше повідомлення» —
+ * раніше (0), «лід мовчить» і «через місяць» — пізніше (1). Відповідь ліда, дзвінок і пінг,
+ * поставлений людиною, стоять на своєму дні (`null`).
+ */
+export function moveRank(task) {
+  if (task.task_type === "Call") return null;
+  const key = String(taskMarks(task).key || "");
+  const [head, second] = key.split(":");
+  if (head === "first") return 0;
+  if (head === "silent" || head === "later" || (head === "import" && second === "silent")) return 1;
+  return null;
+}
+
+/**
+ * Нові дати відкритих пінгів одного лідгена: жоден робочий день від сьогодні не має
+ * більше `capacity`, вихідних дат немає.
+ *
+ * Нерухомі (відповіді, дзвінки, ручні) лишаються на своєму дні — лише з вихідного на
+ * понеділок — і займають ємність першими. Рухомі ніколи не стають раніше своєї дати;
+ * прострочені хочуть сьогодні. Кожен день заповнюється за чергою: «перше повідомлення»,
+ * далі «мовчить»; усередині — хто довше чекає. Надлишок переходить на наступний робочий день.
+ * Прострочені нерухомі ємності дня не займають: це бекліг, його розбирають окремо.
+ *
+ * Повертає `[{ task, from, due }]` — лише ті, чия дата змінюється.
+ */
+export function levelPings(tasks, { today, capacity = DEFAULT_CAPACITY }) {
+  const limit = cleanCapacity(capacity);
+  const start = workday(today);
+  const changes = [];
+  const fixed = new Map();
+  const movable = [];
+  for (const task of tasks) {
+    if (task.completed) continue;
+    const from = dayIn(task.due_date);
+    if (!from) continue;
+    const rank = moveRank(task);
+    if (rank === null) {
+      const due = from < today ? from : workday(from);
+      if (due !== from) changes.push({ task, from, due });
+      if (due >= start) fixed.set(due, (fixed.get(due) || 0) + 1);
+      continue;
+    }
+    movable.push({ task, from, want: from < start ? start : workday(from), rank });
+  }
+  movable.sort((left, right) => left.want.localeCompare(right.want) || left.rank - right.rank
+    || left.from.localeCompare(right.from) || String(left.task.created_at || "").localeCompare(String(right.task.created_at || "")));
+  const waiting = [];
+  let next = 0;
+  let day = start;
+  // Скільки днів уперед можна знадобитись: усі рухомі по одному на день — з запасом.
+  for (let guard = 0; (next < movable.length || waiting.length) && guard < movable.length + 400; guard += 1) {
+    while (next < movable.length && movable[next].want <= day) waiting.push(movable[next++]);
+    waiting.sort((left, right) => left.rank - right.rank || left.from.localeCompare(right.from)
+      || String(left.task.created_at || "").localeCompare(String(right.task.created_at || "")));
+    let free = Math.max(0, limit - (fixed.get(day) || 0));
+    while (free > 0 && waiting.length) {
+      const item = waiting.shift();
+      if (item.from !== day) changes.push({ task: item.task, from: item.from, due: day });
+      free -= 1;
+    }
+    if (!waiting.length && next < movable.length) day = movable[next].want > day ? movable[next].want : addWorkingDays(day, 1);
+    else day = addWorkingDays(day, 1);
+  }
+  return changes;
+}
+
+/** Навантаження на `days` робочих днів від сьогодні: `[{ day, count }]` за датами пінгів. */
+export function loadAhead(dueDays, { today, days = 5 }) {
+  const out = [];
+  let day = workday(today);
+  for (let index = 0; index < days; index += 1) {
+    out.push({ day, count: 0 });
+    day = addWorkingDays(day, 1);
+  }
+  const at = new Map(out.map((row) => [row.day, row]));
+  for (const due of dueDays) {
+    const row = at.get(workday(due));
+    if (row) row.count += 1;
+  }
+  return out;
 }

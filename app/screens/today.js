@@ -163,6 +163,7 @@ const FILTER_TEXT = {
   overdue: ["Дата пінга минула — нагадати, написати, подзвонити", "Розмова вже є, дата пінга минула, а ми не написали: нагадати мовчуну чи подзвонити. Хто лише прийняв запит — у «Перших повідомленнях». Друге за пріоритетом."],
   today: ["Нагадування з датою на сьогодні", "Нагадування тим, хто мовчить, з датою на сьогодні."],
   first: ["Прийняв запит — написати першим", "Людина прийняла запит у друзі, розмови ще немає — написати першими, хоч би й дата минула."],
+  backlog: ["Старі відповіді — розібрати пачкою", "Відповіді, що чекають довше за 3 дні: вибрати кілька й позначити «Не лід» з підставою або перенести. Лише адміністратор."],
   silent: ["Ми написали останніми — людина мовчить", "Ми написали останніми, людина мовчить. Нагадування саме прийде в «На сьогодні» в свій день — тут лише перевірити, хто чекає."],
   threads: ["Усі переписки, і без пінга", "Усі переписки акаунтів, і ті, де пінга немає: люди не з CRM, старі, закриті статусом. Перевіряти час від часу."]
 };
@@ -172,6 +173,99 @@ function silentItems() {
   return [...allItems(), ...(today.data?.later || [])].filter((item) => item.reason === "silent")
     .sort((left, right) => String(left.dueDay || "").localeCompare(String(right.dueDay || "")));
 }
+/** Відповіді, що чекають довше за 3 дні, — бекліг адміністратора (таск cdfe0440). */
+function backlogItems() {
+  return today.data?.canSeeAll ? (today.data.blocks?.replies || []).filter((item) => item.stale) : [];
+}
+
+/** «Не лід ▾»: підстава одним кліком — «Не ICP» у CRM, пінги закриваються. */
+function notLeadMenuHtml(act) {
+  const bases = today.data?.notLeadBases || [];
+  if (!bases.length) return "";
+  return `<details class="today-notlead">
+    <summary title="Не наш лід: статус «Не ICP», підстава — в історії CRM, пінги закриються"><span>Не лід</span><i data-lucide="chevron-down"></i></summary>
+    <div class="today-notlead-menu" role="menu">${bases.map(([key, label]) => `<button type="button" role="menuitem" data-today="${act}" data-basis="${escapeAttr(key)}">${escapeHtml(label)}</button>`).join("")}</div>
+  </details>`;
+}
+
+/** Навантаження на 5 робочих днів проти ємності (таск cdfe0440): «30 з 30 на сьогодні · решта перенесена». */
+function loadHtml() {
+  const load = today.data?.load;
+  if (!load?.days?.length || !load.capacity) return "";
+  const [first] = load.days;
+  const isToday = first.day === today.data.today;
+  const moved = load.moved ? ` · ${load.moved} перенесено далі` : "";
+  const weekday = (day) => new Date(`${day}T12:00:00Z`).toLocaleDateString("uk-UA", { weekday: "short", timeZone: "UTC" });
+  return `<div class="today-load" title="Пінги з датою на кожен із 5 робочих днів проти ємності ${load.capacity} на день. Надлишок «перших повідомлень» і нагадувань переходить на наступні дні; відповіді й дзвінки стоять на своєму дні.">
+    <span class="today-load-text"><b>${first.count}</b> з ${load.capacity} ${isToday ? "на сьогодні" : `на ${escapeHtml(weekday(first.day))}`}${moved}</span>
+    <span class="today-load-days" aria-hidden="true">${load.days.map((row) => `<span class="today-load-day${row.count > load.capacity ? " is-over" : ""}" title="${escapeAttr(`${weekday(row.day)} ${row.day.slice(8)}.${row.day.slice(5, 7)}: ${row.count} з ${load.capacity}`)}"><span class="today-load-bar"><span style="height:${Math.min(100, Math.round((row.count / load.capacity) * 100))}%"></span></span><small>${escapeHtml(weekday(row.day))}</small></span>`).join("")}</span>
+  </div>`;
+}
+
+/** Бекліг: старі відповіді з галочками й дії пачкою. */
+function backlogHtml() {
+  const items = visible(backlogItems());
+  if (!items.length) return `<p class="today-empty">Старих відповідей немає — бекліг розібрано.</p>`;
+  const picked = items.filter((item) => today.backlogPick.has(item.pingId));
+  return `<section class="today-block today-block-backlog">
+    <h3 title="${escapeAttr(FILTER_TEXT.backlog[1])}">Бекліг відповідей <span class="today-count">${items.length}</span></h3>
+    <div class="today-backlog-bar">
+      <label class="today-backlog-all"><input type="checkbox" data-today-backlog-all ${picked.length === items.length ? "checked" : ""}> Усі</label>
+      <span class="today-backlog-picked">${picked.length ? `Вибрано ${picked.length}` : "Оберіть кількох"}</span>
+      ${picked.length && !today.backlogBusy ? `${notLeadMenuHtml("backlog-not-lead")}
+        <button type="button" data-today="backlog-postpone" data-when="+3" title="Перенести вибрані на +3 дні">+3 дні</button>
+        <button type="button" data-today="backlog-postpone" data-when="+7" title="Перенести вибрані на тиждень">+7</button>` : today.backlogBusy ? "<span>Розбираю…</span>" : ""}
+    </div>
+    ${items.map((item) => `<label class="today-backlog-row">
+      <input type="checkbox" data-today-backlog="${escapeAttr(item.pingId)}" ${today.backlogPick.has(item.pingId) ? "checked" : ""}>
+      <span class="warmup-thread-main">
+        <span class="warmup-thread-top"><strong>${escapeHtml(item.name)}</strong><span class="today-due">${escapeHtml(dayLabel(item.dueDay, today.data.today))}</span></span>
+        ${item.position || item.company ? `<span class="warmup-thread-headline">${escapeHtml([item.position, item.company].filter(Boolean).join(" · "))}</span>` : ""}
+        <span class="warmup-thread-preview">${escapeHtml(String(item.preview?.body || item.reasonTitle).slice(0, 150))}</span>
+      </span>
+    </label>`).join("")}
+  </section>`;
+}
+
+/** «Не лід» з картки відповіді: підстава → «Не ICP» у CRM, пінги закриті, лід зникає з «Відповідей». */
+async function markNotLead(basis) {
+  const item = today.detail?.item;
+  if (!item?.contactId || today.statusSaving) return;
+  today.statusSaving = true;
+  render();
+  try {
+    await api("/api/today/not-lead", { method: "POST", body: JSON.stringify({ contactId: item.contactId, basis }) });
+    today.drafts.delete(item.pingId);
+    const label = (today.data?.notLeadBases || []).find(([key]) => key === basis)?.[1] || "";
+    await openToday();
+    say(`${item.name}: не лід (${label.toLowerCase()}) — «Не ICP» у CRM, пінги закрито.`);
+  } catch (error) {
+    if (error?.name !== "AbortError") say(error.message || "Не вдалося позначити «Не лід».", "is-error");
+  } finally {
+    today.statusSaving = false;
+  }
+  render();
+}
+
+/** Пачка з беклогу: «Не лід» з підставою або перенесення — і що вийшло. */
+async function backlogAction(path, payload, done) {
+  const picked = backlogItems().filter((item) => today.backlogPick.has(item.pingId));
+  if (!picked.length || today.backlogBusy) return;
+  today.backlogBusy = true;
+  render();
+  try {
+    const result = await api(path, { method: "POST", body: JSON.stringify(payload(picked)) });
+    today.backlogPick.clear();
+    await openToday({ keepSelection: true });
+    say(`${done(result.done.length)}${result.failed.length ? ` Не вийшло: ${result.failed.length} — ${result.failed[0].error}` : ""}`, result.failed.length ? "is-error" : "is-ok");
+  } catch (error) {
+    if (error?.name !== "AbortError") say(error.message || "Не вдалося.", "is-error");
+  } finally {
+    today.backlogBusy = false;
+  }
+  render();
+}
+
 const DRAFT_LABEL = { reply: "Чернетка відповіді", "follow-up": "Нагадування", first: "Перше повідомлення" };
 
 const today = {
@@ -187,6 +281,8 @@ const today = {
   draftLoading: false, draftNote: "", sending: false, notice: "", tone: "", text: "", textFor: "",
   // Ненадіслані тексти по пінгах: перехід до іншого ліда зберігає мовчки, без питання (таск 85ea1e97).
   drafts: new Map(),
+  // Бекліг старих відповідей (таск cdfe0440): вибрані пінги й чи йде дія пачкою.
+  backlogPick: new Set(), backlogBusy: false,
   // Етап 2/6: відкриті діалоги з 01.08 (адмін).
   imports: null, importOpen: false, importError: "", importPick: new Set(), importEdits: new Map(), importAssignee: "", importBusy: false, importTimer: null,
   // Коли нагадувати тим, хто мовчить (власник 20.10: «зробити ці поля редагованими»).
@@ -554,6 +650,7 @@ function accountChipsHtml() {
 
 function queueHtml() {
   const data = today.data;
+  if (today.blockFilter === "backlog") return backlogHtml();
   if (today.blockFilter === "silent") {
     const items = visible(silentItems());
     return items.length
@@ -781,6 +878,7 @@ function workHtml() {
         ${translationHtml()}
         <div class="today-actions">
           <button type="button" class="primary-button" data-today="send" title="Піде з цього акаунта в найближчу сесію. Наступний пінг — через 3 робочі дні." ${canSend() ? "" : "disabled"}><i data-lucide="send"></i><span>${today.sending ? "Ставлю в чергу…" : "Погодити й надіслати"}</span></button>
+          ${kind === "reply" && item.contactId ? notLeadMenuHtml("not-lead-basis") : ""}
         </div>
       </div>` : item.channel === "moved" ? "" : `<p class="today-note">Переписки з цим контактом тут немає — відкрийте його в CRM або перенесіть пінг.</p>`}
     </div>
@@ -875,7 +973,7 @@ function render() {
     return;
   }
   const counts = BLOCKS.map(([key, title]) => [key, title, (data.blocks[key] || []).length]).filter(([, , count]) => count);
-  if (today.blockFilter && today.blockFilter !== "silent" && !counts.some(([key]) => key === today.blockFilter)) today.blockFilter = "";
+  if (today.blockFilter && !["silent", "backlog"].includes(today.blockFilter) && !counts.some(([key]) => key === today.blockFilter)) today.blockFilter = "";
   const threads = inboxMode === "all";
   // Лічильники — це й фільтри: клік показує лише цей блок (аудит 16.10, P2). Останній —
   // «Усі розмови»: усі переписки акаунтів, і ті, де пінга немає (Марко 20.10).
@@ -889,8 +987,9 @@ function render() {
   host.innerHTML = `
     <section class="panel blk-queue today">
       <header class="today-head">
-        <div>
+        <div class="today-head-main">
           ${chips}
+          ${threads ? "" : loadHtml()}
         </div>
         <div class="today-head-actions">
           ${data.canSeeAll && !threads ? `<div class="today-scope" role="group" aria-label="Чиї пінги">
@@ -926,8 +1025,9 @@ function filterHtml(counts, threads, totalThreads, unreadCount) {
   const total = counts.reduce((sum, [, , count]) => sum + count, 0);
   const silent = silentItems().length;
   const key = threads ? "threads" : today.blockFilter;
-  const label = { "": "До роботи", silent: "Без відповіді", threads: "Усі розмови" }[key] ?? BLOCKS.find(([block]) => block === key)?.[1] ?? "До роботи";
-  const count = { "": total, silent, threads: totalThreads }[key] ?? counts.find(([block]) => block === key)?.[2];
+  const backlog = backlogItems().length;
+  const label = { "": "До роботи", silent: "Без відповіді", backlog: "Бекліг", threads: "Усі розмови" }[key] ?? BLOCKS.find(([block]) => block === key)?.[1] ?? "До роботи";
+  const count = { "": total, silent, backlog, threads: totalThreads }[key] ?? counts.find(([block]) => block === key)?.[2];
   const item = (value, title, number, act = "block") => `<button type="button" role="menuitemradio" aria-checked="${key === value}" class="today-filter-item${key === value ? " is-on" : ""}${["replies", "overdue"].includes(value) && number ? " is-hot" : ""}" data-today="${act}" data-block="${escapeAttr(value)}" title="${escapeAttr(FILTER_TEXT[value][1])}">
       <span>${escapeHtml(title)}</span><b>${number ?? ""}</b><small>${escapeHtml(FILTER_TEXT[value][0])}</small>
     </button>`;
@@ -942,6 +1042,7 @@ function filterHtml(counts, threads, totalThreads, unreadCount) {
       ${counts.map(([block, title, number]) => item(block, title, number)).join("")}
       <p class="today-filter-group">Перевіряти час від часу</p>
       ${item("silent", "Без відповіді", silent)}
+      ${today.data?.canSeeAll ? item("backlog", "Бекліг", backlog) : ""}
       ${item("threads", "Усі розмови", totalThreads, "threads")}
       ${unreadCount ? `<p class="today-filter-foot">Непрочитаних у розмовах: ${escapeHtml(unreadCount)}</p>` : ""}
     </div>` : ""}
@@ -1111,6 +1212,22 @@ document.addEventListener("click", (event) => {
   if (act === "campaign-assign") return void assignCampaign();
   if (act === "campaign-create") return createCampaignFromWork();
   if (act === "campaign-skip") return void skipCampaignForWork();
+  if (act === "not-lead-basis") {
+    target.closest("details")?.removeAttribute("open");
+    return void markNotLead(target.dataset.basis);
+  }
+  if (act === "backlog-not-lead") {
+    target.closest("details")?.removeAttribute("open");
+    const basis = target.dataset.basis;
+    const label = (today.data?.notLeadBases || []).find(([key]) => key === basis)?.[1] || "";
+    return void backlogAction("/api/today/not-lead", (picked) => ({ contactIds: picked.map((item) => item.contactId), basis }),
+      (count) => `Не лід (${label.toLowerCase()}): ${count} — «Не ICP» у CRM, пінги закрито.`);
+  }
+  if (act === "backlog-postpone") {
+    const when = target.dataset.when;
+    return void backlogAction("/api/today/postpone", (picked) => ({ pingIds: picked.map((item) => item.pingId), when }),
+      (count) => `Перенесено ${count} на ${when === "+7" ? "тиждень" : "+3 дні"}.`);
+  }
   if (act === "not-lead") {
     const item = today.detail?.item;
     if (!item) return;
@@ -1166,6 +1283,19 @@ document.addEventListener("change", (event) => {
   const call = Boolean(today.callMode);
   today.callMode = false;
   void movePing(event.target.value, call);
+});
+
+// Галочки беклогу (таск cdfe0440): одна — один пінг, «Усі» — усі видимі.
+document.addEventListener("change", (event) => {
+  const box = event.target.closest?.("#todayRoot [data-today-backlog], #todayRoot [data-today-backlog-all]");
+  if (!box) return;
+  if (box.dataset.todayBacklogAll !== undefined) {
+    const items = visible(backlogItems());
+    if (box.checked) for (const item of items) today.backlogPick.add(item.pingId);
+    else today.backlogPick.clear();
+  } else if (box.checked) today.backlogPick.add(box.dataset.todayBacklog);
+  else today.backlogPick.delete(box.dataset.todayBacklog);
+  render();
 });
 
 document.addEventListener("change", (event) => {

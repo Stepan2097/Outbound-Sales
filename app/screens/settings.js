@@ -7,6 +7,8 @@
 //   · «Свій пароль»                   → /api/account/password: вхід самого себе.
 //   · «Нові, коли є розмови» (адмін)  → /api/today/new-contact-policy: скільки нових
 //     контактів лідген бере з конвеєра, поки в нього є відповіді чи прострочені пінги.
+//   · «Пінгів на день» (адмін)        → /api/today/capacity: денна ємність лідгена; звірка
+//     розкладає «перші повідомлення» й нагадування так, щоб жоден робочий день її не перевищив.
 //
 // Не тут і більше: вибір моделі, діаграми витрат і часу. У застосунку не лишилось
 // нічого, що кликало б модель, тож вибирати було нічого, а витрати стояли б на
@@ -35,6 +37,8 @@ const ROLE_LABEL = { admin: "Адміністратор", seller: "Продав�
  */
 const POLICY_LABEL = { gate: "Ні — спершу розмови", limit: "До N на день", open: "Без обмеження" };
 let contactPolicies = {};
+/** Денна ємність лідгенів: { capacity: { email: n }, defaultCapacity }. */
+let pingCapacity = { capacity: {}, defaultCapacity: 30 };
 
 /**
  * Ім'я, тільки якщо воно ім'я. Уламок адреси ним не є: «pavlo.work.101» над
@@ -90,6 +94,7 @@ function teamRowHtml(person, selfEmail) {
       ${facts ? `<span>${escapeHtml(facts)}</span>` : ""}
     </div>
     ${policyHtml(person.email)}
+    ${capacityHtml(person.email)}
     <select class="team-access" data-email="${escapeAttr(person.email)}"${self ? " disabled title=\"Свою роль змінює інший адміністратор\"" : ""}>${options}</select>
     ${self
       ? ""
@@ -107,6 +112,28 @@ function policyHtml(email) {
       ${rule.mode === "limit" ? `<input type="number" min="1" max="100" step="1" value="${escapeAttr(rule.limit || 5)}" data-policy-limit="${escapeAttr(key)}" aria-label="Скільки нових на день">` : ""}
     </span>
   </label>`;
+}
+
+/** Денна ємність лідгена (таск cdfe0440): без запису — за замовчуванням (30). */
+function capacityHtml(email) {
+  const key = String(email || "").toLowerCase();
+  const value = pingCapacity.capacity?.[key] ?? pingCapacity.defaultCapacity ?? 30;
+  return `<label class="team-policy" title="Скільки пінгів лідген встигає за робочий день. «Перші повідомлення» й нагадування понад це переходять на наступні робочі дні; відповіді й дзвінки — ні.">
+    <span>Пінгів на день</span>
+    <span class="team-policy-row"><input type="number" min="5" max="200" step="1" value="${escapeAttr(value)}" data-capacity-email="${escapeAttr(key)}" aria-label="Пінгів на день"></span>
+  </label>`;
+}
+
+async function saveCapacity(email, capacity) {
+  let note;
+  try {
+    pingCapacity = await api("/api/today/capacity", { method: "POST", body: JSON.stringify({ email, capacity }) });
+    note = `${email}: ${pingCapacity.capacity?.[email] ?? pingCapacity.defaultCapacity} пінгів на день — звірка розкладе решту на наступні робочі дні.`;
+  } catch (error) {
+    note = error.message || "Не вдалося зберегти.";
+  }
+  await loadTeamDirectory();
+  setText("teamUserNote", note);
 }
 
 /** Зберегти й сказати, що тепер діє; рядок пишеться після перечитування списку, бо воно пише туди підсумок. */
@@ -149,11 +176,13 @@ async function loadTeamDirectory() {
   const remembered = recallScreen("team")?.value;
   if (remembered?.people && remembered.selfEmail === selfEmail) renderTeamDirectory(remembered, selfEmail);
   try {
-    const [directory, policy] = await Promise.all([
+    const [directory, policy, capacity] = await Promise.all([
       api("/api/account/directory"),
-      api("/api/today/new-contact-policy").catch(() => ({ policies: {} }))
+      api("/api/today/new-contact-policy").catch(() => ({ policies: {} })),
+      api("/api/today/capacity").catch(() => ({ capacity: {}, defaultCapacity: 30 }))
     ]);
     contactPolicies = policy.policies || {};
+    pingCapacity = capacity;
     renderTeamDirectory(directory, selfEmail);
     rememberScreen("team", { ...directory, selfEmail });
   } catch (error) {
@@ -203,6 +232,8 @@ async function removeTeamUser(button) {
 }
 
 document.getElementById("teamUserList")?.addEventListener("change", async (event) => {
+  const capacity = event.target.closest("[data-capacity-email]");
+  if (capacity?.dataset?.capacityEmail) return void saveCapacity(capacity.dataset.capacityEmail, Number(capacity.value));
   const policy = event.target.closest("[data-policy-email]");
   const limit = event.target.closest("[data-policy-limit]");
   const email = policy?.dataset?.policyEmail || limit?.dataset?.policyLimit;

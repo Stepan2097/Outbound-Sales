@@ -20,7 +20,9 @@ const NAMES = [
   "ROLE_LABEL", "personDisplayName", "renderAccount", "teamRowHtml", "renderTeamDirectory", "loadTeamDirectory",
   "loadSettingsScreen", "removeTeamUser",
   // «Нові, коли є розмови» (19.10): налаштування лідгена в рядку команди.
-  "POLICY_LABEL", "contactPolicies", "policyHtml", "savePolicy"
+  "POLICY_LABEL", "contactPolicies", "policyHtml", "savePolicy",
+  // «Пінгів на день» (таск cdfe0440): денна ємність лідгена в тому самому рядку.
+  "pingCapacity", "capacityHtml", "saveCapacity"
 ];
 
 const LISTENERS = [
@@ -269,4 +271,21 @@ test("роль міняється запитом, кошик питає адре
   const removal = s.calls.find((call) => call.path === "/api/account/users/remove");
   assert.deepEqual(removal.body, { userId: "u-2", email: "ira@example.com" });
   assert.match(s.ids.teamUserNote.textContent, /Акаунт ira@example\.com прибрано\. Рядок у CRM лишився/);
+});
+
+test("«Пінгів на день» (таск cdfe0440): поле в рядку лідгена, зміна йде на /api/today/capacity", async () => {
+  const s = screen({
+    api: async (path) => {
+      if (path === "/api/account/directory") return directory(PEOPLE);
+      if (path === "/api/today/capacity") return { capacity: { "ira@example.com": 25 }, defaultCapacity: 30 };
+      return { policies: {} };
+    }
+  });
+  await s.get("loadTeamDirectory")();
+  assert.match(s.ids.teamUserList.innerHTML, /data-capacity-email="ira@example\.com"/);
+  assert.match(s.ids.teamUserList.innerHTML, /value="25" data-capacity-email="ira@example\.com"/);
+  const input = { closest: (selector) => (selector === "[data-capacity-email]" ? input : null), dataset: { capacityEmail: "ira@example.com" }, value: "40" };
+  await s.handlers["teamUserList:change"]({ target: input });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(s.calls.find((call) => call.path === "/api/today/capacity" && call.method === "POST").body, { email: "ira@example.com", capacity: 40 });
 });

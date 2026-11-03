@@ -336,3 +336,31 @@
 /* AI лише пропонує «Кваліфікований» (таск e06c67c1). */
 .today-side-suggest { display: flex; align-items: flex-start; gap: var(--sp-1); margin: 0; color: var(--teal); font-size: 12px; }
 .today-side-suggest svg { flex: none; width: 14px; height: 14px; margin-top: 1px; }
+
+/* ── денна ємність, «Не лід ▾», бекліг (таск cdfe0440) ── */
+
+.today-head-main { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; min-width: 0; }
+
+.today-load { display: inline-flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.today-load-text b { color: var(--ink); font-size: 14px; }
+.today-load-days { display: inline-flex; align-items: flex-end; gap: 4px; }
+.today-load-day { display: grid; justify-items: center; gap: 2px; }
+.today-load-day small { font-size: 10px; line-height: 1; }
+.today-load-bar { display: flex; align-items: flex-end; width: 12px; height: 22px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.today-load-bar > span { display: block; width: 100%; background: var(--teal); }
+.today-load-day.is-over .today-load-bar > span { background: var(--state-warn); }
+
+.today-notlead { position: relative; }
+.today-notlead > summary { display: inline-flex; align-items: center; gap: 4px; min-height: 32px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; list-style: none; font-size: 13px; }
+.today-notlead > summary::-webkit-details-marker { display: none; }
+.today-notlead > summary svg { width: 14px; height: 14px; }
+.today-notlead-menu { position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 20; display: grid; gap: 2px; min-width: 190px; padding: 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-strong); box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45); }
+.today-notlead-menu button { justify-content: flex-start; border: 0; background: transparent; text-align: left; }
+.today-backlog-bar .today-notlead-menu { top: calc(100% + 6px); bottom: auto; }
+
+.today-backlog-bar { position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 0; background: var(--surface); }
+.today-backlog-picked { color: var(--muted); font-size: 12.5px; }
+.today-backlog-all { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.today-backlog-row { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: start; padding: 8px 6px; border-radius: 8px; cursor: pointer; }
+.today-backlog-row:hover { background: var(--teal-weak); }
+.today-backlog-row input { margin-top: 3px; }
