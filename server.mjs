@@ -3146,16 +3146,82 @@ async function enrichTriageContact(contact) {
   const { patch, added } = crmPatch(contact, { candidates, checks });
   const updated = await writeContactPatch(contact, patch);
   addEvent("enrichment", `${prospect.name} enriched from Головна${added.length ? `; CRM: ${added.map((row) => row.field).join(", ")}` : ""}.`);
+  const hiddenEmails = candidates.filter((item) => item.type === "email" && verdict.get(item.value.toLowerCase())?.status !== "valid")
+    .map((item) => {
+      const check = verdict.get(item.value.toLowerCase());
+      return { value: item.value, status: check?.status || "unknown", reason: check?.reason || "не перевірено" };
+    });
   return {
     prospectId: prospect.id,
-    // Failed or unconfirmable guesses are not shown at all.
+    // Failed or unconfirmable guesses are not shown as found and not saved.
     candidates: candidates.filter((item) => item.type !== "email" || verdict.get(item.value.toLowerCase())?.status === "valid"),
-    hidden: candidates.filter((item) => item.type === "email" && verdict.get(item.value.toLowerCase())?.status !== "valid").length,
+    hidden: hiddenEmails.length,
+    // Таск 10b3bb63: що сховано і чому, де шукали і скільки коштувало — підсумок завжди явний.
+    hiddenEmails,
+    searched: enrichSearchedView(discovery, candidates),
+    cost: enrichCostView(discovery),
     added,
     contact: updated,
     emails: contactEmails(updated),
     note: discovery.scraperNote || "",
     at: new Date().toISOString()
+  };
+}
+
+const ENRICH_SOURCE_LABEL = {
+  personEnrichment: "Apify · профіль людини",
+  emailPhoneFinder: "Apify · пошук пошти й телефону",
+  contactFinder: "Apify · контакти з сайту компанії",
+  linkedinProfile: "Apify · профіль LinkedIn",
+  apollo: "Apify · Apollo",
+  zoominfo: "Apify · ZoomInfo",
+  facebookProfile: "Apify · Facebook"
+};
+
+/**
+ * Де шукали й що кожне джерело дало (таск 10b3bb63: «нічого не відбулось — чи такий лід,
+ * чи не працює взагалі»). Публічний пошук — завжди; платні актори — що запускали, з
+ * кількістю записів чи причиною збою; свіжий кеш чи не підключений Apify — так і сказано.
+ */
+function enrichSearchedView(discovery, candidates) {
+  const rows = [];
+  const fromWeb = candidates.filter((item) => /public web/i.test(item.source || "")).length;
+  rows.push({ source: "Публічний пошук (сайт компанії, соцмережі)", state: "done", found: fromWeb });
+  const budget = discovery.enrichmentBudget;
+  if (!budget) {
+    rows.push({
+      source: "Платні пошуковики (Apify)", state: "off",
+      note: discovery.scraperStatus === "configured_without_actors" ? "Apify підключено, але не вибрано жодного актора" : "Apify не підключено"
+    });
+  } else if (budget.cacheHit) {
+    rows.push({ source: "Платні пошуковики (Apify)", state: "cache", note: `уже шукали за останні ${budget.cacheDays} дн. — повторно не платили` });
+  } else {
+    for (const run of budget.actorsRun || []) {
+      if (String(run.source || "").startsWith("companyPeople")) continue;
+      rows.push({
+        source: ENRICH_SOURCE_LABEL[run.source] || `Apify · ${run.source}`,
+        state: run.status === "complete" ? "done" : "failed",
+        found: run.status === "complete" ? candidates.filter((item) => item.source === `apify:${run.source}`).length : 0,
+        records: run.itemCount || 0,
+        costUsd: run.costUsd ?? null,
+        note: run.status === "complete" ? "" : String(run.error || "збій").slice(0, 160)
+      });
+    }
+    if (!(budget.actorsRun || []).some((run) => !String(run.source || "").startsWith("companyPeople"))) {
+      rows.push({ source: "Платні пошуковики (Apify)", state: "off", note: "жоден актор не підходив до цього ліда" });
+    }
+  }
+  return rows;
+}
+
+/** Ціна пошуку: моделі тут не кличуться (0 токенів), гроші — лише запуски Apify. */
+function enrichCostView(discovery) {
+  const budget = discovery.enrichmentBudget;
+  return {
+    tokens: 0,
+    apifyUsd: budget && !budget.cacheHit ? budget.costUsd ?? null : 0,
+    ceilingUsd: budget && !budget.cacheHit ? budget.chargeCeilingUsd || 0 : 0,
+    runs: budget && !budget.cacheHit ? (budget.actorsRun || []).filter((run) => !String(run.source || "").startsWith("companyPeople")).length : 0
   };
 }
 
@@ -9053,7 +9119,7 @@ async function enrichProspectContacts(prospect, options = {}) {
         ? state.integrations.apify.maxChargeUsd
         : state.integrations.apify.contactMaxChargeUsd;
       const items = await runApifyActor(actorId, renderedInput, chargeLimit);
-      actorRuns.push({ source, actorId, itemCount: items.length, chargeCeilingUsd: chargeLimit, status: "complete" });
+      actorRuns.push({ source, actorId, itemCount: items.length, chargeCeilingUsd: chargeLimit, costUsd: items.run?.costUsd ?? null, status: "complete" });
       updateCompanyEnrichmentFromScraper(prospect, items, source);
       if (peopleSource) {
         companyPeople.push(...peopleFromScraperItems(items, source, prospect));
@@ -9063,7 +9129,7 @@ async function enrichProspectContacts(prospect, options = {}) {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (message.includes("input template")) skippedForTemplate = true;
-      actorRuns.push({ source, actorId, itemCount: 0, chargeCeilingUsd: 0, status: "failed", error: message.slice(0, 220) });
+      actorRuns.push({ source, actorId, itemCount: 0, chargeCeilingUsd: 0, costUsd: error?.apifyRun?.costUsd ?? null, status: "failed", error: message.slice(0, 220) });
       discovery.warnings.push(`${source} scraper failed: ${message}`);
     }
   }
@@ -9079,6 +9145,8 @@ async function enrichProspectContacts(prospect, options = {}) {
     actorsRun: actorRuns,
     actorCount: actorRuns.filter((run) => run.status === "complete").length,
     chargeCeilingUsd: Number(actorRuns.reduce((sum, run) => sum + Number(run.chargeCeilingUsd || 0), 0).toFixed(2)),
+    // Що справді списав Apify за ці запуски (таск 10b3bb63); null — Apify не сказав.
+    costUsd: actorRuns.some((run) => run.costUsd != null) ? Number(actorRuns.reduce((sum, run) => sum + Number(run.costUsd || 0), 0).toFixed(4)) : null,
     cacheDays,
     cacheHit: contactCacheFresh
   };
@@ -9753,35 +9821,62 @@ function isEmptyApifyValue(value) {
   return false;
 }
 
+/**
+ * One Apify actor run, its dataset items, and what the run cost (таск 10b3bb63: «скільки
+ * пішло на збагачення»). The run is started and waited for, not run-sync: only a run
+ * object says what it cost, so the items come back as an array carrying `run`
+ * ({ id, status, costUsd }) — callers that only want the items read them as before.
+ * A run still going at the timeout is aborted, so it stops costing money.
+ */
 async function runApifyActor(actorId, input, maxChargeUsd) {
   const token = decryptSecret(state.apifyVault);
+  const auth = `token=${encodeURIComponent(token)}`;
   const safeActorId = encodeURIComponent(String(actorId || "").replace("/", "~"));
   const timeoutMs = apifyTimeoutMs();
-  const timeoutSeconds = Math.max(5, Math.ceil(timeoutMs / 1000));
-  const url = `https://api.apify.com/v2/acts/${safeActorId}/run-sync-get-dataset-items?token=${encodeURIComponent(token)}&maxTotalChargeUsd=${encodeURIComponent(maxChargeUsd)}&clean=true&timeout=${timeoutSeconds}`;
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(input),
-      signal: controller.signal
-    });
-    if (!response.ok) {
-      const detail = cleanText(stripHtml(decodeHtml(await response.text().catch(() => "")))).slice(0, 280);
-      throw new Error(`Apify actor ${actorId} returned HTTP ${response.status}${detail ? `: ${detail}` : ""}.`);
+  const waitSeconds = Math.min(60, Math.max(5, Math.ceil(timeoutMs / 1000)));
+  const call = async (url, init = {}) => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs + 15000);
+    try {
+      const response = await fetch(url, { ...init, signal: controller.signal });
+      if (!response.ok) {
+        const detail = cleanText(stripHtml(decodeHtml(await response.text().catch(() => "")))).slice(0, 280);
+        throw new Error(`Apify actor ${actorId} returned HTTP ${response.status}${detail ? `: ${detail}` : ""}.`);
+      }
+      return await response.json();
+    } catch (error) {
+      if (error?.name === "AbortError") throw new Error(`Apify actor ${actorId} timed out after ${Math.round(timeoutMs / 1000)}s`);
+      throw error;
+    } finally {
+      clearTimeout(timeout);
     }
-    const data = await response.json();
-    return Array.isArray(data) ? data : [];
-  } catch (error) {
-    if (error?.name === "AbortError") {
-      throw new Error(`Apify actor ${actorId} timed out after ${Math.round(timeoutMs / 1000)}s`);
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeout);
+  };
+  const started = await call(`https://api.apify.com/v2/acts/${safeActorId}/runs?${auth}&maxTotalChargeUsd=${encodeURIComponent(maxChargeUsd)}&timeout=${waitSeconds}&waitForFinish=${waitSeconds}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  let run = started?.data || {};
+  if (!APIFY_DONE.has(run.status)) {
+    await call(`https://api.apify.com/v2/actor-runs/${encodeURIComponent(run.id || "")}/abort?${auth}`, { method: "POST" }).catch(() => null);
+    throw Object.assign(new Error(`Apify actor ${actorId} timed out after ${waitSeconds}s`), { apifyRun: apifyRunView(run) });
   }
+  const data = run.defaultDatasetId ? await call(`https://api.apify.com/v2/datasets/${encodeURIComponent(run.defaultDatasetId)}/items?${auth}&clean=true`) : [];
+  // The run's bill settles a moment after it ends; read it once more, keep the first if that fails.
+  run = (await call(`https://api.apify.com/v2/actor-runs/${encodeURIComponent(run.id || "")}?${auth}`).catch(() => null))?.data || run;
+  if (run.status !== "SUCCEEDED") {
+    throw Object.assign(new Error(`Apify actor ${actorId} ended ${String(run.status || "").toLowerCase()}`), { apifyRun: apifyRunView(run) });
+  }
+  const items = Array.isArray(data) ? data : [];
+  Object.defineProperty(items, "run", { value: apifyRunView(run), enumerable: false });
+  return items;
+}
+
+const APIFY_DONE = new Set(["SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"]);
+
+function apifyRunView(run) {
+  const cost = Number(run?.usageTotalUsd);
+  return { id: run?.id || null, status: run?.status || null, costUsd: Number.isFinite(cost) ? Number(cost.toFixed(4)) : null };
 }
 
 function apifyTimeoutMs() {

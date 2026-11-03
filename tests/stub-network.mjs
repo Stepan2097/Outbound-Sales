@@ -12,6 +12,7 @@
  *                           (без токенів: вони лишаються в запиті й нікуди
  *                           не потрапляють);
  *   STUB_APIFY_ITEMS      — JSON {"<actor-id>": [ ...items ]}, що віддає актор;
+ *   STUB_APIFY_RUN_USD    — ціна одного запуску актора (за замовчуванням 0.012);
  *   STUB_OPENROUTER_JSON  — рядок, який модель «повертає» як content;
  *   STUB_ANTHROPIC_JSON   — те саме для api.anthropic.com/v1/messages
  *                           (без нього — STUB_OPENROUTER_JSON);
@@ -28,6 +29,8 @@ const APIFY_ITEMS = JSON.parse(process.env.STUB_APIFY_ITEMS || "{}");
 const OPENROUTER_JSON = process.env.STUB_OPENROUTER_JSON || "";
 const ANTHROPIC_JSON = process.env.STUB_ANTHROPIC_JSON ?? OPENROUTER_JSON;
 const ANTHROPIC_STATUS = Number(process.env.STUB_ANTHROPIC_STATUS || 200);
+/** Скільки «коштує» кожен запуск актора в заглушці. */
+const APIFY_RUN_USD = Number(process.env.STUB_APIFY_RUN_USD || 0.012);
 const OPENROUTER_BASE = (process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1").replace(/\/+$/, "");
 
 function note(line) {
@@ -47,12 +50,23 @@ globalThis.fetch = async (input, init = {}) => {
   try { url = new URL(raw); } catch { return realFetch(input, init); }
 
   if (url.hostname === "api.apify.com") {
-    // /v2/acts/<actor~id>/run-sync-get-dataset-items?token=…&maxTotalChargeUsd=…
-    const encoded = (url.pathname.match(/\/acts\/([^/]+)\//) || [])[1] || "";
-    const actor = decodeURIComponent(encoded).replace("~", "/");
-    // Стеля витрат — те, заради чого цей виклик і рахують; токен не пишемо.
-    note(`apify ${actor} charge=${url.searchParams.get("maxTotalChargeUsd")}`);
-    return json(APIFY_ITEMS[actor] ?? []);
+    // Запуск і очікування (таск 10b3bb63 — лише об'єкт запуску каже, скільки він коштував):
+    //   POST /v2/acts/<actor~id>/runs?…&maxTotalChargeUsd=…&waitForFinish=…  → запуск
+    //   GET  /v2/datasets/<id>/items                                          → записи актора
+    //   GET  /v2/actor-runs/<id>                                              → той самий запуск
+    const run = (encoded) => ({ id: `run-${encoded}`, status: "SUCCEEDED", defaultDatasetId: `ds-${encoded}`, usageTotalUsd: APIFY_RUN_USD });
+    const started = url.pathname.match(/^\/v2\/acts\/([^/]+)\/runs$/);
+    if (started) {
+      const actor = decodeURIComponent(started[1]).replace("~", "/");
+      // Стеля витрат — те, заради чого цей виклик і рахують; токен не пишемо.
+      note(`apify ${actor} charge=${url.searchParams.get("maxTotalChargeUsd")}`);
+      return json({ data: run(started[1]) }, 201);
+    }
+    const dataset = url.pathname.match(/^\/v2\/datasets\/ds-([^/]+)\/items$/);
+    if (dataset) return json(APIFY_ITEMS[decodeURIComponent(decodeURIComponent(dataset[1])).replace("~", "/")] ?? []);
+    const read = url.pathname.match(/^\/v2\/actor-runs\/run-([^/]+)$/);
+    if (read) return json({ data: run(read[1]) });
+    if (/^\/v2\/actor-runs\/[^/]+\/abort$/.test(url.pathname)) return json({ data: { status: "ABORTED" } });
   }
 
   if (url.hostname === "api.anthropic.com" && url.pathname === "/v1/messages") {

@@ -222,3 +222,24 @@ test("свіжий кеш не дає запустити жодного плат
     await server.stop();
   }
 });
+
+// Таск 10b3bb63: «скільки пішло на збагачення» — ціну знає лише об'єкт запуску Apify.
+test("кожен запуск актора несе свою ціну з Apify, а бюджет ліда — суму", async () => {
+  const items = Object.fromEntries(Object.values(CONTACT_ACTORS).map((actor) => [actor, [{ website: "harborinteractive.example" }]]));
+  const server = await startServer({
+    savedState: { version: 1, prospects: [lead()] },
+    items,
+    env: { APIFY_MAX_ACTORS_PER_LEAD: "2", STUB_APIFY_RUN_USD: "0.0125" }
+  });
+  try {
+    await server.enrich({ prospectId: "lead-apify", force: true });
+    const budget = (await server.saved()).prospects[0].contactDiscovery.enrichmentBudget;
+    const contactRuns = budget.actorsRun.filter((run) => !run.source.startsWith("companyPeople"));
+    assert.equal(contactRuns.length, 2);
+    assert.ok(contactRuns.every((run) => run.costUsd === 0.0125), JSON.stringify(contactRuns));
+    assert.equal(budget.costUsd, Number((0.0125 * budget.actorsRun.length).toFixed(4)));
+    assert.deepEqual((await server.calls()).unexpected, []);
+  } finally {
+    await server.stop();
+  }
+});

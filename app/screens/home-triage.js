@@ -35,7 +35,7 @@ const triage = {
   item: null, loading: false, error: "", notice: "", tone: "", companyLoading: "", companyError: "",
   cursor: 0, skip: [],
   texts: { linkedin: "", subject: "", body: "" },
-  enrich: null, enriching: false, drafting: false, sending: "",
+  enrich: null, enriching: false, enrichingSince: 0, drafting: false, sending: "",
   // The addresses ticked for the letter, and which contacts already had texts written automatically.
   selected: new Set(), autoDrafted: new Set(),
   productId: "", language: "en",
@@ -389,20 +389,46 @@ function foundMark(item) {
   return '<span class="triage-muted" title="Джерело недостатньо впевнене, щоб записати самому">не записано — перевірте</span>';
 }
 
+// «Збагатити» (Марко 03.11, таск 10b3bb63: «непомітна… після натискання нічого не відбулось…
+// скільки токенів пішло»): основна кнопка, поки шукає — видно що й скільки триває, після —
+// завжди явний підсумок, де шукали, що сховано й чому, і дрібно — ціна.
+const ENRICH_STATE = { done: "", failed: "збій", off: "не запускався", cache: "з кешу" };
+
+function enrichCostHtml(cost) {
+  if (!cost) return "";
+  const money = cost.runs
+    ? `Apify: ${cost.apifyUsd != null ? `$${Number(cost.apifyUsd).toFixed(3)}` : "ціну Apify не повернув"} за ${cost.runs} ${cost.runs === 1 ? "запуск" : "запуски"}${cost.ceilingUsd ? ` (стеля $${Number(cost.ceilingUsd).toFixed(2)})` : ""}`
+    : "Apify: $0 — платних запусків не було";
+  return `<p class="triage-enrich-cost">AI: ${Number(cost.tokens || 0)} токенів · ${money} · перевірка пошт безкоштовна</p>`;
+}
+
+function enrichSummaryHtml(enrich, others) {
+  if (enrich.added?.length) return `<p class="triage-added"><i data-lucide="database"></i> Додано в базу: ${enrich.added.map((row) => `${escapeHtml(FIELD_WORD[row.field] || row.field)} <b>${escapeHtml(row.value)}</b>`).join(", ")}</p>`;
+  const where = (enrich.searched || []).filter((row) => row.state === "done").map((row) => row.source);
+  if (others.length) return '<p class="triage-enrich-result">Знайдене вже є в базі — нового не додано.</p>';
+  return `<p class="triage-enrich-result">Нічого нового${where.length ? `, шукали в: ${escapeHtml(where.join(", "))}` : ""}${enrich.hidden ? "; знайдені пошти не пройшли перевірку — нижче чому" : ""}.</p>`;
+}
+
 function enrichHtml() {
   const enrich = triage.enrich;
-  const button = `<button type="button" data-triage="enrich" ${triage.enriching ? "disabled" : ""}><i data-lucide="sparkles"></i><span>${triage.enriching ? "Шукаємо й перевіряємо…" : "Збагатити"}</span></button>`;
-  if (!enrich) return `<div class="triage-enrich">${button}<span class="triage-muted">Знайти пошту, телефон і профілі. Знайдена пошта перевіряється на поштовому сервері; що пройшло, і знайдений сайт, телефон, профіль — одразу записуються в базу.</span></div>`;
-  if (enrich.error) return `<div class="triage-enrich">${button}<p class="esp-notice is-bad">${escapeHtml(enrich.error)}</p></div>`;
+  const seconds = triage.enrichingSince ? Math.max(0, Math.round((Date.now() - triage.enrichingSince) / 1000)) : 0;
+  const button = `<button type="button" class="primary-button triage-enrich-button" data-triage="enrich" ${triage.enriching ? "disabled" : ""}><i data-lucide="${triage.enriching ? "loader" : "sparkles"}"></i><span>${triage.enriching ? "Шукаємо…" : enrich ? "Збагатити ще раз" : "Збагатити"}</span></button>`;
+  const running = triage.enriching
+    ? `<p class="triage-enrich-progress" role="status" aria-live="polite"><span data-enrich-seconds>${seconds}</span> с · публічний пошук → платні пошуковики → перевірка знайдених пошт. Зазвичай до хвилини.</p>`
+    : "";
+  if (!enrich) return `<div class="triage-enrich">${button}${running || '<span class="triage-muted">Знайти пошту, телефон і профілі. Знайдена пошта перевіряється на поштовому сервері; що пройшло, і знайдений сайт, телефон, профіль — одразу записуються в базу.</span>'}</div>`;
+  if (enrich.error) return `<div class="triage-enrich">${button}${running}<p class="esp-notice is-bad">Пошук не вдався: ${escapeHtml(enrich.error)}</p></div>`;
   const others = enrich.candidates.filter((item) => ["phone", "linkedin", "telegram", "whatsapp", "website"].includes(item.type));
-  return `<div class="triage-enrich">${button}
-    ${enrich.added?.length
-      ? `<p class="triage-added"><i data-lucide="database"></i> Додано в базу: ${enrich.added.map((row) => `${escapeHtml(FIELD_WORD[row.field] || row.field)} <b>${escapeHtml(row.value)}</b>`).join(", ")}</p>`
-      : '<p class="triage-muted">Нового для бази не знайдено — те, що знайшлося, там уже є.</p>'}
+  const searched = enrich.searched || [];
+  return `<div class="triage-enrich">${button}${running}
+    ${enrichSummaryHtml(enrich, others)}
     ${others.length ? `<ul class="triage-found">${others.map((item) => `<li><span class="pill tone-muted">${escapeHtml(FIELD_WORD[item.type] || item.type)}</span> <b>${escapeHtml(item.value)}</b>
       ${foundMark(item)}
       <span class="triage-muted">${escapeHtml(item.source || "")}${item.confidence != null ? ` · ${escapeHtml(String(item.confidence))}` : ""}</span></li>`).join("")}</ul>` : ""}
-    ${enrich.hidden ? `<p class="triage-muted">${enrich.hidden === 1 ? "Ще одну знайдену адресу поштовий сервер не підтвердив — її" : `Ще ${enrich.hidden} знайдені адреси поштові сервери не підтвердили — їх`} не показано й не збережено.</p>` : ""}
+    ${(enrich.hiddenEmails || []).length ? `<details class="triage-enrich-more"><summary>Сховано ${enrich.hiddenEmails.length} ${enrich.hiddenEmails.length === 1 ? "пошту" : "пошти"} — не підтверджено</summary><ul>${enrich.hiddenEmails.map((row) => `<li><b>${escapeHtml(row.value)}</b> — ${escapeHtml(row.reason)}</li>`).join("")}</ul></details>`
+      : enrich.hidden ? `<p class="triage-muted">${enrich.hidden === 1 ? "Ще одну знайдену адресу поштовий сервер не підтвердив — її" : `Ще ${enrich.hidden} знайдені адреси поштові сервери не підтвердили — їх`} не показано й не збережено.</p>` : ""}
+    ${searched.length ? `<details class="triage-enrich-more"><summary>Де шукали</summary><ul>${searched.map((row) => `<li>${escapeHtml(row.source)}: ${row.state === "done" ? `${row.found || 0} знайдено${row.records != null ? ` (${row.records} записів)` : ""}` : escapeHtml(ENRICH_STATE[row.state] || row.state)}${row.note ? ` — ${escapeHtml(row.note)}` : ""}</li>`).join("")}</ul></details>` : ""}
+    ${enrichCostHtml(enrich.cost)}
   </div>`;
 }
 
@@ -640,7 +666,13 @@ async function enrich() {
   const contact = triage.item?.contact;
   if (!contact) return;
   triage.enriching = true;
+  triage.enrichingSince = Date.now();
   renderTriage();
+  // Лічильник секунд — лише цифра, без перемальовування картки.
+  const ticker = setInterval(() => {
+    const node = document.querySelector("[data-enrich-seconds]");
+    if (node) node.textContent = String(Math.round((Date.now() - triage.enrichingSince) / 1000));
+  }, 1000);
   try {
     const answer = await api("/api/triage/enrich", { method: "POST", body: JSON.stringify({ contactId: contact.id }) });
     if (triage.item?.contact?.id !== contact.id) return;
@@ -651,7 +683,9 @@ async function enrich() {
   } catch (error) {
     triage.enrich = { error: error.message || "Не вдалося збагатити.", candidates: [] };
   }
+  clearInterval(ticker);
   triage.enriching = false;
+  triage.enrichingSince = 0;
   renderTriage();
   // Something new went into the base: the letter is written again with it.
   if (triage.enrich?.added?.length && triage.item?.contact?.id === contact.id && !triage.dirty.has("body")) await draftTexts();
