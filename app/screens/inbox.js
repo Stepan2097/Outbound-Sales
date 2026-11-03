@@ -492,11 +492,9 @@ function warmupInboxLabelsHtml() {
   const keys = [...(meta.order || []), "none"];
   const chips = keys.map((key) => [key, all.filter((thread) => inboxLabelOf(thread) === key).length]).filter(([, count]) => count);
   if (!chips.length) return "";
-  const job = meta.job?.running ? `<span class="warmup-subtle">AI розбирає: ${meta.job.done} з ${meta.job.total}</span>` : "";
   return `<div class="warmup-inbox-replied warmup-inbox-labels" role="tablist" aria-label="Мітки AI">
     <button type="button" role="tab" class="${inboxLabelFilter ? "" : "is-active"}" data-warmup-inbox-label="">Усі мітки</button>
     ${chips.map(([key, count]) => `<button type="button" role="tab" class="${inboxLabelFilter === key ? "is-active" : ""}" aria-selected="${inboxLabelFilter === key}" data-warmup-inbox-label="${escapeAttr(key)}">${escapeHtml(inboxLabelWord(key))} <b>${count}</b></button>`).join("")}
-    ${job}
   </div>`;
 }
 
