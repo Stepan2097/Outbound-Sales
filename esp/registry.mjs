@@ -294,7 +294,17 @@ export async function setSenderStatus({ email, status, reason = "", code = null 
 export function isDisconnected(sender) {
   if (!sender || sender.status !== "paused") return false;
   const last = [...(sender.history || [])].reverse().find((row) => row.status === sender.status) || {};
-  return last.code === "not_connected";
+  // Only a person's «Відключити». The gate pauses with the same code when a mailbox's
+  // Google access is lost on its own — that one stays on the page, asking to sign in
+  // again (owner 03.11: «мала б показуватися в прогріві і писати… треба перепідключити»).
+  return last.code === "not_connected" && !String(last.actor || "").startsWith("esp");
+}
+
+/** Paused because its Google access went missing, not because somebody disconnected it. */
+export function lostAccess(sender) {
+  if (!sender || sender.status !== "paused") return false;
+  const last = [...(sender.history || [])].reverse().find((row) => row.status === sender.status) || {};
+  return last.code === "not_connected" && String(last.actor || "").startsWith("esp");
 }
 
 /** Whether this address may send right now, and if not, the sentence why. */

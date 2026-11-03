@@ -1,7 +1,7 @@
 import { isHoliday } from "./holidays.mjs";
 import { buildLetter, messageIdFor } from "./letter.mjs";
 import { COUNTING_ZONE, SENDER_DAILY_CAP, coldAllowance, localTime, seeded, sendDecision, sendLedger, senderDailyLimit } from "./limits.mjs";
-import { DOMAIN_LABEL } from "./registry.mjs";
+import { DOMAIN_LABEL, lostAccess } from "./registry.mjs";
 import { replySubject } from "./thread.mjs";
 
 /**
@@ -256,7 +256,7 @@ export function warmupView(entries, { senders = [], domains = [], now = new Date
     .sort((left, right) => String(left.domain).localeCompare(String(right.domain)) || left.email.localeCompare(right.email)).map((sender) => {
     const mine = rows.get(sender.email) || { running: false, day: 0, plannedToday: 0, sentToday: 0, firstsToday: 0, repliesToday: 0, sent: 0, repliesReceived: 0, repliesSent: 0, received: 0, rescued: 0, rescuedOwn: 0, landedInSpam: 0, failedToday: 0, lastError: null, startedAt: null, pausedAt: null, by: "" };
     const domainStatus = domainState.get(sender.domain) || null;
-    const blocked = sender.status !== "active" ? (sender.status === "paused" ? "пошта на паузі" : "пошту виведено")
+    const blocked = sender.status !== "active" ? (sender.status === "paused" ? (lostAccess(sender) ? "відключилася від платформи — перепідключіть: «Увійти через Google»" : "пошта на паузі") : "пошту виведено")
       : !["aging", "ramp", "active"].includes(domainStatus) ? `домен у стані «${DOMAIN_LABEL[domainStatus] || domainStatus || "немає"}»` : null;
     const limit = senderDailyLimit(sender);
     const coldToday = ledger.senders.get(sender.email)?.cold || 0;
