@@ -95,15 +95,8 @@ export function reviewAlerts({ entries, senders, campaigns, enrollmentsOf, now =
       actions.push({ kind: "pause_sender", email: sender.email, ...finding, key: `sender:${sender.email}:${finding.code}` });
     }
   }
-  // ESP 13's weekly review held a sender's ramp: no pause — the stage already
-  // stands — but a person is told why, once per review.
-  for (const held of entries.filter((entry) => entry.type === "sender.ramp_held" && now.getTime() - new Date(entry.at).getTime() < DAY)) {
-    actions.push({
-      kind: "ramp_held", email: held.data?.email, code: "ramp_held",
-      reason: `етап рампи ${held.data?.stage} стоїть: ${(held.data?.reasons || []).join("; ")}`,
-      key: `ramp:${held.data?.email}:${held.seq ?? held.at}`
-    });
-  }
+  // The weekly ramp review is gone (03.11): a mailbox's limit is set by hand and its
+  // day climbs by itself (esp/limits.mjs), so «рампа не росте» is said no more.
   for (const campaign of campaigns) {
     if (campaign.state !== "running") continue;
     const finding = campaignFinding(campaign, enrollmentsOf(campaign.id), entries);

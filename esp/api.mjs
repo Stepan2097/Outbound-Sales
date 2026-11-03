@@ -923,7 +923,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
   // ── ESP 8: the automatic pauses and the alarms ─────────────────────────
   if (method === "GET" && path === "/alerts") {
     const weekAgo = Date.now() - 7 * 86_400_000;
-    const alerts = (await allEntries()).filter((entry) => entry.type === "esp.alert" && new Date(entry.at).getTime() >= weekAgo)
+    const alerts = (await allEntries()).filter((entry) => entry.type === "esp.alert" && entry.data?.kind !== "ramp_held" && new Date(entry.at).getTime() >= weekAgo)
       .reverse().map((entry) => ({ at: entry.at, ...entry.data }));
     sendJson(response, 200, { success: true, alerts, telegram: Boolean(esp.alertsTelegram) });
     return true;
