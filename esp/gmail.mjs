@@ -232,7 +232,17 @@ export class GmailApiConnector {
     }
     const messages = [];
     for (const id of [...new Set(ids)]) {
-      const message = await this.call(mailbox, `/messages/${encodeURIComponent(id)}?format=raw`);
+      // A letter added and then deleted before we read it (the warm-up's own
+      // clean-up, a person emptying Trash) answers 404 — skipped, not a reason to
+      // drop the whole read: 03.11 one such id stopped every inbox for hours, and
+      // with it every reply and bounce.
+      let message;
+      try {
+        message = await this.call(mailbox, `/messages/${encodeURIComponent(id)}?format=raw`);
+      } catch (error) {
+        if (error.status === 404) continue;
+        throw error;
+      }
       const labels = message.labelIds || [];
       if (labels.includes("SENT") && !labels.includes("INBOX")) continue;
       messages.push({ id: message.id, threadId: message.threadId || null, raw: Buffer.from(message.raw || "", "base64url").toString("latin1") });
