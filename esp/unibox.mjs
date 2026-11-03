@@ -16,7 +16,21 @@ import { conversations } from "./conversations.mjs";
  * nothing outside the journal needs to be kept in step with it.
  */
 
-export const UNIBOX_FOLDERS = { inbox: "Вхідні", sent: "Надіслані", starred: "Із зірочкою", bounced: "Bounce" };
+// Owner 03.11 «проаналізуй листи і нормально просортуй»: «Вхідні» — лише живі
+// відповіді людей; автовідповіді (у відпустці, служба підтримки з тікетом),
+// відписки й bounce — кожне в своїй папці.
+export const UNIBOX_FOLDERS = { inbox: "Вхідні", auto: "Автовідповіді", unsubscribed: "Відписки", bounced: "Bounce", starred: "Із зірочкою", sent: "Надіслані" };
+
+// A help desk acknowledging a ticket is a machine, not the person: a support or
+// no-reply address, or the desk's stock sentences.
+const DESK_ADDRESS = /^(support|help|helpdesk|service|customer|care|tickets?|noreply|no-reply|donotreply|payments?(-support)?|billing|info|contact|hello|team)[\w.+-]*@/i;
+const DESK_TEXT = /how can we help you today|we (have )?received your (request|message|e-?mail|ticket)|your (ticket|request) (number|#|id)|ticket #?\d|thank you for (contacting|reaching out to) (us|our)|this is an automated|automatic(ally)? (reply|response)|do not reply to this/i;
+
+/** An inbound letter that only looks like a reply. */
+export function isAutoAck(message, contact = "") {
+  if (message?.kind !== "replied") return false;
+  return DESK_TEXT.test(String(message.text || "")) || (DESK_ADDRESS.test(String(contact)) && String(message.text || "").length < 600);
+}
 export const UNIBOX_PAGE = 50;
 
 /** Stars and the last time each conversation was opened, from the journal. */
@@ -49,12 +63,16 @@ function rowOf(thread, { marks, leads, campaigns }) {
     campaignId: thread.campaignId,
     campaignName: campaigns.get(thread.campaignId) || null,
     subject: thread.subject || "",
-    snippet: firstLine(last?.text) || (last?.kind === "bounced" ? `Лист не доставлено${last.code ? ` (${last.code})` : ""}` : last?.kind === "unsubscribed" ? "Відписка" : ""),
+    snippet: firstLine(last?.text) || (last?.kind === "bounced" ? `Лист не доставлено${last.code ? ` (${last.code})` : ""}` : last?.kind === "unsubscribed" ? "Відписка" : last?.kind === "autoreplied" ? "Автовідповідь" : ""),
     count: thread.messages.length,
-    label: thread.label,
+    // A label is for what a person said; a desk's «how can we help» is not «neutral».
+    label: thread.messages.some((message) => message.kind === "replied" && !isAutoAck(message, thread.contact)) ? thread.label : null,
     lastAt: thread.lastAt,
     lastDirection: last?.direction || "out",
     inbound: thread.inbound,
+    // Whether a person answered, and whether anything came back by itself.
+    human: thread.messages.some((message) => message.kind === "replied" && !isAutoAck(message, thread.contact)),
+    auto: thread.messages.some((message) => message.kind === "autoreplied" || isAutoAck(message, thread.contact)),
     bounced: thread.messages.some((message) => message.kind === "bounced"),
     unsubscribed: thread.messages.some((message) => message.kind === "unsubscribed"),
     starred: marks.starred.has(thread.key),
@@ -66,7 +84,10 @@ function inFolder(row, folder) {
   if (folder === "sent") return true;
   if (folder === "starred") return row.starred;
   if (folder === "bounced") return row.bounced;
-  return row.inbound > 0;
+  if (folder === "unsubscribed") return row.unsubscribed;
+  if (folder === "auto") return row.auto && !row.human && !row.unsubscribed && !row.bounced;
+  // «Вхідні»: a person answered (and did not just unsubscribe).
+  return row.human && !row.unsubscribed;
 }
 
 /**
@@ -81,13 +102,15 @@ export function uniboxList(entries, { folder = "inbox", label = "", campaign = "
   const rows = threads.map((thread) => ({ thread, row: rowOf(thread, { marks, leads, campaigns }) }));
   const counts = {
     inbox: rows.filter(({ row }) => inFolder(row, "inbox")).length,
-    unread: rows.filter(({ row }) => row.unread).length,
+    unread: rows.filter(({ row }) => inFolder(row, "inbox") && row.unread).length,
+    auto: rows.filter(({ row }) => inFolder(row, "auto")).length,
+    unsubscribed: rows.filter(({ row }) => inFolder(row, "unsubscribed")).length,
     sent: rows.length,
     starred: rows.filter(({ row }) => row.starred).length,
     bounced: rows.filter(({ row }) => row.bounced).length
   };
   const needle = String(q || "").trim().toLowerCase();
-  const matches = rows.filter(({ thread, row }) => inFolder(row, folder)
+  const matches = rows.sort((left, right) => String(right.row.lastAt).localeCompare(String(left.row.lastAt))).filter(({ thread, row }) => inFolder(row, folder)
     && (!label || (label === "unread" ? row.unread : row.label === label))
     && (!campaign || row.campaignId === campaign)
     && (!sender || row.sender === sender)
@@ -120,7 +143,7 @@ export function uniboxThread(entries, key, { leads = new Map(), campaigns = new 
  * What stands between the inbox and the mail, for the yellow banner on top —
  * as Snov's «Specify the IMAP settings for …». Each item names what to do.
  */
-export function uniboxProblems({ mode = "stub", polling = false, senders = [] } = {}) {
+export function uniboxProblems({ mode = "stub", polling = false, senders = [], campaignSenders = null } = {}) {
   const problems = [];
   if (mode === "stub") problems.push({ code: "stub", text: "Пошту ще не підключено — працює заглушка: листи з Gmail не читаються, і відповісти звідси не можна. Підключення — «Пошта» → «Прогрів пошт» → «Додати пошту» → «Увійти через Google»." });
   else if (!polling) problems.push({ code: "not_polling", text: "Пошти зараз не читаються (ланцюжок вимкнено, ESP_SEQUENCE) — нові відповіді не з'являться, доки його не ввімкнуть." });
@@ -130,7 +153,10 @@ export function uniboxProblems({ mode = "stub", polling = false, senders = [] } 
     const last = (row.history || []).filter((step) => step.status === "paused").at(-1);
     return Boolean(last && last.code === "not_connected" && last.actor && !String(last.actor).startsWith("esp"));
   };
-  const paused = senders.filter((row) => row.status === "paused" && !byHand(row)).map((row) => row.email);
+  // Only what holds a campaign's letters back (owner 03.11: vlad, a warm-up-only mailbox,
+  // belongs on «Прогрів пошт», not here).
+  const inCampaigns = (row) => !campaignSenders || campaignSenders.has(row.email);
+  const paused = senders.filter((row) => row.status === "paused" && !byHand(row) && inCampaigns(row)).map((row) => row.email);
   if (paused.length) problems.push({ code: "paused", text: `На паузі: ${paused.join(", ")} — їхні листи не йдуть. Причина й зняття паузи — у реєстрі відправників.`, senders: paused });
   return problems;
 }

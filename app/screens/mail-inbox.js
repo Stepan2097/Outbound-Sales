@@ -12,7 +12,7 @@ import { api, escapeAttr, escapeHtml, onScreen, refreshIcons } from "../core.js"
 const CHANNEL_KEY = "unibox:channel";
 const LABEL_TONE = { positive: "tone-live", negative: "tone-warn", referral: "tone-done", neutral: "tone-muted" };
 const KIND_LABEL = { sent: "Ми написали", replied: "Відповідь", autoreplied: "Автовідповідь", bounced: "Не доставлено", unsubscribed: "Відписка" };
-const FOLDER_ICON = { inbox: "inbox", sent: "send", starred: "star", bounced: "mail-x" };
+const FOLDER_ICON = { inbox: "inbox", auto: "bot", unsubscribed: "user-x", sent: "send", starred: "star", bounced: "mail-x" };
 
 export const unibox = {
   channel: readChannel(),
@@ -123,9 +123,9 @@ function toolbarHtml() {
 
 function sideHtml() {
   const counts = unibox.list?.counts || {};
-  const folders = unibox.list?.folders || { inbox: "Вхідні", sent: "Надіслані", starred: "Із зірочкою", bounced: "Bounce" };
+  const folders = unibox.list?.folders || { inbox: "Вхідні", auto: "Автовідповіді", unsubscribed: "Відписки", bounced: "Bounce", starred: "Із зірочкою", sent: "Надіслані" };
   const mail = Object.entries(folders).map(([key, text]) => {
-    const count = key === "inbox" ? counts.unread : key === "starred" || key === "bounced" ? counts[key] : null;
+    const count = key === "inbox" ? counts.unread : ["starred", "bounced", "auto", "unsubscribed"].includes(key) ? counts[key] : null;
     const active = unibox.channel === "mail" && unibox.folder === key;
     return `<button type="button" class="${active ? "is-active" : ""}" data-unibox-folder="${key}"${active ? ' aria-current="page"' : ""}><i data-lucide="${FOLDER_ICON[key]}"></i><span>${escapeHtml(text)}</span>${count ? `<b>${count}</b>` : ""}</button>`;
   }).join("");
@@ -177,7 +177,7 @@ function listHtml() {
   const notice = unibox.notice ? `<p class="esp-notice">${escapeHtml(unibox.notice)}</p>` : "";
   if (!rows.length) {
     const filtered = Object.values(unibox.filters).some(Boolean);
-    const empty = filtered ? "Під ці фільтри листів немає." : unibox.folder === "inbox" ? "Відповідей на холодні листи ще немає." : unibox.folder === "starred" ? "Зірочкою ще нічого не позначено." : unibox.folder === "bounced" ? "Недоставлених листів немає." : "Холодних листів ще не надсилали.";
+    const empty = filtered ? "Під ці фільтри листів немає." : unibox.folder === "inbox" ? "Відповідей на холодні листи ще немає." : unibox.folder === "starred" ? "Зірочкою ще нічого не позначено." : unibox.folder === "bounced" ? "Недоставлених листів немає." : unibox.folder === "auto" ? "Автовідповідей немає." : unibox.folder === "unsubscribed" ? "Ніхто не відписався." : "Холодних листів ще не надсилали.";
     return `${bar}${notice}<div class="empty-state">${empty}</div>`;
   }
   return `${bar}${notice}<ul class="unibox-list">${rows.map((row) => `

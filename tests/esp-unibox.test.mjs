@@ -47,22 +47,42 @@ function world() {
 const LEADS = new Map([["olga@acme.com", { name: "Olga Shevchenko", company: "Acme" }]]);
 const CAMPAIGNS = new Map([["c1", "UK operators"], ["c2", "Affiliates"]]);
 
-test("папки як у Snov: Вхідні — щось повернулось; Надіслані — усі розмови; Bounce — недоставлені; новіші зверху", () => {
+test("папки: Вхідні — лише живі відповіді людей; Bounce — недоставлені; Надіслані — усі розмови; новіші зверху (03.11)", () => {
   const inboxList = uniboxList(world(), { leads: LEADS, campaigns: CAMPAIGNS });
-  assert.deepEqual(inboxList.rows.map((row) => row.contact), ["max@delta.com", "olga@acme.com", "ivan@beta.com"]);
-  assert.deepEqual(inboxList.counts, { inbox: 3, unread: 3, sent: 4, starred: 0, bounced: 1 });
+  assert.deepEqual(inboxList.rows.map((row) => row.contact), ["max@delta.com", "olga@acme.com"]);
+  assert.deepEqual(inboxList.counts, { inbox: 2, unread: 2, auto: 0, unsubscribed: 0, sent: 4, starred: 0, bounced: 1 });
   const olga = inboxList.rows.find((row) => row.contact === "olga@acme.com");
   assert.deepEqual([olga.name, olga.company, olga.campaignName, olga.count, olga.label, olga.snippet], ["Olga Shevchenko", "Acme", "UK operators", 2, "positive", "Yes, call me Tuesday"]);
-  assert.equal(inboxList.rows.find((row) => row.contact === "ivan@beta.com").snippet, "Лист не доставлено (5.1.1)");
+  assert.equal(uniboxList(world(), { folder: "bounced" }).rows[0].snippet, "Лист не доставлено (5.1.1)");
   assert.equal(uniboxList(world(), { folder: "sent" }).total, 4, "kate не відповіла — лише в Надісланих");
   assert.deepEqual(uniboxList(world(), { folder: "bounced" }).rows.map((row) => row.contact), ["ivan@beta.com"]);
+});
+
+test("автовідповідь «не в офісі», тікет служби підтримки і відписка — не у Вхідних, а кожна в своїй папці (03.11)", () => {
+  seq = 0;
+  const entries = [
+    ...letter("anna@send.com", "ellie@yaspa.com", 1),
+    inbound("message.autoreplied", "anna@send.com", "ellie@yaspa.com", 2, { gmailId: "a1" }),
+    ...letter("anna@send.com", "payments-support@paripesa.com", 3),
+    inbound("message.replied", "anna@send.com", "payments-support@paripesa.com", 4, { text: "Good day! We are here to help you in the best way possible. So how can we help you today?", gmailId: "a2", label: "neutral" }),
+    ...letter("anna@send.com", "mwoolfrey@vixio.com", 5),
+    inbound("contact.unsubscribed", "anna@send.com", "mwoolfrey@vixio.com", 6, { text: "Unsubscribe Mike", via: "reply" }),
+    ...letter("anna@send.com", "olga@acme.com", 7),
+    inbound("message.replied", "anna@send.com", "olga@acme.com", 8, { text: "Sounds good, send details", gmailId: "a3", label: "positive" })
+  ];
+  assert.deepEqual(uniboxList(entries).rows.map((row) => row.contact), ["olga@acme.com"]);
+  const auto = uniboxList(entries, { folder: "auto" }).rows;
+  assert.deepEqual(auto.map((row) => row.contact), ["payments-support@paripesa.com", "ellie@yaspa.com"]);
+  assert.equal(auto[0].label, null, "a desk's «how can we help» is not «neutral»");
+  assert.equal(auto[1].snippet, "Автовідповідь");
+  assert.deepEqual(uniboxList(entries, { folder: "unsubscribed" }).rows.map((row) => row.contact), ["mwoolfrey@vixio.com"]);
 });
 
 test("фільтри: мітка відповіді, непрочитані, кампанія, пошта, пошук по імені, темі й тексту листів", () => {
   const entries = world();
   assert.deepEqual(uniboxList(entries, { label: "positive" }).rows.map((row) => row.contact), ["olga@acme.com"]);
   assert.deepEqual(uniboxList(entries, { campaign: "c2" }).rows.map((row) => row.contact), ["max@delta.com"]);
-  assert.deepEqual(uniboxList(entries, { sender: "anna@send.com" }).rows.map((row) => row.contact), ["olga@acme.com", "ivan@beta.com"]);
+  assert.deepEqual(uniboxList(entries, { sender: "anna@send.com" }).rows.map((row) => row.contact), ["olga@acme.com"]);
   assert.deepEqual(uniboxList(entries, { q: "tuesday" }).rows.map((row) => row.contact), ["olga@acme.com"]);
   assert.deepEqual(uniboxList(entries, { q: "shevchenko", leads: LEADS }).rows.map((row) => row.contact), ["olga@acme.com"]);
   assert.deepEqual(uniboxList(entries, { folder: "sent", q: "a question" }).rows.map((row) => row.contact), ["ivan@beta.com"]);
@@ -90,7 +110,7 @@ test("зірочка й «прочитано» — рядки журналу; р
   let olga = uniboxList(entries).rows.find((row) => row.key === key);
   assert.deepEqual([olga.unread, olga.starred], [false, true]);
   assert.deepEqual(uniboxList(entries, { folder: "starred" }).rows.map((row) => row.key), [key]);
-  assert.deepEqual(uniboxList(entries, { label: "unread" }).rows.map((row) => row.contact), ["max@delta.com", "ivan@beta.com"]);
+  assert.deepEqual(uniboxList(entries, { label: "unread" }).rows.map((row) => row.contact), ["max@delta.com"]);
   entries.push(inbound("message.replied", "anna@send.com", "olga@acme.com", 30, { text: "One more thing" }));
   olga = uniboxList(entries).rows.find((row) => row.key === key);
   assert.equal(olga.unread, true);
@@ -150,5 +170,5 @@ test("маршрути: список і тред — праву «бачити �
   assert.deepEqual(marks.map((entry) => [entry.type, entry.actor, entry.contact]), [["conversation.read", "seller@x.com", "olga@acme.com"], ["conversation.starred", "admin@x.com", "olga@acme.com"]]);
   const after = await call("GET", "/unibox?folder=starred");
   assert.deepEqual(after.payload.rows.map((row) => row.contact), ["olga@acme.com"]);
-  assert.equal(after.payload.counts.unread, 2);
+  assert.equal(after.payload.counts.unread, 1, "непрочитані — лише у Вхідних: bounce Івана в них більше не рахується");
 });
