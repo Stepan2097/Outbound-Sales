@@ -17,7 +17,7 @@ import { acceptOpenDialogs, allRows, openDialogs, suggestOpenDialogs } from "./o
 import { OUTREACH_ACTIONS, dayOf, workEntries } from "./work-log.mjs";
 import { CLOSING, DEFAULT_EXIT, EXIT_REASONS, LEAD_STATUSES, NOT_RELEVANT_FOLDER, ORIGIN, statusPatch } from "./statuses.mjs";
 import {
-  DEFAULT_PING_STEPS, LATER_DAYS, PING_QUEUE, REASONS, blockOf, compareItems, currentPingSteps, dayIn, desiredPing, isPingSteps, laterPing, manualDueDay, usePingSteps,
+  DEFAULT_COLD_PING_STEPS, DEFAULT_PING_STEPS, LATER_DAYS, PING_QUEUE, REASONS, blockOf, compareItems, currentPingSteps, dayIn, desiredPing, isPingSteps, laterPing, manualDueDay, ownCampaignSteps, usePingSteps,
   REPLIED_STATUS, leadReplied, newContactsAllowed, planPingChanges, reasonOfKey, repliedStatusDue, stripMarks, taskDescription, taskMarks, taskReason, zonedIso,
   DEFAULT_CAPACITY, addCalendarDays, cleanCapacity, levelPings, loadAhead, workday
 } from "./pings.mjs";
@@ -219,7 +219,9 @@ export async function gatherDialogs() {
   for (const [contactId, campaign] of byContact) {
     const state = states.get(contactId);
     state.campaignId = campaign.id;
-    state.steps = campaign.silentSteps;
+    // Кампанія з кроками за замовчуванням іде за загальними «ще не відповідав / відповідав»
+    // (таск fca90a3a); свої кроки (у «Зміна ролі» — 5 і 10) лишаються її.
+    state.steps = ownCampaignSteps(campaign.silentSteps);
   }
   return { states, accounts, at: new Date() };
 }
@@ -986,18 +988,22 @@ export async function handleTodayApi({ request, response, url, sendJson, readJso
     }
     // Коли нагадувати тим, хто мовчить: бачать усі, змінює адміністратор (власник 20.10: «зробити ці поля редагованими»).
     if (request.method === "GET" && path === "/api/today/ping-steps") {
-      sendJson(response, 200, { steps: currentPingSteps(), defaults: DEFAULT_PING_STEPS, laterDays: LATER_DAYS, canEdit: isAdmin });
+      const steps = currentPingSteps();
+      sendJson(response, 200, { steps: steps.warm, coldSteps: steps.cold, defaults: DEFAULT_PING_STEPS, coldDefaults: DEFAULT_COLD_PING_STEPS, laterDays: LATER_DAYS, canEdit: isAdmin });
       return true;
     }
     if (request.method === "POST" && path === "/api/today/ping-steps") {
       if (!isAdmin) throw refuse("Коли нагадувати, вирішує адміністратор.", 403);
       const body = await readJson(request);
       const steps = Array.isArray(body?.steps) ? body.steps.map(Number) : null;
-      if (!isPingSteps(steps)) throw refuse("Від 1 до 6 нагадувань, кожне — від 1 до 30 робочих днів.", 400);
-      await pingStepsStore.write(steps);
-      usePingSteps(steps);
+      // Без `coldSteps` (старий клієнт) холодні лишаються, як були.
+      const coldSteps = Array.isArray(body?.coldSteps) ? body.coldSteps.map(Number) : currentPingSteps("cold");
+      if (!isPingSteps(steps) || !isPingSteps(coldSteps)) throw refuse("Від 1 до 6 нагадувань, кожне — від 1 до 30 робочих днів.", 400);
+      await pingStepsStore.write({ cold: coldSteps, warm: steps });
+      usePingSteps({ cold: coldSteps, warm: steps });
       reconcileSoon(500);
-      sendJson(response, 200, { steps: currentPingSteps() });
+      const saved = currentPingSteps();
+      sendJson(response, 200, { steps: saved.warm, coldSteps: saved.cold });
       return true;
     }
     if (request.method === "POST" && path === "/api/today/translate") {

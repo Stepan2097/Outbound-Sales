@@ -5632,7 +5632,8 @@ function applyPersistentWorkspaceState(saved = {}) {
   if (saved.pingCapacity && typeof saved.pingCapacity === "object" && !Array.isArray(saved.pingCapacity)) {
     state.pingCapacity = saved.pingCapacity;
   }
-  if (Array.isArray(saved.pingSteps)) {
+  // Один список (до 04.11) — кроки теплих; `{ cold, warm }` — обидва набори (таск fca90a3a).
+  if (Array.isArray(saved.pingSteps) || (saved.pingSteps && typeof saved.pingSteps === "object")) {
     state.pingSteps = saved.pingSteps;
   }
   if (saved.inboxLabels && typeof saved.inboxLabels === "object" && !Array.isArray(saved.inboxLabels)) {

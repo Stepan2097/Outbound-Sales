@@ -286,36 +286,56 @@ const today = {
   // Етап 2/6: відкриті діалоги з 01.08 (адмін).
   imports: null, importOpen: false, importError: "", importPick: new Set(), importEdits: new Map(), importAssignee: "", importBusy: false, importTimer: null,
   // Коли нагадувати тим, хто мовчить (власник 20.10: «зробити ці поля редагованими»).
-  stepsOpen: false, steps: null, stepsDraft: [], stepsLaterDays: 30, stepsSaving: false, stepsError: "", stepsNote: ""
+  stepsOpen: false, steps: null, stepsDraft: { cold: [], warm: [] }, canEditSteps: false, stepsLaterDays: 30, stepsSaving: false, stepsError: "", stepsNote: ""
 };
 
 const ORDINAL = ["Перший", "Другий", "Третій", "Четвертий", "П'ятий", "Шостий"];
 
-/** Кроки нагадувань: поле на кожен, «+» до шести, і що буде з «Невдалим часом». */
-function stepsHtml() {
-  if (!today.steps) return `<div class="today-steps"><p class="today-empty">${escapeHtml(today.stepsError || "Читаю…")}</p></div>`;
-  const draft = today.stepsDraft;
-  return `<form class="today-steps" data-today-steps>
-    <p class="today-steps-lead">Лід мовчить після нашого повідомлення — коли нагадати (робочих днів після попереднього):</p>
+const STEP_SETS = [
+  { kind: "cold", title: "Ще не відповідав", lead: "лід не написав нам жодного разу" },
+  { kind: "warm", title: "Відповідав", lead: "лід хоч раз відповів, потім замовк" }
+];
+
+/** Один набір кроків: поле на кожен, «+» до шести. */
+function stepSetHtml({ kind, title, lead }) {
+  const draft = today.stepsDraft[kind];
+  return `<fieldset class="today-steps-set" data-step-set="${kind}">
+    <legend><b>${title}</b> — ${lead}</legend>
     <div class="today-steps-row">
       ${draft.map((days, index) => `<label class="today-step"><span>${ORDINAL[index]} пінг через</span>
-        <input type="number" min="1" max="30" step="1" inputmode="numeric" data-today-step="${index}" value="${escapeAttr(days)}" aria-label="${ORDINAL[index]} пінг через, робочих днів" />
-        <span>дн.</span>${draft.length > 1 ? `<button type="button" class="icon-button" data-today="step-remove" data-index="${index}" aria-label="Прибрати це нагадування" title="Прибрати"><i data-lucide="x"></i></button>` : ""}</label>`).join("")}
-      ${draft.length < 6 ? `<button type="button" data-today="step-add"><i data-lucide="plus"></i>Нагадування</button>` : ""}
+        <input type="number" min="1" max="30" step="1" inputmode="numeric" data-today-step="${index}" data-step-kind="${kind}" value="${escapeAttr(days)}" aria-label="${title}: ${ORDINAL[index]} пінг через, робочих днів" />
+        <span>дн.</span>${draft.length > 1 ? `<button type="button" class="icon-button" data-today="step-remove" data-kind="${kind}" data-index="${index}" aria-label="Прибрати це нагадування" title="Прибрати"><i data-lucide="x"></i></button>` : ""}</label>`).join("")}
+      ${draft.length < 6 ? `<button type="button" data-today="step-add" data-kind="${kind}"><i data-lucide="plus"></i>Нагадування</button>` : ""}
     </div>
-    <p class="today-steps-note">Після ${draft.length + 1} повідомлень без відповіді людину більше не пінгуємо. Статус «Невдалий час» — один пінг «Повернутись» через ${escapeHtml(today.stepsLaterDays)} днів. Кампанії мають свої кроки — у налаштуваннях кампанії.</p>
+    <p class="today-steps-note">Після ${draft.length + 1} наших повідомлень поспіль без відповіді більше не пінгуємо.</p>
+  </fieldset>`;
+}
+
+/**
+ * Кроки нагадувань — два набори (таск fca90a3a): тим, хто ще не відповідав,
+ * і тим, хто відповідав; і що буде з «Невдалим часом».
+ */
+function stepsHtml() {
+  if (!today.steps) return `<div class="today-steps"><p class="today-empty">${escapeHtml(today.stepsError || "Читаю…")}</p></div>`;
+  return `<form class="today-steps" data-today-steps>
+    <p class="today-steps-lead">Лід мовчить після нашого повідомлення — коли нагадати (робочих днів після попереднього):</p>
+    ${STEP_SETS.map(stepSetHtml).join("")}
+    <p class="today-steps-note">Статус «Невдалий час» — один пінг «Повернутись» через ${escapeHtml(today.stepsLaterDays)} днів. Кампанія зі своїми кроками (не 2, 3, 5, 7) іде за ними — у налаштуваннях кампанії.</p>
     <div class="today-steps-actions">
-      <button type="submit" class="primary-button" ${today.stepsSaving ? "disabled" : ""}>${today.stepsSaving ? "Зберігаю…" : "Зберегти"}</button>
+      ${today.canEditSteps ? `<button type="submit" class="primary-button" ${today.stepsSaving ? "disabled" : ""}>${today.stepsSaving ? "Зберігаю…" : "Зберегти"}</button>` : ""}
       ${today.stepsError ? `<span class="today-notice is-error" role="alert">${escapeHtml(today.stepsError)}</span>` : today.stepsNote ? `<span class="today-notice" role="status">${escapeHtml(today.stepsNote)}</span>` : ""}
     </div>
   </form>`;
 }
 
+const stepsOf = (payload) => ({ cold: [...(payload.coldSteps || payload.coldDefaults || [2, 3])], warm: [...payload.steps] });
+
 async function loadSteps() {
   try {
     const payload = await api("/api/today/ping-steps");
-    today.steps = payload.steps;
-    today.stepsDraft = [...payload.steps];
+    today.steps = stepsOf(payload);
+    today.stepsDraft = stepsOf(payload);
+    today.canEditSteps = payload.canEdit !== false;
     today.stepsLaterDays = payload.laterDays || 30;
     today.stepsError = "";
   } catch (error) {
@@ -325,8 +345,9 @@ async function loadSteps() {
 }
 
 async function saveSteps() {
-  const steps = today.stepsDraft.map(Number);
-  if (!steps.every((days) => Number.isInteger(days) && days >= 1 && days <= 30)) {
+  const cold = today.stepsDraft.cold.map(Number);
+  const warm = today.stepsDraft.warm.map(Number);
+  if (![...cold, ...warm].every((days) => Number.isInteger(days) && days >= 1 && days <= 30)) {
     today.stepsError = "Кожне — ціле число від 1 до 30.";
     return render();
   }
@@ -334,9 +355,9 @@ async function saveSteps() {
   today.stepsError = "";
   render();
   try {
-    const payload = await api("/api/today/ping-steps", { method: "POST", body: JSON.stringify({ steps }) });
-    today.steps = payload.steps;
-    today.stepsDraft = [...payload.steps];
+    const payload = await api("/api/today/ping-steps", { method: "POST", body: JSON.stringify({ steps: warm, coldSteps: cold }) });
+    today.steps = stepsOf(payload);
+    today.stepsDraft = stepsOf(payload);
     today.stepsNote = "Збережено. Пінги перерахуються за хвилину.";
   } catch (error) {
     today.stepsError = error.message || "Не вдалося зберегти.";
@@ -1082,7 +1103,7 @@ function helpHtml() {
 
 document.addEventListener("input", (event) => {
   if (event.target?.dataset?.todayStep !== undefined && event.target.closest?.("#todayRoot")) {
-    today.stepsDraft[Number(event.target.dataset.todayStep)] = event.target.value;
+    today.stepsDraft[event.target.dataset.stepKind === "cold" ? "cold" : "warm"][Number(event.target.dataset.todayStep)] = event.target.value;
     today.stepsNote = "";
     return;
   }
@@ -1186,11 +1207,12 @@ document.addEventListener("click", (event) => {
     return;
   }
   if (act === "step-add") {
-    if (today.stepsDraft.length < 6) today.stepsDraft.push(today.stepsDraft.at(-1) || 3);
+    const list = today.stepsDraft[target.dataset.kind === "cold" ? "cold" : "warm"];
+    if (list.length < 6) list.push(list.at(-1) || 3);
     return render();
   }
   if (act === "step-remove") {
-    today.stepsDraft.splice(Number(target.dataset.index), 1);
+    today.stepsDraft[target.dataset.kind === "cold" ? "cold" : "warm"].splice(Number(target.dataset.index), 1);
     return render();
   }
   if (act === "import-toggle") {

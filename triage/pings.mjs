@@ -30,24 +30,46 @@ export const SILENT_WORKING_DAYS = 3;
  * мати свої.
  */
 export const DEFAULT_PING_STEPS = [2, 3, 5, 7];
-let pingSteps = [...DEFAULT_PING_STEPS];
+/**
+ * Ліду, що ще жодного разу не відповідав, — лише перші два кроки: три наших
+ * повідомлення разом (таск fca90a3a, аудит 03.11: 3-тє дає 2,7% відповідей,
+ * 4-те — 0 з 25; тим, хто відповідав, 4-те і 5-те дають 12% і 9%).
+ */
+export const DEFAULT_COLD_PING_STEPS = [2, 3];
+let pingSteps = { cold: [...DEFAULT_COLD_PING_STEPS], warm: [...DEFAULT_PING_STEPS] };
 
-/** Кроки, які налаштовано в робочому просторі (власник 20.10: «зробити ці поля редагованими»). */
+/**
+ * Кроки, які налаштовано в робочому просторі (власник 20.10: «зробити ці поля
+ * редагованими»): `{ cold, warm }` — «ще не відповідав» і «відповідав». Старе
+ * збереження — один список — це кроки для теплих; холодним тоді — за замовчуванням.
+ */
 export function usePingSteps(steps) {
-  pingSteps = isPingSteps(steps) ? [...steps] : [...DEFAULT_PING_STEPS];
-  return pingSteps;
+  const saved = Array.isArray(steps) ? { warm: steps } : steps || {};
+  pingSteps = {
+    cold: isPingSteps(saved.cold) ? [...saved.cold] : [...DEFAULT_COLD_PING_STEPS],
+    warm: isPingSteps(saved.warm) ? [...saved.warm] : [...DEFAULT_PING_STEPS]
+  };
+  return currentPingSteps();
 }
 
-export function currentPingSteps() {
-  return [...pingSteps];
+/** `{ cold, warm }` — обидва набори; `currentPingSteps("warm")` чи `("cold")` — один. */
+export function currentPingSteps(kind = null) {
+  if (kind === "cold" || kind === "warm") return [...pingSteps[kind]];
+  return { cold: [...pingSteps.cold], warm: [...pingSteps.warm] };
+}
+
+/** Кроки кампанії, що збігаються з кроками за замовчуванням, — не свої: людина йде за загальними «холодні/теплі». */
+export function ownCampaignSteps(steps) {
+  return Array.isArray(steps) && steps.length && JSON.stringify(steps) !== JSON.stringify(DEFAULT_PING_STEPS) ? [...steps] : null;
 }
 
 export function isPingSteps(value) {
   return Array.isArray(value) && value.length >= 1 && value.length <= 6 && value.every((days) => Number.isInteger(days) && days >= 1 && days <= 30);
 }
 
-/** Після стількох наших повідомлень поспіль без відповіді пінгів більше немає: усі кроки й перше. */
+/** Після стількох наших повідомлень поспіль без відповіді пінгів більше немає: усі кроки й перше (теплим; холодним — 3). */
 export const SILENT_LIMIT = DEFAULT_PING_STEPS.length + 1;
+export const COLD_SILENT_LIMIT = DEFAULT_COLD_PING_STEPS.length + 1;
 
 /** «Невдалий час» (власник 20.10: «написати через місяць»): дотик через стільки календарних днів після статусу. */
 export const LATER_DAYS = 30;
@@ -180,8 +202,8 @@ export function taskReason(task) {
  * наступний дотик. Кампанія задає свої (етап 3/6); поза кампанією — 3 дні й не
  * більше трьох наших поспіль, як з етапу 1 ([3, 3]).
  */
-export function stepsOf(steps) {
-  return Array.isArray(steps) && steps.length ? steps : currentPingSteps();
+export function stepsOf(steps, { replied = true } = {}) {
+  return Array.isArray(steps) && steps.length ? steps : currentPingSteps(replied ? "warm" : "cold");
 }
 
 /**
@@ -199,15 +221,15 @@ export function laterPing(contactId, { since, accountId = null, threadKey = null
 }
 
 /** День наступного дотику після нашого `count`-го повідомлення поспіль, або null — кроки скінчились. */
-export function silentNext(steps, count, lastOutAt) {
-  const list = stepsOf(steps);
+export function silentNext(steps, count, lastOutAt, { replied = true } = {}) {
+  const list = stepsOf(steps, { replied });
   if (count > list.length) return null;
   return addWorkingDays(dayIn(lastOutAt), list[Math.max(0, count - 1)]);
 }
 
 /** Коли після останнього кроку тиша стає «Не відповідає»: ще стільки ж днів, як останній крок. */
-export function noReplyDay(steps, lastOutAt) {
-  const list = stepsOf(steps);
+export function noReplyDay(steps, lastOutAt, { replied = true } = {}) {
+  const list = stepsOf(steps, { replied });
   return addWorkingDays(dayIn(lastOutAt), list.at(-1));
 }
 
@@ -225,7 +247,8 @@ const ms = (iso) => {
  *   threads:  [{ accountId, threadKey, lastStoredAt, lastInboundStoredAt, lastMessage: { direction, at }, trailingOut }]
  *   pending:  наші повідомлення, ще не видимі в треді: [{ queuedAt, threadKey }] (чекають або щойно пішли)
  *   accepted: { outreachId, accountId, acceptedAt, dismissed } | null — прийняв запит
- *   steps:    кроки «мовчить» кампанії людини (етап 3/6) або нічого — за замовчуванням
+ *   steps:    власні кроки «мовчить» кампанії людини (етап 3/6) або нічого — тоді загальні:
+ *             «відповідав» (лід хоч раз писав у тред), інакше «ще не відповідав» (таск fca90a3a)
  *
  * Повертає `{ key, reason, basisAt, due, accountId, threadKey, outreachId }`;
  * `{ key: null, basisAt }` — пінгу бути не повинно (три наших без відповіді);
@@ -258,9 +281,14 @@ export function desiredPing(contactId, state, { now = new Date() } = {}) {
     const count = (thread.lastMessage.direction === "out" ? thread.trailingOut : 0) + pending.length;
     const lastOutAt = [thread.lastMessage.direction === "out" ? thread.lastStoredAt : null, ...pending.map((item) => item.queuedAt)]
       .filter(Boolean).sort((left, right) => ms(right) - ms(left))[0];
-    if (!lastOutAt || ms(lastOutAt) < windowStart) return null;
-    const next = silentNext(state.steps, count, lastOutAt);
-    if (!next) return { key: null, basisAt: lastOutAt, noReplyDue: noReplyDay(state.steps, lastOutAt) };
+    if (!lastOutAt) return null;
+    const replied = Boolean(lastIn);
+    const next = silentNext(state.steps, count, lastOutAt, { replied });
+    // Кроки скінчились — пінгу не має бути й поза вікном: так закривається й давній
+    // холодний пінг на 4-те чи 5-те повідомлення (таск fca90a3a).
+    // Давній діалог (поза вікном) лише втрачає пінг — статус «Не відповідає» йому, як і раніше, не ставиться.
+    if (!next) return { key: null, basisAt: lastOutAt, noReplyDue: ms(lastOutAt) < windowStart ? null : noReplyDay(state.steps, lastOutAt, { replied }) };
+    if (ms(lastOutAt) < windowStart) return null;
     return {
       key: `silent:${contactId}:${lastIn || "none"}:${count}`, reason: "silent", basisAt: lastOutAt,
       due: next, accountId: thread.accountId, threadKey: thread.threadKey, outreachId: state.accepted?.outreachId || null
@@ -275,7 +303,7 @@ export function desiredPing(contactId, state, { now = new Date() } = {}) {
     if (ms(queuedAt) < windowStart) return null;
     return {
       key: `silent:${contactId}:none:${firstPending.length}`, reason: "silent", basisAt: queuedAt,
-      due: silentNext(state.steps, firstPending.length, queuedAt) || addWorkingDays(dayIn(queuedAt), SILENT_WORKING_DAYS), accountId: accepted.accountId, threadKey: null, outreachId: accepted.outreachId
+      due: silentNext(state.steps, firstPending.length, queuedAt, { replied: false }) || addWorkingDays(dayIn(queuedAt), SILENT_WORKING_DAYS), accountId: accepted.accountId, threadKey: null, outreachId: accepted.outreachId
     };
   }
   if (accepted.dismissed || !accepted.acceptedAt || ms(accepted.acceptedAt) < windowStart) return null;

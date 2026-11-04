@@ -211,7 +211,7 @@ const PROFILE_LABEL = /^(переглянути профіль|view profile( of)
  * робочі дні, другий через 3, третій через 5, четвертий через 7; редагуються на
  * «Сьогодні»), а не «наступного дня».
  */
-export function followUpsDue(threads, { today, accounts = new Map(), skipAccounts = new Set(), steps = currentPingSteps(), limit = steps.length + 1, maxDays = FOLLOW_UP_MAX_DAYS } = {}) {
+export function followUpsDue(threads, { today, accounts = new Map(), skipAccounts = new Set(), steps = currentPingSteps("warm"), limit = steps.length + 1, maxDays = FOLLOW_UP_MAX_DAYS } = {}) {
   const dayNumber = (date) => Math.round(Date.parse(`${date}T12:00:00Z`) / 86400000);
   const now = dayNumber(today);
   const due = [];
