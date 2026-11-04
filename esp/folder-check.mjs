@@ -222,7 +222,7 @@ export function millionVerifier({ key = process.env.MILLIONVERIFIER_API_KEY || "
  * open (the 16.10 «closed» was a test that waited for 120 bytes of banner).
  * EMAIL_CHECK_SMTP=off turns it off.
  */
-export function smtpVerifier({ check = checkEmail, helo = process.env.EMAIL_CHECK_HELO || (process.env.PUBLIC_URL ? new URL(process.env.PUBLIC_URL).hostname : undefined), pauseMs = 400, env = process.env } = {}) {
+export function smtpVerifier({ check = checkEmail, helo = undefined, pauseMs = 400, env = process.env } = {}) {
   if (/^(0|off|false|no)$/i.test(String(env.EMAIL_CHECK_SMTP || ""))) return null;
   const catchAll = new Set();
   // Mail servers that never greeted us in this run (contacts/email-check.mjs skips them).

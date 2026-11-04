@@ -3119,14 +3119,13 @@ async function handleApi(request, response, url) {
  * two at a time. The server's own public host introduces it.
  */
 async function checkEmailsCached(addresses) {
-  const helo = process.env.EMAIL_CHECK_HELO || (process.env.PUBLIC_URL ? new URL(process.env.PUBLIC_URL).hostname : undefined);
   const fresh = (check) => check && Date.now() - Date.parse(check.checkedAt) < (check.status === "unknown" ? 1 : 30) * 86_400_000;
   const unique = [...new Set(addresses.map((value) => cleanText(value || "").toLowerCase()).filter(Boolean))].slice(0, 8);
   const results = [];
   for (let at = 0; at < unique.length; at += 2) {
     results.push(...await Promise.all(unique.slice(at, at + 2).map(async (email) => {
       if (fresh(state.emailChecks[email])) return state.emailChecks[email];
-      const check = await checkEmail(email, helo ? { helo } : {});
+      const check = await checkEmail(email);
       state.emailChecks[email] = check;
       return check;
     })));

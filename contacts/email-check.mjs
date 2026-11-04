@@ -16,7 +16,7 @@
 // block — not tested). Only `valid` passes.
 
 import { randomBytes } from "node:crypto";
-import { resolve4, resolveMx as dnsResolveMx } from "node:dns/promises";
+import { resolve4, resolveMx as dnsResolveMx, reverse as dnsReverse } from "node:dns/promises";
 import net from "node:net";
 import os from "node:os";
 
@@ -29,6 +29,31 @@ export const EMAIL_CHECK_LABEL = {
   catch_all: "сервер приймає будь-яку адресу — існування не перевірити",
   unknown: "перевірити не вдалося"
 };
+
+// A 5xx at RCPT that is about us (our IP on a blocklist, our name refused), not
+// about the mailbox — Mimecast's «Listed by CSS», «access denied»: not «no such mail».
+const REFUSED_US = /listed|block ?list|black ?list|spamhaus|reputation|blocked|access denied|not allowed|helo|rejected.*(client|sender|host)|policy/i;
+
+let ownName = null;
+/**
+ * The name this server introduces itself by (04.11): the reverse-DNS name of
+ * its public address — the bare container id it used before ("80303ba619f9")
+ * is an «unqualified HELO» some servers refuse, and Spamhaus lists IPs that
+ * greet that way. EMAIL_CHECK_HELO wins; the public host name is the fallback.
+ */
+export function heloName(env = process.env, { lookup = resolve4, reverse = dnsReverse } = {}) {
+  if (env.EMAIL_CHECK_HELO) return Promise.resolve(env.EMAIL_CHECK_HELO);
+  if (ownName && env === process.env) return ownName;
+  const host = env.PUBLIC_URL ? new URL(env.PUBLIC_URL).hostname : env.COOLIFY_FQDN ? String(env.COOLIFY_FQDN).split(",")[0].replace(/^https?:\/\//, "") : "";
+  const found = (async () => {
+    if (!host) return os.hostname();
+    const [ip] = await lookup(host).catch(() => []);
+    const [ptr] = ip ? await reverse(ip).catch(() => []) : [];
+    return ptr || host;
+  })();
+  if (env === process.env) ownName = found;
+  return found;
+}
 
 function result(email, status, reason, extra = {}) {
   return { email, status, reason, checkedAt: new Date().toISOString(), ...extra };
@@ -82,7 +107,7 @@ function smtpProbe({ host, port = 25, helo, from = "", addresses, timeoutMs = 12
  * `port` are for tests; `helo` and `from` default to this host and a null
  * sender, the way a bounce-checking server introduces itself.
  */
-export async function checkEmail(value, { resolveMx = dnsResolveMx, resolveA = resolve4, connect, port = 25, helo = process.env.EMAIL_CHECK_HELO || os.hostname(), from = process.env.EMAIL_CHECK_FROM || "", timeoutMs = 12000, deadHosts = null } = {}) {
+export async function checkEmail(value, { resolveMx = dnsResolveMx, resolveA = resolve4, connect, port = 25, helo = null, from = process.env.EMAIL_CHECK_FROM || "", timeoutMs = 12000, deadHosts = null } = {}) {
   const email = String(value ?? "").trim().toLowerCase();
   if (!ADDRESS.test(email) || email.length > 254) return result(email, "invalid", "неправильний формат адреси");
   const [local, domain] = email.split("@");
@@ -101,6 +126,7 @@ export async function checkEmail(value, { resolveMx = dnsResolveMx, resolveA = r
     exchanges = [domain];
   }
 
+  helo = helo || await heloName();
   const decoy = `${randomBytes(6).toString("hex")}-nobody@${domain}`;
   for (const host of exchanges.slice(0, 2)) {
     // A mail server that did not answer earlier in this run is not waited on again (02.11: a folder of
@@ -118,7 +144,7 @@ export async function checkEmail(value, { resolveMx = dnsResolveMx, resolveA = r
     }
     if (real.code >= 500) {
       // 5.1.x / 550 user unknown — the server says no. A 5.7.x is a policy on us, not on them.
-      if (/5\.7\.\d/.test(real.text)) return result(email, "unknown", "поштовий сервер відхилив перевірку (політика)", { role, mx: host, detail: real.text });
+      if (/5\.7\.\d/.test(real.text) || REFUSED_US.test(real.text)) return result(email, "unknown", "поштовий сервер відхилив перевірку (політика)", { role, mx: host, detail: real.text });
       return result(email, "invalid", "поштовий сервер каже: такої пошти немає", { role, mx: host, detail: real.text });
     }
     if (real.code >= 400) return result(email, "unknown", "поштовий сервер просить повторити пізніше (сірий список)", { role, mx: host, detail: real.text });
