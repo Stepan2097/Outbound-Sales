@@ -1,4 +1,6 @@
-// Пошта (ESP 6): виключення, фільтр країн і перевірка списку — у «Лідах» → «Виключення».
+// Пошта (ESP 6): чорний список, фільтр країн і перевірка списку — у «Лідах» →
+// «Чорний список» (власник 05.11: «зроби десь розділ чорний список і хай там вони
+// всі будуть»): усі виключення, за причиною, з пошуком, — не перші 50.
 //
 // Перед кожним листом — не лише при завантаженні — його отримувач проходить
 // перевірки: глобальні виключення назавжди (відписки, «ні», hard bounce, скарги,
@@ -14,7 +16,31 @@ onScreen("leads", { open: () => void loadEspFilters() });
 // ESP 17: a person erased on their own request stays excluded by a hash — not a category to pick by hand.
 const CATEGORY_EXTRA = { erased: "видалено на прохання людини" };
 
-export const espFiltersState = { data: null, error: "", notice: "", busy: false, check: null, checkText: "" };
+export const espFiltersState = { data: null, error: "", notice: "", busy: false, check: null, checkText: "", search: "" };
+// Clients first: the reason the list was asked for.
+const CATEGORY_ORDER = ["client", "partner", "no", "unsubscribed", "complaint", "hard_bounce", "erased"];
+
+function blacklistHtml() {
+  const { exclusions = [], categories = {} } = espFiltersState.data || {};
+  if (!exclusions.length) return '<p class="esp-subtle">Чорний список порожній. Відписки й hard bounce потрапляють сюди самі.</p>';
+  const query = espFiltersState.search.trim().toLowerCase();
+  const shown = query ? exclusions.filter((row) => `${row.key} ${row.note || ""}`.toLowerCase().includes(query)) : exclusions;
+  if (!shown.length) return `<p class="esp-subtle">У чорному списку немає «${escapeHtml(query)}».</p>`;
+  const groups = new Map();
+  for (const row of shown) groups.set(row.category, [...(groups.get(row.category) || []), row]);
+  const rank = (category) => (CATEGORY_ORDER.includes(category) ? CATEGORY_ORDER.indexOf(category) : CATEGORY_ORDER.length);
+  // A whole domain — a company — before single addresses, each in alphabetical order.
+  const order = (a, b) => (b.key.startsWith("@") - a.key.startsWith("@")) || a.key.localeCompare(b.key);
+  return [...groups.entries()].sort(([a], [b]) => rank(a) - rank(b)).map(([category, rows]) => `
+    <details class="esp-blacklist-group" open>
+      <summary><strong>${escapeHtml(categories[category] || CATEGORY_EXTRA[category] || category)}</strong> <span class="esp-subtle">${rows.length}</span></summary>
+      <div class="esp-list">${rows.sort(order).map((row) => `<div class="esp-row"><div class="esp-row-main">
+        <strong>${escapeHtml(row.key)}</strong>${row.key.startsWith("@") ? ' <span class="pill tone-muted">уся компанія</span>' : ""}
+        ${row.note ? `<span class="esp-subtle">${escapeHtml(row.note)}</span>` : ""}
+        <span class="esp-subtle">${escapeHtml(row.actor || "")} · ${escapeHtml(new Date(row.at).toLocaleDateString())}</span>
+      </div></div>`).join("")}</div>
+    </details>`).join("");
+}
 
 export async function loadEspFilters() {
   try {
@@ -47,14 +73,6 @@ export function renderEspFilters() {
   if (!state.data) { root.innerHTML = '<div class="empty-state">Читаємо фільтри пошти...</div>'; return; }
   const { exclusions = [], countries = [], categories = {}, verificationMaxDays = 30, canExclude, canSetCountries } = state.data;
 
-  const list = exclusions.length
-    ? `<div class="esp-list">${exclusions.slice(0, 50).map((row) => `<div class="esp-row"><div class="esp-row-main">
-        <strong>${escapeHtml(row.key)}</strong> <span class="pill tone-muted">${escapeHtml(categories[row.category] || CATEGORY_EXTRA[row.category] || row.category)}</span>
-        ${row.note ? `<span class="esp-subtle">${escapeHtml(row.note)}</span>` : ""}
-        <span class="esp-subtle">${escapeHtml(row.actor || "")} · ${escapeHtml(new Date(row.at).toLocaleDateString())}</span>
-      </div></div>`).join("")}</div>${exclusions.length > 50 ? `<p class="esp-subtle">І ще ${exclusions.length - 50}.</p>` : ""}`
-    : '<p class="esp-subtle">Виключень ще немає. Відписки й hard bounce потрапляють сюди самі.</p>';
-
   const check = state.check ? `
     <p class="esp-subtle">Піде: <b>${state.check.counts.ok}</b> · ніколи: <b>${state.check.counts.refused}</b> · чекає даних: <b>${state.check.counts.waiting}</b>${state.check.rejected.length ? ` · рядків без адреси: <b>${state.check.rejected.length}</b>` : ""}</p>
     <div class="table-wrap"><table class="esp-matrix esp-check-table"><thead><tr><th>Адреса</th><th>Хто</th><th>Чи піде</th><th>Чому</th></tr></thead>
@@ -62,6 +80,16 @@ export function renderEspFilters() {
 
   root.innerHTML = `
     ${state.notice ? `<p class="esp-notice ${state.error ? "is-bad" : ""}">${escapeHtml(state.notice)}</p>` : ""}
+    <h3 class="esp-title">Чорний список · ${exclusions.length}</h3>
+    ${canExclude ? `<form class="esp-form" id="espExcludeForm">
+      <input name="key" placeholder="ivan@acme.com або @acme.com (уся компанія)" required />
+      <select name="category">${Object.entries(categories).map(([key, label]) => `<option value="${escapeAttr(key)}">${escapeHtml(label)}</option>`).join("")}</select>
+      <input name="note" placeholder="Нотатка (необов'язково)" />
+      <button type="submit"><i data-lucide="ban"></i><span>Додати в чорний список</span></button>
+    </form>` : ""}
+    <input class="esp-blacklist-search" id="espBlacklistSearch" type="search" placeholder="Пошук: адреса, домен, нотатка" value="${escapeAttr(state.search)}" />
+    <div id="espBlacklist">${blacklistHtml()}</div>
+
     <p class="esp-subtle">Перед кожним листом: виключення, верифікація не старша ${verificationMaxDays} днів, без catch-all, службових адрес (abuse@, postmaster@, admin@…) і @icloud.com, лише пошта на Google, країна не з виключених, є джерело й дата.</p>
 
     <h3 class="esp-title">Перевірити список</h3>
@@ -75,16 +103,7 @@ export function renderEspFilters() {
     ${canSetCountries
       ? `<form class="esp-form" id="espCountriesForm"><input name="countries" value="${escapeAttr(countries.join(", "))}" placeholder="DE, PL, AT" /><button type="submit"><i data-lucide="save"></i><span>Зберегти</span></button></form>
          <p class="esp-subtle">Зараз: ${escapeHtml(countries.join(", ") || "жодної")}. PL, AT, DK, CZ, ES, IT, NL, CA — за рішенням після юриста. Людина без країни не йде.</p>`
-      : `<p>${escapeHtml(countries.join(", ") || "жодної")}</p><p class="esp-subtle">Список міняє адміністратор.</p>`}
-
-    <h3 class="esp-title">Глобальні виключення — назавжди</h3>
-    ${canExclude ? `<form class="esp-form" id="espExcludeForm">
-      <input name="key" placeholder="ivan@acme.com або @acme.com (увесь домен)" required />
-      <select name="category">${Object.entries(categories).map(([key, label]) => `<option value="${escapeAttr(key)}">${escapeHtml(label)}</option>`).join("")}</select>
-      <input name="note" placeholder="Нотатка (необов'язково)" />
-      <button type="submit"><i data-lucide="ban"></i><span>Виключити</span></button>
-    </form>` : ""}
-    ${list}`;
+      : `<p>${escapeHtml(countries.join(", ") || "жодної")}</p><p class="esp-subtle">Список міняє адміністратор.</p>`}`;
   refreshIcons();
 }
 
@@ -102,7 +121,7 @@ document.getElementById("espFiltersBody")?.addEventListener("submit", async (eve
       state.notice = "";
     } else if (form.id === "espExcludeForm") {
       const payload = await api("/api/esp/exclusions", { method: "POST", body: JSON.stringify(values) });
-      state.notice = payload.unchanged ? `${values.key} уже у виключеннях.` : `${values.key} виключено назавжди.`;
+      state.notice = payload.unchanged ? `${values.key} уже в чорному списку.` : `${values.key} — у чорному списку назавжди.`;
       await loadEspFilters();
     } else if (form.id === "espCountriesForm") {
       const payload = await api("/api/esp/filters/countries", { method: "POST", body: JSON.stringify({ countries: values.countries }) });
@@ -117,4 +136,12 @@ document.getElementById("espFiltersBody")?.addEventListener("submit", async (eve
     state.busy = false;
     renderEspFilters();
   }
+});
+
+// The search redraws the list only, so the field keeps its focus.
+document.getElementById("espFiltersBody")?.addEventListener("input", (event) => {
+  if (event.target.id !== "espBlacklistSearch") return;
+  espFiltersState.search = event.target.value;
+  const list = document.getElementById("espBlacklist");
+  if (list) list.innerHTML = blacklistHtml();
 });

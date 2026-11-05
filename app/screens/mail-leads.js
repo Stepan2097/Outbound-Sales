@@ -204,7 +204,7 @@ function sideHtml() {
     ${lists || (meta ? '<p class="leads-side-empty">Списків ще немає — створіть перший.</p>' : "")}
     <div class="mail-side-sep"></div>
     ${item("", "users", "Усі зі списків", meta?.total ?? null)}
-    ${item(EXCLUSIONS, "ban", "Виключення", meta?.excluded ?? null)}
+    ${item(EXCLUSIONS, "ban", "Чорний список", meta?.excluded ?? null)}
     ${item(PRIVACY, "shield-check", "Запит про дані", null)}`;
 }
 

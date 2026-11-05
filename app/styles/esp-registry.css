@@ -211,3 +211,8 @@
 .esp-fold { border-top: 1px solid var(--line); padding-top: 8px; }
 .esp-fold summary { cursor: pointer; list-style-position: inside; }
 .esp-fold summary .esp-title { display: inline; }
+
+/* «Чорний список» (05.11): the search, then one group per reason. */
+.esp-blacklist-search { width: 100%; max-width: 420px; margin: 4px 0 12px; }
+.esp-blacklist-group { margin: 0 0 12px; }
+.esp-blacklist-group > summary { cursor: pointer; padding: 6px 0; display: flex; gap: 8px; align-items: baseline; }
