@@ -131,7 +131,8 @@ test("05.11 «кожного дня піднімають і давай на 3 д
 });
 
 test("too many bounces, any 5.7.x, or nothing sent since the last step — the stage stays, with the reasons; once a day", () => {
-  assert.match(reviewRamp(SENDER(), week({ sent: 40, bounces: ["5.1.1", "5.1.1"] }), { now: NOW }).reasons.join(), /bounce 5\.0%/);
+  assert.match(reviewRamp(SENDER(), week({ sent: 60, bounces: ["5.1.1", "5.1.1", "5.1.1"] }), { now: NOW }).reasons.join(), /bounce 5\.0%/);
+  assert.deepEqual(reviewRamp(SENDER(), week({ sent: 15, bounces: ["5.1.1", "5.1.1"] }), { now: NOW }).reasons, [], "two bounces on 15 letters are «13%», but not a reason yet");
   assert.match(reviewRamp(SENDER(), week({ sent: 60, bounces: ["5.7.1"] }), { now: NOW }).reasons.join(), /5\.7\.x/);
   assert.match(reviewRamp(SENDER(), [], { now: NOW }).reasons.join(), /не надіслано/);
   const steppedToday = { ...SENDER(), addedAt: "2026-10-13T00:30:00Z" };

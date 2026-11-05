@@ -4,7 +4,7 @@
 // і є відповіді», a week at a time. Owner 05.11: «кожного дня піднімають і
 // давай на 3 до 25». So once a day — the first look after midnight in Europe,
 // before the day's letters — a mailbox that has sent since it was last looked
-// at, with bounces at most 2% and no 5.7.x over the last seven days, goes one
+// at, with bounces at most 2% (or fewer than three) and no 5.7.x over the last seven days, goes one
 // step up (5 → 8 → … → 25). Replies are no longer asked for: a day is too short
 // for them. Anything else holds the stage; the hold is written to the journal
 // as `sender.ramp_held` with the reasons, once — the same hold is not
@@ -14,6 +14,9 @@ import { COUNTING_ZONE, RAMP_LIMITS, localTime, rampStageOf } from "./limits.mjs
 
 export const RAMP_WINDOW_DAYS = 7;
 export const MAX_BOUNCE_RATE = 0.02;
+// On a few dozen letters one bounce is already «7%»: a step is held for bounces
+// only from the third one in the week — the auto-pause's «3 на 100» (05.11).
+export const MIN_BOUNCES_TO_HOLD = 3;
 
 /** When this sender's stage was last set: its last rampStage change, or when it was added. */
 function stageSince(sender) {
@@ -49,7 +52,7 @@ export function reviewRamp(sender, entries, { now = new Date() } = {}) {
 
   const reasons = [];
   if (!sentSince) reasons.push("з останнього кроку не надіслано жодного листа");
-  if (sent && bounceRate > MAX_BOUNCE_RATE) reasons.push(`bounce ${(bounceRate * 100).toFixed(1)}% за 7 днів — більше 2%`);
+  if (sent && bounceRate > MAX_BOUNCE_RATE && bounces.length >= MIN_BOUNCES_TO_HOLD) reasons.push(`bounce ${(bounceRate * 100).toFixed(1)}% за 7 днів — більше 2%`);
   if (policy) reasons.push(`${policy} × 5.7.x — блок за політикою отримувача`);
   return {
     email, stage, nextStage, due, since: lookedAt.toISOString(),
