@@ -191,7 +191,10 @@ function sideHtml() {
   const crm = (meta?.crmFolders || []).filter((folder) => folder.kind !== "company").map((folder) => item(`crm:${folder.id}`, "folder-open", folder.name, folder.withEmail ?? "—")).join("");
   // Папки компаній CRM (21.10): люди — контакти компаній папки; лічильник — коли їх зібрано.
   const companies = (meta?.crmFolders || []).filter((folder) => folder.kind === "company").map((folder) => item(`crm:${folder.id}`, "building-2", folder.name, folder.withEmail ?? "…")).join("");
+  // «Чорний список» — on top, not under forty folders (05.11).
   return `
+    ${item(EXCLUSIONS, "ban", "Чорний список", meta?.excluded ?? null)}
+    <div class="mail-side-sep"></div>
     <div class="mail-side-head"><span class="mail-side-title">Папки CRM</span></div>
     ${crm || (meta ? `<p class="leads-side-empty">${escapeHtml(meta.crmError || "У CRM немає папок.")}</p>` : "")}
     ${companies ? `<div class="mail-side-sep"></div><div class="mail-side-head"><span class="mail-side-title">Папки компаній CRM</span></div>${companies}` : ""}
@@ -204,7 +207,6 @@ function sideHtml() {
     ${lists || (meta ? '<p class="leads-side-empty">Списків ще немає — створіть перший.</p>' : "")}
     <div class="mail-side-sep"></div>
     ${item("", "users", "Усі зі списків", meta?.total ?? null)}
-    ${item(EXCLUSIONS, "ban", "Чорний список", meta?.excluded ?? null)}
     ${item(PRIVACY, "shield-check", "Запит про дані", null)}`;
 }
 
