@@ -31,7 +31,7 @@ import { composeLetter } from "./compose.mjs";
 import { MailboxError, SendingLocked } from "./provider.mjs";
 import { LetterError } from "./letter.mjs";
 import { isHoliday } from "./holidays.mjs";
-import { COUNTING_ZONE, localTime, sendDecision, sendLedger, zonesFor } from "./limits.mjs";
+import { COUNTING_ZONE, SEND_ZONES, localTime, sendDecision, sendLedger } from "./limits.mjs";
 import { SenderPaused, SendingHalted } from "./senders.mjs";
 import { companyKey } from "./company.mjs";
 
@@ -56,9 +56,9 @@ export function addWorkingDays(date, days, country = "") {
   return at.toISOString().slice(0, 10);
 }
 
-/** The recipient's today: their first zone's date, or ours when they have none. */
-function recipientToday(lead, now) {
-  return localTime(now, zonesFor(lead)[0] || COUNTING_ZONE).date;
+/** Today by the one sending schedule (05.11: where the recipient is does not matter). */
+function recipientToday(_lead, now) {
+  return localTime(now, SEND_ZONES[0]).date;
 }
 
 function stopperFor(entries, enrollment) {
@@ -100,7 +100,7 @@ function advance(enrollment, campaign, { messageId, threadId, subject, reference
     step: next,
     status: done ? "done" : "active",
     lastSent: { messageId, threadId: threadId || null, subject, references: references || [], at },
-    nextDueDate: done ? null : addWorkingDays(today, campaign.steps[next].delayDays, enrollment.lead?.country),
+    nextDueDate: done ? null : addWorkingDays(today, campaign.steps[next].delayDays),
     ...(done ? { finishedAt: at } : {})
   };
 }
@@ -363,7 +363,7 @@ export async function runTick({ now = new Date(), dryRun = false, ...deps }) {
  * working days on when they said none. Never earlier than it already was.
  */
 export function postponedDue(enrollment, { until = null, today }) {
-  const back = until ? addWorkingDays(until, 1, enrollment.lead?.country) : addWorkingDays(today, 3, enrollment.lead?.country);
+  const back = until ? addWorkingDays(until, 1) : addWorkingDays(today, 3);
   return enrollment.nextDueDate && enrollment.nextDueDate > back ? enrollment.nextDueDate : back;
 }
 

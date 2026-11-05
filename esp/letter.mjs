@@ -32,17 +32,15 @@ export function isUnitedStates(country) {
 
 /**
  * The signature, as lines of text. The company's legal postal address goes
- * under it for a lead in the United States (CAN-SPAM); without one configured
- * such a letter is not built at all.
+ * under it for a lead in the United States (CAN-SPAM) when one is set.
  */
 export function signatureText({ name, title = "", company = "ADvantage", site = "", usPostalAddress = "" } = {}, { country = "" } = {}) {
   const lines = [name, title, company, site].map((line) => String(line ?? "").trim()).filter(Boolean);
   if (!String(name ?? "").trim()) throw new LetterError("У підписі немає імені відправника.", { code: "signature_name_missing" });
-  if (isUnitedStates(country)) {
-    const address = String(usPostalAddress ?? "").trim();
-    if (!address) throw new LetterError("Лід зі США, а поштової адреси юрособи для підпису не задано.", { code: "us_address_missing" });
-    lines.push(...address.split(/\r?\n/).map((line) => line.trim()).filter(Boolean));
-  }
+  // A US lead gets the postal address when one is set; without it the letter goes
+  // all the same (owner 05.11: «ми розсилаємо на пошти не залежно де вони знаходяться»).
+  const address = String(usPostalAddress ?? "").trim();
+  if (isUnitedStates(country) && address) lines.push(...address.split(/\r?\n/).map((line) => line.trim()).filter(Boolean));
   return lines.join("\n");
 }
 

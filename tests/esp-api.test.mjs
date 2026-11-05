@@ -121,12 +121,11 @@ test("the preview is the real letter for one lead — plain text with the signat
   assert.deepEqual(empty.payload.variables, ["first_name"]);
 });
 
-test("a US lead without the company's postal address is not previewed as sendable", async () => {
+test("a US lead without the company's postal address is sendable all the same (owner 05.11: «не залежно де вони знаходяться»)", async () => {
   const esp = stubbed();
   await call({ method: "PUT", path: "/signature", esp, body: { name: "Anna" } });
   const preview = await call({ method: "POST", path: "/preview", esp, body: { subject: "Hi", body: "Hi {{first_name}}", lead: { name: "Mark Lee", country: "United States" } } });
-  assert.equal(preview.payload.ok, false);
-  assert.equal(preview.payload.reason, "us_address_missing");
+  assert.equal(preview.payload.ok, true);
 });
 
 test("the preview carries the unsubscribe headers on the sender's own domain, and the connection says whether their key will survive a restart", async () => {

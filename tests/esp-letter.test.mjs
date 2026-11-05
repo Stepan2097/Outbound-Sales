@@ -61,7 +61,7 @@ test("the signature is text — name, title, ADvantage, site — and a US lead g
   const sender = { name: "Anna Koval", title: "Partnerships", site: "advantage.agency", usPostalAddress: "ADvantage LLC\n1 Main St, Wilmington, DE 19801" };
   assert.equal(signatureText(sender, { country: "Poland" }), "Anna Koval\nPartnerships\nADvantage\nadvantage.agency");
   assert.equal(signatureText(sender, { country: "United States" }), "Anna Koval\nPartnerships\nADvantage\nadvantage.agency\nADvantage LLC\n1 Main St, Wilmington, DE 19801");
-  assert.throws(() => signatureText({ ...sender, usPostalAddress: "" }, { country: "USA" }), (error) => error instanceof LetterError && error.code === "us_address_missing");
+  assert.equal(signatureText({ ...sender, usPostalAddress: "" }, { country: "USA" }), "Anna Koval\nPartnerships\nADvantage\nadvantage.agency", "05.11: without an address the letter still goes");
   assert.throws(() => signatureText({ site: "x" }, {}), (error) => error.code === "signature_name_missing");
   for (const country of ["US", "usa", "United States of America", "США"]) assert.equal(isUnitedStates(country), true, country);
   assert.equal(isUnitedStates("Ukraine"), false);

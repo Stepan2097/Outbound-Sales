@@ -38,22 +38,17 @@ test("each market's days off: fixed, from Easter, the n-th Monday, moved off the
   assert.ok(holidaysOf("PL", 2027).has("2027-12-25"));
 });
 
-test("no letter goes on the recipient's public holiday; it comes back the next working morning", () => {
+test("05.11 «насрати на їхні часові пояси»: свято чи пояс одержувача лист не тримає — один розклад для всіх, будні 08–18 за Європою", () => {
   const recipient = { email: "olena@northwind.pl", country: "Poland" };
   const zones = zonesFor(recipient);
-  const allSaints = new Date("2027-11-01T10:00:00Z"); // Monday, 11:00 in Warsaw
-  assert.equal(inWindow(allSaints, zones), true, "the weekday window alone would let it go");
-  assert.equal(inWindow(allSaints, zones, "Poland"), false);
+  const allSaints = new Date("2027-11-01T10:00:00Z"); // Monday, a holiday in Poland
+  assert.equal(inWindow(allSaints, zones, "Poland"), false, "the calendar itself still knows the holiday");
   const sender = { email: "anna@advantage-mail.com", rampStage: 35 };
-  const decision = sendDecision({ sender, recipient, ledger: sendLedger([], { now: allSaints }), now: allSaints });
-  assert.equal(decision.ok, false);
-  assert.equal(decision.reason, "holiday");
-  assert.match(decision.message, /свято/);
-  assert.equal(decision.retryAt, "2027-11-02T07:00:00.000Z", "Tuesday 08:00 in Warsaw");
-
-  // The same Monday is a working day for a German lead.
-  const german = sendDecision({ sender, recipient: { email: "jan@nordwind.de", country: "Germany" }, ledger: sendLedger([], { now: allSaints }), now: allSaints });
-  assert.notEqual(german.reason, "holiday");
+  assert.equal(sendDecision({ sender, recipient, ledger: sendLedger([], { now: allSaints }), now: allSaints }).ok, true);
+  const tokyo = sendDecision({ sender, recipient: { email: "k@x.jp", timezone: "Asia/Tokyo" }, ledger: sendLedger([], { now: allSaints }), now: allSaints });
+  assert.equal(tokyo.ok, true, "19:00 in Tokyo, 11:00 in Berlin — it goes");
+  const sunday = new Date("2027-10-31T10:00:00Z");
+  assert.equal(sendDecision({ sender, recipient, ledger: sendLedger([], { now: sunday }), now: sunday }).reason, "weekend");
 });
 
 test("a run of days off — Christmas, a holiday, a weekend — is still crossed", () => {
@@ -67,5 +62,5 @@ test("follow-up delays and auto-reply postponements count working days without t
   assert.equal(addWorkingDays("2026-04-02", 2, "Germany"), "2026-04-08", "Good Friday and Easter Monday are skipped");
   assert.equal(addWorkingDays("2026-04-02", 2, "Ukraine"), "2026-04-06");
   const enrollment = { email: "olena@northwind.pl", lead: { country: "Poland" }, nextDueDate: null };
-  assert.equal(postponedDue(enrollment, { until: "2026-12-23", today: "2026-12-20" }), "2026-12-28");
+  assert.equal(postponedDue(enrollment, { until: "2026-12-23", today: "2026-12-20" }), "2026-12-24", "05.11: the lead's country's holidays no longer move a letter");
 });

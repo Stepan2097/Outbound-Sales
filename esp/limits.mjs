@@ -87,6 +87,8 @@ const COUNTRY_ALIASES = {
 
 // Owner 03.11 on people whose country is unknown: «робочий час по європі».
 export const UNKNOWN_COUNTRY_ZONES = ["Europe/Berlin"];
+/** The one schedule every cold letter goes by (05.11), whoever and wherever the recipient is. */
+export const SEND_ZONES = UNKNOWN_COUNTRY_ZONES;
 
 export function zonesFor({ timezone = "", country = "" } = {}) {
   const zone = String(timezone || "").trim();
@@ -246,17 +248,16 @@ export function sendDecision({ sender, recipient = {}, ledger, now = new Date(),
     return refuse("domain_daily_limit", `Домен ${domain} сьогодні вже надіслав ${domainToday} з ${domainLimit}.`, tomorrow());
   }
 
-  const zones = zonesFor(recipient);
-  if (!zones.length) {
-    return refuse("unknown_timezone", "Невідомо, котра в одержувача година: у ліда немає ні часового поясу, ні знайомої країни.", null);
-  }
-  const country = recipient.country || "";
-  if (!inWindow(now, zones, country, window)) {
+  // Owner 05.11: «насрати на їхні часові пояси ми розсилаємо на пошти не
+  // залежно де вони знаходяться» — one schedule for everybody, ours: weekdays,
+  // European working hours. The recipient's zone, country and holidays no longer
+  // hold a letter back.
+  const zones = SEND_ZONES;
+  if (!inWindow(now, zones, "", window)) {
     const local = localTime(now, zones[0]);
-    const holiday = local.weekday <= 5 && zones.some((zone) => isHoliday(country, localTime(now, zone).date));
-    const reason = local.weekday > 5 ? "weekend" : holiday ? "holiday" : "outside_window";
-    const message = { weekend: "У одержувача вихідний.", holiday: `У одержувача державне свято (${country}, ${local.date}).`, outside_window: `У одержувача зараз не ${String(window.startHour).padStart(2, "0")}:00–${window.endHour}:00.` }[reason];
-    return refuse(reason, message, nextWindowOpen(now, zones, country, window));
+    const reason = local.weekday > 5 ? "weekend" : "outside_window";
+    const message = { weekend: "Вихідний — листи йдуть у будні.", outside_window: `Зараз не ${String(window.startHour).padStart(2, "0")}:00–${window.endHour}:00 за Європою — листи йдуть у цей час.` }[reason];
+    return refuse(reason, message, nextWindowOpen(now, zones, "", window));
   }
 
   // Not straight at the window's opening, and never on the hour: the first
