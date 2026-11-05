@@ -3,8 +3,8 @@
 // Checklist (P1) was «крок угору лише якщо за тиждень bounce до 2%, немає 5.7.x
 // і є відповіді», a week at a time. Owner 05.11: «кожного дня піднімають і
 // давай на 3 до 25». So once a day — the first look after midnight in Europe,
-// before the day's letters — a mailbox that has sent since it was last looked
-// at, with bounces at most 2% (or fewer than three) and no 5.7.x over the last seven days, goes one
+// before the day's letters — a mailbox that has sent on a day since its last
+// step, with bounces at most 2% (or fewer than three) and no 5.7.x over the last seven days, goes one
 // step up (5 → 8 → … → 25). Replies are no longer asked for: a day is too short
 // for them. Anything else holds the stage; the hold is written to the journal
 // as `sender.ramp_held` with the reasons, once — the same hold is not
@@ -38,13 +38,17 @@ export function reviewRamp(sender, entries, { now = new Date() } = {}) {
   const since = stageSince(sender);
   const hold = lastHold(entries, email);
   const lookedAt = new Date(Math.max(since.getTime(), hold ? new Date(hold.at).getTime() : 0));
-  const due = dayOf(lookedAt) < dayOf(now);
+  // Due on any day after the last step; a hold only says why, it does not put the
+  // next look off — a mailbox held this morning steps up once its reason is gone.
+  const today = dayOf(now);
+  const due = dayOf(since) < today;
 
   const windowStart = now.getTime() - RAMP_WINDOW_DAYS * 86_400_000;
   const at = (entry) => new Date(entry.at).getTime();
   const sentEntries = entries.filter((entry) => entry.type === "message.sent" && entry.data?.from === email && at(entry) >= windowStart);
   const sent = sentEntries.length;
-  const sentSince = sentEntries.filter((entry) => at(entry) >= since.getTime()).length;
+  // The days of sending since the last step, today not yet: a step is earned by a day that is over.
+  const sentSince = sentEntries.filter((entry) => at(entry) >= since.getTime() && dayOf(new Date(entry.at)) < today).length;
   const bounces = entries.filter((entry) => entry.type === "message.bounced" && entry.data?.sender === email && at(entry) >= windowStart);
   const replies = entries.filter((entry) => entry.type === "message.replied" && entry.data?.sender === email && at(entry) >= windowStart).length;
   const policy = bounces.filter((entry) => /^5\.7\./.test(String(entry.data?.code || ""))).length;

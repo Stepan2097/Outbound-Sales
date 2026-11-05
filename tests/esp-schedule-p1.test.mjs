@@ -139,6 +139,10 @@ test("too many bounces, any 5.7.x, or nothing sent since the last step — the s
   assert.equal(reviewRamp(steppedToday, week({ sent: 60 }), { now: NOW }).due, false, "already looked at today");
   const steppedYesterday = { ...SENDER(), addedAt: "2026-10-12T20:00:00Z" };
   assert.match(reviewRamp(steppedYesterday, week({ sent: 60 }), { now: NOW }).reasons.join(), /не надіслано/, "the letters before the last step do not count twice");
+  const today = [{ type: "message.sent", at: "2026-10-13T08:00:00Z", data: { from: "anna@advantage-mail.com" } }];
+  assert.match(reviewRamp(steppedYesterday, today, { now: NOW }).reasons.join(), /не надіслано/, "today's letters earn tomorrow's step, not today's");
+  const heldThisMorning = [...week({ sent: 30 }), { type: "sender.ramp_held", at: "2026-10-13T00:30:00Z", data: { email: "anna@advantage-mail.com", stage: 8, reasons: ["old rule"] } }];
+  assert.equal(reviewRamp(SENDER(), heldThisMorning, { now: NOW }).eligible, true, "a hold this morning does not wait for tomorrow once its reason is gone");
 });
 
 test("applied: the clean sender steps up in the registry, the held one gets a journal note — once, not every hour or day", async (t) => {
