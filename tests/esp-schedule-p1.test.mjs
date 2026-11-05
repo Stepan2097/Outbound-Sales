@@ -113,7 +113,7 @@ test("the 90-day rule: written to without an answer — not again yet; ever answ
 
 // ── the ramp ───────────────────────────────────────────────────────────────
 
-const SENDER = (stage = 10) => ({ email: "anna@advantage-mail.com", rampStage: stage, effectiveStatus: "active", addedAt: "2026-10-01T09:00:00Z", history: [] });
+const SENDER = (stage = 8) => ({ email: "anna@advantage-mail.com", rampStage: stage, effectiveStatus: "active", addedAt: "2026-10-01T09:00:00Z", history: [] });
 const week = (counts) => {
   const entries = [];
   for (let index = 0; index < counts.sent; index += 1) entries.push({ type: "message.sent", at: "2026-10-12T09:00:00Z", data: { from: "anna@advantage-mail.com" } });
@@ -123,45 +123,46 @@ const week = (counts) => {
 };
 const NOW = new Date("2026-10-13T09:00:00Z");
 
-test("a clean week — bounce up to 2%, no 5.7.x, a reply — moves the ramp one step", () => {
-  const review = reviewRamp(SENDER(10), week({ sent: 60, bounces: ["5.1.1"], replies: 2 }), { now: NOW });
-  assert.deepEqual([review.due, review.eligible, review.nextStage, review.reasons], [true, true, 15, []]);
+test("05.11 «кожного дня піднімають і давай на 3 до 25»: a day of clean sending — bounce up to 2%, no 5.7.x — is one step, +3; no reply needed", () => {
+  const review = reviewRamp(SENDER(8), week({ sent: 8, replies: 0 }), { now: NOW });
+  assert.deepEqual([review.due, review.eligible, review.nextStage, review.reasons], [true, true, 11, []]);
+  assert.equal(reviewRamp(SENDER(23), week({ sent: 20 }), { now: NOW }).nextStage, 25);
+  assert.equal(reviewRamp(SENDER(25), week({ sent: 20 }), { now: NOW }).nextStage, null, "25 is the top");
 });
 
-test("too many bounces, any 5.7.x, no replies or nothing sent — the stage stays, with the reasons", () => {
-  assert.match(reviewRamp(SENDER(), week({ sent: 40, bounces: ["5.1.1", "5.1.1"], replies: 1 }), { now: NOW }).reasons.join(), /bounce 5\.0%/);
-  assert.match(reviewRamp(SENDER(), week({ sent: 60, bounces: ["5.7.1"], replies: 3 }), { now: NOW }).reasons.join(), /5\.7\.x/);
-  assert.match(reviewRamp(SENDER(), week({ sent: 60, replies: 0 }), { now: NOW }).reasons.join(), /жодної відповіді/);
+test("too many bounces, any 5.7.x, or nothing sent since the last step — the stage stays, with the reasons; once a day", () => {
+  assert.match(reviewRamp(SENDER(), week({ sent: 40, bounces: ["5.1.1", "5.1.1"] }), { now: NOW }).reasons.join(), /bounce 5\.0%/);
+  assert.match(reviewRamp(SENDER(), week({ sent: 60, bounces: ["5.7.1"] }), { now: NOW }).reasons.join(), /5\.7\.x/);
   assert.match(reviewRamp(SENDER(), [], { now: NOW }).reasons.join(), /не надіслано/);
-  const young = { ...SENDER(), addedAt: "2026-10-10T09:00:00Z" };
-  assert.equal(reviewRamp(young, week({ sent: 60, replies: 3 }), { now: NOW }).due, false, "a week has not passed since the stage was set");
-  assert.equal(reviewRamp(SENDER(35), week({ sent: 60, replies: 3 }), { now: NOW }).nextStage, null);
+  const steppedToday = { ...SENDER(), addedAt: "2026-10-13T00:30:00Z" };
+  assert.equal(reviewRamp(steppedToday, week({ sent: 60 }), { now: NOW }).due, false, "already looked at today");
+  const steppedYesterday = { ...SENDER(), addedAt: "2026-10-12T20:00:00Z" };
+  assert.match(reviewRamp(steppedYesterday, week({ sent: 60 }), { now: NOW }).reasons.join(), /не надіслано/, "the letters before the last step do not count twice");
 });
 
-test("applied: the clean sender steps up in the registry, the held one gets a journal note — once a week, not every hour", async (t) => {
+test("applied: the clean sender steps up in the registry, the held one gets a journal note — once, not every hour or day", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "esp-ramp-"));
   useJournal(join(dir, "journal.jsonl"));
   t.after(async () => { useJournal(null); await rm(dir, { recursive: true, force: true }); });
   t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-01T09:00:00Z").getTime() });
   await addDomain({ domain: "advantage-mail.com" }, "test");
   await setDomainStatus({ domain: "advantage-mail.com", status: "ramp" }, "test");
-  await addSender({ email: "anna@advantage-mail.com", rampStage: 10 }, "test");
-  await addSender({ email: "boris@advantage-mail.com", rampStage: 10 }, "test");
+  await addSender({ email: "anna@advantage-mail.com", rampStage: 8 }, "test");
+  await addSender({ email: "boris@advantage-mail.com", rampStage: 8 }, "test");
   t.mock.timers.setTime(new Date("2026-10-12T09:00:00Z").getTime());
-  for (let index = 0; index < 50; index += 1) {
-    await append({ type: "message.sent", contact: `l${index}@x.com`, data: { from: "anna@advantage-mail.com" } });
-    await append({ type: "message.sent", contact: `m${index}@x.com`, data: { from: "boris@advantage-mail.com" } });
-  }
-  await append({ type: "message.replied", contact: "l1@x.com", data: { sender: "anna@advantage-mail.com" } });
+  for (let index = 0; index < 50; index += 1) await append({ type: "message.sent", contact: `l${index}@x.com`, data: { from: "anna@advantage-mail.com" } });
   t.mock.timers.setTime(NOW.getTime());
   const run = async () => applyRampReviews({ senders: (await registry()).senders, entries: await allEntries(), now: new Date(), updateSender, append });
   const results = await run();
   assert.deepEqual(results.map((row) => [row.email, row.action]).sort(), [["anna@advantage-mail.com", "stepped_up"], ["boris@advantage-mail.com", "held"]]);
   const { senders } = await registry();
-  assert.equal(senders.find((row) => row.email === "anna@advantage-mail.com").rampStage, 15);
-  assert.equal(senders.find((row) => row.email === "boris@advantage-mail.com").rampStage, 10);
+  assert.equal(senders.find((row) => row.email === "anna@advantage-mail.com").rampStage, 11);
+  assert.equal(senders.find((row) => row.email === "boris@advantage-mail.com").rampStage, 8);
   assert.deepEqual(await run(), [], "looked at again an hour later");
+  t.mock.timers.setTime(new Date("2026-10-14T09:00:00Z").getTime());
+  const next = await run();
+  assert.deepEqual(next.map((row) => [row.email, row.action]), [["anna@advantage-mail.com", "held"]], "anna sent nothing on the 13th; boris's same hold is not written again");
   const held = (await allEntries()).filter((entry) => entry.type === "sender.ramp_held");
-  assert.equal(held.length, 1);
-  assert.match(held[0].data.reasons.join(), /жодної відповіді/);
+  assert.equal(held.length, 2);
+  assert.match(held[0].data.reasons.join(), /не надіслано/);
 });

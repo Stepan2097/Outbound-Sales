@@ -90,11 +90,11 @@ test("права діють на маршрутах: етап рампи — «�
   await addSender({ email: "mary@send.example.com" }, "a");
   await addSender({ email: "mark@send.example.com" }, "a");
 
-  let ramp = await data({ method: "POST", path: "/api/esp/senders/update", body: { email: "mary@send.example.com", rampStage: 10 }, profile: SELLER });
+  let ramp = await data({ method: "POST", path: "/api/esp/senders/update", body: { email: "mary@send.example.com", rampStage: 8 }, profile: SELLER });
   assert.equal(ramp.status, 403);
   assert.match(ramp.payload.error, /limits\.change/);
   await changeAccess({ email: SELLER.email, permission: "limits.change", grant: true }, ADMIN);
-  ramp = await data({ method: "POST", path: "/api/esp/senders/update", body: { email: "mary@send.example.com", rampStage: 10 }, profile: SELLER });
+  ramp = await data({ method: "POST", path: "/api/esp/senders/update", body: { email: "mary@send.example.com", rampStage: 8 }, profile: SELLER });
   assert.equal(ramp.status, 201);
   assert.equal((await data({ method: "POST", path: "/api/esp/senders/status", body: { email: "mary@send.example.com", status: "paused", reason: "bounce" }, profile: SELLER })).status, 201, "пауза — теж ліміт");
   const retire = await data({ method: "POST", path: "/api/esp/senders/status", body: { email: "mark@send.example.com", status: "retired", reason: "x" }, profile: SELLER });

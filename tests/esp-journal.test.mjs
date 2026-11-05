@@ -303,16 +303,16 @@ test("відправник: людина за ним, етап рампи — ц
   assert.equal(sender.rampStage, 5);
   assert.equal(sender.limit, 5);
   assert.equal(sender.rampStep, 1);
-  await updateSender({ email: "mary@send.example.com", rampStage: 10 }, "a");
-  await assert.rejects(() => updateSender({ email: "mary@send.example.com", rampStage: 20 }, "a"), /по одному етапу/);
+  await updateSender({ email: "mary@send.example.com", rampStage: 8 }, "a");
+  await assert.rejects(() => updateSender({ email: "mary@send.example.com", rampStage: 14 }, "a"), /по одному етапу/);
   await assert.rejects(() => updateSender({ email: "mary@send.example.com", rampStage: 12 }, "a"), /Етап рампи/);
-  await updateSender({ email: "mary@send.example.com", rampStage: 15 }, "a");
+  await updateSender({ email: "mary@send.example.com", rampStage: 11 }, "a");
   await updateSender({ email: "mary@send.example.com", rampStage: 5, person: "Марко" }, "a");
   [sender] = (await registry()).senders;
   assert.equal(sender.limit, 5);
   assert.equal(sender.person, "Марко");
   assert.equal(await updateSender({ email: "mary@send.example.com", rampStage: 5 }, "a"), null, "без змін — без рядка");
-  assert.deepEqual(RAMP_STAGES, [5, 10, 15, 20, 25, 30, 35]);
+  assert.deepEqual(RAMP_STAGES, [5, 8, 11, 14, 17, 20, 23, 25]);
   await assert.rejects(() => addSender({ email: "x@send.example.com", rampStage: 35 }, "a").then(() => updateSender({ email: "x@send.example.com", mailboxRef: "sk-live-123" }, "a")), /лише назва змінної/);
 });
 

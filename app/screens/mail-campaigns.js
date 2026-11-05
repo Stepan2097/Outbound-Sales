@@ -634,7 +634,7 @@ function sendingHtml(campaign) {
       <ul>
         <li><i data-lucide="clock"></i>Пн–Пт, ${String(window_.startHour).padStart(2, "0")}:00–${window_.endHour}:00 за часом одержувача; державні свята його країни пропускаються.</li>
         <li><i data-lucide="timer"></i>Між листами однієї пошти — ${limits?.gapMinutes?.min ?? 12}–${limits?.gapMinutes?.max ?? 40} хв, перший лист дня — не на відкритті вікна. Пропущене не доганяється.</li>
-        <li><i data-lucide="gauge"></i>Пошта — до свого етапу рампи (5 → 35 на день), домен — до ${limits?.domainLimit ?? 105} на день.</li>
+        <li><i data-lucide="gauge"></i>Пошта — до свого етапу рампи (5 на день, щодня +3 до 25), домен — до ${limits?.domainLimit ?? 105} на день.</li>
         <li><i data-lucide="building-2"></i>З однієї компанії — до 2 нових людей на день; повторно людині — не раніше ніж через 90 днів.</li>
         <li><i data-lucide="file-text"></i>Лише простий текст, посилання для відписки в один клік; без пікселів і переписаних посилань.</li>
       </ul>

@@ -902,8 +902,8 @@ server.listen(port, listenHost, () => {
     startSequence({ tick: async () => { const summary = await esp.tick(); await esp.checkAlerts(); return summary; } });
     // ESP 7: the inboxes every five minutes — an unsubscribe is honoured the same day, a reply stops the chain before its next letter.
     startSequence({ intervalMs: 5 * 60_000, tick: async () => { const summary = await esp.pollInbox(); await esp.checkAlerts(); return summary; } });
-    // ESP 13 (back 03.11, «орієнтуйся на той файл»): each mailbox's week is looked at hourly — a clean
-    // week is +5 a day, up to 35; a held week stays where it is, silently (no «рампа не росте» alert).
+    // ESP 13: looked at hourly, a mailbox steps up once a day — +3, up to 25 (05.11, «кожного дня
+    // піднімають»); a held one stays where it is, silently (no «рампа не росте» alert).
     setInterval(() => {
       void Promise.all([espRegistry(), allEntries()])
         .then(([{ senders }, entries]) => applyRampReviews({ senders, entries, updateSender: espUpdateSender, append: espAppend }))

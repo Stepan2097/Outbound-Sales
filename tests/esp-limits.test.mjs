@@ -10,7 +10,7 @@ import {
  * random gaps, and no catching up.
  */
 
-const SENDER = { email: "anna@advantage-mail.com", rampStage: 10 };
+const SENDER = { email: "anna@advantage-mail.com", rampStage: 11, coldLimit: 10 };
 const POLAND = { country: "Poland" };
 // Tuesday 13.10.2026, 11:00 in Warsaw (09:00 UTC), 12:00 in Kyiv.
 const TUESDAY = new Date("2026-10-13T09:00:00Z");
@@ -28,21 +28,22 @@ const before = (from, days) => Array.from({ length: days }, (_, index) => sent(f
 
 // ── limits ──────────────────────────────────────────────────────────────────
 
-test("a mailbox's ceiling is what was set for it, 35 (the target) until then, never above 35 (03.11)", () => {
-  assert.equal(COLD_LIMIT_DEFAULT, 35);
-  assert.equal(senderDailyLimit({}), 35);
+test("a mailbox's ceiling is what was set for it, 25 (the ramp's top, 05.11) until then, never above 35 (03.11)", () => {
+  assert.equal(COLD_LIMIT_DEFAULT, 25);
+  assert.equal(senderDailyLimit({}), 25);
   assert.equal(senderDailyLimit({ coldLimit: 12 }), 12);
   assert.equal(senderDailyLimit({ coldLimit: 0 }), 0);
   assert.equal(senderDailyLimit({ coldLimit: 80 }), 35);
 });
 
-test("a mailbox's day is its ramp stage — start 5, +5 a clean week, to 35 — under its ceiling (03.11, the strategy)", () => {
+test("a mailbox's day is its ramp stage — start 5, +3 a day, to 25 (05.11) — under its ceiling", () => {
   assert.equal(coldAllowance({}), 5, "a new mailbox starts at 5");
-  assert.deepEqual([5, 10, 15, 35].map((rampStage) => coldAllowance({ rampStage })), [5, 10, 15, 35]);
+  assert.deepEqual([5, 8, 11, 25].map((rampStage) => coldAllowance({ rampStage })), [5, 8, 11, 25]);
+  assert.deepEqual([10, 15, 35, 50].map((rampStage) => coldAllowance({ rampStage })), [8, 14, 25, 25], "a stage of the old ramp is the new one just below it");
   assert.equal(coldAllowance({ rampStage: 20, coldLimit: 12 }), 12, "the ceiling typed in the table wins");
-  assert.equal(coldAllowance({ rampStage: 50 }), 5, "an unknown stage is the first one");
-  const answer = sendDecision({ sender: { email: SENDER.email, rampStage: 15 }, recipient: POLAND, ledger: ledgerOf([]), now: TUESDAY });
-  assert.equal(answer.limit, 15);
+  assert.equal(coldAllowance({ rampStage: "x" }), 5, "no stage is the first one");
+  const answer = sendDecision({ sender: { email: SENDER.email, rampStage: 14 }, recipient: POLAND, ledger: ledgerOf([]), now: TUESDAY });
+  assert.equal(answer.limit, 14);
 });
 
 test("the limit counts every campaign's letters of the day; a failed attempt does not count, one in flight does", () => {

@@ -24,7 +24,14 @@ import { createHash } from "node:crypto";
 
 import { isHoliday } from "./holidays.mjs";
 
-export const RAMP_LIMITS = [5, 10, 15, 20, 25, 30, 35];
+// Owner 05.11: «кожного дня піднімають і давай на 3 до 25» — start 5, +3 a
+// working day, top 25 (it was +5 a week to 35).
+export const RAMP_LIMITS = [5, 8, 11, 14, 17, 20, 23, 25];
+/** A stage written under the old ramp (10, 15, 30…) is read as the new stage just below it. */
+export function rampStageOf(value) {
+  const stage = Number(value);
+  return RAMP_LIMITS.filter((step) => step <= stage).at(-1) ?? RAMP_LIMITS[0];
+}
 export const SENDER_DAILY_CAP = 35;
 export const DOMAIN_DAILY_LIMIT = 105;
 /**
@@ -160,9 +167,9 @@ export function seeded(seed, min, max) {
 // Owner 03.11: «ліміт відправки листів я маю вибирати в інтерфейсі в стовпчику
 // "Холодних листів"» — and then «орієнтуйся на той файл, Старт 5 на день, ціль
 // 35. На домен краще не більше ~105» (the strategy, «Outbound-машина» §2–3):
-// a mailbox starts at 5 a day and climbs +5 a week on a clean week (esp/ramp.mjs)
-// up to 35; the number typed in the table is a ceiling over that.
-export const COLD_LIMIT_DEFAULT = SENDER_DAILY_CAP;
+// a mailbox starts at 5 a day and climbs (05.11: +3 a day, esp/ramp.mjs) up to 25; the number typed in the table is a ceiling over that.
+// 05.11: the ramp tops at 25, so that is the ceiling until somebody sets one.
+export const COLD_LIMIT_DEFAULT = RAMP_LIMITS.at(-1);
 
 /** A mailbox's cold ceiling per day, as set on «Прогрів пошт» (35, the target, until somebody sets it). */
 export function senderDailyLimit(sender) {
@@ -171,10 +178,9 @@ export function senderDailyLimit(sender) {
   return Math.min(Math.max(0, Math.floor(Number(set)) || 0), SENDER_DAILY_CAP);
 }
 
-/** The cold letters a mailbox may send today, across all campaigns: its ramp stage (5 → 35), never above its ceiling. */
+/** The cold letters a mailbox may send today, across all campaigns: its ramp stage (5 → 25), never above its ceiling. */
 export function coldAllowance(sender) {
-  const stage = Number(sender?.rampStage);
-  return Math.min(senderDailyLimit(sender), RAMP_LIMITS.includes(stage) ? stage : RAMP_LIMITS[0]);
+  return Math.min(senderDailyLimit(sender), rampStageOf(sender?.rampStage));
 }
 
 /**
@@ -241,7 +247,7 @@ export function sendDecision({ sender, recipient = {}, ledger, now = new Date(),
   if (used >= limit) {
     return refuse("sender_daily_limit", warmup
       ? `${email} сьогодні вже надіслав ${used} листів прогріву — більше не можна.`
-      : `${email} сьогодні вже надіслав ${used} з ${limit} холодних листів (старт 5, щотижня +5 до 35, якщо тиждень чистий; стеля ${senderDailyLimit(sender)}).`, tomorrow());
+      : `${email} сьогодні вже надіслав ${used} з ${limit} холодних листів (старт 5, щодня +3 до 25, якщо bounce до 2%; стеля ${senderDailyLimit(sender)}).`, tomorrow());
   }
   const domainToday = warmup ? 0 : ledger.domains.get(domain) || 0;
   if (domainToday >= domainLimit && !PUBLIC_MAIL_DOMAINS.has(domain)) {

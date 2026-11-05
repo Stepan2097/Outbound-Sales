@@ -1,7 +1,7 @@
 import { resolve4, resolveMx, resolveTxt } from "node:dns/promises";
 
 import { allEntries, append, contactKey } from "./journal.mjs";
-import { SENDER_DAILY_CAP } from "./limits.mjs";
+import { RAMP_LIMITS, SENDER_DAILY_CAP, rampStageOf } from "./limits.mjs";
 
 /**
  * The registry of sending domains and senders.
@@ -27,7 +27,7 @@ import { SENDER_DAILY_CAP } from "./limits.mjs";
 
 export const DOMAIN_STATES = ["aging", "ramp", "active", "reserve", "paused", "retired"];
 export const SENDING_DOMAIN_STATES = ["ramp", "active"];
-export const RAMP_STAGES = [5, 10, 15, 20, 25, 30, 35];
+export const RAMP_STAGES = RAMP_LIMITS;
 export const DOMAIN_LABEL = { aging: "старіє", ramp: "рампа", active: "активний", reserve: "запас", paused: "пауза", retired: "виведений" };
 export const SENDER_STATES = ["active", "paused", "retired"];
 /** What a mailbox is for: `cold` — campaigns and letters to leads (and warm-up); `warmup` — warm-up only. */
@@ -81,13 +81,13 @@ function foldRegistry(entries) {
     } else if (entry.type === "sender.added") {
       senders.set(data.email, {
         email: data.email, domain: data.domain, displayName: data.displayName || "", mailboxRef: data.mailboxRef || "",
-        person: data.person || "", rampStage: RAMP_STAGES.includes(data.rampStage) ? data.rampStage : RAMP_STAGES[0],
+        person: data.person || "", rampStage: rampStageOf(data.rampStage),
         status: "active", addedAt: entry.at, addedBy: entry.actor, history: [{ ...stamp, status: "active" }], tags: []
       });
     } else if (entry.type === "sender.updated" && senders.has(data.email)) {
       const sender = senders.get(data.email);
       for (const field of ["person", "rampStage", "mailboxRef", "displayName", "coldLimit"]) {
-        if (data[field] !== undefined) sender[field] = data[field];
+        if (data[field] !== undefined) sender[field] = field === "rampStage" ? rampStageOf(data[field]) : data[field];
       }
       sender.history.push({ ...stamp, changed: Object.keys(data).filter((key) => key !== "email") });
     } else if (entry.type === "sender.role" && senders.has(data.email)) {
@@ -163,8 +163,9 @@ export async function addSender({ email, displayName = "", mailboxRef = "", pers
   if (ref && !/^[A-Z][A-Z0-9_]{2,80}$/.test(ref)) {
     throw fail("Посилання на доступ — лише назва змінної середовища (напр. GMAIL_MARY_TOKEN), не сам ключ.");
   }
-  const stage = Number(rampStage);
-  if (!RAMP_STAGES.includes(stage)) throw fail(`Етап рампи — один із: ${RAMP_STAGES.join(", ")} листів на день.`);
+  // A stage of the old ramp (10, 35…) is taken as the new stage just below it (05.11).
+  if (!(Number(rampStage) >= RAMP_STAGES[0])) throw fail(`Етап рампи — один із: ${RAMP_STAGES.join(", ")} листів на день.`);
+  const stage = rampStageOf(rampStage);
   return append({
     type: "sender.added", actor,
     data: {
