@@ -334,6 +334,12 @@ export class GmailApiConnector {
     return metaHeader(message, "message-id") || null;
   }
 
+  /** One message as it arrived (RFC 5322) — for a conversation whose journal kept no words. */
+  async messageRaw(value, id) {
+    const message = await this.call(normalizeMailbox(value), `/messages/${encodeURIComponent(id)}?format=raw`);
+    return Buffer.from(message.raw || "", "base64url").toString("latin1");
+  }
+
   /**
    * One finished RFC 5322 message (built by ESP 2/3), sent as `mailbox`. With
    * `threadId` Gmail keeps a follow-up in the conversation it continues.

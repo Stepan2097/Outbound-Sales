@@ -100,14 +100,15 @@ export function classifyInbound(raw, { mailbox, now = new Date() } = {}) {
     // A report without a code is read by its words: "delayed" is temporary,
     // anything else that calls itself a failure is permanent.
     const code = report.code || (/delay|will (keep|retry)|not yet been delivered/i.test(text + subject) ? "4.0.0" : "5.0.0");
-    return { ...base, kind: "bounce", code, recipient: report.recipient, originalMessageId: report.originalMessageId };
+    return { ...base, kind: "bounce", code, recipient: report.recipient, originalMessageId: report.originalMessageId, text: freshText(text).slice(0, 2000) };
   }
 
   const auto = String(header(message.headers, "auto-submitted")).toLowerCase();
   const precedence = String(header(message.headers, "precedence")).toLowerCase();
   if ((auto && auto !== "no") || header(message.headers, "x-autoreply") || header(message.headers, "x-autorespond")
     || /^(auto_reply|bulk|junk)$/.test(precedence) || AUTO_SUBJECT.test(subject) || AUTO_TEXT.test(text.slice(0, 600))) {
-    return { ...base, kind: "autoreply", returnDate: returnDate(text, now) };
+    // Its words are kept, so the conversation shows what came back (05.11: «де текст цієї автовідповіді?»).
+    return { ...base, kind: "autoreply", returnDate: returnDate(text, now), text: freshText(text).slice(0, 5000) };
   }
 
   const fresh = freshText(text);
@@ -166,7 +167,7 @@ export async function processInbound({ mailbox, message, entries, index, record,
   const common = { sender: mailbox, campaignId: letter.campaignId, step: letter.step, gmailId: message.id, threadId: message.threadId || null };
 
   if (classified.kind === "bounce") {
-    await record("message.bounced", letter.contact, { ...common, code: classified.code });
+    await record("message.bounced", letter.contact, { ...common, code: classified.code, text: classified.text || null });
     // 5.7.x is the receiving side refusing by policy — about the sender, not
     // the address. Raised for the alerts and the auto-pauses (ESP 8).
     if (/^5\.7\./.test(classified.code)) {
@@ -175,7 +176,7 @@ export async function processInbound({ mailbox, message, entries, index, record,
     return { action: "bounce", code: classified.code, contact: letter.contact };
   }
   if (classified.kind === "autoreply") {
-    await record("message.autoreplied", letter.contact, { ...common, returnDate: classified.returnDate, subject: classified.subject.slice(0, 300) });
+    await record("message.autoreplied", letter.contact, { ...common, returnDate: classified.returnDate, subject: classified.subject.slice(0, 300), text: classified.text || null });
     if (letter.campaignId) await postpone({ campaignId: letter.campaignId, email: letter.contact, until: classified.returnDate });
     return { action: "autoreply", contact: letter.contact, returnDate: classified.returnDate };
   }

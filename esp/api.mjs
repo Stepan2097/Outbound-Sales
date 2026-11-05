@@ -18,6 +18,7 @@ import { LeadError, decorateLeads, leadPage } from "./leads.mjs";
 import { PROVIDER_LABEL } from "./folder-check.mjs";
 import { folderTones, groupKey, pickByProvider, providerBreakdown } from "./provider-quotas.mjs";
 import { PLAN_BOUNDS, cleanPlan, mailboxHistory, removedFromWarmup, warmupLog, warmupMode, warmupPlan, warmupView } from "./mail-warmup.mjs";
+import { classifyInbound } from "./inbound.mjs";
 import { UNIBOX_FOLDERS, isAutoAck, uniboxList, uniboxProblems, uniboxThread } from "./unibox.mjs";
 import { recordAboutContact, recordFailed, recordSending, recordSent } from "./messages.mjs";
 import { allEntries, append, contactKey } from "./journal.mjs";
@@ -790,6 +791,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
     if (path === "/unibox/thread") {
       const thread = uniboxThread(entries, String(url.searchParams.get("key") || ""), { leads, campaigns });
       if (!thread) { sendJson(response, 404, { success: false, error: "Такої розмови немає." }); return true; }
+      await fillMissingTexts(thread, esp.connector);
       sendJson(response, 200, { success: true, thread, labels: REPLY_LABELS, liveSend: Boolean(esp.connector?.describe().liveSend), mode: esp.connector?.describe().mode || "stub", replyOnStub: Boolean(esp.sequenceOn) });
       return true;
     }
@@ -1251,6 +1253,22 @@ function badRequest(sendJson, response, error) {
  * A campaign as the list shows it: how many people, where they are, and what
  * the journal says came of it. No opens, no clicks — nothing here tracks them.
  */
+// Auto-replies and bounces were journalled without their words until 05.11 («де
+// текст цієї автовідповіді?»): such a letter's text is read from Gmail when its
+// conversation is opened, once per process. A letter Gmail no longer has stays
+// without words — the conversation still opens.
+const fetchedTexts = new Map();
+async function fillMissingTexts(thread, connector) {
+  for (const message of thread.messages) {
+    if (message.direction !== "in" || message.text || !message.gmailId || !connector?.messageRaw) continue;
+    if (!fetchedTexts.has(message.gmailId)) {
+      const raw = await connector.messageRaw(thread.sender, message.gmailId).catch(() => null);
+      fetchedTexts.set(message.gmailId, raw ? classifyInbound(raw, { mailbox: thread.sender }).text || "" : "");
+    }
+    message.text = fetchedTexts.get(message.gmailId) || null;
+  }
+}
+
 function campaignSummary(campaign, enrollments, entries) {
   const people = new Map(enrollments.map((row) => [row.email, row]));
   const counts = { sent: 0, replied: 0, bounced: 0, unsubscribed: 0 };

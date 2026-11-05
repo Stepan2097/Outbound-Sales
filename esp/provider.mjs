@@ -97,6 +97,7 @@ export function providerRouter({ connectors, providerOf = () => "gmail", fallbac
     // A label of the mailbox by name, created when missing (the warm-up's «Прогрів»).
     labelId: (mailbox, name) => (pick(mailbox).labelId ? pick(mailbox).labelId(mailbox, name) : Promise.resolve(null)),
     // The Message-ID the provider really gave a sent letter (Gmail replaces ours).
+    messageRaw: (mailbox, id) => (pick(mailbox).messageRaw ? pick(mailbox).messageRaw(mailbox, id) : Promise.resolve(null)),
     messageIdOf: (mailbox, id) => (pick(mailbox).messageIdOf ? pick(mailbox).messageIdOf(mailbox, id) : Promise.resolve(null)),
     // The stub's test hooks, when the default is the stub.
     deliver: main.deliver ? (...args) => main.deliver(...args) : undefined,

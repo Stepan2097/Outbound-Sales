@@ -165,3 +165,28 @@ test("маршрути: список і тред — праву «бачити �
   assert.deepEqual(after.payload.rows.map((row) => row.contact), ["olga@acme.com"]);
   assert.equal(after.payload.counts.unread, 1, "непрочитані — лише у Вхідних: bounce Івана в них більше не рахується");
 });
+
+test("05.11 «де текст цієї автовідповіді?»: автовідповідь, збережена без слів, дочитується з Gmail, коли розмову відкривають", async () => {
+  await append({ type: "message.sending", contact: "jens@bc.com", data: { from: "julien@trafbase.com", subject: "affiliates or in-house?", text: "Hey Jens" } });
+  const sending = (await allEntries()).at(-1);
+  await append({ type: "message.sent", contact: "jens@bc.com", data: { from: "julien@trafbase.com", sendingSeq: sending.seq, campaignId: "c1", step: 0, threadId: "t1" } });
+  await append({ type: "message.autoreplied", contact: "jens@bc.com", data: { sender: "julien@trafbase.com", gmailId: "g-auto", threadId: "t1", subject: "Re: affiliates or in-house?" } });
+  const asked = [];
+  const esp = {
+    campaigns: { enrollments: () => [], list: () => [] },
+    connector: {
+      describe: () => ({ mode: "gmail", liveSend: true }),
+      messageRaw: async (mailbox, id) => { asked.push([mailbox, id]); return "From: Jens <jens@bc.com>\r\nSubject: Re: affiliates or in-house?\r\nAuto-Submitted: auto-replied\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nI am on parental leave until December. Please write to Anna.\r\n"; }
+    }
+  };
+  let answer = null;
+  const open = () => handleEspApi({
+    request: { method: "GET", auth: { profile: { role: "admin" } } }, response: {}, url: new URL("http://x/api/esp/unibox/thread?key=julien%40trafbase.com%7Cjens%40bc.com"),
+    sendJson: (_r, status, payload) => { answer = { status, payload }; }, readJson: async () => null, esp
+  });
+  await open();
+  assert.equal(answer.status, 200);
+  assert.equal(answer.payload.thread.messages.find((row) => row.kind === "autoreplied").text, "I am on parental leave until December. Please write to Anna.");
+  await open();
+  assert.deepEqual(asked, [["julien@trafbase.com", "g-auto"]], "read from Gmail once");
+});

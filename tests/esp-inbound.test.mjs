@@ -115,6 +115,8 @@ test("an out-of-office moves the next letter past the return date — it neither
   const sent = await started(w, ["olena"]);
   w.connector.deliver(ANNA, reply(ANNA, { from: "olena@olena-co.com", subject: "Automatic reply: Northwind and us", headers: "Auto-Submitted: auto-replied\r\n", body: "I am out of the office until 23.10.2026 with limited access to email." }), { threadId: sent.olena.threadId });
   assert.deepEqual((await w.poll(at(1))).actions, { autoreply: 1 });
+  const auto = (await allEntries()).find((entry) => entry.type === "message.autoreplied");
+  assert.equal(auto.data.text, "I am out of the office until 23.10.2026 with limited access to email.", "05.11: the auto-reply's words are kept for the conversation");
   const person = w.cstore.enrollmentsOf(w.campaign.id)[0];
   assert.equal(person.status, "active");
   assert.equal(person.nextDueDate, "2026-10-26", "Friday the 23rd back, next letter the working day after");
