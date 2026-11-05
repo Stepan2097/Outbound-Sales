@@ -62,3 +62,14 @@ test("05.11: перший лист іде й на catch-all, і на непер�
   for (const status of ["valid", "catch_all", "unknown", ""]) assert.equal((await checkLead(lead("a@x.com", status), { ...ctx, step: 0 })).ok, true, status);
   assert.equal((await checkLead(lead("a@x.com", "invalid"), { ...ctx, step: 0 })).reason, "invalid");
 });
+
+test("05.11: людей, яких зупинило правило, що вже не діє (невідомий пояс, адреса для США), повертають назад; bounce — ні", async () => {
+  const campaigns = store([
+    row("1", "a@ug.co", "valid", { status: "stopped", reason: "unknown_timezone" }),
+    row("2", "b@us.co", "valid", { status: "stopped", reason: "us_address_missing" }),
+    row("3", "c@x.co", "valid", { status: "stopped", reason: "hard_bounce" })
+  ]);
+  assert.equal(await campaigns.resumeStopped("unknown_timezone"), 1);
+  assert.deepEqual(campaigns.enrollments().map((item) => item.status), ["active", "stopped", "stopped"]);
+  await assert.rejects(() => campaigns.resumeStopped("hard_bounce"), /не знімають/);
+});

@@ -116,6 +116,8 @@ export function parseLeadLines(text) {
   return { leads, rejected };
 }
 
+const RESUMABLE_REASONS = new Set(["unknown_timezone", "us_address_missing"]);
+
 export function campaignStore({ read, write, readEnrollments, writeEnrollments, templates, now = () => new Date() }) {
   const list = () => (Array.isArray(read()) ? read() : []);
   const enrollments = () => (Array.isArray(readEnrollments()) ? readEnrollments() : []);
@@ -284,6 +286,24 @@ export function campaignStore({ read, write, readEnrollments, writeEnrollments, 
       const next = { ...row, status: "active", reason: null, resumedAt: now().toISOString() };
       await writeEnrollments(enrollments().map((item) => (item.id === row.id ? next : item)));
       return next;
+    },
+
+    /**
+     * 05.11: people a rule set aside that no longer holds — an unknown time
+     * zone (now European hours), a US lead before the postal address was set —
+     * go back to their campaigns, due now. Only these reasons: a bounce, a reply
+     * or an unsubscribe is never undone here.
+     */
+    async resumeStopped(reason) {
+      if (!RESUMABLE_REASONS.has(reason)) throw new CampaignError("Цю причину так не знімають.", { code: "not_resumable", status: 409 });
+      const at = now().toISOString();
+      let count = 0;
+      await writeEnrollments(enrollments().map((row) => {
+        if (row.status !== "stopped" || row.reason !== reason) return row;
+        count += 1;
+        return { ...row, status: "active", reason: null, stoppedAt: null, resumedAt: at };
+      }));
+      return count;
     },
 
     /**

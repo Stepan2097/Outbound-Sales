@@ -918,6 +918,17 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
   if (method === "POST" && path === "/campaigns/people/resume") {
     const body = await readJson(request);
     if (!body) return badRequest(sendJson, response, "Некоректне тіло JSON");
+    if (body.reason) {
+      try {
+        const resumed = await esp.campaigns.resumeStopped(String(body.reason));
+        logged("esp.campaign.people.resumed", { reason: body.reason, count: resumed });
+        sendJson(response, 200, { success: true, resumed });
+      } catch (error) {
+        if (!(error instanceof CampaignError)) throw error;
+        sendJson(response, error.status, { success: false, error: error.message, code: error.code });
+      }
+      return true;
+    }
     try {
       const person = await esp.campaigns.resumePerson(String(body.id || ""), String(body.email || ""));
       logged("esp.campaign.person.resumed", { campaignId: body.id, email: person.email });
