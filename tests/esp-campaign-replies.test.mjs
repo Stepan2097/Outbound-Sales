@@ -37,13 +37,21 @@ test("«Відповіді» in a campaign count every answer; the relevant ones
   assert.deepEqual(campaign.replyKinds, { positive: 1, neutral: 0, negative: 1, referral: 0, unlabelled: 0, auto: 2 });
 });
 
-test("a good answer in Telegram: who, campaign and mailbox, the words, where to answer", () => {
-  const text = coldReplyText({ name: "Olga Shevchenko", company: "Acme", email: "olga@acme.com", campaign: "Оператори · A", sender: "anna@send.com", label: "positive", text: "Yes, let's talk on Tuesday", url: "https://app/#mail-inbox" });
-  assert.match(text, /^✅ Хороша відповідь на холодний лист \(позитивна\)/);
-  assert.match(text, /Olga Shevchenko · Acme \(olga@acme\.com\)/);
-  assert.match(text, /Кампанія: Оператори · A · пошта anna@send\.com/);
-  assert.match(text, /«Yes, let's talk on Tuesday»/);
-  assert.match(text, /Відповісти: https:\/\/app\/#mail-inbox/);
+test("a good answer in Telegram: who, campaign and mailbox, the words, where to answer — in paragraphs", () => {
+  const text = coldReplyText({ name: "Olga Shevchenko", company: "Acme", email: "olga@acme.com", campaign: "Оператори · A", sender: "anna@send.com", label: "positive", text: "Hi Anna,\n\n\n  Yes, let's talk   on Tuesday.\r\nBest,\nOlga", url: "https://app/#mail-inbox" });
+  assert.equal(text, [
+    "✅ Хороша відповідь на холодний лист",
+    "Olga Shevchenko · Acme\nolga@acme.com",
+    "Кампанія: Оператори · A\nПошта: anna@send.com",
+    "«Hi Anna,\n\nYes, let's talk on Tuesday.\nBest,\nOlga»",
+    "Відповісти: https://app/#mail-inbox"
+  ].join("\n\n"));
+});
+
+test("05.11 «це не є Хороша відповідь а переадресація»: a referral is titled as one", () => {
+  const text = coldReplyText({ email: "mehedi@doppcall.com", label: "referral", text: "Hi Camille, this isn't my area." });
+  assert.match(text, /^↪️ Переадресація — відповідь на холодний лист\n\nmehedi@doppcall\.com\n\n«Hi Camille/);
+  assert.doesNotMatch(text, /Хороша/);
 });
 
 test("a pause somebody already lifted is no longer shown as an alert; one still on is (03.11, tomas@trafpush.com)", async (t) => {

@@ -25,8 +25,22 @@ export const REPLY_FRESH_HOURS = 48;
 export const REPLIES_PER_SWEEP = 5;
 
 export function leadgenTelegram(env = process.env, { fetch = globalThis.fetch } = {}) {
-  const token = String(env.TELEGRAM_BOT_TOKEN || "").trim();
-  const chat = String(env.OUTBOUND_TELEGRAM_CHAT_ID || env.TELEGRAM_LOGIN_CHAT_ID || "").trim();
+  return telegramBot(env.TELEGRAM_BOT_TOKEN, env.OUTBOUND_TELEGRAM_CHAT_ID || env.TELEGRAM_LOGIN_CHAT_ID, { fetch });
+}
+
+// Answers to cold letters go to their own group, from their own bot (owner
+// 05.11: «сповіщення про листи приходить не вту групу треба в цю -4232040148 і
+// з іншого бота»). Without that bot's token they are not sent at all — never
+// to the LinkedIn group instead.
+export const COLD_REPLY_CHAT_ID = "-4232040148";
+
+export function coldReplyTelegram(env = process.env, { fetch = globalThis.fetch } = {}) {
+  return telegramBot(env.COLD_REPLY_TELEGRAM_BOT_TOKEN, env.COLD_REPLY_TELEGRAM_CHAT_ID || COLD_REPLY_CHAT_ID, { fetch });
+}
+
+function telegramBot(token, chat, { fetch }) {
+  token = String(token || "").trim();
+  chat = String(chat || "").trim();
   if (!token || !chat) return { configured: false, send: async () => false };
   return {
     configured: true,
@@ -73,20 +87,31 @@ export function replyText({ name, headline = "", account = "", messages = [], ur
 
 /**
  * A good answer to a cold letter (owner 03.11: «коли приходить хороша відповідь
- * треба писати в телеграм»): who, which campaign and mailbox, the first lines,
- * where to answer. Only a person's positive answer or a referral — never an
- * auto-reply, a help desk, a «no» or an unsubscribe.
+ * треба писати в телеграм»): who, which campaign and mailbox, the words, where
+ * to answer. Only a person's positive answer or a referral — never an
+ * auto-reply, a help desk, a «no» or an unsubscribe. 05.11, the owner: a
+ * referral «не є Хороша відповідь а переадресація» — it is titled as such; and
+ * the message is set out in paragraphs, the letter keeping its own.
  */
 export const GOOD_REPLY_LABELS = { positive: "позитивна", referral: "переадресація" };
+const COLD_REPLY_TITLES = { positive: "✅ Хороша відповідь на холодний лист", referral: "↪️ Переадресація — відповідь на холодний лист" };
+
+/** The letter's own paragraphs: lines trimmed, at most one empty line between them, cut at `limit`. */
+const paragraphs = (text, limit) => {
+  const kept = String(text || "").replace(/\r/g, "").split("\n").map((line) => line.replace(/[ \t]+/g, " ").trim())
+    .join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  return kept.length > limit ? `${kept.slice(0, limit - 1).trimEnd()}…` : kept;
+};
 
 export function coldReplyText({ name = "", company = "", email = "", campaign = "", sender = "", label = "", text = "", url = "" }) {
+  const who = [cleanName(name || email), company].filter(Boolean).join(" · ");
   return [
-    `✅ Хороша відповідь на холодний лист (${GOOD_REPLY_LABELS[label] || label})`,
-    `${[cleanName(name || email), company].filter(Boolean).join(" · ")}${name && email ? ` (${email})` : ""}`,
-    [campaign ? `Кампанія: ${clip(campaign, 80)}` : "", sender ? `пошта ${sender}` : ""].filter(Boolean).join(" · "),
-    text ? `«${clip(text, 300)}»` : "",
+    COLD_REPLY_TITLES[label] || `✅ Хороша відповідь на холодний лист (${GOOD_REPLY_LABELS[label] || label})`,
+    [who, name && email ? email : ""].filter(Boolean).join("\n"),
+    [campaign ? `Кампанія: ${clip(campaign, 80)}` : "", sender ? `Пошта: ${sender}` : ""].filter(Boolean).join("\n"),
+    text ? `«${paragraphs(text, 700)}»` : "",
     url ? `Відповісти: ${url}` : ""
-  ].filter(Boolean).join("\n");
+  ].filter(Boolean).join("\n\n");
 }
 
 const plural = (count, one, few, many) => {

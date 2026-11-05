@@ -76,3 +76,12 @@ test("акаунт не працює: хто, скільки збоїв, при�
   assert.match(text, /Причина: цього профілю немає на серверній Anty/);
   assert.equal(troubleText({ name: "Profile 42", recovered: true }), "✅ Profile 42: знову працює.");
 });
+
+test("05.11: answers to cold letters go to group -4232040148 from their own bot; without its token — nowhere, not to the LinkedIn group", async () => {
+  const { coldReplyTelegram } = await import("../triage/leadgen-notify.mjs");
+  assert.equal(coldReplyTelegram({ TELEGRAM_BOT_TOKEN: "linkedin", TELEGRAM_LOGIN_CHAT_ID: "-1" }).configured, false);
+  const sent = [];
+  const bot = coldReplyTelegram({ COLD_REPLY_TELEGRAM_BOT_TOKEN: "mail", TELEGRAM_BOT_TOKEN: "linkedin" }, { fetch: async (url, init) => { sent.push([url, JSON.parse(init.body).chat_id]); return { ok: true }; } });
+  await bot.send("hi");
+  assert.deepEqual(sent, [["https://api.telegram.org/botmail/sendMessage", "-4232040148"]]);
+});
