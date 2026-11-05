@@ -48,6 +48,12 @@ test("a good answer in Telegram: who, campaign and mailbox, the words, where to 
   ].join("\n\n"));
 });
 
+test("05.11: the signature stays out — cut after the sign-off and the name; lines the mail program wrapped are joined back", () => {
+  const raw = "Hi Camille,\r\n\r\nThanks for reaching out.\r\n\r\nTo be honest, this isn't my area of expertise. I'm focused on other\r\ncampaigns, so I'm not the right person to speak on that.\r\n\r\nBest,\r\nMehedi\r\nMehedi Hasan\r\nAffiliate Manager | DOPPCALL\r\nE: mehedi@doppcall.com  M: +1 (929) 822-5911";
+  const text = coldReplyText({ email: "mehedi@doppcall.com", label: "referral", text: raw });
+  assert.match(text, /«Hi Camille,\n\nThanks for reaching out\.\n\nTo be honest, this isn't my area of expertise\. I'm focused on other campaigns, so I'm not the right person to speak on that\.\n\nBest,\nMehedi»$/);
+});
+
 test("05.11 «це не є Хороша відповідь а переадресація»: a referral is titled as one", () => {
   const text = coldReplyText({ email: "mehedi@doppcall.com", label: "referral", text: "Hi Camille, this isn't my area." });
   assert.match(text, /^↪️ Переадресація — відповідь на холодний лист\n\nmehedi@doppcall\.com\n\n«Hi Camille/);

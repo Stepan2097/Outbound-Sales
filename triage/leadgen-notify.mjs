@@ -96,10 +96,30 @@ export function replyText({ name, headline = "", account = "", messages = [], ur
 export const GOOD_REPLY_LABELS = { positive: "позитивна", referral: "переадресація" };
 const COLD_REPLY_TITLES = { positive: "✅ Хороша відповідь на холодний лист", referral: "↪️ Переадресація — відповідь на холодний лист" };
 
-/** The letter's own paragraphs: lines trimmed, at most one empty line between them, cut at `limit`. */
+// A sign-off line: what follows it and the name under it is the signature —
+// phones, addresses, links — and stays out of the message.
+const SIGN_OFF = /^(best( regards| wishes)?|kind regards|warm regards|regards|cheers|thanks|thank you|many thanks|sincerely|br|thx|с уважением|з повагою)[,!.]?$/i;
+
+/**
+ * The letter's own paragraphs: the signature cut after the sign-off and its
+ * name, lines the mail program wrapped joined back, at most one empty line
+ * between paragraphs, cut at `limit`.
+ */
 const paragraphs = (text, limit) => {
-  const kept = String(text || "").replace(/\r/g, "").split("\n").map((line) => line.replace(/[ \t]+/g, " ").trim())
-    .join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  const lines = String(text || "").replace(/\r/g, "").split("\n").map((line) => line.replace(/[ \t]+/g, " ").trim());
+  const cut = lines.findIndex((line) => line === "--" || SIGN_OFF.test(line));
+  if (cut >= 0) {
+    const name = lines.slice(cut + 1).findIndex(Boolean);
+    lines.splice(name >= 0 ? cut + 2 + name : cut + 1);
+  }
+  const joined = [];
+  for (const line of lines) {
+    const last = joined.at(-1);
+    // A long line followed by one that goes on in lower case was wrapped, not ended.
+    if (last && last.length >= 60 && /^[a-zа-яіїєґ]/.test(line)) joined[joined.length - 1] = `${last} ${line}`;
+    else joined.push(line);
+  }
+  const kept = joined.join("\n").replace(/\n{3,}/g, "\n\n").trim();
   return kept.length > limit ? `${kept.slice(0, limit - 1).trimEnd()}…` : kept;
 };
 
