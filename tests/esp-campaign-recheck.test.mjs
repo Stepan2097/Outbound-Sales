@@ -13,7 +13,7 @@ function store(rows) {
   return campaignStore({ read: () => [], write: async () => {}, readEnrollments: () => enrollments, writeEnrollments: async (value) => { enrollments = value; }, templates: () => [] });
 }
 
-test("04.11 «перепровір і ті адреси в яких не впевнений прибери з кампаній»: перевірена знову лишається, решта виходить із причиною", async () => {
+test("05.11 «відкидаємо тільки пошти в яких 80%+ впевнені що вони погані»: виходить лише адреса, якої сервер каже — немає; catch-all і «без відповіді» лишаються", async () => {
   const campaigns = store([
     row("1", "a@catchall.com", "catch_all"),
     row("2", "b@real.com", "unknown"),
@@ -21,35 +21,44 @@ test("04.11 «перепровір і ті адреси в яких не впе�
     row("4", "d@sure.com", "valid"),
     row("5", "e@catchall.com", "catch_all", { step: 1, lastSent: "2026-11-03T10:00:00Z" }),
     row("6", "f@real.com", "catch_all", { status: "stopped", reason: "catch_all" }),
-    row("7", "g@quiet.com", "unknown")
+    row("7", "g@quiet.com", "unknown", { status: "stopped", reason: "not_verified" }),
+    row("8", "h@gone.com", "unknown", { status: "stopped", reason: "not_verified" })
   ]);
-  const verdicts = { "a@catchall.com": "catch_all", "b@real.com": "valid", "c@gone.com": "invalid", "f@real.com": "valid", "g@quiet.com": "unknown" };
+  const verdicts = { "b@real.com": "valid", "c@gone.com": "invalid", "f@real.com": "catch_all", "g@quiet.com": "unknown", "h@gone.com": "invalid" };
   const asked = [];
   const recheck = campaignRecheck({ campaigns, deep: () => async (email) => { asked.push(email); return { status: verdicts[email], reason: `сервер: ${verdicts[email]}` }; }, now: () => new Date("2026-11-05T09:00:00Z") });
   await recheck.start().done;
 
-  assert.deepEqual(asked.sort(), ["a@catchall.com", "b@real.com", "c@gone.com", "f@real.com", "g@quiet.com"], "a sure one and one who already had a letter are not asked");
+  assert.deepEqual(asked.sort(), ["b@real.com", "c@gone.com", "f@real.com", "g@quiet.com", "h@gone.com"], "a sure one, a catch-all still in and one who already had a letter are not asked");
   const by = Object.fromEntries(campaigns.enrollments().map((item) => [item.id, [item.status, item.reason ?? null, item.lead.verification]]));
   assert.deepEqual(by, {
-    1: ["stopped", "catch_all", "catch_all"],
+    1: ["active", null, "catch_all"],
     2: ["active", null, "valid"],
     3: ["stopped", "invalid", "invalid"],
     4: ["active", null, "valid"],
     5: ["active", null, "catch_all"],
-    6: ["active", null, "valid"],
-    7: ["stopped", "not_verified", "unknown"]
+    6: ["active", null, "catch_all"],
+    7: ["active", null, "unknown"],
+    8: ["stopped", "invalid", "invalid"]
   });
-  assert.deepEqual(recheck.status().counts, { valid: 2, invalid: 1, catch_all: 1, unknown: 1 });
-  assert.equal(recheck.status().running, false);
-  assert.deepEqual(campaigns.enrollments().filter(needsRecheck).map((item) => item.id).sort(), ["1", "3", "7"], "a second run asks again only those it set aside");
+  assert.deepEqual(recheck.status().counts, { valid: 1, invalid: 2, catch_all: 1, unknown: 1 });
+  assert.deepEqual(campaigns.enrollments().filter(needsRecheck).map((item) => item.id), ["7"], "only «no answer» is worth asking again");
 });
 
-test("04.11: перший лист — лише на адресу, яку сервер підтвердив; наступний іде тому, хто перший отримав без bounce", async () => {
+test("05.11: перевірка, зроблена деінде (через проксі), приходить готовими відповідями; кого в них немає — не чіпається", async () => {
+  const campaigns = store([
+    row("1", "a@mimecast.co", "unknown", { status: "stopped", reason: "not_verified" }),
+    row("2", "b@mimecast.co", "unknown", { status: "stopped", reason: "not_verified" }),
+    row("3", "c@other.co", "unknown", { status: "stopped", reason: "not_verified" })
+  ]);
+  const recheck = campaignRecheck({ campaigns, deep: () => { throw new Error("not asked"); } });
+  await recheck.start({ verdicts: { "A@mimecast.co": { status: "valid", reason: "via proxy" }, "b@mimecast.co": { status: "invalid", reason: "550 5.1.1" } } }).done;
+  assert.deepEqual(campaigns.enrollments().map((item) => [item.status, item.reason ?? null]), [["active", null], ["stopped", "invalid"], ["stopped", "not_verified"]]);
+  assert.equal(recheck.status().error, null);
+});
+
+test("05.11: перший лист іде й на catch-all, і на неперевірену; не йде — лише на адресу, якої немає", async () => {
   const ctx = { exclusions: new Map(), countries: [], recontact: null, now: new Date("2026-11-05T09:00:00Z") };
-  assert.equal((await checkLead(lead("a@x.com", "valid"), { ...ctx, step: 0 })).ok, true);
-  const catchAll = await checkLead(lead("a@x.com", "catch_all"), { ...ctx, step: 0 });
-  assert.deepEqual([catchAll.ok, catchAll.reason, catchAll.permanent], [false, "catch_all", true]);
-  const unknown = await checkLead(lead("a@x.com", "unknown"), { ...ctx, step: 0 });
-  assert.deepEqual([unknown.ok, unknown.reason, unknown.permanent], [false, "not_verified", true]);
-  assert.equal((await checkLead(lead("a@x.com", "catch_all"), { ...ctx, step: 1 })).ok, true);
+  for (const status of ["valid", "catch_all", "unknown", ""]) assert.equal((await checkLead(lead("a@x.com", status), { ...ctx, step: 0 })).ok, true, status);
+  assert.equal((await checkLead(lead("a@x.com", "invalid"), { ...ctx, step: 0 })).reason, "invalid");
 });

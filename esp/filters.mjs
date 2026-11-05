@@ -205,17 +205,13 @@ export async function checkLead(lead, { exclusions: excluded, countries, reconta
 
   // Owner 03.11: «мені треба розіслати на всіх крім Microsoft» — service
   // addresses and mail outside Google go too (Microsoft is left out where
-  // people are picked); catch-all and unchecked ones came back out 04.11. What stays:
+  // people are picked). 05.11: «відкидаємо тільки пошти в яких 80%+ впевнені
+  // що вони погані» — catch-all and unchecked ones go too. What stays:
   // the exclusions, the 90 days, the source, excluded countries, blocked
   // domains and an address the check found does not exist.
   if (BLOCKED_RECIPIENT_DOMAINS.has(domain)) return no("blocked_domain", domain, { permanent: true });
   const status = String(lead.verification ?? "").trim().toLowerCase();
   if (status === "invalid") return no("invalid", "", { permanent: true });
-  // Owner 04.11, after 12 of 13 bounces came from catch-all and unchecked
-  // addresses: «ті адреси в яких не впевнений прибери з кампаній». The first
-  // letter goes only to a mailbox its server confirmed; a follow-up still goes
-  // to whoever had the first one without a bounce.
-  if (step === 0 && status !== "valid") return no(status === "catch_all" ? "catch_all" : "not_verified", status, { permanent: true });
 
   return { ok: true, reason: null, detail: "", permanent: false, needsRecheck: false };
 }
