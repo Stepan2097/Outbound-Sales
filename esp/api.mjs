@@ -909,6 +909,15 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
     return true;
   }
 
+  // 04.11: «перепровір і ті адреси в яких не впевнений прибери з кампаній».
+  if (path === "/campaigns/recheck" && (method === "GET" || method === "POST")) {
+    if (!esp.recheck) return badRequest(sendJson, response, "Перевірку адрес на цьому сервері не підключено.");
+    const run = method === "POST" ? esp.recheck.start() : esp.recheck.status();
+    if (method === "POST") logged("esp.campaign.recheck", { total: run.total });
+    sendJson(response, 200, { success: true, run });
+    return true;
+  }
+
   if (method === "POST" && path === "/campaigns/people/resume") {
     const body = await readJson(request);
     if (!body) return badRequest(sendJson, response, "Некоректне тіло JSON");

@@ -331,6 +331,14 @@ export function campaignStore({ read, write, readEnrollments, writeEnrollments, 
     async saveEnrollment(enrollment) {
       await writeEnrollments(enrollments().map((row) => (row.id === enrollment.id ? enrollment : row)));
       return enrollment;
+    },
+
+    /** Several rows in one write (the address re-check saves fifty at a time). */
+    async saveEnrollments(rows) {
+      if (!rows.length) return 0;
+      const byId = new Map(rows.map((row) => [row.id, row]));
+      await writeEnrollments(enrollments().map((row) => byId.get(row.id) || row));
+      return rows.length;
     }
   };
 }

@@ -65,9 +65,13 @@ test("глобальні виключення — назавжди: відпис
   assert.equal((await exclusions()).get("no@x-corp.com").actor, "ira@advantage-agency.co");
 });
 
-test("на всіх, крім Microsoft (03.11): не перевірені, застарілі, catch-all, службові й не на Google — ідуть; не існуюча адреса й заблоковані домени — ні", async () => {
-  for (const lead of [{ verifiedAt: "2026-08-01" }, { verification: "", verifiedAt: "" }, { verification: "unknown" }, { verification: "catch_all" }, { email: "info@northwind.co.uk" }, { email: "olena@outlook-co.com" }]) {
+test("на всіх, крім Microsoft (03.11): застарілі, службові й не на Google — ідуть; не існуюча адреса й заблоковані домени — ні; не перевірені й catch-all — лише фолоуапи (04.11)", async () => {
+  for (const lead of [{ verifiedAt: "2026-08-01" }, { email: "info@northwind.co.uk" }, { email: "olena@outlook-co.com" }]) {
     assert.equal((await check(lead)).ok, true, JSON.stringify(lead));
+  }
+  for (const lead of [{ verification: "", verifiedAt: "" }, { verification: "unknown" }, { verification: "catch_all" }]) {
+    assert.equal((await check(lead)).permanent, true, JSON.stringify(lead));
+    assert.equal((await check(lead, { step: 1 })).ok, true, JSON.stringify(lead));
   }
   assert.deepEqual([(await check({ verification: "invalid" })).reason, (await check({ verification: "invalid" })).permanent], ["invalid", true]);
   for (const domain of ["icloud.com", "me.com", "mac.com"]) assert.equal((await check({ email: `olena@${domain}` })).reason, "blocked_domain");

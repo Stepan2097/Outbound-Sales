@@ -52,7 +52,8 @@ import { campaignStore } from "./esp/campaigns.mjs";
 import { isAutoAck } from "./esp/unibox.mjs";
 import { leadStore } from "./esp/leads.mjs";
 import { crmLeadSource } from "./esp/crm-leads.mjs";
-import { folderChecker } from "./esp/folder-check.mjs";
+import { defaultDeep, folderChecker } from "./esp/folder-check.mjs";
+import { campaignRecheck } from "./esp/campaign-recheck.mjs";
 import { crmStats } from "./triage/crm-stats.mjs";
 import { lastActive, sessionBeat } from "./triage/crm-sessions.mjs";
 import { companyFolderSource, isCompanyFolder } from "./esp/crm-company-leads.mjs";
@@ -678,7 +679,9 @@ const esp = (() => {
       if (isCompanyFolder(folderId)) void companyFolders.refresh(folderId);
     }
   });
-  return { connector, oauth, keyError, gate, templates, signature, unsubscribe, campaigns, leads, crmLeads, folderCheck, halt, halted, tick, filters, pollInbox, checkAlerts, runMonitor, warmupTick, alertsTelegram: telegram.configured, sequenceOn: process.env.ESP_SEQUENCE === "on" };
+  // 04.11: the campaigns' unsure addresses asked of their mail servers again.
+  const recheck = campaignRecheck({ campaigns, deep: defaultDeep });
+  return { connector, oauth, keyError, gate, templates, signature, unsubscribe, campaigns, leads, crmLeads, folderCheck, recheck, halt, halted, tick, filters, pollInbox, checkAlerts, runMonitor, warmupTick, alertsTelegram: telegram.configured, sequenceOn: process.env.ESP_SEQUENCE === "on" };
 })();
 
 /**
