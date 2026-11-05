@@ -795,13 +795,9 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
     }
     const params = Object.fromEntries(["folder", "label", "campaign", "sender", "q", "offset", "limit"].map((name) => [name, url.searchParams.get(name) || ""]));
     const list = uniboxList(entries, { ...params, sender: params.sender.toLowerCase(), leads, campaigns });
-    const { senders } = await registry();
     sendJson(response, 200, {
       success: true, ...list, folders: UNIBOX_FOLDERS, labels: REPLY_LABELS,
-      problems: uniboxProblems({
-        mode: esp.connector?.describe().mode || "stub", polling: Boolean(esp.sequenceOn), senders,
-        campaignSenders: new Set((esp.campaigns?.list() || []).filter((row) => row.state !== "done").flatMap((row) => row.senders || []))
-      })
+      problems: uniboxProblems({ mode: esp.connector?.describe().mode || "stub", polling: Boolean(esp.sequenceOn) })
     });
     return true;
   }

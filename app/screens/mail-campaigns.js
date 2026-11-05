@@ -82,7 +82,8 @@ export async function loadCampaignsPage() {
     page.variables = templates.variables || [];
     page.signature = templates.signature || null;
     page.limits = limits;
-    page.alerts = alerts.alerts || [];
+    // A mailbox's pause is shown on «Прогрів пошт» only (owner 05.11).
+    page.alerts = (alerts.alerts || []).filter((alert) => alert.kind !== "pause_sender");
     page.error = "";
     if (page.openId && !current()) page.openId = null;
     if (page.openId) await loadPeople();

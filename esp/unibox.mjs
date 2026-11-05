@@ -143,20 +143,12 @@ export function uniboxThread(entries, key, { leads = new Map(), campaigns = new 
  * What stands between the inbox and the mail, for the yellow banner on top —
  * as Snov's «Specify the IMAP settings for …». Each item names what to do.
  */
-export function uniboxProblems({ mode = "stub", polling = false, senders = [], campaignSenders = null } = {}) {
+export function uniboxProblems({ mode = "stub", polling = false } = {}) {
   const problems = [];
   if (mode === "stub") problems.push({ code: "stub", text: "Пошту ще не підключено — працює заглушка: листи з Gmail не читаються, і відповісти звідси не можна. Підключення — «Пошта» → «Прогрів пошт» → «Додати пошту» → «Увійти через Google»." });
   else if (!polling) problems.push({ code: "not_polling", text: "Пошти зараз не читаються (ланцюжок вимкнено, ESP_SEQUENCE) — нові відповіді не з'являться, доки його не ввімкнуть." });
-  // A mailbox a person disconnected on purpose is not a problem to raise (owner 03.11:
-  // «першу пошту я видалив навіщо за неї згадувати»); one the system paused is.
-  const byHand = (row) => {
-    const last = (row.history || []).filter((step) => step.status === "paused").at(-1);
-    return Boolean(last && last.code === "not_connected" && last.actor && !String(last.actor).startsWith("esp"));
-  };
-  // Only what holds a campaign's letters back (owner 03.11: vlad, a warm-up-only mailbox,
-  // belongs on «Прогрів пошт», not here).
-  const inCampaigns = (row) => !campaignSenders || campaignSenders.has(row.email);
-  const paused = senders.filter((row) => row.status === "paused" && !byHand(row) && inCampaigns(row)).map((row) => row.email);
-  if (paused.length) problems.push({ code: "paused", text: `На паузі: ${paused.join(", ")} — їхні листи не йдуть. Причина й зняття паузи — у реєстрі відправників.`, senders: paused });
+  // A paused mailbox is not raised here (owner 05.11: «сповіщення На паузі … не
+  // треба показувати на цій і на інших сторінках окрім прогріву») — «Прогрів
+  // пошт» shows each pause with its reason and what to do.
   return problems;
 }

@@ -139,9 +139,10 @@ function sideHtml() {
   const counts = unibox.list?.counts || {};
   const folders = unibox.list?.folders || { inbox: "Вхідні", auto: "Автовідповіді", unsubscribed: "Відписки", bounced: "Bounce", starred: "Із зірочкою", sent: "Надіслані" };
   const mail = Object.entries(folders).map(([key, text]) => {
-    const count = key === "inbox" ? counts.unread : ["starred", "bounced", "auto", "unsubscribed"].includes(key) ? counts[key] : null;
+    // Every folder says how many it holds (05.11: «не пише кількість вхідних із зірочкою і надісланих»).
+    const count = counts[key] ?? 0;
     const active = unibox.channel === "mail" && unibox.folder === key;
-    return `<button type="button" class="${active ? "is-active" : ""}" data-unibox-folder="${key}"${active ? ' aria-current="page"' : ""}><i data-lucide="${FOLDER_ICON[key]}"></i><span>${escapeHtml(text)}</span>${count ? `<b>${count}</b>` : ""}</button>`;
+    return `<button type="button" class="${active ? "is-active" : ""}" data-unibox-folder="${key}"${active ? ' aria-current="page"' : ""}><i data-lucide="${FOLDER_ICON[key]}"></i><span>${escapeHtml(text)}</span><b>${count}</b></button>`;
   }).join("");
   return `
     <div class="mail-side-title">Пошта</div>

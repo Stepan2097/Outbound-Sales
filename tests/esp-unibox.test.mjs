@@ -126,18 +126,11 @@ test("тред: усі листи розмови по черзі, з рядко�
   assert.equal(uniboxThread(world(), "nobody|x"), null);
 });
 
-test("жовтий банер: заглушка замість пошти, пошти не читаються, відправники на паузі", () => {
+test("жовтий банер: заглушка замість пошти, пошти не читаються; пошта на паузі — лише на «Прогрів пошт» (05.11)", () => {
   assert.equal(uniboxProblems({ mode: "stub" })[0].code, "stub");
   assert.equal(uniboxProblems({ mode: "gmail", polling: false })[0].code, "not_polling");
-  // 03.11: a mailbox a person disconnected is not raised; one the gate paused is.
-  const senders = [
-    { email: "gone@x.com", status: "paused", history: [{ status: "paused", code: "not_connected", actor: "owner@advantage.agency" }] },
-    { email: "lost@x.com", status: "paused", history: [{ status: "paused", code: "not_connected", actor: "esp-gate" }] }
-  ];
-  assert.deepEqual(uniboxProblems({ mode: "gmail", polling: true, senders }).find((row) => row.code === "paused").senders, ["lost@x.com"]);
-  assert.deepEqual(uniboxProblems({ mode: "gmail", polling: true }), []);
-  const paused = uniboxProblems({ mode: "gmail", polling: true, senders: [{ email: "anna@send.com", status: "paused" }, { email: "b@send.com", status: "active" }] });
-  assert.deepEqual(paused[0].senders, ["anna@send.com"]);
+  const senders = [{ email: "lost@x.com", status: "paused", history: [{ status: "paused", code: "not_connected", actor: "esp-gate" }] }];
+  assert.deepEqual(uniboxProblems({ mode: "gmail", polling: true, senders }), []);
 });
 
 test("маршрути: список і тред — праву «бачити відповіді»; зірочка — «відповідати»; обидві дії пишуться з тим, хто й про кого", async () => {
