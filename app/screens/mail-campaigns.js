@@ -187,6 +187,15 @@ function repliesTip(kinds) {
   return `Релевантні відповіді: ${relevant}\nАвтовідповіді: ${kinds.auto}`;
 }
 
+/** The hover over «Одержувачів»: how many had the 1st letter, the 2nd and so on (05.11). */
+function peopleTip(campaign) {
+  const lines = (campaign.byStep || []).map((count, index) => `${index + 1}-й лист отримали: ${count}`);
+  if (campaign.waiting != null) lines.push(`Чекають першого листа: ${campaign.waiting}`);
+  if (campaign.byStatus?.done) lines.push(`Пройшли весь ланцюжок: ${campaign.byStatus.done}`);
+  if (campaign.byStatus?.stopped) lines.push(`Вийшли з кампанії: ${campaign.byStatus.stopped}`);
+  return lines.join("\n");
+}
+
 function campaignRowHtml(campaign) {
   const done = (campaign.byStatus?.done || 0) + (campaign.byStatus?.stopped || 0);
   const progress = percent(done, campaign.people);
@@ -200,7 +209,7 @@ function campaignRowHtml(campaign) {
         <button type="button" class="mc-expand ${page.expanded.has(campaign.id) ? "is-open" : ""}" data-mc-expand="${escapeAttr(campaign.id)}" aria-expanded="${page.expanded.has(campaign.id)}" title="${page.expanded.has(campaign.id) ? "Згорнути пошти" : "Показати пошти кампанії"}" aria-label="Пошти кампанії ${escapeAttr(campaign.name)}"><i data-lucide="chevron-down"></i><span>${(campaign.bySender || []).length}</span></button>
       </div>
       <div class="mc-meta">
-        <span><i data-lucide="users"></i>Одержувачів: ${campaign.people}</span>${campaign.people ? `<span class="mc-progress" title="Пройшли ланцюжок: ${done} з ${campaign.people}"><span style="width:${progress}%"></span></span>` : ""}
+        <span class="mc-tip-target" data-mc-tip="${escapeAttr(peopleTip(campaign))}"><i data-lucide="users"></i>Одержувачів: ${campaign.people}</span>${campaign.people ? `<span class="mc-progress" title="Пройшли ланцюжок: ${done} з ${campaign.people}"><span style="width:${progress}%"></span></span>` : ""}
         <span><i data-lucide="mail"></i>${campaign.steps.length} ${campaign.steps.length === 1 ? "лист" : campaign.steps.length < 5 ? "листи" : "листів"}${campaign.spinMode === "half" ? " · A/B" : ""}</span>
         <span><i data-lucide="at-sign"></i>${campaign.senders.length ? escapeHtml(campaign.senders.join(", ")) : "пошти не обрано"}</span>
         <span><i data-lucide="calendar"></i>${escapeHtml(when(campaign.createdAt))}</span>
@@ -1250,7 +1259,7 @@ root?.addEventListener("mouseover", (event) => {
   document.body.append(tipBox);
   const box = target.getBoundingClientRect();
   tipBox.style.top = `${Math.round(box.bottom + 6)}px`;
-  tipBox.style.left = `${Math.round(Math.max(8, Math.min(window.innerWidth - tipBox.offsetWidth - 8, box.right - tipBox.offsetWidth)))}px`;
+  tipBox.style.left = `${Math.round(Math.max(8, Math.min(window.innerWidth - tipBox.offsetWidth - 8, box.left)))}px`;
 });
 root?.addEventListener("mouseleave", () => { tipBox?.remove(); tipBox = null; });
 root?.addEventListener("input", onInput);

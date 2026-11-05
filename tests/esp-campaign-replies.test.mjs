@@ -66,3 +66,30 @@ test("a pause somebody already lifted is no longer shown as an alert; one still 
   });
   assert.deepEqual(answer.payload.alerts.map((row) => row.email), ["anna@send.com"]);
 });
+
+// Owner 05.11: «при наведені я хочу бачити детальну інформацію скільки перших листів скільки других і тд».
+test("«Одержувачів» на наведенні: скільки людей отримали 1-й лист, 2-й, 3-й, і скільки ще чекають першого", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "esp-steps-"));
+  useJournal(join(dir, "journal.jsonl"));
+  t.after(async () => { useJournal(null); await rm(dir, { recursive: true, force: true }); });
+  for (const contact of ["a@x.com", "b@x.com", "c@x.com"]) await append({ type: "message.sent", contact, data: { from: "anna@send.com", campaignId: "c1", step: 0 } });
+  await append({ type: "message.sent", contact: "a@x.com", data: { from: "anna@send.com", campaignId: "c1", step: 1 } });
+  await append({ type: "message.sent", contact: "a@x.com", data: { from: "anna@send.com", campaignId: "c1", step: 1 } });
+  await append({ type: "message.sent", contact: "z@x.com", data: { from: "anna@send.com", campaignId: "other", step: 0 } });
+  const rows = [
+    { email: "a@x.com", status: "active", step: 2, lastSent: "2026-11-04" },
+    { email: "b@x.com", status: "active", step: 1, lastSent: "2026-11-03" },
+    { email: "c@x.com", status: "stopped", step: 1, lastSent: "2026-11-03" },
+    { email: "d@x.com", status: "active", step: 0, lastSent: null },
+    { email: "e@x.com", status: "active", step: 0, lastSent: null }
+  ].map((row) => ({ ...row, enrolledAt: "2026-11-01T00:00:00.000Z", sender: "anna@send.com" }));
+  const esp = { campaigns: { list: () => [{ id: "c1", name: "Operators", state: "running", steps: [{}, {}, {}], senders: ["anna@send.com"] }], enrollmentsOf: () => rows } };
+  let answer = null;
+  await handleEspApi({
+    request: { method: "GET", auth: { profile: { role: "admin" } } }, response: {}, url: new URL("http://x/api/esp/campaigns"),
+    sendJson: (_r, status, payload) => { answer = { status, payload }; }, readJson: async () => null, esp
+  });
+  const [campaign] = answer.payload.campaigns;
+  assert.deepEqual(campaign.byStep, [3, 1, 0], "a resend of the 2nd letter is one person, not two");
+  assert.equal(campaign.waiting, 2);
+});

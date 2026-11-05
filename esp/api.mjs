@@ -1258,9 +1258,14 @@ function campaignSummary(campaign, enrollments, entries) {
     if (!bySender.has(key)) bySender.set(key, { sent: 0, replied: 0, bounced: 0, unsubscribed: 0 });
     return bySender.get(key);
   };
+  // Who has had which letter (owner 05.11: «при наведені я хочу бачити детальну
+  // інформацію скільки перших листів скільки других і тд») — people, once each.
+  const reached = (campaign.steps || []).map(() => new Set());
   for (const entry of entries) {
     if (entry.type === "message.sent" && entry.data?.campaignId === campaign.id) {
       counts.sent += 1;
+      const step = Number(entry.data?.step);
+      if (entry.contact && Number.isInteger(step) && step >= 0) (reached[step] ||= new Set()).add(entry.contact);
       const from = entry.data?.from;
       const row = sender(from);
       if (row) row.sent += 1;
@@ -1279,7 +1284,9 @@ function campaignSummary(campaign, enrollments, entries) {
   }
   const byStatus = {};
   for (const row of enrollments) byStatus[row.status] = (byStatus[row.status] || 0) + 1;
-  return { ...campaign, people: enrollments.length, byStatus, ...counts, replyKinds, bySender: [...bySender.entries()].map(([email, stats]) => ({ email, ...stats })) };
+  const waiting = enrollments.filter((row) => !row.lastSent && !row.step && ["active", "paused", "uncertain"].includes(row.status)).length;
+  const byStep = [...reached].map((set) => set?.size || 0);
+  return { ...campaign, people: enrollments.length, byStatus, byStep, waiting, ...counts, replyKinds, bySender: [...bySender.entries()].map(([email, stats]) => ({ email, ...stats })) };
 }
 
 /** A report as a file to save. */
