@@ -495,8 +495,7 @@ function contactBeforeCallHtml() {
   const data = contactBeforeCall;
   if (!data) return "";
   const body = data.empty
-    ? `<p><b>Сигналів не знайдено</b> — за 90 днів ні новин компанії, ні постів людини з датою й посиланням.</p>
-       <ul>${[...(data.searched || []).map((row) => `Шукали: ${row}`), ...(data.gaps || [])].map((row) => `<li>${escapeHtml(row)}</li>`).join("")}</ul>`
+    ? "<p>Сигналів за 90 днів не знайдено</p>"
     : `<ol>${(data.facts || []).map((row) => `<li>${escapeHtml(row.text)} <small>${escapeHtml([row.whose === "person" ? "пост людини" : row.publisher, row.date].filter(Boolean).join(" · "))} · <a href="${escapeAttr(row.url)}" target="_blank" rel="noopener">джерело</a></small></li>`).join("")}</ol>
        ${(data.questions || []).length ? `<strong>Питання${data.productName ? ` · ${escapeHtml(data.productName)}` : ""}</strong><ul>${data.questions.map((row) => `<li title="${escapeAttr(row.basis || "")}">${escapeHtml(row.text)}</li>`).join("")}</ul>` : ""}`;
   return `<section class="contact-history contact-before-call"><strong>Перед розмовою</strong>${body}<small>зібрано ${escapeHtml(new Date(data.checkedAt).toLocaleDateString([], { dateStyle: "medium" }))}</small></section>`;

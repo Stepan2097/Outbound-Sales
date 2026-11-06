@@ -671,7 +671,7 @@ test("папка — власний випадаючий список: друз�
   assert.ok(INDEX.includes('id="contactFolderButton"') && INDEX.includes('id="contactFolderQuery"'));
 });
 
-test("«Перед розмовою» на картці контакту — лише збережене з Головної, з джерелами; порожнє — прямо «Сигналів не знайдено» (таск 92abd9df)", () => {
+test("«Перед розмовою» на картці контакту — лише збережене з Головної, з джерелами; порожнє — лише «Сигналів за 90 днів не знайдено» (таск 92abd9df)", () => {
   const s = screen();
   s.set("contactBeforeCall", { checkedAt: "2026-11-03T12:00:00Z", productName: "Google Ads for iGaming", empty: false,
     facts: [{ text: "Отримали нагороду на SiGMA", date: "2026-11-03", url: "https://www.linkedin.com/posts/x", publisher: "linkedin.com", whose: "company" }],
@@ -682,7 +682,8 @@ test("«Перед розмовою» на картці контакту — л�
   assert.match(html, /href="https:\/\/www.linkedin.com\/posts\/x"/);
   assert.match(html, /Як ви тестуєте нові канали\?/);
   s.set("contactBeforeCall", { checkedAt: "2026-11-03T12:00:00Z", empty: true, facts: [], questions: [], searched: ["вебпошук: WeltBet news"], gaps: [] });
-  assert.match(s.get("contactBeforeCallHtml()"), /Сигналів не знайдено[\s\S]*Шукали: вебпошук: WeltBet news/);
+  assert.match(s.get("contactBeforeCallHtml()"), /Сигналів за 90 днів не знайдено/);
+  assert.doesNotMatch(s.get("contactBeforeCallHtml()"), /Шукали/, "06.11: одного рядка досить");
   s.set("contactBeforeCall", null);
   assert.equal(s.get("contactBeforeCallHtml()"), "");
 });

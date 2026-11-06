@@ -305,8 +305,8 @@ function beforeCallHtml(item) {
   const source = (row) => `<small>${escapeHtml([row.whose === "person" ? "пост людини" : row.publisher, row.date].filter(Boolean).join(" · "))} · <a href="${escapeAttr(row.url)}" target="_blank" rel="noopener">джерело</a></small>`;
   const searched = data.searched?.length ? `<details class="triage-before-searched"><summary>Що шукали</summary><ul>${data.searched.map((row) => `<li>${escapeHtml(row)}</li>`).join("")}</ul>${data.gaps?.length ? `<ul class="triage-muted">${data.gaps.map((row) => `<li>${escapeHtml(row)}</li>`).join("")}</ul>` : ""}</details>` : "";
   const body = data.empty
-    ? `<p class="triage-before-empty"><b>Сигналів не знайдено</b> — за ${90} днів ні новин компанії, ні постів людини з датою й посиланням.</p>
-       <ul class="triage-muted">${[...(data.searched || []).map((row) => `Шукали: ${row}`), ...(data.gaps || [])].map((row) => `<li>${escapeHtml(row)}</li>`).join("") || "<li>Шукати не було де: немає ні компанії, ні LinkedIn.</li>"}</ul>`
+    // Owner 06.11: «якщо сигналів за 90 днів не знайдено то написати що "сигналів за 90 днів не знайдено" буде достатньо».
+    ? '<p class="triage-before-empty">Сигналів за 90 днів не знайдено</p>'
     : `<ol class="triage-before-facts">${data.facts.map((row) => `<li><span>${escapeHtml(row.text)}</span>${source(row)}</li>`).join("")}</ol>
        ${data.questions?.length ? `<div class="triage-before-questions"><small class="triage-muted">Питання${data.productName ? ` · ${escapeHtml(data.productName)}` : ""}</small><ul>${data.questions.map((row) => `<li title="${escapeAttr(row.basis || "")}">${escapeHtml(row.text)}</li>`).join("")}</ul></div>` : ""}
        ${searched}`;
