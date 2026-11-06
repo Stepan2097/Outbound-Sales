@@ -22,7 +22,8 @@ const PERSON_STATE = { active: "у ланцюжку", done: "отримав ус
 const STOP_REASON = {
   replied: "відповів", bounced: "bounce", unsubscribed: "відписався", campaign_done: "кампанію завершено", company_replied: "відповів колега з компанії",
   unknown_timezone: "невідомий часовий пояс", empty_variable: "порожня змінна", us_address_missing: "немає адреси для США",
-  no_answer_from_provider: "Gmail не відповів — перевір «Надіслані»"
+  no_answer_from_provider: "Gmail не відповів — перевір «Надіслані»",
+  foreign_address: "пошта чужа — не збігається ні з ім'ям, ні з компанією"
 };
 const SKIP_REASON = {
   not_due: "ще не день", sender_daily_limit: "ліміт пошти", domain_daily_limit: "ліміт домену", outside_window: "поза вікном одержувача",

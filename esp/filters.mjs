@@ -168,6 +168,35 @@ export async function mailOnGoogle(domain, { dns = { resolveMx }, now = Date.now
   return value;
 }
 
+// Words a company name shares with half the industry — «Gaming» in a name says nothing about the domain.
+const GENERIC_COMPANY_WORDS = new Set([
+  "the", "and", "group", "limited", "ltd", "inc", "llc", "gmbh", "plc", "entertainment", "gaming", "games", "casino",
+  "international", "technologies", "technology", "media", "online", "bet", "hotel", "resort", "partners", "digital"
+]);
+const plain = (value) => String(value ?? "").toLowerCase().normalize("NFD").replace(/[^a-z0-9]+/g, " ").trim();
+
+/**
+ * An address that belongs to somebody else: its first part has none of the
+ * person's names and its domain none of the company's. 06.11: 14 of 18 hard
+ * bounces were such (Adam Davis · PokerStars at liam.ashton@beatport.com) — an
+ * import shuffled the emails, and what did not bounce reached the wrong person.
+ * `null` when there is no name or no company to compare with.
+ */
+export function foreignAddress(lead) {
+  const email = contactKey(lead?.email);
+  if (!email) return null;
+  const [local, domain] = email.split("@");
+  const names = [lead.name, lead.firstName, lead.lastName].flatMap((value) => plain(value).split(" ")).filter((word) => word.length >= 3);
+  const company = plain(lead.company);
+  const words = company.split(" ").filter((word) => word.length >= 3 && !GENERIC_COMPANY_WORDS.has(word));
+  if (!names.length || !words.length) return null;
+  const person = local.replace(/[^a-z0-9]/g, "");
+  if (names.some((word) => person.includes(word))) return false;
+  const site = plain(domain.split(".").slice(0, -1).join(" ")).replace(/ /g, "");
+  const joined = company.replace(/ /g, "");
+  return !(words.some((word) => site.includes(word)) || site.includes(joined) || (site.length >= 4 && joined.includes(site)));
+}
+
 const dayMs = 24 * 60 * 60 * 1000;
 const validDate = (value) => /^\d{4}-\d{2}-\d{2}/.test(String(value ?? "")) && !Number.isNaN(Date.parse(value));
 
@@ -212,6 +241,7 @@ export async function checkLead(lead, { exclusions: excluded, countries, reconta
   if (BLOCKED_RECIPIENT_DOMAINS.has(domain)) return no("blocked_domain", domain, { permanent: true });
   const status = String(lead.verification ?? "").trim().toLowerCase();
   if (status === "invalid") return no("invalid", "", { permanent: true });
+  if (foreignAddress(lead)) return no("foreign_address", `${email} — ні ім'я, ні компанія (${lead.company}) не збігаються з поштою`, { permanent: true });
 
   return { ok: true, reason: null, detail: "", permanent: false, needsRecheck: false };
 }
@@ -238,6 +268,7 @@ export const SKIP_REASON_LABEL = {
   blocked_domain: "домен Apple (icloud.com)",
   catch_all: "catch-all домен",
   invalid: "адреса недійсна",
+  foreign_address: "пошта чужа — не збігається ні з ім'ям, ні з компанією",
   not_verified: "не перевірена — на повторну перевірку",
   verification_stale: "перевірка старша 30 днів — на повторну перевірку",
   mx_unknown: "DNS не відповів",

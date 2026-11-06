@@ -73,6 +73,19 @@ test("на всіх, крім Microsoft (03.11, 05.11): не перевірен�
   for (const domain of ["icloud.com", "me.com", "mac.com"]) assert.equal((await check({ email: `olena@${domain}` })).reason, "blocked_domain");
 });
 
+test("чужа пошта (06.11): ні ім'я, ні компанія не збігаються з адресою — лист не йде ніколи", async () => {
+  const foreign = await check({ email: "liam.ashton@beatport.com", name: "Adam Davis", company: "PokerStars" });
+  assert.deepEqual([foreign.reason, foreign.permanent], ["foreign_address", true]);
+  assert.equal((await check({ email: "info@ellisjones.co.uk", name: "westgate las vegas resort casino", company: "westgate las vegas resort casino" })).reason, "foreign_address");
+  for (const lead of [
+    { email: "a.pashkevich@softswiss.com", name: "Anastasiya Pashkevich", company: "SOFTSWISS" },
+    { email: "olena@gmail.com", name: "Olena", company: "Northwind" },
+    { email: "info@northwind.co.uk", name: "Northwind", company: "Northwind Ltd" },
+    { email: "jd@northwind.co.uk", name: "John Doe", company: "Northwind" },
+    { email: "jd@other.com", name: "", company: "Northwind" }
+  ]) assert.equal((await check(lead)).ok, true, lead.email);
+});
+
 test("MX: Google — так; інше — ні; DNS без відповіді — «невідомо», і таке не запам'ятовується", async () => {
   let asked = 0;
   const flaky = { resolveMx: async () => { asked += 1; throw Object.assign(new Error("timeout"), { code: "ETIMEOUT" }); } };
