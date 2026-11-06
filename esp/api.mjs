@@ -1305,6 +1305,9 @@ function campaignSummary(campaign, enrollments, entries) {
     const automatic = entry.type === "message.autoreplied" || (entry.type === "message.replied" && isAutoAck({ kind: "replied", text: entry.data?.text }, entry.contact));
     const key = entry.type === "message.replied" || automatic ? "replied" : entry.type === "message.bounced" ? "bounced" : entry.type === "contact.unsubscribed" ? "unsubscribed" : null;
     if (!key) continue;
+    // A 4.x.x is a delay the server retries, not a bounce (06.11: «чому вони
+    // продовжують рости» — nine 4.4.1 notices in a morning, two per person).
+    if (key === "bounced" && !/^5\./.test(String(entry.data?.code || ""))) continue;
     if (automatic) replyKinds.auto += 1;
     else if (key === "replied") replyKinds[Object.hasOwn(replyKinds, entry.data?.label) && entry.data.label !== "auto" ? entry.data.label : "unlabelled"] += 1;
     counts[key] += 1;

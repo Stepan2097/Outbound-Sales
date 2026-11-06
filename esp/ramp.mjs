@@ -49,7 +49,8 @@ export function reviewRamp(sender, entries, { now = new Date() } = {}) {
   const sent = sentEntries.length;
   // The days of sending since the last step, today not yet: a step is earned by a day that is over.
   const sentSince = sentEntries.filter((entry) => at(entry) >= since.getTime() && dayOf(new Date(entry.at)) < today).length;
-  const bounces = entries.filter((entry) => entry.type === "message.bounced" && entry.data?.sender === email && at(entry) >= windowStart);
+  // Only permanent bounces (5.x.x) — a 4.x.x is a delay the server retries, as in the alerts (ESP 8).
+  const bounces = entries.filter((entry) => entry.type === "message.bounced" && /^5\./.test(String(entry.data?.code || "")) && entry.data?.sender === email && at(entry) >= windowStart);
   const replies = entries.filter((entry) => entry.type === "message.replied" && entry.data?.sender === email && at(entry) >= windowStart).length;
   const policy = bounces.filter((entry) => /^5\.7\./.test(String(entry.data?.code || ""))).length;
   const bounceRate = sent ? bounces.length / sent : 0;
