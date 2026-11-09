@@ -54,7 +54,11 @@ test("Gmail refusing — a daily limit, a blocked account, a pile of failures in
   assert.deepEqual(review([fail("Gmail API відповів 403: Mail service not enabled; account disabled")]).map((row) => row.code), ["gmail_blocked"]);
   assert.deepEqual(review(Array.from({ length: 5 }, () => fail("Gmail API відповів 503: Backend Error", 0.2))).map((row) => row.code), ["gmail_mass_failures"]);
   assert.deepEqual(review(Array.from({ length: 4 }, () => fail("Gmail API відповів 503: Backend Error", 0.2))), [], "four is not a pile");
-  assert.deepEqual(review([{ type: "sender.alert", at: hoursAgo(3), data: { email: ANNA, code: "5.7.1", contact: "ceo@big.com" } }]).map((row) => row.code), ["policy_bounce"]);
+  const policy = (contact, hours = 3) => ({ type: "sender.alert", at: hoursAgo(hours), data: { email: ANNA, code: "5.7.1", contact } });
+  assert.deepEqual(review([policy("ceo@big.com"), policy("cto@other.com")]).map((row) => row.code), ["policy_bounce"]);
+  assert.deepEqual(review([policy("ceo@big.com")]), [], "one company's gateway is not about the mailbox");
+  assert.deepEqual(review([policy("ceo@big.com"), policy("cfo@big.com")]), [], "the same company twice is still one");
+  assert.deepEqual(review([policy("ceo@big.com", 24 * 8), policy("cto@other.com")]), [], "older than a week");
 });
 
 test("a new campaign with more than 3% bounces among its first 100–300 people is paused; fewer than 100 reached is too early to tell", () => {
@@ -66,6 +70,14 @@ test("a new campaign with more than 3% bounces among its first 100–300 people 
   assert.match(findings[0].reason, /3\.3% на перших 150/);
   assert.deepEqual(reviewAlerts({ entries: bounced, senders: [], campaigns: [campaign], enrollmentsOf: () => people.slice(0, 80), now: NOW }), []);
   assert.deepEqual(reviewAlerts({ entries: bounced.slice(0, 4), senders: [], campaigns: [campaign], enrollmentsOf: () => people, now: NOW }), [], "4 of 150 is under 3%");
+});
+
+test("06.11: somebody else's address is the filter's, not the list's — it does not count among a campaign's first people", () => {
+  const people = Array.from({ length: 150 }, (_, index) => ({ email: `p${index}@p${index}.com`, firstSentAt: hoursAgo(10 - index / 100), lead: { name: `P${index}`, company: `P${index}` } }));
+  const foreign = Array.from({ length: 10 }, (_, index) => ({ email: `liam${index}@beatport.com`, firstSentAt: hoursAgo(11), lead: { name: "Adam Davis", company: "PokerStars" } }));
+  const campaign = { id: "c-1", name: "Northwind", state: "running" };
+  const entries = foreign.map((row) => bounce(row.email));
+  assert.deepEqual(reviewAlerts({ entries, senders: [], campaigns: [campaign], enrollmentsOf: () => [...foreign, ...people], now: NOW }), []);
 });
 
 test("applied: the sender is paused in the registry with the reason, the alarm is journalled and sent once — not every hour", async (t) => {

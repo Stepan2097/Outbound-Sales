@@ -17,6 +17,8 @@
 //
 // Only permanent bounces count (5.x.x); a 4.x.x is a delay (ESP 7).
 
+import { foreignAddress } from "./filters.mjs";
+
 export const SENDER_BOUNCE_RATE = 0.02;
 // The 2% only speaks from this many letters a week: 1 bounce of 4 is «25%» and
 // paused a sender on its first day (03.11, tomas@trafpush.com). Below it, the
@@ -26,6 +28,7 @@ export const SENDER_BOUNCES_PER_100 = 3;
 export const CAMPAIGN_BOUNCE_RATE = 0.03;
 export const CAMPAIGN_EARLY = { min: 100, max: 300 };
 export const MASS_FAILURES = { count: 5, minutes: 60 };
+export const POLICY_DOMAINS = 2;
 
 const DAY = 86_400_000;
 const permanent = (entry) => entry.type === "message.bounced" && /^5\./.test(String(entry.data?.code || ""));
@@ -68,10 +71,13 @@ function senderFindings(sender, entries, now) {
     findings.push({ code: "gmail_mass_failures", reason: `${recentFailures} відмов Gmail за годину` });
   }
   // A 5.7.x is the receiving side refusing by policy: raised by ESP 7 as
-  // `sender.alert`; here it becomes a pause.
-  const policy = entries.filter((entry) => entry.type === "sender.alert" && entry.data?.email === email && /^5\.7\./.test(String(entry.data?.code || ""))).at(-1);
-  if (policy && now.getTime() - new Date(policy.at).getTime() < 7 * DAY) {
-    findings.push({ code: "policy_bounce", reason: `відмова ${policy.data.code} за політикою отримувача (${policy.data.contact || "адресат"})` });
+  // `sender.alert`; here it becomes a pause — when two companies refuse within
+  // a week. One company's gateway says nothing about the mailbox: on 04–05.11
+  // five mailboxes stood for days, each over one refusal (softswiss.com twice).
+  const policy = entries.filter((entry) => entry.type === "sender.alert" && entry.data?.email === email && /^5\.7\./.test(String(entry.data?.code || "")) && now.getTime() - new Date(entry.at).getTime() < 7 * DAY);
+  const refusing = [...new Set(policy.map((entry) => String(entry.data?.contact || "").split("@")[1] || entry.seq))];
+  if (refusing.length >= POLICY_DOMAINS) {
+    findings.push({ code: "policy_bounce", reason: `відмови ${policy.at(-1).data.code} за політикою отримувача — ${refusing.length} компанії за тиждень (${refusing.slice(-3).join(", ")})` });
   }
   return findings;
 }
@@ -81,7 +87,10 @@ function senderFindings(sender, entries, now) {
  * them pauses it — the list it was built from is suspect.
  */
 function campaignFinding(campaign, enrollments, entries) {
-  const reached = enrollments.filter((row) => row.firstSentAt).sort((a, b) => String(a.firstSentAt).localeCompare(String(b.firstSentAt)));
+  // An address that was somebody else's is the filter's now (esp/filters.mjs,
+  // 06.11), not the list's: 14 of 18 early bounces were such, and they kept both
+  // «Оператори» campaigns paused after the filter stopped writing to them.
+  const reached = enrollments.filter((row) => row.firstSentAt && row.reason !== "foreign_address" && !foreignAddress({ ...row.lead, email: row.email })).sort((a, b) => String(a.firstSentAt).localeCompare(String(b.firstSentAt)));
   if (reached.length < CAMPAIGN_EARLY.min) return null;
   const early = new Set(reached.slice(0, CAMPAIGN_EARLY.max).map((row) => row.email));
   const bounced = new Set(entries.filter((entry) => permanent(entry) && early.has(entry.contact) && (entry.data?.campaignId == null || entry.data.campaignId === campaign.id)).map((entry) => entry.contact));
