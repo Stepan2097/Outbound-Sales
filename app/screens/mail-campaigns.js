@@ -23,7 +23,10 @@ const STOP_REASON = {
   replied: "відповів", bounced: "bounce", unsubscribed: "відписався", campaign_done: "кампанію завершено", company_replied: "відповів колега з компанії",
   unknown_timezone: "невідомий часовий пояс", empty_variable: "порожня змінна", us_address_missing: "немає адреси для США",
   no_answer_from_provider: "Gmail не відповів — перевір «Надіслані»",
-  foreign_address: "пошта чужа — не збігається ні з ім'ям, ні з компанією"
+  foreign_address: "пошта чужа — не збігається ні з ім'ям, ні з компанією",
+  domain_refused: "компанія відхиляє наші листи (5.7.x)",
+  domain_guess_bounced: "у компанії вже відбилась вгадана адреса",
+  another_person: "адреса іншої людини, не підтверджена"
 };
 const SKIP_REASON = {
   not_due: "ще не день", sender_daily_limit: "ліміт пошти", domain_daily_limit: "ліміт домену", outside_window: "поза вікном одержувача",

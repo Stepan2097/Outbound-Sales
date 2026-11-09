@@ -9,7 +9,7 @@ import { allEntries, append, useJournal } from "../esp/journal.mjs";
 import { parseLeadLines } from "../esp/campaigns.mjs";
 import {
   DEFAULT_EXCLUDED_COUNTRIES, addExclusion, checkLead, countryCode, excludedCountries, exclusions, filterContext, forgetMx,
-  mailOnGoogle, refusedAtEnrolment, setExcludedCountries
+  bouncedDomains, mailOnGoogle, refusedAtEnrolment, setExcludedCountries
 } from "../esp/filters.mjs";
 import { adminLog } from "../esp/access.mjs";
 
@@ -84,6 +84,32 @@ test("чужа пошта (06.11): ні ім'я, ні компанія не зб
     { email: "jd@northwind.co.uk", name: "John Doe", company: "Northwind" },
     { email: "jd@other.com", name: "", company: "Northwind" }
   ]) assert.equal((await check(lead)).ok, true, lead.email);
+});
+
+test("09.11, щоб менше баунсів: відбій компанії стосується її інших людей; чужа людина в неперевіреній адресі не йде", async () => {
+  const bounce = (contact, code) => ({ type: "message.bounced", contact, data: { code } });
+  const domainBounces = bouncedDomains([
+    bounce("victoria.sviridova@softswiss.com", "5.7.1"), bounce("artur.salnikov@softgamings.com", "5.1.3"),
+    bounce("nobody@gmail.com", "5.1.1"), bounce("x@slow.com", "4.4.1"), bounce("y@full.com", "5.2.2")
+  ]);
+  assert.deepEqual([...domainBounces.keys()], ["softswiss.com", "softgamings.com"], "free mail, a delay and a full mailbox say nothing about the company");
+  const at = (lead, step = 0) => check({ ...lead }, { domainBounces, step });
+  const refused = await at({ email: "anna.loiko@softswiss.com", name: "Anna Loiko", company: "SOFTSWISS", verification: "valid" });
+  assert.deepEqual([refused.reason, refused.permanent], ["domain_refused", true], "a 5.7.x refuses even a confirmed address");
+  assert.equal((await at({ email: "anna.loiko@softswiss.com", name: "Anna Loiko", company: "SOFTSWISS" }, 1)).ok, true, "a follow-up is a conversation already under way");
+  assert.equal((await at({ email: "pavch@softgamings.com", name: "Pavel Chuchanov", company: "SoftGamings", verification: "catch_all" })).reason, "domain_guess_bounced");
+  assert.equal((await at({ email: "pavel@softgamings.com", name: "Pavel Chuchanov", company: "SoftGamings", verification: "valid" })).ok, true, "the check confirmed this one");
+  assert.equal((await at({ email: "olena@gmail.com", name: "Olena", company: "Northwind" })).ok, true);
+  const other = await at({ email: "michael.noble@williamhill.com", name: "Georgia Mooney", company: "William Hill", verification: "catch_all" });
+  assert.deepEqual([other.reason, other.permanent], ["another_person", true]);
+  for (const lead of [
+    { email: "michael.noble@williamhill.com", name: "Georgia Mooney", company: "William Hill", verification: "valid" },
+    { email: "g.mooney@williamhill.com", name: "Georgia Mooney", company: "William Hill", verification: "catch_all" },
+    { email: "bob.mooney@williamhill.com", name: "Robert Mooney", company: "William Hill", verification: "catch_all" },
+    { email: "sales.team@williamhill.com", name: "Georgia Mooney", company: "William Hill", verification: "catch_all" },
+    { email: "david.williams@rank.com", name: "the rank group plc", company: "the rank group plc", verification: "catch_all" },
+    { email: "alexandra.mccleary@sanmanuel-nsn.gov", name: "san manuel band of mission indians", company: "San Manuel", verification: "catch_all" }
+  ]) assert.equal((await at(lead)).ok, true, lead.email);
 });
 
 test("MX: Google — так; інше — ні; DNS без відповіді — «невідомо», і таке не запам'ятовується", async () => {

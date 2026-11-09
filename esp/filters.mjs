@@ -1,6 +1,6 @@
 import { resolveMx } from "node:dns/promises";
 
-import { recentContactBlocks } from "./company.mjs";
+import { isFreeMail, recentContactBlocks } from "./company.mjs";
 import { allEntries, append, contactKey, erasureKey } from "./journal.mjs";
 
 /**
@@ -197,6 +197,48 @@ export function foreignAddress(lead) {
   return !(words.some((word) => site.includes(word)) || site.includes(joined) || (site.length >= 4 && joined.includes(site)));
 }
 
+/**
+ * An address a check could not confirm that carries another person's name —
+ * artur.salnikov@softgamings.com for Camille Roux (09.11, 5.1.3). Only a
+ * name-shaped first part (two words: first.last, first_last) counts; a role
+ * mailbox or initials are left alone, and so is a lead with no person's name.
+ */
+export function anotherPersonsAddress(lead) {
+  const email = contactKey(lead?.email);
+  if (!email) return false;
+  const local = email.split("@")[0];
+  const parts = local.split(/[._-]/).filter(Boolean);
+  if (parts.length !== 2 || parts.some((part) => !/^[a-z]{3,}$/.test(part) || ROLE_LOCAL_PARTS.has(part))) return false;
+  // A person's name is two or three words; «san manuel band of mission indians» is an organisation.
+  if (plain(lead.name).split(" ").length > 3) return false;
+  const names = [lead.name, lead.firstName, lead.lastName].flatMap((value) => plain(value).split(" ")).filter((word) => word.length >= 3);
+  const company = plain(lead.company).replace(/ /g, "");
+  if (!names.length || (company && names.join("").includes(company)) || (company && company.includes(names.join("")))) return false;
+  const joined = parts.join("");
+  return !names.some((word) => joined.includes(word) || parts.some((part) => word.startsWith(part) || part.startsWith(word)));
+}
+
+/**
+ * 09.11, «щоб зменшити кількість баунсів»: what a company's bounce says about
+ * its other people. A 5.7.x is its gateway refusing our letters — the next one
+ * there is refused too. A 5.1.x is an address that does not exist; the lists
+ * guess a company's addresses one way, so its other unconfirmed guesses are as
+ * wrong. Free mail is not a company.
+ */
+export function bouncedDomains(entries) {
+  const domains = new Map();
+  for (const entry of entries) {
+    if (entry.type !== "message.bounced") continue;
+    const code = String(entry.data?.code || "");
+    const domain = String(entry.contact || "").split("@")[1];
+    if (!domain || isFreeMail(domain) || !/^5\.[17]\./.test(code)) continue;
+    const row = domains.get(domain) || {};
+    row[code.startsWith("5.7.") ? "refused" : "missing"] = { code, contact: entry.contact };
+    domains.set(domain, row);
+  }
+  return domains;
+}
+
 const dayMs = 24 * 60 * 60 * 1000;
 const validDate = (value) => /^\d{4}-\d{2}-\d{2}/.test(String(value ?? "")) && !Number.isNaN(Date.parse(value));
 
@@ -204,7 +246,7 @@ const validDate = (value) => /^\d{4}-\d{2}-\d{2}/.test(String(value ?? "")) && !
  * One lead, against everything. `context` carries what is read once per pass:
  * the exclusions, the excluded countries and DNS.
  */
-export async function checkLead(lead, { exclusions: excluded, countries, recontact = null, dns, now = new Date(), step = 0 } = {}) {
+export async function checkLead(lead, { exclusions: excluded, countries, recontact = null, domainBounces = null, dns, now = new Date(), step = 0 } = {}) {
   const email = contactKey(lead?.email);
   const no = (reason, detail = "", extra = {}) => ({ ok: false, reason, detail, permanent: false, needsRecheck: false, ...extra });
   if (!email) return no("not_an_email", "", { permanent: true });
@@ -242,6 +284,15 @@ export async function checkLead(lead, { exclusions: excluded, countries, reconta
   const status = String(lead.verification ?? "").trim().toLowerCase();
   if (status === "invalid") return no("invalid", "", { permanent: true });
   if (foreignAddress(lead)) return no("foreign_address", `${email} — ні ім'я, ні компанія (${lead.company}) не збігаються з поштою`, { permanent: true });
+  // 09.11: a first letter only — whoever got one without a bounce is a real mailbox.
+  if (step === 0) {
+    const bounced = domainBounces?.get(domain);
+    if (bounced?.refused) return no("domain_refused", `${domain} відхилив наш лист (${bounced.refused.code}, ${bounced.refused.contact})`, { permanent: true });
+    if (status !== "valid") {
+      if (bounced?.missing) return no("domain_guess_bounced", `${bounced.missing.contact} не існує (${bounced.missing.code}) — інші непідтверджені адреси ${domain} вгадані так само`, { permanent: true });
+      if (anotherPersonsAddress(lead)) return no("another_person", `${email} — інша людина, не ${lead.name}, а перевірка не підтвердила адресу`, { permanent: true });
+    }
+  }
 
   return { ok: true, reason: null, detail: "", permanent: false, needsRecheck: false };
 }
@@ -249,7 +300,7 @@ export async function checkLead(lead, { exclusions: excluded, countries, reconta
 /** What is read once for a whole pass, so a hundred leads do not fold the journal a hundred times. */
 export async function filterContext({ entries = null, dns, now = new Date() } = {}) {
   const all = entries ?? await allEntries();
-  return { exclusions: await exclusions(all), countries: await excludedCountries(all), recontact: recentContactBlocks(all, { now }), dns, now };
+  return { exclusions: await exclusions(all), countries: await excludedCountries(all), recontact: recentContactBlocks(all, { now }), domainBounces: bouncedDomains(all), dns, now };
 }
 
 /** Words for each reason, for the screen and the journal. */
@@ -269,6 +320,9 @@ export const SKIP_REASON_LABEL = {
   catch_all: "catch-all домен",
   invalid: "адреса недійсна",
   foreign_address: "пошта чужа — не збігається ні з ім'ям, ні з компанією",
+  domain_refused: "компанія відхиляє наші листи (5.7.x)",
+  domain_guess_bounced: "у компанії вже відбилась вгадана адреса",
+  another_person: "адреса іншої людини, не підтверджена",
   not_verified: "не перевірена — на повторну перевірку",
   verification_stale: "перевірка старша 30 днів — на повторну перевірку",
   mx_unknown: "DNS не відповів",
