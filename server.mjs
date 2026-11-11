@@ -10,7 +10,7 @@ import { CHANNEL_RULES, LANGUAGES, buildFallbackDrafts, draftsPromptPayload, nor
 import { invalidateContactCaches, contactAsProspect, contactsConfigured, contactsMissingConfig, crmKeyKind, folderContactAt, listContactFolders, listFolderContacts, searchFolderContacts, readContact, supabaseKeyKind } from "./contacts/store.mjs";
 import { handleKnowledgeLibraryApi } from "./knowledge/api.mjs";
 import { handlePitchApi } from "./knowledge/pitch-api.mjs";
-import { handleTodayApi, todayList, reconcileSoon, setCapacityStore, setInboxLabelReader, setLeadgenStore, setNewContactPolicyStore, setPingStepsStore, startPingReconciler } from "./triage/today.mjs";
+import { handleTodayApi, todayList, reconcileSoon, setCapacityStore, setReplyHoldStore, setInboxLabelReader, setLeadgenStore, setNewContactPolicyStore, setPingStepsStore, startPingReconciler } from "./triage/today.mjs";
 import { setActivityAuthor } from "./warmup/activities.mjs";
 import { campaignsByContact, handleLeadCampaignApi, leadCampaigns, setCampaignSkipStore, setLeadCampaignStore } from "./triage/lead-campaigns.mjs";
 import { handleCampaignReportApi, setReportStores, startReplyLabeler } from "./triage/campaign-report.mjs";
@@ -323,6 +323,7 @@ const state = {
   pingCapacity: {},
   // Кроки нагадувань тим, хто мовчить (власник 20.10); null — за замовчуванням [2, 3, 5, 7].
   pingSteps: null,
+  pingReplyHold: {},
   // Мітки відповідей у звіті кампаній (етап 6/6): { contactId: { label, by: ai|human, basis, at } }.
   replyLabels: {},
   // «Вхідні» LinkedIn: мітка AI (чи людини) кожної розмови — warmup/inbox-labels.mjs (20.10).
@@ -829,6 +830,13 @@ server.listen(port, listenHost, () => {
     read: () => state.pingCapacity || {},
     async write(value) {
       state.pingCapacity = value;
+      await writePersistentWorkspaceState();
+    }
+  });
+  setReplyHoldStore({
+    read: () => state.pingReplyHold || {},
+    async write(value) {
+      state.pingReplyHold = value;
       await writePersistentWorkspaceState();
     }
   });
@@ -5635,6 +5643,9 @@ function applyPersistentWorkspaceState(saved = {}) {
   if (saved.pingCapacity && typeof saved.pingCapacity === "object" && !Array.isArray(saved.pingCapacity)) {
     state.pingCapacity = saved.pingCapacity;
   }
+  if (saved.pingReplyHold && typeof saved.pingReplyHold === "object" && !Array.isArray(saved.pingReplyHold)) {
+    state.pingReplyHold = saved.pingReplyHold;
+  }
   // Один список (до 04.11) — кроки теплих; `{ cold, warm }` — обидва набори (таск fca90a3a).
   if (Array.isArray(saved.pingSteps) || (saved.pingSteps && typeof saved.pingSteps === "object")) {
     state.pingSteps = saved.pingSteps;
@@ -5920,6 +5931,7 @@ async function writeWorkspaceStateNow() {
       accountLeadgens: state.accountLeadgens,
       newContactPolicy: state.newContactPolicy,
       pingCapacity: state.pingCapacity,
+      pingReplyHold: state.pingReplyHold,
       pingSteps: state.pingSteps,
       replyLabels: state.replyLabels,
       inboxLabels: state.inboxLabels,

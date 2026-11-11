@@ -8,7 +8,9 @@
 //   · «Нові, коли є розмови» (адмін)  → /api/today/new-contact-policy: скільки нових
 //     контактів лідген бере з конвеєра, поки в нього є відповіді чи прострочені пінги.
 //   · «Пінгів на день» (адмін)        → /api/today/capacity: денна ємність лідгена; звірка
-//     розкладає «перші повідомлення» й нагадування так, щоб жоден робочий день її не перевищив.
+//     розкладає «перші повідомлення» й нагадування так, щоб жоден робочий день її не перевищив;
+//     прапорець «Відповіді займають місце» (таск ac8b350a): нерозібрана відповідь тримає
+//     одиницю ємності щодня, доки її не розберуть. Вмикати після розбору беклогу лідгена.
 //
 // Не тут і більше: вибір моделі, діаграми витрат і часу. У застосунку не лишилось
 // нічого, що кликало б модель, тож вибирати було нічого, а витрати стояли б на
@@ -38,7 +40,7 @@ const ROLE_LABEL = { admin: "Адміністратор", seller: "Продав�
 const POLICY_LABEL = { gate: "Ні — спершу розмови", limit: "До N на день", open: "Без обмеження" };
 let contactPolicies = {};
 /** Денна ємність лідгенів: { capacity: { email: n }, defaultCapacity }. */
-let pingCapacity = { capacity: {}, defaultCapacity: 30 };
+let pingCapacity = { capacity: {}, replyHold: {}, defaultCapacity: 30 };
 
 /**
  * Ім'я, тільки якщо воно ім'я. Уламок адреси ним не є: «pavlo.work.101» над
@@ -121,7 +123,25 @@ function capacityHtml(email) {
   return `<label class="team-policy" title="Скільки пінгів лідген встигає за робочий день. «Перші повідомлення» й нагадування понад це переходять на наступні робочі дні; відповіді й дзвінки — ні.">
     <span>Пінгів на день</span>
     <span class="team-policy-row"><input type="number" min="5" max="200" step="1" value="${escapeAttr(value)}" data-capacity-email="${escapeAttr(key)}" aria-label="Пінгів на день"></span>
+  </label>
+  <label class="team-policy team-hold" title="Відповідь, яку лідген ще не розібрав, займає місце в його дні, доки не розбере: відповісти, «Не лід» чи перенести. Вмикати після разового розбору старих відповідей, інакше нагадування стануть на кілька днів.">
+    <span>Відповіді займають місце</span>
+    <span class="team-policy-row"><input type="checkbox" data-hold-email="${escapeAttr(key)}"${pingCapacity.replyHold?.[key] ? " checked" : ""} aria-label="Нерозібрані відповіді займають місце в дні"></span>
   </label>`;
+}
+
+async function saveReplyHold(email, replyHold) {
+  let note;
+  try {
+    pingCapacity = await api("/api/today/capacity", { method: "POST", body: JSON.stringify({ email, replyHold }) });
+    note = replyHold
+      ? `${email}: нерозібрані відповіді тепер займають місце в дні; нагадування понад ємність звірка перенесе далі.`
+      : `${email}: відповіді більше не займають місце, день наповнюється до ємності як раніше.`;
+  } catch (error) {
+    note = error.message || "Не вдалося зберегти.";
+  }
+  await loadTeamDirectory();
+  setText("teamUserNote", note);
 }
 
 async function saveCapacity(email, capacity) {
@@ -179,7 +199,7 @@ async function loadTeamDirectory() {
     const [directory, policy, capacity] = await Promise.all([
       api("/api/account/directory"),
       api("/api/today/new-contact-policy").catch(() => ({ policies: {} })),
-      api("/api/today/capacity").catch(() => ({ capacity: {}, defaultCapacity: 30 }))
+      api("/api/today/capacity").catch(() => ({ capacity: {}, replyHold: {}, defaultCapacity: 30 }))
     ]);
     contactPolicies = policy.policies || {};
     pingCapacity = capacity;
@@ -234,6 +254,8 @@ async function removeTeamUser(button) {
 document.getElementById("teamUserList")?.addEventListener("change", async (event) => {
   const capacity = event.target.closest("[data-capacity-email]");
   if (capacity?.dataset?.capacityEmail) return void saveCapacity(capacity.dataset.capacityEmail, Number(capacity.value));
+  const hold = event.target.closest("[data-hold-email]");
+  if (hold?.dataset?.holdEmail) return void saveReplyHold(hold.dataset.holdEmail, hold.checked);
   const policy = event.target.closest("[data-policy-email]");
   const limit = event.target.closest("[data-policy-limit]");
   const email = policy?.dataset?.policyEmail || limit?.dataset?.policyLimit;

@@ -19,7 +19,7 @@ import { CLOSING, DEFAULT_EXIT, EXIT_REASONS, LEAD_STATUSES, NOT_RELEVANT_FOLDER
 import {
   DEFAULT_COLD_PING_STEPS, DEFAULT_PING_STEPS, LATER_DAYS, PING_QUEUE, REASONS, blockOf, compareItems, currentPingSteps, dayIn, desiredPing, isPingSteps, laterPing, manualDueDay, ownCampaignSteps, usePingSteps,
   REPLIED_STATUS, leadReplied, newContactsAllowed, planPingChanges, reasonOfKey, repliedStatusDue, stripMarks, taskDescription, taskMarks, taskReason, zonedIso,
-  DEFAULT_CAPACITY, addCalendarDays, cleanCapacity, levelPings, loadAhead, workday
+  DEFAULT_CAPACITY, addCalendarDays, cleanCapacity, heldReply, levelPings, loadAhead, workday
 } from "./pings.mjs";
 
 const TASK_COLUMNS = "id,title,description,contact_id,owner_id,assigned_to,due_date,completed,status,task_type,queue,created_at,updated_at,ping_key,ping_superseded";
@@ -72,6 +72,14 @@ export function setCapacityStore(store) {
   if (store?.read && store?.write) capacityStore = store;
 }
 const capacityOf = (email) => cleanCapacity(capacityStore.read()[String(email || "").toLowerCase()] ?? DEFAULT_CAPACITY);
+
+// «Відповіді займають місце» (таск ac8b350a, варіант А): { email: true }. Вмикає адміністратор
+// для лідгена після разового розбору його беклогу відповідей; без запису як раніше.
+let replyHoldStore = { read: () => ({}), write: async () => {} };
+export function setReplyHoldStore(store) {
+  if (store?.read && store?.write) replyHoldStore = store;
+}
+const replyHoldOf = (email) => replyHoldStore.read()[String(email || "").toLowerCase()] === true;
 
 /** «Не лід» (таск cdfe0440): статус CRM «Не ICP» і підстава — нотаткою в історії контакту. */
 export const NOT_LEAD_BASES = [
@@ -454,7 +462,7 @@ export async function levelOpenPings({ now = new Date() } = {}) {
   const updatedAt = now.toISOString();
   let moved = 0;
   for (const [assignee, tasks] of byAssignee) {
-    const changes = levelPings(tasks, { today, capacity: capacityOf(emails.get(assignee)) });
+    const changes = levelPings(tasks, { today, capacity: capacityOf(emails.get(assignee)), holdReplies: replyHoldOf(emails.get(assignee)) });
     movedToday.set(assignee, { count: changes.filter((change) => change.from <= today && change.due > today).length, at: updatedAt });
     const byDay = new Map();
     for (const change of changes) byDay.set(change.due, [...(byDay.get(change.due) || []), change.task.id]);
@@ -582,9 +590,12 @@ export async function todayList({ viewerId, viewerEmail = "", scope = "mine", no
   const mine = scope !== "all";
   const capacity = mine ? capacityOf(emails.get(viewerId) || viewerEmail) : assignees.reduce((sum, id) => sum + capacityOf(emails.get(id)), 0);
   const moved = mine ? movedToday.get(viewerId)?.count || 0 : assignees.reduce((sum, id) => sum + (movedToday.get(id)?.count || 0), 0);
+  // Прострочена відповідь, що тримає місце (таск ac8b350a), рахується в сьогоднішнє навантаження.
+  const holding = new Set(open.filter((task) => heldReply(task) && replyHoldOf(emails.get(task.assigned_to))).map((task) => task.id));
+  const loadDays = items.map((item) => (item.dueDay && item.dueDay < today && holding.has(item.pingId) ? today : item.dueDay)).filter((day) => day && day >= today);
   return {
     configured: true, today, scope, blocks, later,
-    load: { capacity, days: loadAhead(items.map((item) => item.dueDay).filter((day) => day && day >= today), { today }), moved },
+    load: { capacity, days: loadAhead(loadDays, { today }), moved },
     notLeadBases: NOT_LEAD_BASES, backlogDays: BACKLOG_DAYS,
     newContactsAllowed: newContactsAllowed(blocks),
     statuses: LEAD_STATUSES, exitReasons: EXIT_REASONS, closing: [...CLOSING], defaultExit: DEFAULT_EXIT,
@@ -952,7 +963,7 @@ export async function handleTodayApi({ request, response, url, sendJson, readJso
     // Денна ємність лідгена (таск cdfe0440): бачить і змінює адміністратор (Налаштування → Команда).
     if (request.method === "GET" && path === "/api/today/capacity") {
       if (!isAdmin) throw refuse("Ємність лідгенів бачить і змінює адміністратор.", 403);
-      sendJson(response, 200, { capacity: capacityStore.read(), defaultCapacity: DEFAULT_CAPACITY });
+      sendJson(response, 200, { capacity: capacityStore.read(), replyHold: replyHoldStore.read(), defaultCapacity: DEFAULT_CAPACITY });
       return true;
     }
     if (request.method === "POST" && path === "/api/today/capacity") {
@@ -961,12 +972,20 @@ export async function handleTodayApi({ request, response, url, sendJson, readJso
       const email = String(body?.email || "").trim().toLowerCase();
       if (!/^[^@\s]+@[^@\s]+$/.test(email)) throw refuse("Потрібна пошта лідгена.", 400);
       const next = { ...capacityStore.read() };
-      const value = cleanCapacity(body?.capacity);
-      if (value === DEFAULT_CAPACITY) delete next[email];
-      else next[email] = value;
-      await capacityStore.write(next);
+      if (body?.capacity !== undefined) {
+        const value = cleanCapacity(body.capacity);
+        if (value === DEFAULT_CAPACITY) delete next[email];
+        else next[email] = value;
+        await capacityStore.write(next);
+      }
+      const hold = { ...replyHoldStore.read() };
+      if (typeof body?.replyHold === "boolean") {
+        if (body.replyHold) hold[email] = true;
+        else delete hold[email];
+        await replyHoldStore.write(hold);
+      }
       reconcileSoon(500);
-      sendJson(response, 200, { capacity: next, defaultCapacity: DEFAULT_CAPACITY });
+      sendJson(response, 200, { capacity: next, replyHold: hold, defaultCapacity: DEFAULT_CAPACITY });
       return true;
     }
     if (request.method === "POST" && path === "/api/today/not-lead") {

@@ -521,3 +521,36 @@ test("лист від LinkedIn Team не стає «Відповіддю», а �
   assert.equal(openOf("c1").length, 0, "системний лист — не розмова");
   assert.equal((await todayList({ viewerId: "u-bohdan" })).blocks.replies.length, 0);
 });
+
+// Таск ac8b350a: нерозібрана прострочена відповідь займає місце в дні лідгена (варіант А).
+import { setReplyHoldStore } from "../triage/today.mjs";
+
+test("прострочені відповіді Богдана тримають місце: звірка лишає на сьогодні лише решту ємності", async () => {
+  rows.wl_events = [];
+  const today = dayIn(new Date());
+  const past = new Date(Date.now() - 3 * 86400000).toISOString();
+  const task = (id, key, extra = {}) => ({ id, queue: "Outbound", contact_id: id, assigned_to: "u-bohdan", owner_id: "u-bohdan", completed: false, task_type: "To-do", ping_key: key, due_date: past, created_at: ago(9000), ...extra });
+  const build = () => [
+    ...Array.from({ length: 4 }, (_, index) => task(`hr${index}`, `reply:hr${index}:x`)),
+    ...Array.from({ length: 15 }, (_, index) => task(`hs${index}`, `silent:hs${index}:none:1`))
+  ];
+  const onToday = () => rows.tasks.filter((row) => !row.ping_key.startsWith("reply:") && dayIn(row.due_date) === workday(today)).length;
+  setCapacityStore({ read: () => ({ "bohdan@example.com": 10 }), write: async () => {} });
+  try {
+    rows.tasks = build();
+    setReplyHoldStore({ read: () => ({}), write: async () => {} });
+    await reconcilePings();
+    assert.equal(onToday(), 10, "без прапорця: як раніше, до ємності");
+    rows.tasks = build();
+    setReplyHoldStore({ read: () => ({ "bohdan@example.com": true }), write: async () => {} });
+    await reconcilePings();
+    assert.equal(onToday(), 6, "4 нерозібрані відповіді займають 4 з 10");
+    assert.ok(rows.tasks.filter((row) => row.ping_key.startsWith("reply:")).every((row) => dayIn(row.due_date) === workday(dayIn(past))), "відповіді не рухаються (лише з вихідного на понеділок)");
+    const list = await todayList({ viewerId: "u-bohdan", viewerEmail: "bohdan@example.com" });
+    if (workday(today) === today) assert.equal(list.load.days[0].count, 10, "шапка: 4 відповіді + 6 нагадувань з 10");
+    assert.equal(list.blocks.replies.length, 4);
+  } finally {
+    setCapacityStore({ read: () => ({}), write: async () => {} });
+    setReplyHoldStore({ read: () => ({}), write: async () => {} });
+  }
+});

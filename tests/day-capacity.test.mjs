@@ -110,3 +110,50 @@ test("системні відправники LinkedIn — не розмова: 
   const real = { ...welcome, threadKey: "t-1", participant: { name: "Jane Doe", slug: "jane-doe", memberProfile: true }, lastStoredAt: "2026-11-02T09:00:00Z", lastInboundStoredAt: "2026-11-02T09:00:00Z" };
   assert.equal(desiredPing("c1", { threads: [welcome, real], pending: [], accepted: null }, { now }).threadKey, "t-1", "розмова з людиною — та, на яку відповідаємо");
 });
+
+/* ── Таск ac8b350a: нерозібрана відповідь займає місце в дні (варіант А) ──── */
+
+const YESTERDAY = "2026-11-02";
+
+test("Богдан: 12 відповідей чекають з учора, ємність 30 → на сьогодні не більше 18 перших і нагадувань", () => {
+  const tasks = [
+    ...Array.from({ length: 12 }, (_, index) => ping(`reply:h${index}:${YESTERDAY}`, YESTERDAY)),
+    ...Array.from({ length: 20 }, (_, index) => ping(`first:hf${index}:o${index}`, TODAY)),
+    ...Array.from({ length: 20 }, (_, index) => ping(`silent:hs${index}:none:1`, TODAY))
+  ];
+  const placed = after(tasks, levelPings(tasks, { today: TODAY, capacity: 30, holdReplies: true }));
+  const todayMovable = placed.filter(({ task, day }) => day === TODAY && !task.ping_key.startsWith("reply:"));
+  assert.equal(todayMovable.length, 18);
+  assert.equal(todayMovable.filter(({ task }) => task.ping_key.startsWith("first:")).length, 18, "першими йдуть перші повідомлення");
+  assert.ok(placed.filter(({ task }) => task.ping_key.startsWith("reply:")).every(({ day }) => day === YESTERDAY), "відповіді не рухаються");
+  // Наступного дня відповіді, якщо не розібрані, знову займають місце.
+  const settled = placed.map(({ task, day }) => ({ ...task, due_date: zonedIso(day) }));
+  const tomorrow = addWorkingDays(TODAY, 1);
+  const next = after(settled, levelPings(settled, { today: tomorrow, capacity: 30, holdReplies: true }));
+  assert.equal(next.filter(({ task, day }) => day === tomorrow && !task.ping_key.startsWith("reply:")).length, 18);
+});
+
+test("прострочених відповідей немає → день наповнюється до 30, як раніше", () => {
+  const tasks = Array.from({ length: 40 }, (_, index) => ping(`silent:e${index}:none:1`, TODAY));
+  const placed = after(tasks, levelPings(tasks, { today: TODAY, capacity: 30, holdReplies: true }));
+  assert.equal(placed.filter(({ day }) => day === TODAY).length, 30);
+});
+
+test("без прапорця нічого не змінюється; прострочені дзвінки й ручні ємності не займають", () => {
+  const tasks = [
+    ...Array.from({ length: 12 }, (_, index) => ping(`reply:n${index}:${YESTERDAY}`, YESTERDAY)),
+    ping(`silent:call:none:1`, YESTERDAY, { task_type: "Call" }),
+    ping("manual:2026-10-30T00:00:00Z", YESTERDAY),
+    ...Array.from({ length: 40 }, (_, index) => ping(`silent:n${index}:none:1`, TODAY))
+  ];
+  const off = after(tasks, levelPings(tasks, { today: TODAY, capacity: 30 }));
+  assert.equal(off.filter(({ day }) => day === TODAY).length, 30);
+  const onlyFixed = tasks.filter((task) => !task.ping_key.startsWith("reply:"));
+  const on = after(onlyFixed, levelPings(onlyFixed, { today: TODAY, capacity: 30, holdReplies: true }));
+  assert.equal(on.filter(({ day }) => day === TODAY).length, 30, "дзвінок і ручний з учора місця не тримають");
+});
+
+test("порядок блоків: Відповіді, Перші повідомлення, Нагадування", async () => {
+  const { BLOCK_ORDER } = await import("../triage/pings.mjs");
+  assert.deepEqual(BLOCK_ORDER, ["replies", "first", "overdue", "today"]);
+});

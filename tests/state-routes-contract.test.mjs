@@ -116,6 +116,7 @@ const SAVED_AS = {
   accountLeadgens: "accountLeadgens",
   newContactPolicy: "newContactPolicy",
   pingCapacity: "pingCapacity",
+  pingReplyHold: "pingReplyHold",
   pingSteps: "pingSteps",
   replyLabels: "replyLabels",
   inboxLabels: "inboxLabels",

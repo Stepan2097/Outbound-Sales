@@ -373,7 +373,9 @@ export function blockOf({ reason, dueDay, awaitingUs, dialog = reason !== "first
   return "today";
 }
 
-export const BLOCK_ORDER = ["replies", "overdue", "today", "first"];
+// Порядок за цінністю (таск ac8b350a, Марко 03.11): Відповіді, Перші повідомлення, далі
+// нагадування (прострочені й на сьогодні).
+export const BLOCK_ORDER = ["replies", "first", "overdue", "today"];
 
 /** Порядок у блоці: давніші перші — те, що чекає довше, іде вище. */
 export function compareItems(left, right) {
@@ -469,6 +471,11 @@ export function moveRank(task) {
   return null;
 }
 
+/** Відповідь ліда, що чекає нас (не дзвінок): лише вона тримає місце в дні після своєї дати. */
+export function heldReply(task) {
+  return task.task_type !== "Call" && taskReason(task) === "reply";
+}
+
 /**
  * Нові дати відкритих пінгів одного лідгена: жоден робочий день від сьогодні не має
  * більше `capacity`, вихідних дат немає.
@@ -478,10 +485,12 @@ export function moveRank(task) {
  * прострочені хочуть сьогодні. Кожен день заповнюється за чергою: «перше повідомлення»,
  * далі «мовчить»; усередині — хто довше чекає. Надлишок переходить на наступний робочий день.
  * Прострочені нерухомі ємності дня не займають: це бекліг, його розбирають окремо.
+ * З `holdReplies` (таск ac8b350a, варіант А) нерозібрана прострочена відповідь займає
+ * одиницю ємності сьогодні, щодня, доки її не розберуть; прострочені дзвінки й ручні, як раніше.
  *
  * Повертає `[{ task, from, due }]` — лише ті, чия дата змінюється.
  */
-export function levelPings(tasks, { today, capacity = DEFAULT_CAPACITY }) {
+export function levelPings(tasks, { today, capacity = DEFAULT_CAPACITY, holdReplies = false }) {
   const limit = cleanCapacity(capacity);
   const start = workday(today);
   const changes = [];
@@ -497,6 +506,7 @@ export function levelPings(tasks, { today, capacity = DEFAULT_CAPACITY }) {
       const due = workday(from);
       if (due !== from) changes.push({ task, from, due });
       if (due >= start) fixed.set(due, (fixed.get(due) || 0) + 1);
+      else if (holdReplies && heldReply(task)) fixed.set(start, (fixed.get(start) || 0) + 1);
       continue;
     }
     movable.push({ task, from, want: from < start ? start : workday(from), rank });
