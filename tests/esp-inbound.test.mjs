@@ -269,3 +269,25 @@ test("Gmail: a letter deleted before it was read (404) is skipped — the rest o
   const read = await gmail.inboxSince("a@x.com", "100");
   assert.deepEqual([read.messages.map((message) => message.id), read.cursor], [["m1"], "200"]);
 });
+
+test("12.11: a help desk's receipt is an auto-reply, not an answer — in its language, and as HTML without its CSS", () => {
+  const mail = (from, body, type = "text/plain") => Buffer.from(`From: Desk <${from}>\r\nSubject: Re: in-app after Moloco\r\nContent-Type: ${type}; charset=utf-8\r\n\r\n${body}`).toString("latin1");
+  const kind = (from, body, type) => classifyInbound(mail(from, body, type), { mailbox: ANNA }).kind;
+  for (const [from, body] of [
+    ["kundtjanst@lyllocasino.com", "Hej Freja! Vi på Lyllo's kundtjänst har mottagit din fråga och kommer besvara den så snabbt vi kan."],
+    ["kontakt@comeon.pl", "Witaj Lukas,\r\n\r\nDziękujemy za kontakt z nami!\r\n\r\nTwoja wiadomość została przekazana do naszych konsultantów."],
+    ["payments-support@paripesa.com", "Good day! We are here to help you in the best way possible. So how can we help you today? Please describe your problem in details"],
+    ["support@betmaster.co.uk", "Hello, Thank you for contacting Betmaster. To ensure your account’s security and comply with regulatory requirements, we kindly ask you to complete a quick verification"],
+    ["help@desk.com", "Thank you for your email. We have received your request and a ticket has been created."]
+  ]) assert.equal(kind(from, body), "autoreply", from);
+  const html = classifyInbound(mail("support@sportsbroker.com", "<html><head><style>#outlook a{ padding: 0; } body{ font-weight: 400; }</style></head><body><!-- x --><p>#40227470: in-app after Moloco</p><p>Submitted</p><p>We&#39;ll pick up your ticket soon</p></body></html>", "text/html"), { mailbox: ANNA });
+  assert.equal(html.kind, "autoreply");
+  assert.doesNotMatch(html.text, /padding|outlook/);
+  assert.match(html.text, /We'll pick up your ticket soon/);
+  for (const [from, body] of [
+    ["michael@arc.org.mt", "Hello, I believe you have sent this email to the wrong organization Regards"],
+    ["mehedi@doppcall.com", "Hi Camille, Thanks for reaching out. To be honest, this isn't my area of expertise."],
+    ["partner@gamzix.com", "Hi Tomás, Thank you for reaching out! Gamzix is a B2B game provider focused on developing and supplying our own games to operators."],
+    ["jo@northwind.com", "Thanks, got your note — I'll get back to you shortly with the numbers."]
+  ]) assert.equal(kind(from, body), "reply", from);
+});

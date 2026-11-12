@@ -26,6 +26,24 @@ import { classifyReply } from "./replies.mjs";
 
 const AUTO_SUBJECT = /(?<!\p{L})(out of (the )?office|automatic reply|auto[- ]?reply|autoreply|auto:|away from (the )?office|on vacation|on holiday|abwesenheit|automatische antwort|fuera de la oficina|respuesta autom[aá]tica|ausente|resposta autom[aá]tica|aus[eê]ncia|r[ée]ponse automatique|absence|absent|niedost[eę]pno[sś][cć]|automatyczna odpowied[zź]|відсутн|автоматична відповідь|автоответ|отсутств)/iu;
 const AUTO_TEXT = /\b(i am|i'm) (currently )?(out of (the )?office|on (annual )?leave|away|on vacation|travelling|traveling)\b|limited access to (my )?e-?mail|will (be back|return) on|i will respond (to your (e-?mail|message) )?(upon|when i) return|ich bin (bis|ab)|estoy fuera|я у відпустці|я в отпуске|nie ma mnie w biurze/i;
+// 12.11, «фільтр який відсортовує автоматичні відповіді погано працює»: 7 of the 11
+// «replies» were a help desk's receipt — no Auto-Submitted header, no «out of office»,
+// just «we have received your request» in a dozen languages. Only phrases a person
+// does not write back to a cold letter.
+const DESK_TEXT = new RegExp([
+  "(we|we've|we have) (have )?(received|got) your (request|message|e-?mail|inquiry|enquiry|query|question|ticket)",
+  "your (request|ticket|message|e-?mail|enquiry|inquiry|query) (has been|was|is being) (received|created|logged|forwarded|submitted|registered)",
+  "(a |new )?ticket (number|no\\.?|#|id)", "ticket has been (created|opened|received)", "your ticket", "#\\d{5,}\\s*:",
+  "this is an automated (message|response|reply|e-?mail|notification)", "(please )?do not reply to this (e-?mail|message)",
+  "how can we help you today", "describe your (problem|issue|request) in detail", "to ensure your account.{0,3}s security",
+  "complete a (quick |short )?(identity |account )?verification", "(is|am) no longer (with|at|working (at|for|with))",
+  "har (mottagit|tagit emot) (din|ditt|er|ert)", "vi har (mottatt|modtaget) (din|ditt|jeres)", "ditt ärende",
+  "wiadomość została przekazana", "dziękujemy za (kontakt|wiadomość)", "otrzymaliśmy (twoją|pana|pani|państwa) wiadomość",
+  "wir haben ihre (nachricht|anfrage|e-?mail) erhalten", "ihre anfrage (wurde|ist)",
+  "hemos recibido (tu|su) (mensaje|solicitud|correo|consulta)", "abbiamo ricevuto (la tua|il tuo|la sua|il suo)",
+  "nous avons (bien )?reçu votre (message|demande|e-?mail|courriel)", "recebemos (a sua|sua|o seu|seu) (mensagem|solicitação|pedido|e-?mail)",
+  "we hebben (je|uw) (bericht|vraag|e-?mail|verzoek) ontvangen", "olemme vastaanottaneet", "ми отримали ваш", "мы получили ваш"
+].join("|"), "iu");
 const BOUNCE_FROM = /mailer-daemon|postmaster|mail delivery (subsystem|system)|delivery status notification/i;
 const BOUNCE_SUBJECT = /delivery status notification|undeliver(able|ed)|returned mail|failure notice|mail delivery failed|delivery (has )?failed|non[- ]?delivery|message not delivered|nicht zustellbar|no entregado/i;
 // The whole of a short reply that means "leave me alone".
@@ -106,7 +124,8 @@ export function classifyInbound(raw, { mailbox, now = new Date() } = {}) {
   const auto = String(header(message.headers, "auto-submitted")).toLowerCase();
   const precedence = String(header(message.headers, "precedence")).toLowerCase();
   if ((auto && auto !== "no") || header(message.headers, "x-autoreply") || header(message.headers, "x-autorespond")
-    || /^(auto_reply|bulk|junk)$/.test(precedence) || AUTO_SUBJECT.test(subject) || AUTO_TEXT.test(text.slice(0, 600))) {
+    || /^(auto_reply|bulk|junk)$/.test(precedence) || AUTO_SUBJECT.test(subject) || AUTO_TEXT.test(text.slice(0, 600))
+    || DESK_TEXT.test(freshText(text).slice(0, 800)) || DESK_TEXT.test(subject)) {
     // Its words are kept, so the conversation shows what came back (05.11: «де текст цієї автовідповіді?»).
     return { ...base, kind: "autoreply", returnDate: returnDate(text, now), text: freshText(text).slice(0, 5000) };
   }

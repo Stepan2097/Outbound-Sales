@@ -100,7 +100,15 @@ export function plainText(message) {
   for (const part of walk(message)) if (part.type === "text/plain" && part.text) return part.text;
   for (const part of walk(message)) {
     if (part.type === "text/html" && part.text) {
-      return part.text.replace(/<(br|\/p|\/div)[^>]*>/gi, "\n").replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&");
+      // 12.11: a help desk's letter came in as its CSS («#outlook a{ padding: 0; }…») — what is
+      // inside <style>, <script>, <head> and comments is not text.
+      return part.text
+        .replace(/<!--[\s\S]*?-->/g, "")
+        .replace(/<(style|script|head|title)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, "")
+        .replace(/<(br|\/p|\/div|\/tr|\/li|\/h\d)[^>]*>/gi, "\n").replace(/<[^>]+>/g, "")
+        .replace(/&nbsp;/g, " ").replace(/&quot;/g, "\"").replace(/&#39;|&apos;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+        .replace(/&#(\d{2,5});/g, (whole, code) => String.fromCharCode(+code)).replace(/&amp;/g, "&")
+        .replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n");
     }
   }
   return "";
