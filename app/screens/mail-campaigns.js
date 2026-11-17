@@ -380,12 +380,12 @@ function draftName() {
 }
 
 /** Нова чернетка й одразу конструктор — як «Create from scratch» у Snov. */
-async function createCampaign({ steps = [], name = draftName(), letters = [], senders = [], spinMode = "all" } = {}) {
+async function createCampaign({ steps = [], name = draftName(), letters = [], senders = [], spinMode = "all", signature = null } = {}) {
   // A second click while the first is still creating made two identical drafts (12.10).
   if (page.creating) return;
   page.creating = true;
   await act(async () => {
-    const { campaign } = await api("/api/esp/campaigns", { method: "POST", body: JSON.stringify({ name, senders, spinMode }) });
+    const { campaign } = await api("/api/esp/campaigns", { method: "POST", body: JSON.stringify({ name, senders, spinMode, ...(signature ? { signature } : {}) }) });
     // Листи нової кампанії — її власні копії: правка тут не міняє ні шаблон, ні іншу кампанію.
     const own = [];
     for (const [index, letter] of letters.entries()) {
@@ -613,7 +613,6 @@ function sendingHtml(campaign) {
   const domainOf = (sender) => sender.email.split("@")[1] || "";
   const usable = (limits?.senders || []).filter((sender) => sender.status === "active" || campaign.senders.includes(sender.email))
     .sort((left, right) => domainOf(left).localeCompare(domainOf(right)) || left.email.localeCompare(right.email));
-  const signature = page.signature || {};
   const window_ = limits?.window || { startHour: 8, endHour: 17 };
   return `<section class="mc-step-page">
     <div class="mc-step-intro"><h2>Параметри відправки</h2><p>З яких пошт іде кампанія і як. Людина отримує весь ланцюжок з однієї пошти; нові люди розподіляються на найменш завантажену.</p></div>
@@ -643,20 +642,9 @@ function sendingHtml(campaign) {
         <li><i data-lucide="file-text"></i>Лише простий текст, посилання для відписки в один клік; без пікселів і переписаних посилань.</li>
       </ul>
     </div>
-    <form class="mc-signature" data-mc-form="signature">
-      <h3>Підпис під кожним листом</h3>
-      <div class="mc-signature-grid">
-        <input name="name" placeholder="Ім'я" value="${escapeAttr(signature.name || "")}" />
-        <input name="title" placeholder="Посада" value="${escapeAttr(signature.title || "")}" />
-        <input name="company" placeholder="Компанія" value="${escapeAttr(signature.company || "ADvantage")}" />
-        <input name="site" placeholder="Сайт" value="${escapeAttr(signature.site || "")}" />
-      </div>
-      <textarea name="usPostalAddress" rows="2" placeholder="Поштова адреса юрособи — додається лише для лідів зі США">${escapeHtml(signature.usPostalAddress || "")}</textarea>
-      <div class="mc-form-actions"><button type="submit" ${page.busy ? "disabled" : ""}><i data-lucide="pen-line"></i><span>Зберегти підпис</span></button><small class="mc-subtle">Підпис спільний для всіх кампаній, які не мають власного.</small></div>
-    </form>
     <form class="mc-signature" data-mc-form="campaign-signature">
-      <h3>Власний підпис цієї кампанії</h3>
-      <p class="mc-subtle">Коли кампанія пише від імені іншої компанії (наприклад, Stelemind), — її листи, відповіді в «Розмовах» і сторінка /privacy?c=… підписані тільки цим, без загального. Порожня «Компанія» — кампанія бере загальний підпис.</p>
+      <h3>Підпис під листами цієї кампанії</h3>
+      <p class="mc-subtle">Кожна кампанія підписана своїм підписом — ним же підписані відповіді в «Розмовах» і сторінка /privacy?c=…. Без «Компанії» кампанію не запустити.</p>
       <div class="mc-signature-grid">
         <input name="name" placeholder="Ім'я (без нього — ім'я пошти)" value="${escapeAttr(campaign.signature?.name || "")}" />
         <input name="title" placeholder="Посада" value="${escapeAttr(campaign.signature?.title || "")}" />
@@ -664,7 +652,7 @@ function sendingHtml(campaign) {
         <input name="site" placeholder="Сайт" value="${escapeAttr(campaign.signature?.site || "")}" />
       </div>
       <textarea name="usPostalAddress" rows="2" placeholder="Поштова адреса юрособи — додається лише для лідів зі США">${escapeHtml(campaign.signature?.usPostalAddress || "")}</textarea>
-      <div class="mc-form-actions"><button type="submit" ${page.busy || campaign.state === "done" ? "disabled" : ""}><i data-lucide="pen-line"></i><span>Зберегти підпис кампанії</span></button><small class="mc-subtle">${campaign.signature?.company ? `Листи цієї кампанії підписані «${escapeHtml(campaign.signature.company)}».` : "Зараз — загальний підпис."}</small></div>
+      <div class="mc-form-actions"><button type="submit" ${page.busy || campaign.state === "done" ? "disabled" : ""}><i data-lucide="pen-line"></i><span>Зберегти підпис кампанії</span></button><small class="mc-subtle">${campaign.signature?.company ? `Листи цієї кампанії підписані «${escapeHtml(campaign.signature.company)}».` : "Підпису ще немає — впишіть компанію."}</small></div>
     </form>
   </section>`;
 }
@@ -676,6 +664,7 @@ function reviewChecks(campaign) {
     [campaign.steps.length > 0 && campaign.steps.every((step) => templateOf(step.templateId)), "Кожен лист написаний і знайдений", "sequence"],
     [page.people.length > 0, page.people.length ? `${page.people.length} одержувачів` : "Немає одержувачів", "recipients"],
     [campaign.senders.length > 0, campaign.senders.length ? `Пошти: ${campaign.senders.join(", ")}` : "Не обрано пошт", "sending"],
+    [Boolean(String(campaign.signature?.company || "").trim()), campaign.signature?.company ? `Підпис: ${campaign.signature.company}` : "У підписі кампанії немає компанії — впишіть її в «Параметрах відправки»", "sending"],
     [!waitingSenders || campaign.senders.length > 0, waitingSenders ? `${waitingSenders} людей отримають пошту при запуску` : "Кожна людина має пошту", "sending"],
     [!page.halt?.on, page.halt?.on ? "Увімкнено «Стоп усе»" : "«Стоп усе» вимкнено", null],
     [page.sequenceOn, page.sequenceOn ? "Відправка на сервері увімкнена" : "Відправку на сервері вимкнено — кампанія стоятиме, доки її не ввімкнуть (ESP 11)", null]
@@ -684,7 +673,7 @@ function reviewChecks(campaign) {
 
 function reviewHtml(campaign) {
   const checks = reviewChecks(campaign);
-  const ready = checks.slice(0, 4).every(([ok]) => ok);
+  const ready = checks.slice(0, 5).every(([ok]) => ok);
   const sample = page.people.find((person) => person.email === page.sampleEmail);
   return `<section class="mc-step-page">
     <div class="mc-step-intro"><h2>Перевірка перед запуском</h2><p>Нічого не надсилається звідси: запуск лише дозволяє ланцюжку на сервері брати людей цієї кампанії у вікна відправки.</p></div>
@@ -1025,7 +1014,7 @@ async function archiveCampaigns(ids, archived) {
 async function copyCampaign(id) {
   const source = byId(id);
   const letters = source.steps.map((step) => templateOf(step.templateId)).filter(Boolean);
-  await createCampaign({ name: `${source.name} (копія)`, letters, steps: source.steps, senders: source.senders, spinMode: source.spinMode });
+  await createCampaign({ name: `${source.name} (копія)`, letters, steps: source.steps, senders: source.senders, spinMode: source.spinMode, signature: source.signature || null });
 }
 
 async function removeLetter(index) {
@@ -1258,11 +1247,7 @@ async function onSubmit(event) {
   }
   if (form.dataset.mcForm === "campaign-signature") {
     const data = Object.fromEntries(new FormData(form).entries());
-    return act(() => saveCampaign({ signature: String(data.company || "").trim() ? data : null }), { success: String(data.company || "").trim() ? "Підпис кампанії збережено." : "Кампанія знову бере загальний підпис." });
-  }
-  if (form.dataset.mcForm === "signature") {
-    const data = Object.fromEntries(new FormData(form).entries());
-    return act(() => api("/api/esp/signature", { method: "PUT", body: JSON.stringify(data) }), { success: "Підпис збережено — він під кожним листом усіх кампаній." });
+    return act(() => saveCampaign({ signature: String(data.company || "").trim() ? data : null }), { success: String(data.company || "").trim() ? "Підпис кампанії збережено." : "Підпис кампанії прибрано — без компанії її не запустити." });
   }
   return undefined;
 }

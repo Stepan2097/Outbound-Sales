@@ -332,6 +332,9 @@ test("the API: «стоп усе» needs a reason and is in force before it answ
   assert.equal(leads.payload.added, 1);
   assert.deepEqual(leads.payload.skipped, [{ email: "gone@example.com", reason: "unsubscribed" }]);
   assert.equal(leads.payload.rejected.length, 1);
+  // ab0fdf9c, owner 17.11: no company in the campaign's signature — not started.
+  assert.equal((await call("POST", "/campaigns/state", { id, state: "running" })).payload.code, "no_signature");
+  assert.equal((await call("PATCH", "/campaigns", { id, signature: { company: "ADvantage" } })).status, 200);
   assert.equal((await call("POST", "/campaigns/state", { id, state: "running" })).status, 200);
 
   const plan = await call("GET", "/campaigns/plan");
@@ -393,8 +396,33 @@ test("ab0fdf9c: a campaign with its own signature is signed only with it; a camp
   const operatorsText = Buffer.from(raw("boris@advantage-mail.com").split("\r\n\r\n").slice(1).join("\r\n\r\n"), "base64").toString("utf8") + raw("boris@advantage-mail.com");
   assert.match(operatorsText, /Boris Lis\r?\nPartnerships\r?\nADvantage\r?\nadvantage\.agency/);
 
+  await assert.rejects(w.campaigns.update(stelemind.id, { signature: { company: "" } }), /не лишити/, "a running campaign keeps a company in its signature");
+  await w.campaigns.setState(stelemind.id, "paused");
   const cleared = await w.campaigns.update(stelemind.id, { signature: { company: "" } });
-  assert.equal(cleared.signature, undefined, "an empty company is back to the workspace's signature");
+  assert.equal(cleared.signature, undefined, "a paused one may be left without, and is not started so");
   assert.equal((await w.campaigns.update(stelemind.id, { signature: { company: "Stelemind" } })).signature.company, "Stelemind", "and it may change after the chain began");
   assert.equal(w.campaigns.find(operators.id).signature, undefined, "the other campaign is untouched");
+});
+
+test("ab0fdf9c, owner 17.11: campaigns made before keep ADvantage's signature, once — their letters do not change by a character", async (t) => {
+  const { adoptWorkspaceSignature } = await import("../esp/campaigns.mjs");
+  const { DEFAULT_SIGNATURE } = await import("../esp/templates.mjs");
+  const workspace = { name: "Anna Koval", title: "Partnerships", company: "ADvantage", site: "advantage.agency" };
+  const before = [{ id: "ops", name: "Оператори", state: "paused" }, { id: "own", name: "Stelemind", signature: { company: "Stelemind" } }];
+  const after = adoptWorkspaceSignature(before, workspace, DEFAULT_SIGNATURE);
+  assert.deepEqual(after[0].signature, { ...DEFAULT_SIGNATURE, ...workspace });
+  assert.deepEqual(after[1], before[1], "a campaign with its own signature is left alone");
+  assert.equal(before[0].signature, undefined, "the stored rows are not mutated in place");
+
+  // The same letter before (the workspace's signature) and after (the adopted one), side by side.
+  const w = await world(t);
+  const plain = await w.campaigns.create({ name: "Оператори · до", steps: w.steps, senders: ["anna@advantage-mail.com"] });
+  const kept = await w.campaigns.create({ name: "Оператори · після", steps: w.steps, senders: ["anna@advantage-mail.com"], signature: after[0].signature });
+  await w.campaigns.enroll(plain.id, [LEAD]);
+  await w.campaigns.enroll(kept.id, [{ ...LEAD, email: "olena@southwind.com", company: "Northwind" }]);
+  await w.campaigns.setState(plain.id, "running");
+  await w.campaigns.setState(kept.id, "running");
+  assert.equal((await w.tick(TUESDAY)).sent + (await w.tick(at(0, 60))).sent, 2);
+  const body = (email) => { const raw = w.connector.sent.find((row) => row.raw.includes(`<${email}>`) || row.raw.includes(`To: ${email}`)).raw; return raw.slice(raw.indexOf("\r\n\r\n")); };
+  assert.equal(body("olena@southwind.com"), body("olena@northwind.com"));
 });

@@ -48,7 +48,7 @@ import { compareSenders, runDailyMonitor } from "./esp/monitor.mjs";
 import { runRetention } from "./esp/retention.mjs";
 import { defaultFilters } from "./esp/filters.mjs";
 import { applyRampReviews } from "./esp/ramp.mjs";
-import { campaignStore } from "./esp/campaigns.mjs";
+import { adoptWorkspaceSignature, campaignStore } from "./esp/campaigns.mjs";
 import { isAutoAck } from "./esp/unibox.mjs";
 import { leadStore } from "./esp/leads.mjs";
 import { crmLeadSource } from "./esp/crm-leads.mjs";
@@ -341,6 +341,7 @@ const state = {
   // esp/template.mjs — and the one text signature under every letter.
   espTemplates: [],
   espSignature: null,
+  espSignatureAdopted: true,
   // ESP 5: the cold-email campaigns, the people in them (one sender each, for
   // the whole chain), and «стоп усе» — when on, not one letter leaves.
   espCampaigns: [],
@@ -5690,6 +5691,17 @@ function applyPersistentWorkspaceState(saved = {}) {
   if (saved.espHalt && typeof saved.espHalt === "object") state.espHalt = { ...state.espHalt, ...saved.espHalt };
   if (saved.espInboxCursors && typeof saved.espInboxCursors === "object") state.espInboxCursors = saved.espInboxCursors;
   if (saved.espSignature && typeof saved.espSignature === "object") state.espSignature = saved.espSignature;
+  // ab0fdf9c, owner 17.11: the signature is the campaign's now; the campaigns made before
+  // keep ADvantage's, once. Never fails the load (see the 20.10 state-load incident).
+  state.espSignatureAdopted = saved.espSignatureAdopted === true;
+  if (!state.espSignatureAdopted) {
+    try {
+      state.espCampaigns = adoptWorkspaceSignature(state.espCampaigns, state.espSignature, DEFAULT_SIGNATURE);
+      state.espSignatureAdopted = true;
+    } catch (error) {
+      console.error(`[esp] campaign signatures not adopted: ${error.message}`);
+    }
+  }
   state.providerRule = restoreProviderRule(saved.providerRule, state.providerRule);
   state.budgets = restoreBudgets(saved.budgets, state.budgets);
   state.aiModelDefaults = restoreAiModelDefaults(saved.aiModelDefaults, state.aiModelDefaults);
@@ -5950,6 +5962,7 @@ async function writeWorkspaceStateNow() {
       espHalt: state.espHalt,
       espInboxCursors: state.espInboxCursors,
       espSignature: state.espSignature,
+      espSignatureAdopted: state.espSignatureAdopted === true,
       providerRule: state.providerRule,
       budgets: state.budgets,
       aiModelDefaults: state.aiModelDefaults,

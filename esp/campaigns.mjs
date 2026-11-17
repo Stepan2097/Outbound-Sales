@@ -55,6 +55,18 @@ function cleanSenders(senders, { allowEmpty = false } = {}) {
 }
 
 /** A person from a pasted line or a CRM row: an email, and what the letter may use. */
+/**
+ * ab0fdf9c, owner 17.11: «для створених кампаній залиш адвентедж». Once, when the
+ * signature moved onto campaigns: every campaign that has none gets the signature
+ * it was being signed with — the workspace's, ADvantage's — so its letters do not
+ * change by a character. A campaign made afterwards starts with none.
+ */
+export function adoptWorkspaceSignature(campaigns, workspace, defaults) {
+  if (!Array.isArray(campaigns)) return campaigns;
+  const current = { ...defaults, ...(workspace && typeof workspace === "object" ? workspace : {}) };
+  return campaigns.map((row) => (row && typeof row === "object" && !String(row.signature?.company || "").trim() ? { ...row, signature: { ...current } } : row));
+}
+
 export function cleanLead(input) {
   const email = contactKey(input?.email);
   if (!email) return null;
@@ -184,6 +196,7 @@ export function campaignStore({ read, write, readEnrollments, writeEnrollments, 
       if (input.signature !== undefined) {
         const own = input.signature && typeof input.signature === "object" ? prepareSignature(input.signature) : null;
         if (own && String(input.signature.company || "").trim()) next.signature = own;
+        else if (campaign.state === "running") throw new CampaignError("Кампанія йде — її підпис без компанії не лишити. Поставте її на паузу або впишіть компанію.", { code: "no_signature", status: 409 });
         else delete next.signature;
       }
       if (input.steps !== undefined) {

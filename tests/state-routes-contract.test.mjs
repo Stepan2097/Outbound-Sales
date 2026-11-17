@@ -127,6 +127,7 @@ const SAVED_AS = {
   espSenderPauses: "espSenderPauses",
   espTemplates: "espTemplates",
   espSignature: "espSignature",
+  espSignatureAdopted: "espSignatureAdopted",
   espCampaigns: "espCampaigns",
   espEnrollments: "espEnrollments",
   espLeadLists: "espLeadLists",

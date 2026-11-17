@@ -335,6 +335,10 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
       if (body.state === "running" && campaign && !esp.campaigns.enrollmentsOf(campaign.id).length) {
         throw new CampaignError("У кампанії ще нікого немає — додайте людей, перш ніж запускати.", { code: "empty", status: 409 });
       }
+      // ab0fdf9c, owner 17.11: «тільки на компанію» — a campaign is signed by its own signature only.
+      if (body.state === "running" && campaign && !String(campaign.signature?.company || "").trim()) {
+        throw new CampaignError("У підписі кампанії немає компанії — заповніть «Власний підпис цієї кампанії» в «Параметрах відправки».", { code: "no_signature", status: 409 });
+      }
       const changed = await esp.campaigns.setState(String(body.id || ""), String(body.state || ""));
       await logged("campaign_state", { id: String(body.id || ""), status: String(body.state || "") });
       sendJson(response, 200, { success: true, campaign: changed });
