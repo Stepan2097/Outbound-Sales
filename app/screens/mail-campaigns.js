@@ -940,7 +940,7 @@ async function sendTest() {
   editor.busy = true;
   renderCampaignsPage();
   try {
-    const answer = await api("/api/esp/test-send", { method: "POST", body: JSON.stringify({ subject: editor.subject, body: editor.body, lead: sampleLead(), mailbox: sampleMailbox() }) });
+    const answer = await api("/api/esp/test-send", { method: "POST", body: JSON.stringify({ subject: editor.subject, body: editor.body, lead: sampleLead(), mailbox: sampleMailbox(), campaignId: current()?.id || null }) });
     editor.notice = answer.ok ? `Тест надіслано на ${answer.to} з ${answer.mailbox}.` : answer.error || "Тест не пішов.";
     editor.tone = answer.ok ? "is-ok" : "is-bad";
   } catch (error) {

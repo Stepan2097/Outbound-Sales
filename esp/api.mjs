@@ -87,6 +87,20 @@ export function espRouteRight(method, path) {
   return "registry.change";
 }
 
+/**
+ * ab0fdf9c: the signature a letter from `mailbox` in `campaign` carries. A campaign
+ * signature without a name signs with the mailbox's name — as the chain does
+ * (esp/sequence.mjs) — so a preview, a test and a quick reply never fail on it.
+ */
+async function signatureFor(esp, campaign, mailbox) {
+  const signature = campaignSignature(esp.signature.read(), campaign);
+  if (String(signature.name || "").trim()) return signature;
+  const email = String(mailbox || "").toLowerCase();
+  const sender = (await registry()).senders.find((row) => row.email === email);
+  const fallback = sender?.displayName || String(esp.signature.read()?.name || "").trim() || email.split("@")[0].replace(/[._-]+/g, " ").replace(/\b\p{L}/gu, (char) => char.toUpperCase());
+  return { ...signature, name: fallback };
+}
+
 // A «Лідів» folder whole, for its split by mail provider (02.11): read once in two minutes.
 const FOLDER_ROWS_TTL = 2 * 60_000;
 const folderRows = new Map();
@@ -885,7 +899,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
     let letter;
     try {
       // ab0fdf9c: an answer in a Stelemind conversation is signed Stelemind.
-      letter = quickReply(conversation, body.text, campaignSignature(esp.signature.read(), row ? esp.campaigns.find(row.campaignId) : null), { lead });
+      letter = quickReply(conversation, body.text, await signatureFor(esp, row ? esp.campaigns.find(row.campaignId) : null, conversation.sender), { lead });
     } catch (error) {
       if (!(error instanceof ReplyError) && !(error instanceof LetterError)) throw error;
       sendJson(response, 400, { success: false, error: error.message, code: error.code });
@@ -1096,7 +1110,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
       const mailbox = String(body.mailbox || "sender@example.com");
       // ab0fdf9c: a campaign's preview is signed the way its letters will be.
       const campaign = body.campaignId ? esp.campaigns.find(String(body.campaignId)) : null;
-      const sender = { ...campaignSignature(esp.signature.read(), campaign), ...(body.sender || {}), email: mailbox };
+      const sender = { ...await signatureFor(esp, campaign, mailbox), ...(body.sender || {}), email: mailbox };
       // Built exactly as a first letter of a sequence is (esp/compose.mjs),
       // with its unsubscribe headers — and not sent.
       const letter = composeLetter({ template, sender, lead, unsubscribe: esp.unsubscribe });
@@ -1151,7 +1165,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
     }
     try {
       const template = prepareTemplate({ subject: body.subject, body: body.body });
-      const sender = { ...campaignSignature(esp.signature.read(), body.campaignId ? esp.campaigns?.find(String(body.campaignId)) : null), email: mailbox };
+      const sender = { ...await signatureFor(esp, body.campaignId ? esp.campaigns?.find(String(body.campaignId)) : null, mailbox), email: mailbox };
       const letter = composeLetter({ template, sender, lead: { ...(body.lead || {}), email: to }, unsubscribe: esp.unsubscribe });
       if (!letter.ok) {
         sendJson(response, 200, { success: true, ok: false, reason: letter.reason, error: letter.message });
@@ -1205,7 +1219,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
     }
     try {
       const template = prepareTemplate({ subject: body.subject, body: body.body });
-      const sender = { ...campaignSignature(esp.signature.read(), body.campaignId ? esp.campaigns?.find(String(body.campaignId)) : null), email: mailbox };
+      const sender = { ...await signatureFor(esp, body.campaignId ? esp.campaigns?.find(String(body.campaignId)) : null, mailbox), email: mailbox };
       const letter = composeLetter({ template, sender, lead, unsubscribe: esp.unsubscribe });
       if (!letter.ok) {
         sendJson(response, 409, { success: false, code: letter.reason, error: letter.message });
