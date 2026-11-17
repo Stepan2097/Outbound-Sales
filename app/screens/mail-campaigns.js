@@ -33,9 +33,44 @@ const SKIP_REASON = {
   weekend: "вихідний", holiday: "свято в країні одержувача", too_soon: "інтервал між листами", sender_unavailable: "пошта не надсилає",
   sender_paused: "пошта на паузі", already_sent: "уже надіслано", provider_refused: "Gmail відмовив", company_daily_limit: "2 нових з компанії на день"
 };
-// Пояс відправки кампанії (таск 956d368f): порожньо, тоді як усі, за Europe/Berlin.
-const SEND_ZONES = [["", "Європа (Берлін), як усі"], ["Europe/London", "Велика Британія (Лондон)"], ["America/New_York", "США, схід (Нью-Йорк)"], ["America/Chicago", "США, центр (Чикаго)"], ["America/Denver", "США, гори (Денвер)"], ["America/Los_Angeles", "США, захід (Лос-Анджелес)"]];
-const zoneLabel = (zone) => SEND_ZONES.find(([value]) => value === (zone || ""))?.[1] || zone;
+// Пояс відправки кампанії (таск 956d368f): порожньо, тоді як усі, за Europe/Berlin. Угорі
+// часті, далі всі пояси IANA за регіонами (Марко 17.11: «щоб ми мали можливість вибирати будь яку»).
+const COMMON_ZONES = [["", "Європа (Берлін), як усі"], ["Europe/London", "Велика Британія (Лондон)"], ["America/New_York", "США, схід (Нью-Йорк)"], ["America/Chicago", "США, центр (Чикаго)"], ["America/Denver", "США, гори (Денвер)"], ["America/Los_Angeles", "США, захід (Лос-Анджелес)"], ["Europe/Kyiv", "Україна (Київ)"], ["Europe/Warsaw", "Польща (Варшава)"], ["Asia/Dubai", "ОАЕ (Дубай)"], ["Asia/Singapore", "Сінгапур"], ["Australia/Sydney", "Австралія (Сідней)"]];
+const ZONE_REGIONS = { Europe: "Європа", America: "Америка", Asia: "Азія", Africa: "Африка", Australia: "Австралія", Pacific: "Тихий океан", Atlantic: "Атлантика", Indian: "Індійський океан", Antarctica: "Антарктида", Arctic: "Арктика", Etc: "Інше" };
+let allZonesCache = null;
+function allZones() {
+  if (allZonesCache) return allZonesCache;
+  let zones = [];
+  try { zones = Intl.supportedValuesOf("timeZone"); } catch { zones = []; }
+  allZonesCache = zones.filter((zone) => zone.includes("/")).sort();
+  return allZonesCache;
+}
+/** «UTC+05:30» для пояса зараз: зсув влітку й узимку різний, тож показуємо поточний. */
+function zoneOffset(zone) {
+  try {
+    const part = new Intl.DateTimeFormat("en-US", { timeZone: zone, timeZoneName: "longOffset" }).formatToParts(new Date()).find((item) => item.type === "timeZoneName")?.value || "";
+    return part.replace("GMT", "UTC") === "UTC" ? "UTC+00:00" : part.replace("GMT", "UTC");
+  } catch { return ""; }
+}
+const zoneCity = (zone) => zone.split("/").slice(1).join(" / ").replace(/_/g, " ");
+const zoneLabel = (zone) => COMMON_ZONES.find(([value]) => value === (zone || ""))?.[1] || (zone ? `${zoneCity(zone)} (${zone.split("/")[0]})` : "");
+function zoneOptionsHtml(selected = "") {
+  const option = (value, label) => `<option value="${escapeAttr(value)}" ${selected === value ? "selected" : ""}>${escapeHtml(label)}</option>`;
+  const common = COMMON_ZONES.map(([value, label]) => option(value, value ? `${label} · ${zoneOffset(value)}` : label)).join("");
+  const byRegion = new Map();
+  for (const zone of allZones()) {
+    const region = zone.split("/")[0];
+    byRegion.set(region, [...(byRegion.get(region) || []), zone]);
+  }
+  // Пояс, якого браузер не знає (старий псевдонім), усе одно видно вибраним.
+  const known = new Set(allZones());
+  const extra = selected && !known.has(selected) && !COMMON_ZONES.some(([value]) => value === selected) ? option(selected, selected) : "";
+  const groups = [...byRegion].map(([region, zones]) => `<optgroup label="${escapeAttr(ZONE_REGIONS[region] || region)}">${zones.map((zone) => option(zone, `${zoneCity(zone)} · ${zoneOffset(zone)}`)).join("")}</optgroup>`).join("");
+  // Частий пояс стоїть і в «Часті», і в своєму регіоні: вибраним позначаємо лише перший.
+  const html = `<optgroup label="Часті">${common}</optgroup>${extra}${groups}`;
+  const first = html.indexOf(" selected>");
+  return first < 0 ? html : html.slice(0, first + 9) + html.slice(first + 9).replaceAll(" selected>", ">");
+}
 const SPIN_MODES = [["all", "Усім", "кожен отримує свої варіанти речень і тем"], ["half", "A/B — половині", "половина бачить базовий текст: видно, чи варіанти кращі"], ["off", "Нікому", "завжди перший варіант"]];
 const SKIP_CHOOSER_KEY = "outbound.campaigns.skipChooser";
 const MAX_LETTERS = 6;
@@ -631,8 +666,8 @@ function sendingHtml(campaign) {
         <button type="button" class="text-button" data-mc="add-mailbox"><i data-lucide="mail-plus"></i><span>Додати пошту</span></button>
       </fieldset>
       <fieldset class="mc-fieldset"><legend>Часовий пояс відправки</legend>
-        <label class="mc-zone"><select name="zone" ${campaign.state === "done" ? "disabled" : ""}>${SEND_ZONES.map(([value, label]) => `<option value="${escapeAttr(value)}" ${(campaign.zone || "") === value ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}</select></label>
-        <small class="mc-subtle">Лист 1 і фолоуапи йдуть у будні з ${String(window_.startHour).padStart(2, "0")}:00 до ${window_.endHour}:00 за цим поясом. Змінюється будь-коли.</small>
+        <label class="mc-zone"><select name="zone" ${campaign.state === "done" ? "disabled" : ""}>${zoneOptionsHtml(campaign.zone || "")}</select></label>
+        <small class="mc-subtle">Лист 1 і фолоуапи йдуть у будні з ${String(window_.startHour).padStart(2, "0")}:00 до ${window_.endHour}:00 за цим поясом. Будь-який пояс світу: часті вгорі, решта за регіонами, у списку можна шукати, набираючи назву міста. Змінюється будь-коли.</small>
       </fieldset>
       <fieldset class="mc-fieldset"><legend>Варіанти тексту (A/B)</legend>
         ${SPIN_MODES.map(([value, label, hint]) => `<label class="mc-radio"><input type="radio" name="spinMode" value="${value}" ${(campaign.spinMode || "all") === value ? "checked" : ""} ${started() ? "disabled" : ""} /><span><strong>${label}</strong><small>${hint}</small></span></label>`).join("")}

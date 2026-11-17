@@ -478,4 +478,24 @@ test("пояс кампанії: змінюється через update, пор�
   assert.equal((await w.campaigns.update(campaign.id, { name: "UK 2" })).zone, "Europe/London", "інші поля пояс не скидають");
   await assert.rejects(w.campaigns.update(campaign.id, { zone: "Europe/Atlantis" }), /Невідомий часовий пояс/);
   assert.equal((await w.campaigns.update(campaign.id, { zone: "" })).zone, undefined);
+  // Правка Марка 17.11: будь-який пояс світу, не лише список із шести.
+  for (const zone of ["Asia/Kolkata", "Europe/Kyiv", "America/Argentina/Buenos_Aires", "Pacific/Auckland", "UTC"]) {
+    assert.equal((await w.campaigns.update(campaign.id, { zone })).zone, zone);
+  }
+  await assert.rejects(w.campaigns.update(campaign.id, { zone: "EST" }), /Невідомий часовий пояс/, "скорочення, а не пояс");
+});
+
+test("пояс кампанії: будь-який пояс IANA тримає своє вікно (Калькута: 08:00 там це 02:30 UTC)", () => {
+  const sender = { email: "anna@advantage-mail.com", rampStage: 35 };
+  const now = new Date("2026-10-13T05:00:00Z"); // 10:30 у Калькуті, 07:00 у Берліні
+  assert.equal(sendDecision({ sender, recipient: {}, ledger: sendLedger([], { now }), now, zone: "Asia/Kolkata" }).ok, true);
+  assert.equal(sendDecision({ sender, recipient: {}, ledger: sendLedger([], { now }), now }).ok, false);
+});
+
+test("екран: у виборі поясу всі пояси браузера, часті вгорі", async () => {
+  const { readFileSync } = await import("node:fs");
+  const screen = readFileSync(new URL("../app/screens/mail-campaigns.js", import.meta.url), "utf8");
+  assert.match(screen, /Intl\.supportedValuesOf\("timeZone"\)/);
+  assert.match(screen, /<optgroup label="Часті">/);
+  assert.match(screen, /zoneOptionsHtml\(campaign\.zone \|\| ""\)/);
 });

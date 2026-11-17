@@ -98,15 +98,15 @@ export const UNKNOWN_COUNTRY_ZONES = ["Europe/Berlin"];
 export const SEND_ZONES = UNKNOWN_COUNTRY_ZONES;
 
 /**
- * Пояси, які кампанія може обрати (таск 956d368f, Марко 17.11): UK шле за Лондоном,
- * США за Нью-Йорком чи Чикаго. Порожньо: як усі, за SEND_ZONES (Europe/Berlin).
+ * Пояс кампанії (таск 956d368f): будь-який пояс IANA (Марко 17.11: «додати в список всі
+ * таймзони, щоб ми мали можливість вибирати будь яку»), "" якщо порожній чи невідомий;
+ * тоді кампанія шле за SEND_ZONES (Europe/Berlin). Скорочення на кшталт EST не беремо:
+ * лише «Регіон/Місто» або UTC.
  */
-export const CAMPAIGN_ZONES = ["Europe/Berlin", "Europe/London", "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles"];
-
-/** Пояс кампанії або "" (тоді SEND_ZONES); невідомий пояс відкидається. */
 export function cleanCampaignZone(zone) {
   const value = String(zone || "").trim();
-  return CAMPAIGN_ZONES.includes(value) ? value : "";
+  if (!value || value.length > 64 || !(value === "UTC" || /^[A-Za-z_]+\/[A-Za-z0-9_+\-/]+$/.test(value))) return "";
+  return isZone(value) ? value : "";
 }
 
 /** За якими поясами шле кампанія: її власний або спільний розклад. */
