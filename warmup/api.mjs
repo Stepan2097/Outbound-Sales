@@ -1,6 +1,7 @@
 import { LABELS as INBOX_LABELS, LABEL_ORDER as INBOX_LABEL_ORDER } from "./inbox-labels.mjs";
 import { scenarioForPrompt } from "./scenarios.mjs";
 import { diagnoseScreen, explainFailure } from "./diagnose.mjs";
+import { cachedAnswer } from "../state/answer-cache.mjs";
 import { LIVE_ACCOUNT_STATUSES, withAccountQuota } from "./store.mjs";
 import { applyResolved, profilesToResolve } from "./profile-resolve.mjs";
 import { connectCeiling, weeklyAllowance, weeklyConnectAllowance, weeklyConnectCounts } from "./weekly.mjs";
@@ -1508,7 +1509,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
     // a person → who answered. And, beside it, what needs a person now: people to
     // write to, replies to read, accounts that are stuck.
     if (method === "GET" && path === "/home") {
-      sendJson(response, 200, { success: true, ...await homeView(readCampaigns(), writer) });
+      sendJson(response, 200, { success: true, ...await cachedAnswer("warmup/home", () => homeView(readCampaigns(), writer)) });
       return true;
     }
 

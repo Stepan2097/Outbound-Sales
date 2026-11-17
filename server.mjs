@@ -66,6 +66,7 @@ import { runWarmupTick, warmupMode } from "./esp/mail-warmup.mjs";
 import { createFileOnceSync, writeFileAtomic } from "./state/atomic-write.mjs";
 import { startScheduler } from "./warmup/scheduler.mjs";
 import { serveStaticFile } from "./state/static-files.mjs";
+import { cachedAnswer, noteWrite } from "./state/answer-cache.mjs";
 import { sendJsonResponse } from "./state/json-response.mjs";
 import { shouldInvalidateContactReads } from "./contacts/invalidation.mjs";
 
@@ -749,6 +750,10 @@ const SLOW_REQUEST_MS = Number(process.env.SLOW_REQUEST_MS || 700);
 const server = createServer(async (request, response) => {
   const startedAt = performance.now();
   response.once("finish", () => {
+    // A finished write request spoils every kept answer (state/answer-cache.mjs).
+    // The agents' own calls are not a person's change; what they write stales answers through the tables.
+    if (!["GET", "HEAD", "OPTIONS"].includes(request.method) && String(request.url || "").startsWith("/api/")
+      && !String(request.url).startsWith("/api/warmup/agent")) noteWrite();
     const ms = Math.round(performance.now() - startedAt);
     if (ms >= SLOW_REQUEST_MS && String(request.url || "").startsWith("/api/")) {
       console.log(`[slow] ${request.method} ${String(request.url).split("?")[0]} ${response.statusCode} ${ms}ms`);
@@ -1680,7 +1685,7 @@ async function handleApi(request, response, url) {
   if (request.method === "GET" && url.pathname === "/api/stats") {
     if (!warmupCrm.configured()) return sendJson(response, 503, { error: "CRM не підключено." });
     try {
-      sendJson(response, 200, await crmStats({
+      sendJson(response, 200, await cachedAnswer(`stats|${request.auth?.profile?.email || ""}|${url.search}`, async () => crmStats({
         crm: warmupCrm,
         anty: warmupAnty,
         // The work funnel (30.10): invites by account → lead-gen, qualified from the inbox's AI labels.
@@ -1692,7 +1697,7 @@ async function handleApi(request, response, url) {
         user: cleanText(url.searchParams.get("user") || "all"),
         // What people did in Outbound counts as working time too (27.10).
         workEntries: await workEntries()
-      }));
+      })));
     } catch (error) {
       sendJson(response, 502, { error: `CRM не відповіла: ${error.message}` });
     }
@@ -1711,6 +1716,8 @@ async function handleApi(request, response, url) {
         // An administrator opens on the team's day (owner 15.10: «Моя» was empty
         // while the accounts were writing); «me» is one's own, for «Щойно написали».
         const user = !admin || wanted === "me" ? viewer : wanted || "all";
+        // The whole answer is kept between requests (state/answer-cache.mjs): it was 5–6 s each time.
+        sendJson(response, 200, await cachedAnswer(`work/day|${viewer}|${admin}|${date}|${user}`, async () => {
         const entries = await workEntries();
         // The team view also counts what was really sent in LinkedIn (triage/work-log.mjs linkedinSends).
         // Одна людина — відправки з акаунтів, які вона веде (Марко 22.10, таск 556679b0: у Богдана,
@@ -1739,7 +1746,7 @@ async function handleApi(request, response, url) {
         });
         const answeredBy = new Map();
         for (const item of contacts) if (item.answer) for (const person of item.users) answeredBy.set(person, (answeredBy.get(person) || 0) + 1);
-        sendJson(response, 200, {
+        return {
           date, user, admin, viewer,
           today: dayOf(new Date()),
           users: admin ? workUsers(entries) : [],
@@ -1747,7 +1754,8 @@ async function handleApi(request, response, url) {
           total: { ...activity.total, answered: contacts.filter((item) => item.answer).length, fresh: contacts.filter((item) => item.fresh).length },
           byUser: activity.users.map((person) => ({ ...person, counts: { ...person.counts, answered: answeredBy.get(person.user) || 0 } })),
           contacts
-        });
+        };
+        }));
         return;
       }
 

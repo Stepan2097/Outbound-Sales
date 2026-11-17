@@ -8,6 +8,7 @@
 
 import { anyCampaignOf, campaignSkippedUntil, campaignsByContact, leadCampaignById, leadCampaigns } from "./lead-campaigns.mjs";
 import { anty, crm } from "../warmup/db.mjs";
+import { cachedAnswer } from "../state/answer-cache.mjs";
 import { listThreads, readThread } from "../warmup/inbox.mjs";
 import { repliesOf, sameText } from "../warmup/outbox.mjs";
 import { acceptedRows, firstMarks } from "../warmup/first-messages.mjs";
@@ -933,7 +934,8 @@ export async function handleTodayApi({ request, response, url, sendJson, readJso
   try {
     if (request.method === "GET" && path === "/api/today") {
       const scope = isAdmin && url.searchParams.get("scope") === "all" ? "all" : "mine";
-      sendJson(response, 200, { ...(await todayList({ viewerId: viewer.id, viewerEmail: viewer.email, scope })), canSeeAll: isAdmin });
+      const list = await cachedAnswer(`today|${viewer.id}|${viewer.email}|${scope}`, () => todayList({ viewerId: viewer.id, viewerEmail: viewer.email, scope }));
+      sendJson(response, 200, { ...list, canSeeAll: isAdmin });
       return true;
     }
     if (request.method === "GET" && path === "/api/today/gate") {

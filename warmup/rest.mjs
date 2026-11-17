@@ -7,6 +7,23 @@
  * the call sites so the ported queries read like the originals.
  */
 
+// How many writes each table has had in this process: a read cached under the
+// number is stale the moment anything here writes to that table (17.11: the
+// conversation list was re-read from the database on every screen change).
+const writes = new Map();
+
+/** The write count of a table in this process — part of a cache key. */
+export function tableWrites(table) {
+  return writes.get(table) || 0;
+}
+
+/** Writes to every table in this process, together. */
+export function allTableWrites() {
+  let total = 0;
+  for (const count of writes.values()) total += count;
+  return total;
+}
+
 export class RestError extends Error {
   constructor(message, { code = null, status = 0, details = null } = {}) {
     super(message);
@@ -220,6 +237,7 @@ class Query {
       ...(this.table.startsWith("rpc/") ? { signal: AbortSignal.timeout(10000) } : {})
     });
 
+    if (this.method !== "GET") writes.set(this.table, (writes.get(this.table) || 0) + 1);
     if (response.status === 204) return { response, rows: [] };
 
     const text = await response.text();

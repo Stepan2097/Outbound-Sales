@@ -11,6 +11,7 @@ import {
 import { OUTBOX_AUDIT_HIDDEN } from "./outbox.mjs";
 import { adoptable, adoptionEnabled, createContact, hasProfileWords, once } from "./people.mjs";
 import { likeLiteral } from "./rest.mjs";
+import { cachedAnswer } from "../state/answer-cache.mjs";
 
 /**
  * The inbox: threads, messages, what has been read, and when an account was
@@ -1537,9 +1538,20 @@ export async function syncSummary(accountIds) {
 }
 
 /** Threads across every account, or one account, unread first then newest. */
+// The list of conversations, kept between requests (state/answer-cache.mjs): the nav badge, the
+// home screen, the inbox and the queue each asked for it, and each time it was thousands of
+// events re-read and re-folded — 2 s a screen change (17.11). A person marking a thread read is a
+// write request and gets a fresh list; a message the agent brought makes the kept one stale.
+function threadList(accountId) {
+  return cachedAnswer(`threads|${accountId || "*"}`, async () => {
+    const [events, { read, synced, contacts }] = await Promise.all([messageEvents({ accountId }), marks(accountId)]);
+    return deriveThreads(events, { readMarks: read, syncedAt: synced, contactMarks: contacts });
+  });
+}
+
 export async function listThreads({ accountId = null, unreadOnly = false } = {}) {
-  const [events, { read, synced, contacts }] = await Promise.all([messageEvents({ accountId }), marks(accountId)]);
-  const threads = deriveThreads(events, { readMarks: read, syncedAt: synced, contactMarks: contacts });
+  // Copies: callers decorate the threads they get, the next caller must not see that.
+  const threads = structuredClone(await threadList(accountId));
   return unreadOnly ? threads.filter((thread) => thread.unread) : threads;
 }
 
