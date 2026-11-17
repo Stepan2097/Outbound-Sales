@@ -13,6 +13,7 @@
 import { randomUUID } from "node:crypto";
 
 import { contactKey } from "./journal.mjs";
+import { cleanCampaignZone } from "./limits.mjs";
 import { SPIN_MODES } from "./spintax.mjs";
 import { prepareSignature } from "./templates.mjs";
 
@@ -161,7 +162,7 @@ export function campaignStore({ read, write, readEnrollments, writeEnrollments, 
      * and is filled step by step; what a running campaign needs (a letter, a
      * mailbox) is asked for when it is started, not when it is named.
      */
-    async create({ name, steps = [], senders = [], spinMode = "all", createdBy = "", signature = null }) {
+    async create({ name, steps = [], senders = [], spinMode = "all", createdBy = "", signature = null, zone = "" }) {
       const title = String(name ?? "").trim().slice(0, 120);
       if (!title) throw new CampaignError("Дайте кампанії назву.", { code: "no_name" });
       const at = now().toISOString();
@@ -173,6 +174,8 @@ export function campaignStore({ read, write, readEnrollments, writeEnrollments, 
         // Whose campaign it is — the team's list says it, as Snov's «Owner» does.
         createdBy: String(createdBy || "").trim().toLowerCase().slice(0, 200),
         ...(signature && typeof signature === "object" && String(signature.company || "").trim() ? { signature: prepareSignature(signature) } : {}),
+        // Таск 956d368f: свій пояс відправки; без нього кампанія шле за Europe/Berlin.
+        ...(cleanCampaignZone(zone) ? { zone: cleanCampaignZone(zone) } : {}),
         createdAt: at, updatedAt: at
       };
       await write([...list(), campaign]);
@@ -198,6 +201,14 @@ export function campaignStore({ read, write, readEnrollments, writeEnrollments, 
         if (own && String(input.signature.company || "").trim()) next.signature = own;
         else if (campaign.state === "running") throw new CampaignError("Кампанія йде — її підпис без компанії не лишити. Поставте її на паузу або впишіть компанію.", { code: "no_signature", status: 409 });
         else delete next.signature;
+      }
+      // Таск 956d368f: пояс відправки змінюється будь-коли, як і підпис; "" чи null повертає
+      // спільний розклад (Europe/Berlin). Невідомий пояс не мовчки ігнорується, а відмовляється.
+      if (input.zone !== undefined) {
+        const zone = cleanCampaignZone(input.zone);
+        if (input.zone && !zone) throw new CampaignError(`Невідомий часовий пояс «${String(input.zone).slice(0, 60)}».`, { code: "bad_zone", status: 400 });
+        if (zone) next.zone = zone;
+        else delete next.zone;
       }
       if (input.steps !== undefined) {
         if (started) throw new CampaignError("Ланцюжок уже почався — листи в ньому не змінюються.", { code: "started", status: 409 });

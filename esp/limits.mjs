@@ -97,6 +97,24 @@ export const UNKNOWN_COUNTRY_ZONES = ["Europe/Berlin"];
 /** The one schedule every cold letter goes by (05.11), whoever and wherever the recipient is. */
 export const SEND_ZONES = UNKNOWN_COUNTRY_ZONES;
 
+/**
+ * Пояси, які кампанія може обрати (таск 956d368f, Марко 17.11): UK шле за Лондоном,
+ * США за Нью-Йорком чи Чикаго. Порожньо: як усі, за SEND_ZONES (Europe/Berlin).
+ */
+export const CAMPAIGN_ZONES = ["Europe/Berlin", "Europe/London", "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles"];
+
+/** Пояс кампанії або "" (тоді SEND_ZONES); невідомий пояс відкидається. */
+export function cleanCampaignZone(zone) {
+  const value = String(zone || "").trim();
+  return CAMPAIGN_ZONES.includes(value) ? value : "";
+}
+
+/** За якими поясами шле кампанія: її власний або спільний розклад. */
+export function sendZonesFor(campaign) {
+  const own = cleanCampaignZone(campaign?.zone);
+  return own ? [own] : SEND_ZONES;
+}
+
 export function zonesFor({ timezone = "", country = "" } = {}) {
   const zone = String(timezone || "").trim();
   if (zone && isZone(zone)) return [zone];
@@ -233,7 +251,7 @@ export function sendLedger(entries, { now = new Date(), zone = COUNTING_ZONE } =
  * answer). Limits are checked before the clock: a sender that is done for the
  * day is told so, not told to wait twelve minutes.
  */
-export function sendDecision({ sender, recipient = {}, ledger, now = new Date(), domainLimit = DOMAIN_DAILY_LIMIT, window = WINDOW, purpose = "cold", spreadDay = true }) {
+export function sendDecision({ sender, recipient = {}, ledger, now = new Date(), domainLimit = DOMAIN_DAILY_LIMIT, window = WINDOW, purpose = "cold", spreadDay = true, zone = "" }) {
   const email = String(sender?.email || "").toLowerCase();
   const domain = email.split("@")[1] || "";
   const mine = ledger.senders.get(email) || { today: 0, cold: 0, warmup: 0, lastAt: null };
@@ -257,12 +275,14 @@ export function sendDecision({ sender, recipient = {}, ledger, now = new Date(),
   // Owner 05.11: «насрати на їхні часові пояси ми розсилаємо на пошти не
   // залежно де вони знаходяться» — one schedule for everybody, ours: weekdays,
   // European working hours. The recipient's zone, country and holidays no longer
-  // hold a letter back.
-  const zones = SEND_ZONES;
+  // hold a letter back. A campaign may keep its own zone (таск 956d368f): UK by London,
+  // the US by New York; without one, ours.
+  const own = cleanCampaignZone(zone);
+  const zones = own ? [own] : SEND_ZONES;
   if (!inWindow(now, zones, "", window)) {
     const local = localTime(now, zones[0]);
     const reason = local.weekday > 5 ? "weekend" : "outside_window";
-    const message = { weekend: "Вихідний — листи йдуть у будні.", outside_window: `Зараз не ${String(window.startHour).padStart(2, "0")}:00–${window.endHour}:00 за Європою — листи йдуть у цей час.` }[reason];
+    const message = { weekend: "Вихідний: листи йдуть у будні.", outside_window: `Зараз не ${String(window.startHour).padStart(2, "0")}:00-${window.endHour}:00 за ${own ? `поясом ${own}` : "Європою"}: листи йдуть у цей час.` }[reason];
     return refuse(reason, message, nextWindowOpen(now, zones, "", window));
   }
 

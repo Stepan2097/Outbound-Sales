@@ -426,3 +426,56 @@ test("ab0fdf9c, owner 17.11: campaigns made before keep ADvantage's signature, o
   const body = (email) => { const raw = w.connector.sent.find((row) => row.raw.includes(`<${email}>`) || row.raw.includes(`To: ${email}`)).raw; return raw.slice(raw.indexOf("\r\n\r\n")); };
   assert.equal(body("olena@southwind.com"), body("olena@northwind.com"));
 });
+
+// Таск 956d368f: свій часовий пояс відправки кампанії. 13.10.2026: Берлін UTC+2, Нью-Йорк UTC-4.
+import { sendDecision, sendLedger } from "../esp/limits.mjs";
+
+test("пояс кампанії: о 10:30 за Берліном (04:30 у Нью-Йорку) лист кампанії з America/New_York не йде, о 15:00 за Нью-Йорком іде", () => {
+  const sender = { email: "anna@advantage-mail.com", rampStage: 35 };
+  const recipient = { email: "dan@acme.com", country: "United States" };
+  const berlinMorning = new Date("2026-10-13T08:30:00Z");
+  const nyAfternoon = new Date("2026-10-13T19:00:00Z");
+  const decide = (now, zone) => sendDecision({ sender, recipient, ledger: sendLedger([], { now }), now, zone });
+  const early = decide(berlinMorning, "America/New_York");
+  assert.equal(early.ok, false);
+  assert.equal(early.reason, "outside_window");
+  assert.match(early.message, /America\/New_York/);
+  assert.equal(early.retryAt, "2026-10-13T12:00:00.000Z", "наступне вікно: 08:00 у Нью-Йорку");
+  assert.equal(decide(nyAfternoon, "America/New_York").ok, true, "15:00 у Нью-Йорку, 21:00 у Берліні: іде");
+  assert.equal(decide(berlinMorning, "").ok, true, "без поясу: як раніше, за Берліном");
+  assert.equal(decide(nyAfternoon, "").ok, false, "без поясу о 21:00 за Берліном: не йде");
+  assert.equal(decide(nyAfternoon, "Mars/Olympus").ok, false, "невідомий пояс: спільний розклад");
+  // 15:00 за Берліном у Лондоні 14:00: UK-кампанія шле, а о 17:30 за Берліном (16:30 у Лондоні) теж.
+  assert.equal(decide(new Date("2026-10-13T15:30:00Z"), "Europe/London").ok, true);
+  assert.equal(decide(new Date("2026-10-13T15:30:00Z"), "").ok, false);
+});
+
+test("пояс кампанії: тик шле лист 1 і фолоуап за поясом кампанії, кампанія без поясу як раніше", async (t) => {
+  const w = await world(t);
+  const us = await w.campaigns.create({ name: "US", steps: w.steps, senders: ["anna@advantage-mail.com"], zone: "America/New_York" });
+  const eu = await w.campaigns.create({ name: "EU", steps: w.steps, senders: ["boris@advantage-mail.com"] });
+  assert.equal(us.zone, "America/New_York");
+  assert.equal(eu.zone, undefined);
+  await w.campaigns.enroll(us.id, [{ ...LEAD, email: "dan@acme.com", company: "Acme", country: "United States" }]);
+  await w.campaigns.enroll(eu.id, [LEAD]);
+  await w.campaigns.setState(us.id, "running");
+  await w.campaigns.setState(eu.id, "running");
+  assert.equal((await w.tick(TUESDAY)).sent, 1, "10:30 за Берліном: йде лише EU");
+  assert.deepEqual(w.connector.sent.map((row) => row.mailbox), ["boris@advantage-mail.com"]);
+  assert.equal((await w.tick(new Date("2026-10-13T19:00:00Z"))).sent, 1, "15:00 у Нью-Йорку: йде US");
+  assert.equal(w.connector.sent.at(-1).mailbox, "anna@advantage-mail.com");
+  // Фолоуап US через 3 робочі дні (п'ятниця), знову лише у вікні Нью-Йорка.
+  assert.equal((await w.tick(new Date("2026-10-16T09:00:00Z"))).sent, 1, "п'ятниця 11:00 за Берліном: лише фолоуап EU");
+  assert.equal(w.connector.sent.at(-1).mailbox, "boris@advantage-mail.com");
+  assert.equal((await w.tick(new Date("2026-10-16T18:00:00Z"))).sent, 1, "п'ятниця 14:00 у Нью-Йорку: фолоуап US");
+  assert.equal(w.connector.sent.at(-1).mailbox, "anna@advantage-mail.com");
+});
+
+test("пояс кампанії: змінюється через update, порожній повертає спільний, невідомий відмовляється", async (t) => {
+  const w = await world(t);
+  const campaign = await w.campaigns.create({ name: "UK", steps: w.steps, senders: ["anna@advantage-mail.com"] });
+  assert.equal((await w.campaigns.update(campaign.id, { zone: "Europe/London" })).zone, "Europe/London");
+  assert.equal((await w.campaigns.update(campaign.id, { name: "UK 2" })).zone, "Europe/London", "інші поля пояс не скидають");
+  await assert.rejects(w.campaigns.update(campaign.id, { zone: "Europe/Atlantis" }), /Невідомий часовий пояс/);
+  assert.equal((await w.campaigns.update(campaign.id, { zone: "" })).zone, undefined);
+});

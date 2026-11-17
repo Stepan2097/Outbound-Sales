@@ -1030,7 +1030,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
     sendJson(response, 200, {
       success: true,
       day: ledger.today,
-      window: { ...WINDOW, days: "Пн–Пт", zone: "одержувача" },
+      window: { ...WINDOW, days: "Пн-Пт", zone: "кампанії, без поясу Europe/Berlin" },
       gapMinutes: GAP_MINUTES,
       domainLimit: DOMAIN_DAILY_LIMIT,
       senders: senders.map((sender) => {

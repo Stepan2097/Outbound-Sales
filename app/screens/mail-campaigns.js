@@ -33,6 +33,9 @@ const SKIP_REASON = {
   weekend: "вихідний", holiday: "свято в країні одержувача", too_soon: "інтервал між листами", sender_unavailable: "пошта не надсилає",
   sender_paused: "пошта на паузі", already_sent: "уже надіслано", provider_refused: "Gmail відмовив", company_daily_limit: "2 нових з компанії на день"
 };
+// Пояс відправки кампанії (таск 956d368f): порожньо, тоді як усі, за Europe/Berlin.
+const SEND_ZONES = [["", "Європа (Берлін), як усі"], ["Europe/London", "Велика Британія (Лондон)"], ["America/New_York", "США, схід (Нью-Йорк)"], ["America/Chicago", "США, центр (Чикаго)"], ["America/Denver", "США, гори (Денвер)"], ["America/Los_Angeles", "США, захід (Лос-Анджелес)"]];
+const zoneLabel = (zone) => SEND_ZONES.find(([value]) => value === (zone || ""))?.[1] || zone;
 const SPIN_MODES = [["all", "Усім", "кожен отримує свої варіанти речень і тем"], ["half", "A/B — половині", "половина бачить базовий текст: видно, чи варіанти кращі"], ["off", "Нікому", "завжди перший варіант"]];
 const SKIP_CHOOSER_KEY = "outbound.campaigns.skipChooser";
 const MAX_LETTERS = 6;
@@ -215,6 +218,7 @@ function campaignRowHtml(campaign) {
       <div class="mc-meta">
         <span class="mc-tip-target" data-mc-tip="${escapeAttr(peopleTip(campaign))}"><i data-lucide="users"></i>Одержувачів: ${campaign.people}</span>${campaign.people ? `<span class="mc-progress" title="Пройшли ланцюжок: ${done} з ${campaign.people}"><span style="width:${progress}%"></span></span>` : ""}
         <span><i data-lucide="mail"></i>${campaign.steps.length} ${campaign.steps.length === 1 ? "лист" : campaign.steps.length < 5 ? "листи" : "листів"}${campaign.spinMode === "half" ? " · A/B" : ""}</span>
+        ${campaign.zone ? `<span title="Пояс відправки"><i data-lucide="clock"></i>${escapeHtml(zoneLabel(campaign.zone))}</span>` : ""}
         <span><i data-lucide="at-sign"></i>${campaign.senders.length ? escapeHtml(campaign.senders.join(", ")) : "пошти не обрано"}</span>
         <span><i data-lucide="calendar"></i>${escapeHtml(when(campaign.createdAt))}</span>
       </div>
@@ -380,12 +384,12 @@ function draftName() {
 }
 
 /** Нова чернетка й одразу конструктор — як «Create from scratch» у Snov. */
-async function createCampaign({ steps = [], name = draftName(), letters = [], senders = [], spinMode = "all", signature = null } = {}) {
+async function createCampaign({ steps = [], name = draftName(), letters = [], senders = [], spinMode = "all", signature = null, zone = "" } = {}) {
   // A second click while the first is still creating made two identical drafts (12.10).
   if (page.creating) return;
   page.creating = true;
   await act(async () => {
-    const { campaign } = await api("/api/esp/campaigns", { method: "POST", body: JSON.stringify({ name, senders, spinMode, ...(signature ? { signature } : {}) }) });
+    const { campaign } = await api("/api/esp/campaigns", { method: "POST", body: JSON.stringify({ name, senders, spinMode, ...(signature ? { signature } : {}), ...(zone ? { zone } : {}) }) });
     // Листи нової кампанії — її власні копії: правка тут не міняє ні шаблон, ні іншу кампанію.
     const own = [];
     for (const [index, letter] of letters.entries()) {
@@ -626,6 +630,10 @@ function sendingHtml(campaign) {
           </label>`).join("") : '<p class="esp-notice is-bad">У реєстрі немає жодної активної пошти. Додайте пошту: «Пошта» → «Прогрів пошт» → «Додати пошту».</p>'}
         <button type="button" class="text-button" data-mc="add-mailbox"><i data-lucide="mail-plus"></i><span>Додати пошту</span></button>
       </fieldset>
+      <fieldset class="mc-fieldset"><legend>Часовий пояс відправки</legend>
+        <label class="mc-zone"><select name="zone" ${campaign.state === "done" ? "disabled" : ""}>${SEND_ZONES.map(([value, label]) => `<option value="${escapeAttr(value)}" ${(campaign.zone || "") === value ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}</select></label>
+        <small class="mc-subtle">Лист 1 і фолоуапи йдуть у будні з ${String(window_.startHour).padStart(2, "0")}:00 до ${window_.endHour}:00 за цим поясом. Змінюється будь-коли.</small>
+      </fieldset>
       <fieldset class="mc-fieldset"><legend>Варіанти тексту (A/B)</legend>
         ${SPIN_MODES.map(([value, label, hint]) => `<label class="mc-radio"><input type="radio" name="spinMode" value="${value}" ${(campaign.spinMode || "all") === value ? "checked" : ""} ${started() ? "disabled" : ""} /><span><strong>${label}</strong><small>${hint}</small></span></label>`).join("")}
         ${started() ? '<small class="mc-subtle">Ланцюжок почався — режим не змінюється, інакше A/B порівнював би різне.</small>' : ""}
@@ -633,9 +641,9 @@ function sendingHtml(campaign) {
       <div class="mc-form-actions"><button type="submit" class="primary-button" ${page.busy || campaign.state === "done" ? "disabled" : ""}><i data-lucide="save"></i><span>Зберегти</span></button></div>
     </form>
     <div class="mc-rules">
-      <h3>Як іде відправка — однаково для всіх кампаній</h3>
+      <h3>Як іде відправка</h3>
       <ul>
-        <li><i data-lucide="clock"></i>Пн–Пт, ${String(window_.startHour).padStart(2, "0")}:00–${window_.endHour}:00 за часом одержувача; державні свята його країни пропускаються.</li>
+        <li><i data-lucide="clock"></i>Пн-Пт, з ${String(window_.startHour).padStart(2, "0")}:00 до ${window_.endHour}:00 за поясом кампанії: ${escapeHtml(zoneLabel(campaign.zone))}.</li>
         <li><i data-lucide="timer"></i>Між листами однієї пошти — ${limits?.gapMinutes?.min ?? 12}–${limits?.gapMinutes?.max ?? 40} хв, перший лист дня — не на відкритті вікна. Пропущене не доганяється.</li>
         <li><i data-lucide="gauge"></i>Пошта — до свого етапу рампи (5 на день, щодня +3 до 25), домен — до ${limits?.domainLimit ?? 105} на день.</li>
         <li><i data-lucide="building-2"></i>З однієї компанії — до 2 нових людей на день; повторно людині — не раніше ніж через 90 днів.</li>
@@ -1014,7 +1022,7 @@ async function archiveCampaigns(ids, archived) {
 async function copyCampaign(id) {
   const source = byId(id);
   const letters = source.steps.map((step) => templateOf(step.templateId)).filter(Boolean);
-  await createCampaign({ name: `${source.name} (копія)`, letters, steps: source.steps, senders: source.senders, spinMode: source.spinMode, signature: source.signature || null });
+  await createCampaign({ name: `${source.name} (копія)`, letters, steps: source.steps, senders: source.senders, spinMode: source.spinMode, signature: source.signature || null, zone: source.zone || "" });
 }
 
 async function removeLetter(index) {
@@ -1243,7 +1251,8 @@ async function onSubmit(event) {
     const data = new FormData(form);
     const senders = data.getAll("sender");
     const spinMode = data.get("spinMode");
-    return act(() => saveCampaign({ senders, ...(spinMode && !started() ? { spinMode } : {}) }), { success: "Параметри відправки збережено." });
+    const zone = data.get("zone");
+    return act(() => saveCampaign({ senders, ...(spinMode && !started() ? { spinMode } : {}), ...(zone !== null ? { zone } : {}) }), { success: "Параметри відправки збережено." });
   }
   if (form.dataset.mcForm === "campaign-signature") {
     const data = Object.fromEntries(new FormData(form).entries());

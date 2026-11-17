@@ -31,7 +31,7 @@ import { composeLetter } from "./compose.mjs";
 import { MailboxError, SendingLocked } from "./provider.mjs";
 import { LetterError } from "./letter.mjs";
 import { isHoliday } from "./holidays.mjs";
-import { COUNTING_ZONE, SEND_ZONES, localTime, sendDecision, sendLedger } from "./limits.mjs";
+import { COUNTING_ZONE, cleanCampaignZone, localTime, sendDecision, sendLedger, sendZonesFor } from "./limits.mjs";
 import { SenderPaused, SendingHalted } from "./senders.mjs";
 import { companyKey } from "./company.mjs";
 import { campaignSignature } from "./templates.mjs";
@@ -57,9 +57,9 @@ export function addWorkingDays(date, days, country = "") {
   return at.toISOString().slice(0, 10);
 }
 
-/** Today by the one sending schedule (05.11: where the recipient is does not matter). */
-function recipientToday(_lead, now) {
-  return localTime(now, SEND_ZONES[0]).date;
+/** Today by the campaign's schedule (05.11: where the recipient is does not matter; 956d368f: the campaign's zone does). */
+function recipientToday(_lead, now, campaign = null) {
+  return localTime(now, sendZonesFor(campaign)[0]).date;
 }
 
 function stopperFor(entries, enrollment) {
@@ -178,7 +178,7 @@ export async function runTick({ now = new Date(), dryRun = false, ...deps }) {
       if (deps.halted()) return { ...summary, halted: true };
       if (deps.campaigns.find(campaign.id)?.state !== "running") break;
 
-      const today = recipientToday(enrollment.lead, now);
+      const today = recipientToday(enrollment.lead, now, campaign);
       if (enrollment.nextDueDate && today < enrollment.nextDueDate) { skip("not_due"); continue; }
 
       const stopper = stopperFor(about(enrollment.email), enrollment);
@@ -228,7 +228,7 @@ export async function runTick({ now = new Date(), dryRun = false, ...deps }) {
       if (!allowed.ok) { skip("sender_unavailable"); continue; }
       if (await deps.gate.store.pausedFor(enrollment.sender)) { skip("sender_paused"); continue; }
 
-      const decision = sendDecision({ sender, recipient: enrollment.lead, ledger, now, spreadDay: deps.spreadDay ?? true });
+      const decision = sendDecision({ sender, recipient: enrollment.lead, ledger, now, spreadDay: deps.spreadDay ?? true, zone: cleanCampaignZone(campaign.zone) });
       if (!decision.ok) {
         if (decision.reason === "unknown_timezone") {
           if (!dryRun) {
