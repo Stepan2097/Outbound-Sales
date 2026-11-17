@@ -376,3 +376,25 @@ test("ESP 6: без джерела лист не йде навіть у вже �
   assert.equal(result.sent, 0);
   assert.equal(result.skipped.no_source, 1);
 });
+
+test("ab0fdf9c: a campaign with its own signature is signed only with it; a campaign without one keeps the workspace's", async (t) => {
+  const w = await world(t);
+  const stelemind = await w.campaigns.create({ name: "Stelemind · agencies UK/US", steps: w.steps, senders: ["anna@advantage-mail.com"], signature: { company: "Stelemind", site: "stelemind.com" } });
+  const operators = await w.campaigns.create({ name: "Оператори", steps: w.steps, senders: ["boris@advantage-mail.com"] });
+  await w.campaigns.enroll(stelemind.id, [LEAD]);
+  await w.campaigns.enroll(operators.id, [{ ...LEAD, email: "petro@southwind.com", name: "Petro Ivanenko", company: "Southwind" }]);
+  await w.campaigns.setState(stelemind.id, "running");
+  await w.campaigns.setState(operators.id, "running");
+  assert.equal((await w.tick(TUESDAY)).sent, 2);
+  const raw = (mailbox) => w.connector.sent.find((row) => row.mailbox === mailbox).raw;
+  const stelemindText = Buffer.from(raw("anna@advantage-mail.com").split("\r\n\r\n").slice(1).join("\r\n\r\n"), "base64").toString("utf8") + raw("anna@advantage-mail.com");
+  assert.match(stelemindText, /Anna Koval\r?\nStelemind\r?\nstelemind\.com/);
+  assert.doesNotMatch(stelemindText, /advantage\.agency|Partnerships|\bADvantage\b/);
+  const operatorsText = Buffer.from(raw("boris@advantage-mail.com").split("\r\n\r\n").slice(1).join("\r\n\r\n"), "base64").toString("utf8") + raw("boris@advantage-mail.com");
+  assert.match(operatorsText, /Boris Lis\r?\nPartnerships\r?\nADvantage\r?\nadvantage\.agency/);
+
+  const cleared = await w.campaigns.update(stelemind.id, { signature: { company: "" } });
+  assert.equal(cleared.signature, undefined, "an empty company is back to the workspace's signature");
+  assert.equal((await w.campaigns.update(stelemind.id, { signature: { company: "Stelemind" } })).signature.company, "Stelemind", "and it may change after the chain began");
+  assert.equal(w.campaigns.find(operators.id).signature, undefined, "the other campaign is untouched");
+});

@@ -27,7 +27,7 @@ import { DOMAIN_DAILY_LIMIT, GAP_MINUTES, WINDOW, coldAllowance, sendDecision, s
 import { canSend, isDisconnected, registry, setSenderRole, tagCatalog, updateSender } from "./registry.mjs";
 import { LetterError, assertPlainLetter } from "./letter.mjs";
 import { TEMPLATE_VARIABLES, TemplateError, prepareTemplate } from "./template.mjs";
-import { DEFAULT_SIGNATURE, prepareSignature } from "./templates.mjs";
+import { DEFAULT_SIGNATURE, campaignSignature, prepareSignature } from "./templates.mjs";
 
 /**
  * The right each part of the mail set-up needs (ESP 10, esp/access.mjs). Seeing
@@ -879,10 +879,13 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
       sendJson(response, 409, { success: false, code: "not_connected", error: `Пошту ${conversation.sender} не підключено (працює заглушка) — відповідь нікуди б не пішла, тож її не надіслано й не записано.` });
       return true;
     }
-    const lead = (esp.campaigns?.enrollments() || []).find((row) => row.email === conversation.contact)?.lead || {};
+    const enrolled = (esp.campaigns?.enrollments() || []).filter((row) => row.email === conversation.contact);
+    const row = enrolled.find((one) => one.campaignId === conversation.campaignId) || enrolled[0];
+    const lead = row?.lead || {};
     let letter;
     try {
-      letter = quickReply(conversation, body.text, { ...DEFAULT_SIGNATURE, ...(esp.signature.read() || {}) }, { lead });
+      // ab0fdf9c: an answer in a Stelemind conversation is signed Stelemind.
+      letter = quickReply(conversation, body.text, campaignSignature(esp.signature.read(), row ? esp.campaigns.find(row.campaignId) : null), { lead });
     } catch (error) {
       if (!(error instanceof ReplyError) && !(error instanceof LetterError)) throw error;
       sendJson(response, 400, { success: false, error: error.message, code: error.code });
@@ -1091,7 +1094,9 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
       }
       const lead = { email: "lead@example.com", ...(body.lead || {}) };
       const mailbox = String(body.mailbox || "sender@example.com");
-      const sender = { ...DEFAULT_SIGNATURE, ...(esp.signature.read() || {}), ...(body.sender || {}), email: mailbox };
+      // ab0fdf9c: a campaign's preview is signed the way its letters will be.
+      const campaign = body.campaignId ? esp.campaigns.find(String(body.campaignId)) : null;
+      const sender = { ...campaignSignature(esp.signature.read(), campaign), ...(body.sender || {}), email: mailbox };
       // Built exactly as a first letter of a sequence is (esp/compose.mjs),
       // with its unsubscribe headers — and not sent.
       const letter = composeLetter({ template, sender, lead, unsubscribe: esp.unsubscribe });
@@ -1146,7 +1151,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
     }
     try {
       const template = prepareTemplate({ subject: body.subject, body: body.body });
-      const sender = { ...DEFAULT_SIGNATURE, ...(esp.signature.read() || {}), email: mailbox };
+      const sender = { ...campaignSignature(esp.signature.read(), body.campaignId ? esp.campaigns?.find(String(body.campaignId)) : null), email: mailbox };
       const letter = composeLetter({ template, sender, lead: { ...(body.lead || {}), email: to }, unsubscribe: esp.unsubscribe });
       if (!letter.ok) {
         sendJson(response, 200, { success: true, ok: false, reason: letter.reason, error: letter.message });
@@ -1200,7 +1205,7 @@ export async function handleEspApi({ request, response, url, sendJson, readJson,
     }
     try {
       const template = prepareTemplate({ subject: body.subject, body: body.body });
-      const sender = { ...DEFAULT_SIGNATURE, ...(esp.signature.read() || {}), email: mailbox };
+      const sender = { ...campaignSignature(esp.signature.read(), body.campaignId ? esp.campaigns?.find(String(body.campaignId)) : null), email: mailbox };
       const letter = composeLetter({ template, sender, lead, unsubscribe: esp.unsubscribe });
       if (!letter.ok) {
         sendJson(response, 409, { success: false, code: letter.reason, error: letter.message });

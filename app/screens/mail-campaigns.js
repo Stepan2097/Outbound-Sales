@@ -652,7 +652,19 @@ function sendingHtml(campaign) {
         <input name="site" placeholder="Сайт" value="${escapeAttr(signature.site || "")}" />
       </div>
       <textarea name="usPostalAddress" rows="2" placeholder="Поштова адреса юрособи — додається лише для лідів зі США">${escapeHtml(signature.usPostalAddress || "")}</textarea>
-      <div class="mc-form-actions"><button type="submit" ${page.busy ? "disabled" : ""}><i data-lucide="pen-line"></i><span>Зберегти підпис</span></button><small class="mc-subtle">Підпис спільний для всіх кампаній.</small></div>
+      <div class="mc-form-actions"><button type="submit" ${page.busy ? "disabled" : ""}><i data-lucide="pen-line"></i><span>Зберегти підпис</span></button><small class="mc-subtle">Підпис спільний для всіх кампаній, які не мають власного.</small></div>
+    </form>
+    <form class="mc-signature" data-mc-form="campaign-signature">
+      <h3>Власний підпис цієї кампанії</h3>
+      <p class="mc-subtle">Коли кампанія пише від імені іншої компанії (наприклад, Stelemind), — її листи, відповіді в «Розмовах» і сторінка /privacy?c=… підписані тільки цим, без загального. Порожня «Компанія» — кампанія бере загальний підпис.</p>
+      <div class="mc-signature-grid">
+        <input name="name" placeholder="Ім'я (без нього — ім'я пошти)" value="${escapeAttr(campaign.signature?.name || "")}" />
+        <input name="title" placeholder="Посада" value="${escapeAttr(campaign.signature?.title || "")}" />
+        <input name="company" placeholder="Компанія" value="${escapeAttr(campaign.signature?.company || "")}" />
+        <input name="site" placeholder="Сайт" value="${escapeAttr(campaign.signature?.site || "")}" />
+      </div>
+      <textarea name="usPostalAddress" rows="2" placeholder="Поштова адреса юрособи — додається лише для лідів зі США">${escapeHtml(campaign.signature?.usPostalAddress || "")}</textarea>
+      <div class="mc-form-actions"><button type="submit" ${page.busy || campaign.state === "done" ? "disabled" : ""}><i data-lucide="pen-line"></i><span>Зберегти підпис кампанії</span></button><small class="mc-subtle">${campaign.signature?.company ? `Листи цієї кампанії підписані «${escapeHtml(campaign.signature.company)}».` : "Зараз — загальний підпис."}</small></div>
     </form>
   </section>`;
 }
@@ -910,7 +922,7 @@ async function previewEditor() {
   const editor = page.editor;
   const lead = sampleLead();
   try {
-    const answer = await api("/api/esp/preview", { method: "POST", body: JSON.stringify({ subject: editor.subject, body: editor.body, lead, mailbox: sampleMailbox() }) });
+    const answer = await api("/api/esp/preview", { method: "POST", body: JSON.stringify({ subject: editor.subject, body: editor.body, lead, mailbox: sampleMailbox(), campaignId: current()?.id || null }) });
     editor.preview = { ...answer, to: lead.email, subject: editor.followUp && answer.ok ? `Re: ${answer.subject}` : answer.subject };
   } catch (error) {
     editor.preview = { ok: false, error: error.message };
@@ -944,7 +956,7 @@ async function previewAll() {
   const lead = sampleLead();
   page.previews = {};
   for (const [index, step] of campaign.steps.entries()) {
-    page.previews[index] = await api("/api/esp/preview", { method: "POST", body: JSON.stringify({ templateId: step.templateId, lead, mailbox: sampleMailbox() }) })
+    page.previews[index] = await api("/api/esp/preview", { method: "POST", body: JSON.stringify({ templateId: step.templateId, lead, mailbox: sampleMailbox(), campaignId: current()?.id || null }) })
       .catch((error) => ({ ok: false, error: error.message }));
   }
   page.step = "review";
@@ -1243,6 +1255,10 @@ async function onSubmit(event) {
     const senders = data.getAll("sender");
     const spinMode = data.get("spinMode");
     return act(() => saveCampaign({ senders, ...(spinMode && !started() ? { spinMode } : {}) }), { success: "Параметри відправки збережено." });
+  }
+  if (form.dataset.mcForm === "campaign-signature") {
+    const data = Object.fromEntries(new FormData(form).entries());
+    return act(() => saveCampaign({ signature: String(data.company || "").trim() ? data : null }), { success: String(data.company || "").trim() ? "Підпис кампанії збережено." : "Кампанія знову бере загальний підпис." });
   }
   if (form.dataset.mcForm === "signature") {
     const data = Object.fromEntries(new FormData(form).entries());

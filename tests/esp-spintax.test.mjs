@@ -126,3 +126,13 @@ test("a refusal names the real reason and the whole variant — not a half cut a
   assert.throws(() => prepareTemplate({ subject: "{Hi {{first_name|there}}}", body: "x." }),
     (error) => error.code === "single_variant", "one variant with a stand-in is still one variant");
 });
+
+test("ab0fdf9c: /privacy?c=<Stelemind campaign> names Stelemind and nothing of ADvantage; without it — the workspace's company", async () => {
+  const { campaignSignature } = await import("../esp/templates.mjs");
+  const workspace = { name: "Anna", company: "ADvantage", site: "advantage.agency" };
+  const own = privacyPage({ company: campaignSignature(workspace, { signature: { company: "Stelemind" } }).company });
+  assert.match(own, /How Stelemind handles your data/);
+  assert.doesNotMatch(own, /ADvantage/);
+  assert.match(privacyPage({ company: campaignSignature(workspace, null).company }), /How ADvantage handles your data/);
+  assert.match(privacyPage({ company: campaignSignature(null, { signature: { company: "" } }).company }), /How ADvantage handles your data/);
+});

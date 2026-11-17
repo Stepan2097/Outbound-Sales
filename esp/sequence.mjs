@@ -34,6 +34,7 @@ import { isHoliday } from "./holidays.mjs";
 import { COUNTING_ZONE, SEND_ZONES, localTime, sendDecision, sendLedger } from "./limits.mjs";
 import { SenderPaused, SendingHalted } from "./senders.mjs";
 import { companyKey } from "./company.mjs";
+import { campaignSignature } from "./templates.mjs";
 
 export { SendingHalted };
 
@@ -277,7 +278,8 @@ export async function runTick({ now = new Date(), dryRun = false, ...deps }) {
       const template = deps.templates.get(campaign.steps[enrollment.step].templateId);
       const letter = template && composeLetter({
         template,
-        sender: { ...deps.signature(), name: sender.displayName || deps.signature().name, email: enrollment.sender },
+        // ab0fdf9c: the campaign's own signature over the workspace's, when it has one.
+        sender: (() => { const own = campaignSignature(deps.signature(), campaign); return { ...own, name: sender.displayName || own.name, email: enrollment.sender }; })(),
         lead: enrollment.lead,
         previous: enrollment.lastSent ? { ...enrollment.lastSent, sender: enrollment.sender } : null,
         unsubscribe: deps.unsubscribe,

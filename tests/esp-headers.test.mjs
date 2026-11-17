@@ -52,7 +52,7 @@ test("a link this server did not sign, or that somebody edited, unsubscribes nob
 });
 
 test("the signing key comes from the environment; without one it is random and said to be", () => {
-  assert.deepEqual(unsubscribeSecretFromEnv({ ESP_UNSUBSCRIBE_SECRET: SECRET }), { secret: SECRET, ephemeral: false });
+  assert.deepEqual(unsubscribeSecretFromEnv({ ESP_UNSUBSCRIBE_SECRET: SECRET }), { secret: SECRET, ephemeral: false, hostPrefix: "" });
   const random = unsubscribeSecretFromEnv({});
   assert.equal(random.ephemeral, true);
   assert.ok(random.secret.length >= 32);
@@ -145,4 +145,12 @@ test("composed: the first letter has its own subject and the unsubscribe headers
   assert.deepEqual([otherSender.ok, otherSender.reason], [false, "other_sender"]);
   const noName = composeLetter({ template: opening, sender: SENDER, lead: { ...LEAD, name: "" }, unsubscribe });
   assert.deepEqual([noName.ok, noName.reason], [false, "empty_variable"]);
+});
+
+test("ab0fdf9c: ESP_UNSUBSCRIBE_HOST_PREFIX puts the link on u.<sender domain> — the root forwards elsewhere", () => {
+  const { hostPrefix } = unsubscribeSecretFromEnv({ ESP_UNSUBSCRIBE_SECRET: SECRET, ESP_UNSUBSCRIBE_HOST_PREFIX: "u" });
+  const headers = unsubscribeHeaders({ sender: "elena@trafboost.com", recipient: "jo@agency.co.uk", secret: SECRET, hostPrefix });
+  assert.match(headers["List-Unsubscribe"], /^<mailto:elena@trafboost\.com\?subject=unsubscribe>, <https:\/\/u\.trafboost\.com\/u\/[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+>$/);
+  assert.match(unsubscribeHeaders({ sender: "elena@trafboost.com", recipient: "jo@agency.co.uk", secret: SECRET })["List-Unsubscribe"], /<https:\/\/trafboost\.com\/u\//, "unset — the domain itself, as before");
+  assert.match(unsubscribeHeaders({ sender: "elena@trafboost.com", recipient: "jo@agency.co.uk", secret: SECRET, hostPrefix: "evil.com/x" })["List-Unsubscribe"], /<https:\/\/trafboost\.com\/u\//, "a prefix that is not a label is ignored");
 });

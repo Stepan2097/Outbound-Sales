@@ -52,7 +52,7 @@ export function composeLetter({ template, sender, lead, previous = null, unsubsc
       messageId,
       headers: {
         ...(thread ? thread.headers : {}),
-        ...unsubscribeHeaders({ sender: sender.email, recipient: lead.email, campaignId, secret: unsubscribe?.secret, base: unsubscribe?.base })
+        ...unsubscribeHeaders({ sender: sender.email, recipient: lead.email, campaignId, secret: unsubscribe?.secret, base: unsubscribe?.base, hostPrefix: unsubscribe?.hostPrefix })
       }
     });
     return {

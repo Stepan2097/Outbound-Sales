@@ -48,6 +48,17 @@ export function templateStore({ read, write, now = () => new Date() }) {
  * address on as many lines as it has. Text only — there is nowhere for an
  * image or a link wrapper to go.
  */
+/**
+ * The signature a campaign's letters carry (ab0fdf9c, 17.11): its own when it has
+ * one — whole, so nothing of the workspace's (ADvantage, its site) leaks into a
+ * Stelemind letter — otherwise the workspace's, as every campaign had before.
+ */
+export function campaignSignature(workspace, campaign) {
+  const own = campaign?.signature;
+  if (own && typeof own === "object" && String(own.company || "").trim()) return { ...DEFAULT_SIGNATURE, ...own };
+  return { ...DEFAULT_SIGNATURE, ...(workspace || {}) };
+}
+
 export function prepareSignature(input = {}) {
   const line = (value) => cleanText(value, { singleLine: true }).text;
   return {

@@ -38,7 +38,7 @@ import { connectorFromEnv } from "./esp/gmail.mjs";
 import { GmailOAuthConnector, NotConnectedConnector, googleSignIn, grantStore, oauthConfigFromEnv, redirectUriFor } from "./esp/google-oauth.mjs";
 import { MicrosoftGraphConnector, providerOfFromEnv, providerRouter } from "./esp/provider.mjs";
 import { SenderGate } from "./esp/senders.mjs";
-import { DEFAULT_SIGNATURE, templateStore } from "./esp/templates.mjs";
+import { DEFAULT_SIGNATURE, campaignSignature, templateStore } from "./esp/templates.mjs";
 import { handleUnsubscribe, unsubscribeSecretFromEnv } from "./esp/unsubscribe.mjs";
 import { privacyPage } from "./esp/notice.mjs";
 import { recordAboutContact, recordFailed, recordSending, recordSent } from "./esp/messages.mjs";
@@ -771,7 +771,9 @@ const server = createServer(async (request, response) => {
     // own domain, which points here. Public, plain, nothing tracked.
     if (request.method === "GET" && (url.pathname === "/privacy" || url.pathname === "/privacy/")) {
       response.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=3600" });
-      response.end(privacyPage({ company: state.espSignature?.company || "ADvantage" }));
+      // ab0fdf9c: ?c=<campaign> — the company that campaign signs as (Stelemind), else the workspace's.
+      const campaign = (Array.isArray(state.espCampaigns) ? state.espCampaigns : []).find((row) => row.id === url.searchParams.get("c")) || null;
+      response.end(privacyPage({ company: campaignSignature(state.espSignature, campaign).company }));
       return;
     }
 

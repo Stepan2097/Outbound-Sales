@@ -14,6 +14,7 @@ import { randomUUID } from "node:crypto";
 
 import { contactKey } from "./journal.mjs";
 import { SPIN_MODES } from "./spintax.mjs";
+import { prepareSignature } from "./templates.mjs";
 
 export const DEFAULT_STEP_DELAYS = [0, 3, 4];
 export const CAMPAIGN_STATES = ["draft", "running", "paused", "done"];
@@ -148,7 +149,7 @@ export function campaignStore({ read, write, readEnrollments, writeEnrollments, 
      * and is filled step by step; what a running campaign needs (a letter, a
      * mailbox) is asked for when it is started, not when it is named.
      */
-    async create({ name, steps = [], senders = [], spinMode = "all", createdBy = "" }) {
+    async create({ name, steps = [], senders = [], spinMode = "all", createdBy = "", signature = null }) {
       const title = String(name ?? "").trim().slice(0, 120);
       if (!title) throw new CampaignError("Дайте кампанії назву.", { code: "no_name" });
       const at = now().toISOString();
@@ -159,6 +160,7 @@ export function campaignStore({ read, write, readEnrollments, writeEnrollments, 
         spinMode: SPIN_MODES.includes(spinMode) ? spinMode : "all",
         // Whose campaign it is — the team's list says it, as Snov's «Owner» does.
         createdBy: String(createdBy || "").trim().toLowerCase().slice(0, 200),
+        ...(signature && typeof signature === "object" && String(signature.company || "").trim() ? { signature: prepareSignature(signature) } : {}),
         createdAt: at, updatedAt: at
       };
       await write([...list(), campaign]);
@@ -176,6 +178,13 @@ export function campaignStore({ read, write, readEnrollments, writeEnrollments, 
       if (input.spinMode !== undefined) {
         if (started) throw new CampaignError("Ланцюжок уже почався — режим спінтаксу не змінюється, інакше A/B порівнює різне.", { code: "started", status: 409 });
         next.spinMode = SPIN_MODES.includes(input.spinMode) ? input.spinMode : campaign.spinMode;
+      }
+      // ab0fdf9c: a campaign may sign as another company (Stelemind); empty company or
+      // null — back to the workspace's signature. It may change at any time, like that one.
+      if (input.signature !== undefined) {
+        const own = input.signature && typeof input.signature === "object" ? prepareSignature(input.signature) : null;
+        if (own && String(input.signature.company || "").trim()) next.signature = own;
+        else delete next.signature;
       }
       if (input.steps !== undefined) {
         if (started) throw new CampaignError("Ланцюжок уже почався — листи в ньому не змінюються.", { code: "started", status: 409 });

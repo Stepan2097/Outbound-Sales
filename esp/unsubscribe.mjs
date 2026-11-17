@@ -28,8 +28,10 @@ import { LetterError } from "./letter.mjs";
  */
 export function unsubscribeSecretFromEnv(env = process.env) {
   const secret = String(env.ESP_UNSUBSCRIBE_SECRET || "").trim();
-  if (secret.length >= 16) return { secret, ephemeral: false };
-  return { secret: randomBytes(32).toString("hex"), ephemeral: true };
+  // ESP_UNSUBSCRIBE_HOST_PREFIX=u — links on u.<sender domain> (ab0fdf9c); unset — on the domain itself.
+  const hostPrefix = String(env.ESP_UNSUBSCRIBE_HOST_PREFIX || "").trim().toLowerCase();
+  if (secret.length >= 16) return { secret, ephemeral: false, hostPrefix };
+  return { secret: randomBytes(32).toString("hex"), ephemeral: true, hostPrefix };
 }
 
 const b64 = (value) => Buffer.from(value).toString("base64url");
@@ -65,12 +67,15 @@ export function senderDomain(mailbox) {
  * `/u/`; by default the domain itself. A base on any other domain is refused —
  * a link to somewhere else is exactly what the checklist forbids.
  */
-export function unsubscribeHeaders({ sender, recipient, campaignId = null, secret, base = null }) {
+export function unsubscribeHeaders({ sender, recipient, campaignId = null, secret, base = null, hostPrefix = "" }) {
   if (!secret) throw new LetterError("Немає ключа для посилань відписки.", { code: "unsubscribe_secret_missing" });
   const domain = senderDomain(sender);
+  // ab0fdf9c: the sending domains forward their root to a site (301 → trinity-ltd.co),
+  // so /u/ is served on a subdomain of each that points here: `u.trafboost.com`.
+  const prefix = String(hostPrefix || "").trim().toLowerCase();
   let url;
   try {
-    url = new URL(base || `https://${domain}`);
+    url = new URL(base || (/^[a-z0-9-]{1,30}$/.test(prefix) ? `https://${prefix}.${domain}` : `https://${domain}`));
   } catch {
     throw new LetterError(`Адреса для відписки не читається: ${base}.`, { code: "unsubscribe_bad_base" });
   }
