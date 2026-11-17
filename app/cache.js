@@ -47,9 +47,73 @@ export function setCacheScope(value) {
   scope = next;
 }
 
+// Snapshots live in IndexedDB (власник 17.11: «при перезавантаженні сторінки все одно довго
+// грузить»): the queue of the whole team is 630 KB and the conversations more — past the 512 KB a
+// sessionStorage snapshot may take, so exactly the heaviest screens were drawn from nothing after a
+// reload. They are read into memory once, before the first screen opens (`loadScreens`), so a
+// screen still recalls synchronously; writes go to memory at once and to the database behind it.
+const DB_NAME = "outbound-screens";
+const DB_STORE = "snapshots";
+const MAX_DB_SNAPSHOTS = 24;
+const snapshots = new Map();
+let snapshotsFor = "";
+let dbPromise = null;
+
+function screensDb() {
+  if (!dbPromise) {
+    dbPromise = new Promise((resolve, reject) => {
+      if (!window.indexedDB) return reject(new Error("no IndexedDB"));
+      const request = window.indexedDB.open(DB_NAME, 1);
+      request.onupgradeneeded = () => request.result.createObjectStore(DB_STORE, { keyPath: "id" });
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+      request.onblocked = () => reject(new Error("blocked"));
+    }).catch((error) => { dbPromise = null; throw error; });
+  }
+  return dbPromise;
+}
+
+function inStore(mode, work) {
+  return screensDb().then((db) => new Promise((resolve, reject) => {
+    const tx = db.transaction(DB_STORE, mode);
+    const result = work(tx.objectStore(DB_STORE));
+    tx.oncomplete = () => resolve(result?.result);
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  }));
+}
+
+/** This person's snapshots into memory, before the first screen opens. Never longer than ~0.4 s. */
+export async function loadScreens() {
+  if (!scope || snapshotsFor === scope) return;
+  const own = scope;
+  const read = inStore("readonly", (store) => store.getAll()).then((rows) => {
+    if (own !== scope) return;
+    snapshots.clear();
+    for (const row of rows || []) if (row?.scope === own && row.key) snapshots.set(row.key, { at: row.at, value: row.value });
+    snapshotsFor = own;
+  });
+  await Promise.race([read.catch(() => {}), new Promise((resolve) => setTimeout(resolve, 400))]);
+}
+
+function forgetDbSnapshots(keepScope = "") {
+  if (!keepScope) snapshots.clear();
+  if (snapshotsFor !== keepScope) { snapshots.clear(); snapshotsFor = ""; }
+  inStore("readwrite", (store) => {
+    const request = store.openCursor();
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) return;
+      if (!keepScope || cursor.value?.scope !== keepScope) cursor.delete();
+      cursor.continue();
+    };
+  }).catch(() => {});
+}
+
 /** `{ at, value }` as last remembered, or null. A snapshot is display-only. */
 export function recallScreen(key) {
   if (!scope) return null;
+  if (snapshotsFor === scope && snapshots.has(key)) return snapshots.get(key);
   try {
     const raw = window.sessionStorage.getItem(PREFIX + scope + ":" + key);
     if (!raw || raw.length > MAX_SNAPSHOT_CHARS) return null;
@@ -60,6 +124,24 @@ export function recallScreen(key) {
 
 export function rememberScreen(key, value) {
   if (!scope) return;
+  if (snapshotsFor === scope || !snapshotsFor) {
+    const at = Date.now();
+    const own = scope;
+    snapshots.set(key, { at, value });
+    snapshotsFor = own;
+    const id = own + ":" + key;
+    inStore("readwrite", (store) => {
+      store.put({ id, scope: own, key, at, value });
+      // The oldest go when there are too many; another person's never stay.
+      const all = store.getAll();
+      all.onsuccess = () => {
+        const rows = all.result || [];
+        for (const row of rows) if (row.scope !== own) store.delete(row.id);
+        const mine = rows.filter((row) => row.scope === own && row.id !== id).sort((left, right) => left.at - right.at);
+        while (mine.length >= MAX_DB_SNAPSHOTS) store.delete(mine.shift().id);
+      };
+    }).catch(() => {});
+  }
   try {
     const raw = JSON.stringify({ at: Date.now(), value });
     if (raw.length > MAX_SNAPSHOT_CHARS) return;
@@ -80,6 +162,7 @@ function storageKeys() {
 }
 
 export function invalidateScreens(keepScope = "") {
+  forgetDbSnapshots(keepScope);
   try {
     const keepPrefix = keepScope ? PREFIX + keepScope + ":" : "";
     for (const key of storageKeys()) {

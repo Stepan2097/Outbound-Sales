@@ -3,7 +3,7 @@
 // the four screens by name only — each screen registers what opening it means
 // (`onScreen`), so nothing here imports a screen.
 
-import { forgetReads, forgetScreens, getCacheEpoch, getCacheScope, invalidateReads, invalidateScreens, recallRead, rememberRead, setCacheScope } from "./cache.js";
+import { forgetReads, forgetScreens, getCacheEpoch, getCacheScope, invalidateReads, invalidateScreens, loadScreens, recallRead, rememberRead, setCacheScope } from "./cache.js";
 
 export let state = null;
 
@@ -221,6 +221,8 @@ async function enterWorkspace() {
   // second of empty page before the screen had even asked for its data.
   // A link to a screen wins over the tab somebody last left.
   const saved = linkedView() || rememberedView();
+  // The last snapshots of this person's screens, so the first screen is drawn from them at once.
+  await loadScreens();
   // Перший вхід (Марко 20.10): адмін — на Головну (нагляд за командою), лідген — у
   // Вхідні (там його робота). Далі відкривається та вкладка, на якій людина була.
   setView(saved || (authState?.user?.role === "admin" ? "home" : "inbox"));

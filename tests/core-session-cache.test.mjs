@@ -14,6 +14,7 @@ function harness(fetch) {
     fetch, getCacheEpoch: () => epoch,
     getCacheScope: () => scope,
     setCacheScope: (next) => { if (scope !== next) epoch += 1; scope = next; },
+    loadScreens: async () => {},
     invalidateReads: (prefix, options) => { invalidations += 1; invalidationOptions.push({ prefix, options }); }, invalidateScreens: () => {},
     showAuthGate: () => { gates += 1; epoch += 1; },
     document: { getElementById: () => ({ hidden: false }) },

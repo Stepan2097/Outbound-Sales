@@ -117,10 +117,14 @@ test("writes and logout invalidate resolved and in-flight reads, including late 
   assert.equal(await cachedRead("old-session", () => "new read"), "new read");
 });
 
-test("an oversized persisted snapshot is omitted instead of filling tab storage", () => {
+// Власник 17.11: «при перезавантаженні сторінки все одно довго грузить» — черга команди (630 КБ)
+// не влазила в знімок вкладки, тож найважчі екрани після перезавантаження малювались з нуля.
+// Великий знімок тепер іде в IndexedDB (і в пам'ять); сховище вкладки великим не забивається.
+test("a big snapshot is kept (IndexedDB and memory), but never fills tab storage", () => {
   setCacheScope("bounded");
   rememberScreen("inbox", { body: "x".repeat(512_001) });
-  assert.equal(recallScreen("inbox"), null);
+  assert.equal(recallScreen("inbox")?.value?.body.length, 512_001);
+  assert.ok(!Object.keys(globalThis.sessionStorage?.store ?? {}).some((key) => (globalThis.sessionStorage.store[key] || "").length > 512_000));
 });
 
 test("a background Home write during Contacts navigation retries the current read without showing its old answer", async () => {

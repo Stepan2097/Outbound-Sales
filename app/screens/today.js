@@ -392,9 +392,15 @@ function allItems() {
 onCacheReset(() => { today.data = null; today.selected = ""; });
 
 async function openToday({ keepSelection = false } = {}) {
+  // Під тим, що попросили, а не тим, що показали: адміна без власних пінгів перемикає на «Усі»
+  // нижче, і знімок, збережений під «Усі», після перезавантаження шукали під «Мої».
+  const asked = today.scope;
   if (!today.data) {
-    const saved = recallScreen(`today:${today.scope}`)?.value;
-    if (saved) today.data = saved;
+    const saved = recallScreen(`today:${asked}`)?.value;
+    if (saved) {
+      today.data = saved;
+      if (saved.scope === "all" || saved.scope === "mine") today.scope = saved.scope;
+    }
   }
   today.loading = true;
   render();
@@ -408,7 +414,7 @@ async function openToday({ keepSelection = false } = {}) {
     }
     today.loadedAt = Date.now();
     today.error = "";
-    rememberScreen(`today:${today.scope}`, today.data);
+    rememberScreen(`today:${asked}`, today.data);
   } catch (error) {
     if (error?.name === "AbortError") return;
     today.error = error.message || "Не вдалося завантажити пінги.";
