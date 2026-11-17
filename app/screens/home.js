@@ -11,6 +11,7 @@
 // Нові контакти — у Вхідні → «Нові»; історія за дні й тижні — у «Звіт команди».
 
 import { api, authState, escapeAttr, escapeHtml, onScreen, refreshIcons, uaPlural } from "../core.js";
+import { onCacheReset, recallScreen, rememberScreen } from "../cache.js";
 import { openNewTab, openTodayBlock } from "./today.js";
 import { warmupApi } from "./warmup-accounts.js";
 // Сповіщення про акаунти у верхньому куті — на кожному екрані; вантажиться разом із Головною (таск 4e97fa87).
@@ -34,7 +35,17 @@ const home = { today: null, warmup: null, day: null, gate: null, errors: [], loa
 const isAdmin = () => authState?.user?.role === "admin";
 const scope = () => (isAdmin() ? "all" : "mine");
 
+// Головна з'являється одразу з останнього знімка, свіжа — за мить (власник 17.11: «весь інтерфейс
+// має літати»). Від пінгів — лише те, що тут показано: блоки з датою й лідгеном кожного.
+const slimToday = (today) => today && {
+  ...today,
+  blocks: Object.fromEntries(Object.entries(today.blocks || {}).map(([key, items]) => [key, (items || []).map((item) => ({ dueDay: item.dueDay, assignee: item.assignee }))])),
+  later: []
+};
+onCacheReset(() => Object.assign(home, { today: null, warmup: null, day: null, gate: null, errors: [], loading: false }));
+
 async function openHome() {
+  if (!home.today && !home.warmup) Object.assign(home, recallScreen("home")?.value || {});
   home.loading = true;
   render();
   const errors = [];
@@ -46,6 +57,7 @@ async function openHome() {
     read(api("/api/today/gate"), "нові контакти")
   ]);
   Object.assign(home, { today, warmup, day, gate, errors, loading: false });
+  if (!errors.length) rememberScreen("home", { today: slimToday(today), warmup, day, gate });
   render();
 }
 

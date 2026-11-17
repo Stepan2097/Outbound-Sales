@@ -15,6 +15,7 @@
 // закриває цей і ставить наступний (через 3 робочі дні).
 
 import { api, escapeAttr, escapeHtml, keepScroll, onScreen, refreshIcons } from "../core.js";
+import { onCacheReset, recallScreen, rememberScreen } from "../cache.js";
 import { connectInboxWork, renderWarmupInbox, warmupAccountsNeedingPerson, warmupThreadAiLabel, warmupThreadTotal, showWarmupInboxThread, warmupGoesOutText, warmupMessageHtml, warmupProfileUrl } from "./inbox.js";
 import { showContactCard } from "./contacts.js";
 import { createCampaignFor } from "./lead-campaigns.js";
@@ -386,7 +387,15 @@ function allItems() {
   return BLOCKS.flatMap(([key]) => blocks[key] || []);
 }
 
+// Черга з'являється одразу з останнього знімка цієї вкладки, свіжа — за мить (власник 17.11:
+// «весь інтерфейс має літати»). Знімок — лише для показу; дії йдуть уже по свіжих даних.
+onCacheReset(() => { today.data = null; today.selected = ""; });
+
 async function openToday({ keepSelection = false } = {}) {
+  if (!today.data) {
+    const saved = recallScreen(`today:${today.scope}`)?.value;
+    if (saved) today.data = saved;
+  }
   today.loading = true;
   render();
   try {
@@ -399,6 +408,7 @@ async function openToday({ keepSelection = false } = {}) {
     }
     today.loadedAt = Date.now();
     today.error = "";
+    rememberScreen(`today:${today.scope}`, today.data);
   } catch (error) {
     if (error?.name === "AbortError") return;
     today.error = error.message || "Не вдалося завантажити пінги.";

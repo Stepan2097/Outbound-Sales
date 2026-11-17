@@ -742,7 +742,18 @@ void warmRuntimeConnections();
 // before anybody has signed in. A failure here only means "not known yet".
 void crmProfilesByEmail().catch(() => {});
 
+// Повільні запити — у журнал, щоб прискорювати те, що справді гальмує (власник 17.11: «весь
+// інтерфейс має літати»): метод, шлях без параметрів, статус і час. Лише час — без даних і людей.
+const SLOW_REQUEST_MS = Number(process.env.SLOW_REQUEST_MS || 700);
+
 const server = createServer(async (request, response) => {
+  const startedAt = performance.now();
+  response.once("finish", () => {
+    const ms = Math.round(performance.now() - startedAt);
+    if (ms >= SLOW_REQUEST_MS && String(request.url || "").startsWith("/api/")) {
+      console.log(`[slow] ${request.method} ${String(request.url).split("?")[0]} ${response.statusCode} ${ms}ms`);
+    }
+  });
   try {
     const url = new URL(request.url ?? "/", `http://${request.headers.host}`);
     if (request.method === "GET" && url.pathname === "/health") {

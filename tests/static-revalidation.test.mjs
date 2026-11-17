@@ -53,3 +53,41 @@ test('strong validator and length describe the sent bytes even if a file changes
   }
  }finally{await rm(root,{recursive:true,force:true});}
 });
+
+// Власник 17.11: «весь інтерфейс має літати» — файли сторінки за адресою з релізом, кеш на рік.
+test('the page names its files by release; those URLs are immutable, an older release still answers', async () => {
+ const { appRelease, withRelease } = await import('../state/static-files.mjs');
+ const root = await mkdtemp(join(tmpdir(), 'outbound-release-'));
+ await writeFile(join(root, 'index.html'), '<link rel="stylesheet" href="/styles/a.css" /><script type="module" src="/main.js"></script><a href="/api/x">x</a><a href="https://e.com/y.js">y</a>');
+ await writeFile(join(root, 'main.js'), 'import "./b.js";');
+ const server = createServer(async (req, res) => { if (!await serveStaticFile(req, res, root, req.url, () => 'text/plain')) { res.writeHead(404); res.end(); } });
+ await new Promise((r) => server.listen(0, '127.0.0.1', r));
+ const url = `http://127.0.0.1:${server.address().port}`;
+ try {
+  const release = await appRelease(root);
+  assert.match(release, /^[0-9a-f]{12}$/);
+  const page = await (await fetch(url + '/')).text();
+  assert.match(page, new RegExp(`href="/r/${release}/styles/a\\.css"`));
+  assert.match(page, new RegExp(`src="/r/${release}/main\\.js"`));
+  assert.match(page, /href="\/api\/x"/);
+  assert.match(page, /href="https:\/\/e\.com\/y\.js"/);
+  const asset = await fetch(`${url}/r/${release}/main.js`);
+  assert.equal(asset.status, 200);
+  assert.match(asset.headers.get('cache-control'), /immutable/);
+  assert.equal(await asset.text(), 'import "./b.js";');
+  const old = await fetch(`${url}/r/000000000000/main.js`);
+  assert.equal(old.status, 200);
+  assert.match(old.headers.get('cache-control'), /no-cache/);
+  // A saved file is a new release: a server under edit never serves an old module for a year.
+  await writeFile(join(root, 'main.js'), 'import "./c.js";');
+  assert.notEqual(await appRelease(root), release);
+  assert.equal(withRelease('<img src="/logo.svg">', 'abc'), '<img src="/r/abc/logo.svg">');
+ } finally { server.closeAllConnections(); await new Promise((r) => server.close(r)); await rm(root, { recursive: true, force: true }); }
+});
+
+test('the icons come from a pinned version — «@latest» is a redirect cached for a minute on every load', async () => {
+ const { readFileSync } = await import('node:fs');
+ const html = readFileSync(new URL('../app/index.html', import.meta.url), 'utf8');
+ assert.doesNotMatch(html, /@latest/);
+ assert.match(html, /unpkg\.com\/lucide@\d+\.\d+\.\d+\//);
+});
