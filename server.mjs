@@ -746,14 +746,18 @@ void crmProfilesByEmail().catch(() => {});
 // Повільні запити — у журнал, щоб прискорювати те, що справді гальмує (власник 17.11: «весь
 // інтерфейс має літати»): метод, шлях без параметрів, статус і час. Лише час — без даних і людей.
 const SLOW_REQUEST_MS = Number(process.env.SLOW_REQUEST_MS || 700);
+// Requests that write nothing a screen shows: they leave the kept answers as they are.
+const NOT_A_CHANGE = new Set(["/api/account/heartbeat", "/api/today/translate", "/api/auth/status"]);
 
 const server = createServer(async (request, response) => {
   const startedAt = performance.now();
   response.once("finish", () => {
     // A finished write request spoils every kept answer (state/answer-cache.mjs).
     // The agents' own calls are not a person's change; what they write stales answers through the tables.
-    if (!["GET", "HEAD", "OPTIONS"].includes(request.method) && String(request.url || "").startsWith("/api/")
-      && !String(request.url).startsWith("/api/warmup/agent")) noteWrite();
+    // Nor is a tab's minute heartbeat — it spoiled every kept answer once a minute per open tab.
+    const path = String(request.url || "").split("?")[0];
+    if (!["GET", "HEAD", "OPTIONS"].includes(request.method) && path.startsWith("/api/")
+      && !path.startsWith("/api/warmup/agent") && !NOT_A_CHANGE.has(path)) noteWrite();
     const ms = Math.round(performance.now() - startedAt);
     if (ms >= SLOW_REQUEST_MS && String(request.url || "").startsWith("/api/")) {
       console.log(`[slow] ${request.method} ${String(request.url).split("?")[0]} ${response.statusCode} ${ms}ms`);

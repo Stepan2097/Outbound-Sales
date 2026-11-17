@@ -41,3 +41,27 @@ test("відповідь лежить; запис людини — свіжа; �
     delete process.env.ANSWER_CACHE_IN_TESTS;
   }
 });
+
+test("відповідь, що зависла, не тримає всіх: за 15 с наступний питає сам (17.11: «досі завантажується»)", async () => {
+  process.env.ANSWER_CACHE_IN_TESTS = "1";
+  const realNow = Date.now;
+  try {
+    const { cachedAnswer } = await import("../state/answer-cache.mjs");
+    let now = realNow();
+    Date.now = () => now;
+    const hung = cachedAnswer("hang", () => new Promise(() => {}));
+    let settled = false;
+    hung.then(() => { settled = true; });
+    // Поки свіжа — спільна.
+    let other = 0;
+    void cachedAnswer("hang", async () => { other += 1; return "other"; });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.equal(other, 0, "поки свіжа — нова не робиться");
+    now += 16_000;
+    assert.equal(await cachedAnswer("hang", async () => "fresh"), "fresh");
+    assert.equal(settled, false);
+  } finally {
+    Date.now = realNow;
+    delete process.env.ANSWER_CACHE_IN_TESTS;
+  }
+});

@@ -11,6 +11,7 @@
 // number is stale the moment anything here writes to that table (17.11: the
 // conversation list was re-read from the database on every screen change).
 const writes = new Map();
+const READ_TIMEOUT_MS = 45_000;
 
 /** The write count of a table in this process — part of a cache key. */
 export function tableWrites(table) {
@@ -234,7 +235,9 @@ class Query {
         ...this.headers
       },
       body: this.payload === undefined ? undefined : JSON.stringify(this.payload),
-      ...(this.table.startsWith("rpc/") ? { signal: AbortSignal.timeout(10000) } : {})
+      // Reads end: a read that never returned once held every screen behind the kept answer
+      // that waited on it (17.11). Writes keep no limit — a cut write may still land.
+      ...(this.table.startsWith("rpc/") ? { signal: AbortSignal.timeout(10000) } : this.method === "GET" ? { signal: AbortSignal.timeout(READ_TIMEOUT_MS) } : {})
     });
 
     if (this.method !== "GET") writes.set(this.table, (writes.get(this.table) || 0) + 1);

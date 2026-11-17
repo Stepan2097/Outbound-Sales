@@ -12,6 +12,7 @@ import { allTableWrites } from "../warmup/rest.mjs";
  */
 const entries = new Map();
 const MAX_ENTRIES = 300;
+const SHARE_PENDING_MS = 15_000;
 let requestWrites = 0;
 
 /** A person's write request finished: every kept answer is from before it. */
@@ -24,7 +25,9 @@ export async function cachedAnswer(key, make, { ttlMs = 20_000, staleMs = 10 * 6
   if (process.env.NODE_TEST_CONTEXT && !process.env.ANSWER_CACHE_IN_TESTS) return make();
   const kept = entries.get(key);
   if (kept && kept.requests === requestWrites) {
-    if (kept.promise) return kept.promise;
+    // One answer being made is shared — but not one that hangs: past this, the next asker makes
+    // its own, so a database read that never returns does not hold every screen behind it.
+    if (kept.promise && Date.now() - kept.started < SHARE_PENDING_MS) return kept.promise;
     const age = Date.now() - kept.at;
     if (age < ttlMs && kept.tables === allTableWrites()) return kept.value;
     if (age < staleMs) {
@@ -37,7 +40,7 @@ export async function cachedAnswer(key, make, { ttlMs = 20_000, staleMs = 10 * 6
     }
   }
   const requests = requestWrites;
-  const pending = { requests, promise: null };
+  const pending = { requests, promise: null, started: Date.now() };
   pending.promise = Promise.resolve().then(make).then((value) => {
     store(key, value, requests);
     return value;
