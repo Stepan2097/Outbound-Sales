@@ -148,6 +148,7 @@ function tableHtml(data) {
     if (!canChange) return "";
     if (row.status === "running") return `<button type="button" class="text-button" data-warmup-pause="${escapeAttr(row.email)}"${mailWarmupState.busy ? " disabled" : ""}><i data-lucide="pause"></i><span>Пауза</span></button>`;
     if (row.status === "removed") return `<button type="button" class="text-button" data-warmup-restore="${escapeAttr(row.email)}"${mailWarmupState.busy ? " disabled" : ""}><i data-lucide="undo-2"></i><span>Повернути в прогрів</span></button>`;
+    if (row.status === "blocked" && row.senderPaused) return `<button type="button" class="text-button" data-warmup-unpause="${escapeAttr(row.email)}" title="${escapeAttr(row.blocked || "")}"${mailWarmupState.busy ? " disabled" : ""}><i data-lucide="play"></i><span>Зняти з паузи</span></button>`;
     if (row.status === "blocked") return "";
     return `<button type="button" class="primary-button" data-warmup-start="${escapeAttr(row.email)}"${mailWarmupState.busy ? " disabled" : ""}><i data-lucide="play"></i><span>Старт</span></button>`;
   };
@@ -252,6 +253,23 @@ async function change(path, body, done) {
   await loadMailWarmup();
 }
 
+/** The mailbox's own pause (an alarm's or a person's) lifted — it sends and warms again. */
+async function unpauseMailbox(email) {
+  mailWarmupState.busy = "unpause";
+  renderMailWarmup();
+  try {
+    await api("/api/esp/senders/status", { method: "POST", body: JSON.stringify({ email, status: "active", reason: "знято з паузи вручну" }) });
+    mailWarmupState.notice = `${email}: знято з паузи.`;
+    mailWarmupState.error = "";
+  } catch (error) {
+    mailWarmupState.notice = error?.status === 403 ? "Знімати пошту з паузи може той, хто має право міняти ліміти." : error?.message || "Не вдалося.";
+    mailWarmupState.error = mailWarmupState.notice;
+  } finally {
+    mailWarmupState.busy = "";
+  }
+  await loadMailWarmup();
+}
+
 document.getElementById("mailWarmupRoot")?.addEventListener("change", (event) => {
   if (event.target.id !== "mailWarmupTag") return;
   mailWarmupState.tag = event.target.value;
@@ -277,6 +295,8 @@ document.getElementById("mailWarmupRoot")?.addEventListener("click", (event) => 
   }
   const restore = event.target.closest("[data-warmup-restore]")?.dataset.warmupRestore;
   if (restore) return void change("restore", { mailbox: restore }, () => `${restore}: повернуто — натисніть «Старт», щоб прогрів пішов.`);
+  const unpause = event.target.closest("[data-warmup-unpause]")?.dataset.warmupUnpause;
+  if (unpause) return void unpauseMailbox(unpause);
   const pause = event.target.closest("[data-warmup-pause]")?.dataset.warmupPause;
   if (pause) return void change("pause", { mailbox: pause }, () => `${pause}: прогрів на паузі.`);
   if (event.target.closest("[data-warmup-start-all]")) {

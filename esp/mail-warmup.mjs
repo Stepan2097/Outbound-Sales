@@ -269,6 +269,8 @@ export function warmupView(entries, { senders = [], domains = [], now = new Date
     return {
       email: sender.email, domain: sender.domain, domainStatus, person: sender.person || sender.displayName || "", role: sender.role || null, tags: sender.tags || [],
       status: blocked ? "blocked" : mine.running ? "running" : mine.startedAt ? "paused" : "never",
+      // 17.11, owner: «додай кнопку зняти з паузи» — a mailbox paused by hand or by an alarm, not one that lost Google.
+      senderPaused: sender.status === "paused" && !lostAccess(sender),
       blocked, blockedLabel, day: mine.day, plannedToday: mine.plannedToday, planOfDay: mine.plannedToday,
       sentToday: mine.sentToday, firstsToday: mine.firstsToday, repliesToday: mine.repliesToday, coldToday, coldAllowed, limit,
       sent: mine.sent, repliesReceived: mine.repliesReceived, repliesSent: mine.repliesSent, received: mine.received,

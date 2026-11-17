@@ -32,3 +32,23 @@ test("a mailbox that lost its Google access stays in the warm-up with «пере
   assert.equal(rows[0].blockedLabel, "відключилася");
   assert.match(rows[0].blocked, /перепідключіть: «Увійти через Google»/);
 });
+
+test("17.11, «додай кнопку зняти з паузи»: a mailbox an alarm paused can be unpaused from the table; one that lost Google cannot", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "esp-unpause-"));
+  useJournal(join(dir, "journal.jsonl"));
+  t.after(async () => { useJournal(null); await rm(dir, { recursive: true, force: true }); });
+  await addDomain({ domain: "trafboost.com" }, "test");
+  await setDomainStatus({ domain: "trafboost.com", status: "ramp" }, "test");
+  await addSender({ email: "elena@trafboost.com" }, "test");
+  await addSender({ email: "lost@trafboost.com" }, "test");
+  await setSenderStatus({ email: "elena@trafboost.com", status: "paused", reason: "відмова 5.7.1 за політикою отримувача", code: "policy_bounce" }, "esp-alerts");
+  await setSenderStatus({ email: "lost@trafboost.com", status: "paused", reason: "Пошту не підключено", code: "not_connected" }, "esp-gate");
+  const { senders, domains } = await registry();
+  const rows = warmupView([], { senders, domains });
+  const by = (email) => rows.find((row) => row.email === email);
+  assert.deepEqual([by("elena@trafboost.com").status, by("elena@trafboost.com").senderPaused], ["blocked", true]);
+  assert.deepEqual([by("lost@trafboost.com").status, by("lost@trafboost.com").senderPaused], ["blocked", false]);
+  await setSenderStatus({ email: "elena@trafboost.com", status: "active", reason: "знято з паузи вручну" }, "owner@advantage.agency");
+  const after = warmupView([], { ...(await registry()) }).find((row) => row.email === "elena@trafboost.com");
+  assert.deepEqual([after.status, after.senderPaused], ["never", false]);
+});
