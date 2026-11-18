@@ -798,6 +798,14 @@ const server = createServer(async (request, response) => {
       return;
     }
 
+    // 619e88e4: u.<cold domain> serves the unsubscribe link and /privacy, nothing else —
+    // the workspace (sign-in, screens, API) is not shown on a sending domain.
+    if (/^u\./i.test(String(request.headers.host || ""))) {
+      response.writeHead(404, { "content-type": "text/plain; charset=utf-8", "x-robots-tag": "noindex" });
+      response.end("Not found");
+      return;
+    }
+
     if (url.pathname.startsWith("/api/")) {
       // The box is opened empty and filled the moment the session gate names a
       // profile, so everything the request does afterwards knows who asked.
