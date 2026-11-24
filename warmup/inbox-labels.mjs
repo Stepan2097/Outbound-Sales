@@ -34,8 +34,15 @@ export function needsInboxLabel(thread, stored) {
   return stored.by === "ai" && stored.basis !== labelBasis(thread);
 }
 
-export function inboxLabeler({ store, listThreads, readThread, classify, concurrency = 3 }) {
+// A conversation the model could not label rests before it is asked again, and a run in which
+// the model keeps failing stops: on 24.11 every one of ~1000 conversations was asked again every
+// ten minutes against a provider with no credits — 14 000 refusals a day, nothing labelled.
+export const LABEL_REST_MS = 2 * 3600_000;
+export const STOP_AFTER_FAILURES = 5;
+
+export function inboxLabeler({ store, listThreads, readThread, classify, concurrency = 3, clock = () => Date.now() }) {
   let job = null;
+  const resting = new Map();
 
   async function set(accountId, threadKey, label, { by = "human", basis = null } = {}) {
     if (!isInboxLabel(label)) throw Object.assign(new Error("Невідома мітка."), { status: 400 });
@@ -48,11 +55,13 @@ export function inboxLabeler({ store, listThreads, readThread, classify, concurr
   async function run() {
     if (job?.running) return job;
     const labels = store.read() || {};
-    const todo = (await listThreads({})).filter((thread) => needsInboxLabel(thread, labels[labelKey(thread.accountId, thread.threadKey)]));
+    const todo = (await listThreads({})).filter((thread) => needsInboxLabel(thread, labels[labelKey(thread.accountId, thread.threadKey)])
+      && !(resting.get(labelKey(thread.accountId, thread.threadKey)) > clock()));
     job = { running: true, total: todo.length, done: 0, failed: 0, startedAt: new Date().toISOString() };
     const queue = [...todo];
+    let failedInARow = 0;
     const worker = async () => {
-      while (queue.length) {
+      while (queue.length && failedInARow < STOP_AFTER_FAILURES) {
         const thread = queue.shift();
         try {
           const found = await readThread({ accountId: thread.accountId, threadKey: thread.threadKey });
@@ -63,11 +72,19 @@ export function inboxLabeler({ store, listThreads, readThread, classify, concurr
           // A person's label made while AI was thinking stays.
           const now = (store.read() || {})[labelKey(thread.accountId, thread.threadKey)];
           if (now && now.by !== "ai") { job.done += 1; continue; }
-          if (answer && isInboxLabel(answer.label)) await set(thread.accountId, thread.threadKey, answer.label, { by: "ai", basis: labelBasis(thread) });
-          else job.failed += 1;
+          if (answer && isInboxLabel(answer.label)) {
+            await set(thread.accountId, thread.threadKey, answer.label, { by: "ai", basis: labelBasis(thread) });
+            failedInARow = 0;
+          } else {
+            job.failed += 1;
+            resting.set(labelKey(thread.accountId, thread.threadKey), clock() + LABEL_REST_MS);
+          }
         } catch (error) {
           job.failed += 1;
+          failedInARow += 1;
+          resting.set(labelKey(thread.accountId, thread.threadKey), clock() + LABEL_REST_MS);
           console.warn(`[inbox-labels] ${thread.accountId}/${thread.threadKey}: ${error.message}`);
+          if (failedInARow === STOP_AFTER_FAILURES) console.warn(`[inbox-labels] ${STOP_AFTER_FAILURES} failures in a row — this run stops, the next is in ten minutes`);
         }
         job.done += 1;
       }

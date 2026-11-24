@@ -151,8 +151,10 @@ test("без ANTHROPIC_API_KEY збагачення йде через OpenRouter
   }
 });
 
-test("з ключем Anthropic інші функції (AI-оператор) лишаються на OpenRouter", async () => {
-  const server = await startServer({ ANTHROPIC_API_KEY: "test-anthropic-key", OPENROUTER_API_KEY: "test-openrouter-key" });
+// Власник 24.11: на OpenRouter скінчились кредити — з ключем Anthropic тепер усе йде через нього.
+// Старий поділ (через Anthropic лише збагачення) — за AI_PROVIDER=openrouter.
+test("з ключем Anthropic і AI_PROVIDER=openrouter інші функції (AI-оператор) лишаються на OpenRouter", async () => {
+  const server = await startServer({ ANTHROPIC_API_KEY: "test-anthropic-key", OPENROUTER_API_KEY: "test-openrouter-key", AI_PROVIDER: "openrouter" });
   try {
     const health = await server.post("/api/openrouter/test", {});
     assert.equal(health.payload.providerHealth.status, "healthy");
@@ -180,6 +182,20 @@ test("Anthropic відповів 401, а OpenRouter є — лід однаков
     assert.equal(calls.anthropic.length, 1);
     assert.equal(calls.openrouterChat.length, 1);
     assert.equal((await server.saved()).prospects[0].leadIntelligence?.model?.provider, "openrouter");
+  } finally {
+    await server.stop();
+  }
+});
+
+test("з ключем Anthropic AI-оператор теж іде через Anthropic, а не OpenRouter (власник 24.11)", async () => {
+  const server = await startServer({ ANTHROPIC_API_KEY: "test-anthropic-key", OPENROUTER_API_KEY: "test-openrouter-key" });
+  try {
+    await server.post("/api/openrouter/test", {});
+    const result = await server.post("/api/assistant/task", { instruction: "наведи лад у лідах", scope: "all" });
+    assert.equal(result.status, 200);
+    const calls = await server.calls();
+    assert.ok(calls.anthropic.length >= 1, "AI-оператор має піти в Anthropic");
+    assert.equal(calls.openrouterChat.length, 0);
   } finally {
     await server.stop();
   }

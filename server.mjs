@@ -1224,7 +1224,7 @@ async function handleApi(request, response, url) {
       // LinkedIn "after accepting" part is kept. Without a healthy provider it is
       // the brief's own template, and `status` says so to the Home screen.
       writer: {
-        status: () => ({ ready: Boolean(state.vault) && state.providerHealth.status === "healthy" }),
+        status: () => ({ ready: liveAiReady() }),
         async write(contact, { productId = "", language = "en", instruction = "", scenario = null } = {}) {
           const product = draftProduct(productId);
           // Сценарій кампанії й хребет (WorkSpace, 16.10): перше повідомлення після прийнятого запиту — опенер флоу.
@@ -7246,7 +7246,7 @@ async function teachProductFromText(text, selectedProductId = "", options = {}) 
   let analysis = localAnalysis;
   let source = "local";
 
-  if (state.vault && state.providerHealth.status === "healthy") {
+  if (liveAiReady()) {
     try {
       const ai = await analyzeProductContextWithAi(text, selectedProduct, localAnalysis);
       analysis = mergeProductAnalyses(localAnalysis, ai.analysis);
@@ -10889,7 +10889,7 @@ function learningStats(productId = state.selectedProductId) {
 
 async function analyzeLearningExample(example, product) {
   const fallback = localLearningSignals(example);
-  const canUseLiveAi = Boolean(state.vault && state.providerHealth.status === "healthy");
+  const canUseLiveAi = liveAiReady();
   if (!canUseLiveAi) return fallback;
 
   try {
@@ -10998,7 +10998,7 @@ async function rebuildLearningPlaybook({ forceAi = false } = {}) {
     example.learnedAt ??= new Date().toISOString();
   }
   const local = localLearningPlaybook(examples);
-  const canUseLiveAi = forceAi && state.vault && state.providerHealth.status === "healthy" && examples.length;
+  const canUseLiveAi = forceAi && liveAiReady() && examples.length;
   if (!canUseLiveAi) {
     state.learning.playbook = local;
     state.learning.lastTrainedAt = new Date().toISOString();
@@ -11166,7 +11166,7 @@ function topEntries(counts, limit) {
 
 async function prepareOutreachWithAi(prospect, profile, taskType = "SEQUENCE_GENERATION", productOverride = null, options = {}) {
   const product = productOverride || currentProduct();
-  const canUseLiveAi = Boolean(state.vault && state.providerHealth.status === "healthy");
+  const canUseLiveAi = liveAiReady();
   const fallbackRoute = canUseLiveAi ? localFallbackRun(taskType, profile) : simulateRun(taskType, profile, "");
   if (!isNamedPersonProspect(prospect)) {
     return buildCompanyOnlyResearchPlan(prospect, profile, fallbackRoute, product, analyzeLead(prospect, product));
@@ -14266,7 +14266,7 @@ function buildLinkedInOutreach(prospect, product = currentProduct(), profile = "
 async function attachCallAnalysis(prospect, transcript, source = "manual_paste", externalCallId = "") {
   const product = currentProduct();
   let analysis = analyzeCallTranscript(prospect, transcript, product);
-  if (state.vault && state.providerHealth.status === "healthy") {
+  if (liveAiReady()) {
     try {
       analysis = await analyzeCallTranscriptWithAi(prospect, transcript, product, analysis);
     } catch (error) {
@@ -14504,7 +14504,7 @@ async function runAssistantAction({ instruction, scope, limit, selectedProspectI
 }
 
 async function interpretAssistantInstruction(instruction, defaults) {
-  if (state.vault && state.providerHealth.status === "healthy") {
+  if (liveAiReady()) {
     try {
       const { data, run } = await callOpenRouterJson({
         model: resolveModelForActingUser("analysis"),
@@ -15768,7 +15768,7 @@ async function generateContactDrafts(contact, product, { language = "en", instru
     generatedAt: new Date().toISOString()
   };
 
-  if (!state.vault || state.providerHealth.status !== "healthy") {
+  if (!liveAiReady()) {
     return { ...base, ...fallback, modelUsed: "local-draft", provider: "local" };
   }
 
@@ -15835,7 +15835,7 @@ async function generateContactDrafts(contact, product, { language = "en", instru
  */
 /** Переклад чернетки українською для лідгена (таск 532076ec) — лише прочитати, не надіслати. */
 async function translateToUkrainian(text) {
-  if (!state.vault || state.providerHealth.status !== "healthy") return "";
+  if (!liveAiReady()) return "";
   const { data } = await callOpenRouterJson({
     model: outreachModelForProfile("balanced"),
     taskType: "SEQUENCE_GENERATION",
@@ -15850,7 +15850,7 @@ async function translateToUkrainian(text) {
 }
 
 async function classifyOpenDialog(candidate) {
-  if (!state.vault || state.providerHealth.status !== "healthy") return null;
+  if (!liveAiReady()) return null;
   const { data } = await callOpenRouterJson({
     model: outreachModelForProfile("balanced"),
     taskType: "SEQUENCE_GENERATION",
@@ -15872,7 +15872,7 @@ async function classifyOpenDialog(candidate) {
  * { label: qualified|not_icp|refusal|traffic_only|other } або null без моделі.
  */
 async function classifyReply({ person, messages = [] }) {
-  if (!state.vault || state.providerHealth.status !== "healthy") return null;
+  if (!liveAiReady()) return null;
   const conversation = messages.slice(-12).map((message) => ({ from: message.direction === "in" ? "them" : "us", text: String(message.body || "").slice(0, 1200) }));
   const { data } = await callOpenRouterJson({
     model: outreachModelForProfile("balanced"),
@@ -15892,7 +15892,7 @@ async function classifyReply({ person, messages = [] }) {
 
 // Оголошена функція, а не const: маршрут /api/today може прийти раніше, ніж модуль дочитано до цього рядка.
 async function writeTodayDraft({ contact, messages = [], kind = "reply", accountId = "" }) {
-  if (!state.vault || state.providerHealth.status !== "healthy") return { text: "", model: null };
+  if (!liveAiReady()) return { text: "", model: null };
   // Кампанія лідгена — за папкою CRM людини (WorkSpace, 16.10), а не за акаунтом прогріву.
   const campaign = contact?.id ? (await campaignsByContact([contact.id]).catch(() => new Map())).get(String(contact.id)) || null : null;
   const product = draftProduct(campaign?.productId || "");
@@ -16663,8 +16663,26 @@ function anthropicEnrichModel() {
   return String(process.env.ANTHROPIC_ENRICH_MODEL || "").trim() || "claude-haiku-5-5";
 }
 
+/**
+ * Усе — через Anthropic, коли є його ключ (власник 24.11: на OpenRouter скінчились кредити —
+ * мітки «Вхідних», чернетки, переклад і перші повідомлення стояли, 14 тис. відмов 402 за добу).
+ * AI_PROVIDER=openrouter повертає старий поділ: через Anthropic лише збагачення лідів.
+ */
 function usesAnthropicForTask(taskType) {
-  return Boolean(anthropicEnrichKey()) && ANTHROPIC_ENRICH_TASKS.has(taskType);
+  if (!anthropicEnrichKey()) return false;
+  if (String(process.env.AI_PROVIDER || "").trim().toLowerCase() === "openrouter") return ANTHROPIC_ENRICH_TASKS.has(taskType);
+  return true;
+}
+
+/** Чи є чим писати й розбирати моделлю: ключ Anthropic або живий OpenRouter. */
+function liveAiReady() {
+  return Boolean(anthropicEnrichKey()) || Boolean(state.vault && state.providerHealth.status === "healthy");
+}
+
+/** Письмо — моделлю сильнішою, решта (мітки, розбір, збагачення) — швидкою. */
+function anthropicModelFor(taskType) {
+  if (writingTaskTypes().has(taskType)) return String(process.env.ANTHROPIC_WRITING_MODEL || "").trim() || "claude-sonnet-5-5";
+  return anthropicEnrichModel();
 }
 
 /** Чи є чим збагачувати моделлю: ключ Anthropic або здоровий OpenRouter. */
@@ -16715,7 +16733,7 @@ async function postAnthropicMessages({ model, system, messages, maxTokens, timeo
 
 async function callAnthropicJson({ taskType, profile, messages, maxTokens }) {
   const startedAt = performance.now();
-  const model = anthropicEnrichModel();
+  const model = anthropicModelFor(taskType);
   const system = messages.filter((message) => message.role === "system").map((message) => anthropicText(message.content)).join("\n\n");
   const turns = messages
     .filter((message) => message.role !== "system")

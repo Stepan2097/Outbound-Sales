@@ -38,3 +38,40 @@ test("прохід: AI ставить мітки, невідома відпов�
   await assert.rejects(() => labeler.set("acc", "a", "bogus"), /Невідома мітка/);
   assert.equal((await labeler.set("acc", "a", "not_icp")).by, "human");
 });
+
+test("модель не відповідає — прохід зупиняється після п'яти відмов поспіль, а розмова відпочиває 2 год (24.11: 14 000 відмов 402 за добу)", async () => {
+  const { STOP_AFTER_FAILURES, LABEL_REST_MS } = await import("../warmup/inbox-labels.mjs");
+  let clock = 1_000_000;
+  let asked = 0;
+  const threads = Array.from({ length: 20 }, (_, index) => ({ accountId: "a", threadKey: `t${index}`, answered: true, participant: { name: "X" }, lastMessage: { direction: "in", body: "hi" } }));
+  const labeler = inboxLabeler({
+    store: { read: () => ({}), write: async () => {} },
+    listThreads: async () => threads,
+    readThread: async () => ({ messages: [] }),
+    classify: async () => { asked += 1; throw new Error("OpenRouter chat HTTP 402"); },
+    concurrency: 1,
+    clock: () => clock
+  });
+  const warn = console.warn; console.warn = () => {};
+  try {
+    await labeler.run();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(asked, STOP_AFTER_FAILURES);
+    await labeler.run();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(asked, STOP_AFTER_FAILURES * 2, "наступний прохід бере інші розмови — ті відпочивають");
+    clock += LABEL_REST_MS + 1;
+    asked = 0;
+    await labeler.run();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(asked, STOP_AFTER_FAILURES, "після відпочинку — знову, але не більше п'яти відмов за прохід");
+  } finally { console.warn = warn; }
+});
+
+test("з ключем Anthropic усе йде через нього; AI_PROVIDER=openrouter повертає старий поділ (власник 24.11)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const server = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+  assert.match(server, /function usesAnthropicForTask\(taskType\) \{\n  if \(!anthropicEnrichKey\(\)\) return false;\n  if \(String\(process\.env\.AI_PROVIDER \|\| ""\)\.trim\(\)\.toLowerCase\(\) === "openrouter"\) return ANTHROPIC_ENRICH_TASKS\.has\(taskType\);\n  return true;\n\}/);
+  assert.match(server, /const model = anthropicModelFor\(taskType\);/);
+  assert.doesNotMatch(server, /state\.vault && state\.providerHealth\.status === "healthy" \?|!state\.vault \|\| state\.providerHealth\.status !== "healthy"/);
+});
