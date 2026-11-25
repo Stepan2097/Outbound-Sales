@@ -643,88 +643,119 @@
   margin: 8px 0 0;
 }
 
-/* ── «Агент заходить в акаунт» (власник 25.11) ──────────────────────────────
-   Головний перемикач рядка: заходить сервер сам чи людина працює вручну. */
-.warmup-agent-help {
-  margin: 0 0 12px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: var(--surface-strong);
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.45;
+/* ── Таблиця акаунтів (власник 25.11): режим «Авто / Вручну», запити в друзі ──────────── */
+.warmup-list-panel table {
+  min-width: 860px;
 }
-.warmup-agent-help b {
-  color: var(--ink);
+.warmup-list-panel td {
+  vertical-align: middle;
 }
-.warmup-agent-cell {
-  white-space: nowrap;
+.warmup-profile-cell strong {
+  display: block;
 }
-.warmup-agent-switch {
+.warmup-linkedin-cell .warmup-identity {
+  margin: 0;
+}
+/* Перемикач: доріжка з кружком і підпис поруч — без рамки навколо. */
+.warmup-toggle {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  min-height: 30px;
-  padding: 3px 10px 3px 4px;
-  border-radius: 999px;
+  min-height: 0;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 600;
+  line-height: 1;
   cursor: pointer;
 }
-.warmup-switch-track {
+.warmup-toggle:hover,
+.warmup-toggle:focus-visible {
+  background: none;
+}
+.warmup-toggle-track {
   position: relative;
-  display: inline-block;
-  width: 34px;
-  height: 20px;
+  flex: none;
+  width: 32px;
+  height: 18px;
   border-radius: 999px;
-  background: var(--line);
+  background: var(--line-strong, var(--line));
   transition: background 0.15s ease;
 }
-.warmup-switch-track span {
+.warmup-toggle-thumb {
   position: absolute;
   top: 2px;
   left: 2px;
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
   background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
   transition: transform 0.15s ease;
 }
-.warmup-agent-switch.is-on {
-  border-color: var(--teal);
-  background: var(--teal-weak);
-  color: var(--ink);
-}
-.warmup-agent-switch.is-on .warmup-switch-track {
+.warmup-toggle.is-on .warmup-toggle-track {
   background: var(--teal);
 }
-.warmup-agent-switch.is-on .warmup-switch-track span {
+.warmup-toggle.is-on .warmup-toggle-thumb {
   transform: translateX(14px);
 }
-.warmup-agent-switch.is-off {
-  color: var(--amber);
+.warmup-toggle.is-on .warmup-toggle-label {
+  color: var(--ink);
 }
-.warmup-agent-note {
-  display: block;
-  margin-top: 4px;
-  color: var(--muted);
-  font-size: 11.5px;
-  white-space: normal;
+.warmup-toggle-label {
+  min-width: 46px;
+  text-align: left;
 }
-/* Рядок, у якому працюють вручну, — приглушений: агент туди не заходить. */
-.warmup-list-panel tbody tr.is-agent-off > td:not(.warmup-agent-cell) {
-  opacity: 0.72;
-}
-.warmup-state-next {
-  margin-top: 4px;
-  font-size: 12.5px;
-}
-.warmup-warm-campaign {
-  margin-top: 4px;
-}
-.warmup-account-cell .warmup-tags-cell {
-  margin-top: 4px;
+/* Рядок у режимі «Вручну» — приглушений: агент туди не заходить. */
+.warmup-list-panel tbody tr.is-manual > td:not(.warmup-mode-cell) {
+  opacity: 0.7;
 }
 .warmup-state-cell .pill {
   white-space: nowrap;
+}
+.warmup-state-next {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.warmup-day-cell {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.warmup-invites-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.warmup-invites-count {
+  display: inline-grid;
+  gap: 4px;
+  min-width: 52px;
+  font-size: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.warmup-invites-count b {
+  color: var(--ink);
+}
+.warmup-invites-bar {
+  display: block;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+}
+.warmup-invites-bar span {
+  display: block;
+  height: 100%;
+  background: var(--teal);
+}
+@media (max-width: 720px) {
+  .warmup-list-panel table {
+    min-width: 0;
+  }
 }

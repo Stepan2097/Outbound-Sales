@@ -182,34 +182,40 @@ function warmupRelativeTime(iso) {
 /** What the "next session" cell says, which follows the quota and not the clock. */
 function warmupNextSessionCell(profile) {
   const next = profile.nextSession;
-  if (profile.isRunningNow) return '<span class="warmup-due">профіль відкритий зараз</span>';
-  if (profile.agentOff) return '<span class="warmup-subtle">агент не заходить</span>';
-  if (!next) return "";
-  if (next.overdue) return '<span class="warmup-due">наступний вхід агента — зараз</span>';
-  if (next.today) return `<span class="warmup-subtle">наступний вхід агента</span> ${warmupRelativeTime(next.at)}`;
-  return `<span class="warmup-subtle">наступний вхід агента</span> завтра ${new Date(next.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+  if (profile.isRunningNow) return '<span class="warmup-due">відкритий зараз</span>';
+  if (profile.agentOff || !next) return "";
+  if (next.overdue) return '<span class="warmup-due">сесія зараз</span>';
+  const time = new Date(next.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return `${next.today ? "сесія о" : "завтра о"} ${time}`;
+}
+
+/** Перемикач у таблиці акаунтів — один вигляд для режиму й для запитів у друзі. */
+function warmupToggleHtml({ on, label = "", data, title, aria }) {
+  return `<button type="button" class="warmup-toggle ${on ? "is-on" : "is-off"}" role="switch" aria-checked="${on}" ${data} title="${escapeAttr(title)}" aria-label="${escapeAttr(aria)}"><span class="warmup-toggle-track" aria-hidden="true"><span class="warmup-toggle-thumb"></span></span>${label ? `<span class="warmup-toggle-label">${escapeHtml(label)}</span>` : ""}</button>`;
 }
 
 /**
- * «Агент заходить в акаунт» — головний перемикач рядка (власник 25.11: «щоб я міг включити й
- * виключити, щоб він заглядав і не заглядав, коли прошу»). Увімкнено — сервер сам прогріває акаунт,
- * читає вхідні й надсилає відповіді з платформи. Вимкнено — сервер акаунт не відкриває: людина
- * працює в ньому вручну, а LinkedIn, який бачить два входи паралельно, обмежує.
+ * Режим акаунта: «Авто» чи «Вручну» (власник 25.11: «щоб я міг включити й виключити, щоб він
+ * заглядав і не заглядав, коли прошу»). «Авто» — агент сервера сам веде акаунт: прогрів, нові
+ * повідомлення, відповіді з платформи. «Вручну» — агент акаунт не відкриває: людина працює в ньому
+ * сама, а LinkedIn, який бачить два входи паралельно, обмежує.
  */
-function warmupAgentSwitchHtml(profile, { compact = false } = {}) {
+function warmupModeSwitchHtml(profile) {
   const account = profile.account;
-  if (!account || account.status === "excluded" || profile.status === "blocked") return compact ? "" : '<span class="warmup-subtle">—</span>';
-  const off = Boolean(profile.agentOff);
-  const since = off && profile.agentOff.since
+  if (!account || account.status === "excluded" || profile.status === "blocked") return "";
+  const auto = !profile.agentOff;
+  const since = !auto && profile.agentOff.since
     ? new Date(profile.agentOff.since).toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
     : "";
-  const title = off
-    ? "Агент сервера в цей акаунт не заходить — ви працюєте в ньому вручну. Відповіді, надіслані з платформи, чекають. Натисніть, щоб агент знову заходив сам."
-    : "Агент сервера сам заходить в акаунт: прогрів, перегляд нових повідомлень кожні 15–20 хв, відправка відповідей з платформи. Вимкніть, коли працюєте в акаунті вручну — LinkedIn бачить два входи й обмежує.";
-  const button = `<button type="button" class="warmup-agent-switch ${off ? "is-off" : "is-on"}" role="switch" aria-checked="${!off}" data-warmup-agent="${escapeAttr(account.id)}" data-warmup-agent-on="${off ? "1" : "0"}" title="${escapeAttr(title)}" aria-label="${escapeAttr(`Агент у ${profile.name}: ${off ? "не заходить" : "заходить"}`)}"><span class="warmup-switch-track" aria-hidden="true"><span></span></span><span>${off ? "Не заходить" : "Заходить"}</span></button>`;
-  if (compact) return button;
-  // Підпис — лише під вимкненим: що заходить сам, уже каже довідка над таблицею.
-  return off ? `${button}<small class="warmup-agent-note">ви працюєте вручну${since ? ` · з ${escapeHtml(since)}` : ""}</small>` : button;
+  return warmupToggleHtml({
+    on: auto,
+    label: auto ? "Авто" : "Вручну",
+    data: `data-warmup-agent="${escapeAttr(account.id)}" data-warmup-agent-on="${auto ? "0" : "1"}"`,
+    title: auto
+      ? "Авто: агент сам веде акаунт — прогрів, нові повідомлення, відповіді з платформи. Перемкніть на «Вручну», коли працюєте в акаунті самі."
+      : `Вручну${since ? ` з ${since}` : ""}: агент акаунт не відкриває, відповіді з платформи чекають. Перемкніть на «Авто», щоб агент знову вів його сам.`,
+    aria: `Режим ${profile.name}: ${auto ? "авто" : "вручну"}`
+  });
 }
 
 async function setWarmupAgent(accountId, enabled) {
@@ -231,29 +237,32 @@ async function setWarmupAgent(accountId, enabled) {
 }
 
 /**
- * On a phone the status, the day and today's requests do not get columns of
- * their own — the table would not fit 390px — so they ride under the name.
+ * On a phone the day and today's requests do not get columns of their own —
+ * the table would not fit 390px — so they ride under the name.
  */
 function warmupPhoneLine(profile) {
   const { today = 0, quota = 0 } = profile.connections || {};
   const parts = [];
   if (profile.day) parts.push(`день ${profile.day}`);
-  if (quota > 0) parts.push(`${today}/${quota} сьогодні`);
+  if (quota > 0) parts.push(`запити ${today} з ${quota}`);
   return parts.join(" · ");
 }
 
+/** Запити в друзі сьогодні: скільки з дозволених, смужка і перемикач поруч. */
 function warmupConnectionsCell(profile) {
   const { today = 0, total = 0, quota = 0, startsDay = null, off = false } = profile.connections || {};
   const week = profile.connections?.weekly;
-  const all = `title="${total} за весь час${week ? ` · ${week.done}/${week.limit} за 7 днів` : ""}"`;
+  const all = `title="${total} за весь час${week ? ` · ${week.done} з ${week.limit} за 7 днів` : ""}"`;
   let count;
-  if (off) count = `<span class="pill tone-muted" ${all}>вимкнено</span>`;
-  else if (quota > 0) count = `<span ${all}>${today}/${quota}</span>`;
-  else if (startsDay) count = `<span class="warmup-subtle" ${all}>з ${startsDay}-го дня</span>`;
+  if (off) count = `<span class="warmup-invites-count is-off" ${all}>вимкнено</span>`;
+  else if (quota > 0) {
+    const share = Math.min(100, Math.round((today / quota) * 100));
+    count = `<span class="warmup-invites-count" ${all}><span><b>${today}</b> з ${quota}</span><span class="warmup-invites-bar"><span style="width:${share}%"></span></span></span>`;
+  } else if (startsDay) count = `<span class="warmup-invites-count is-off" ${all}>з ${startsDay}-го дня</span>`;
   // No requests today: the column is about today, so it says nothing — the
   // all-time count read as today's in a column headed «сьогодні».
-  else count = `<span class="warmup-subtle" ${all}>—</span>`;
-  return `<span class="warmup-invites-cell">${count}${warmupInvitesSwitchHtml(profile)}</span>`;
+  else count = `<span class="warmup-invites-count is-off" ${all}>—</span>`;
+  return `<span class="warmup-invites-cell">${warmupInvitesSwitchHtml(profile)}${count}</span>`;
 }
 
 /**
@@ -265,10 +274,14 @@ function warmupInvitesSwitchHtml(profile) {
   const account = profile.account;
   if (!account) return "";
   const off = Boolean(profile.connections?.off);
-  const title = off
-    ? "Запити в друзі з цього акаунта вимкнено. Натисніть, щоб увімкнути."
-    : "Цей акаунт надсилає запити в друзі. Натисніть, щоб вимкнути — решта роботи акаунта триває.";
-  return `<button type="button" class="warmup-invites-switch ${off ? "is-off" : "is-on"}" role="switch" aria-checked="${!off}" data-warmup-invites="${escapeAttr(account.id)}" data-warmup-invites-on="${off ? "1" : "0"}" title="${escapeAttr(title)}" aria-label="${escapeAttr(`Запити в друзі з ${profile.name}: ${off ? "вимкнено" : "увімкнено"}`)}"><i data-lucide="${off ? "user-x" : "user-plus"}"></i></button>`;
+  return warmupToggleHtml({
+    on: !off,
+    data: `data-warmup-invites="${escapeAttr(account.id)}" data-warmup-invites-on="${off ? "1" : "0"}"`,
+    title: off
+      ? "Запити в друзі з цього акаунта вимкнено. Натисніть, щоб увімкнути."
+      : "Акаунт надсилає запити в друзі. Натисніть, щоб вимкнути — решта роботи акаунта триває.",
+    aria: `Запити в друзі з ${profile.name}: ${off ? "вимкнено" : "увімкнено"}`
+  });
 }
 
 async function setWarmupInvites(accountId, enabled) {
@@ -385,7 +398,7 @@ function warmupQueueState(accountId) {
 /** Колонка «Автозапити» в таблиці прогріву: що веде акаунт; змінюється в блоці вище. */
 function warmupCampaignCellHtml(accountId) {
   const campaign = warmupAccountCampaign(accountId);
-  if (!campaign) return '<span class="warmup-subtle" title="Акаунти автозапитів обирають у блоці «Автозапити в друзі» вище">—</span>';
+  if (!campaign) return "";
   return `<span class="warmup-campaign-chip ${campaign.state === "running" ? "is-running" : ""}" title="${escapeAttr(`Веде «${campaign.name || "без назви"}»${campaign.state === "running" ? "" : " — не запущена"}. Змінюється в блоці «Автозапити в друзі».`)}">${escapeHtml(campaign.name || "без назви")}</span>`;
 }
 
@@ -558,7 +571,7 @@ function placeWarmupDetail(body) {
   const holder = document.createElement("tr");
   holder.className = "warmup-detail-row";
   const cell = document.createElement("td");
-  cell.colSpan = 5;
+  cell.colSpan = 8;
   cell.appendChild(panel);
   holder.appendChild(cell);
   row.after(holder);
@@ -570,7 +583,7 @@ export function renderWarmupProfiles() {
   parkWarmupDetail();
 
   if (!warmupState.profiles.length) {
-    body.innerHTML = '<tr><td colspan="5"><div class="empty-state">Акаунтів LinkedIn в Anty немає.</div></td></tr>';
+    body.innerHTML = '<tr><td colspan="8"><div class="empty-state">Акаунтів LinkedIn в Anty немає.</div></td></tr>';
     renderWarmupCampaignDetail();
     return;
   }
@@ -582,7 +595,7 @@ export function renderWarmupProfiles() {
   const showIdle = warmupState.showIdleProfiles || idle.some((profile) => profile.id === warmupState.selectedProfileId);
   const shown = showIdle ? sorted : sorted.filter((profile) => warmupProfileRank(profile) === 0);
   const idleToggle = idle.length && idle.length < sorted.length
-    ? `<tr class="warmup-idle-toggle"><td colspan="5"><button class="text-button" type="button" data-warmup-idle-toggle aria-expanded="${showIdle}"><i data-lucide="${showIdle ? "chevron-up" : "chevron-down"}"></i><span>${showIdle ? "Сховати" : "Показати"} ще ${idle.length} — вимкнені, з тегами, Ban</span></button></td></tr>`
+    ? `<tr class="warmup-idle-toggle"><td colspan="8"><button class="text-button" type="button" data-warmup-idle-toggle aria-expanded="${showIdle}"><i data-lucide="${showIdle ? "chevron-up" : "chevron-down"}"></i><span>${showIdle ? "Сховати" : "Показати"} ще ${idle.length} — вимкнені, з тегами, Ban</span></button></td></tr>`
     : "";
   const firstIdle = idle[0]?.id;
 
@@ -592,29 +605,28 @@ export function renderWarmupProfiles() {
       // The person the browser is actually signed in as, which is not the same
       // string as the profile label somebody typed in Anty.
       const identity = profile.identity || account?.identity || null;
+      const adopt = warmupProfileRank(profile) === 3
+        // Тег Ban: основна зелена кнопка тут підштовхувала прогрівати забанений акаунт (аудит 16.10, P1).
+        ? '<button class="text-button" type="button" data-warmup-adopt title="Тег Ban — акаунт забанено в LinkedIn. Прогрівати, лише якщо його розбанили.">Прогріти</button>'
+        : '<button class="primary-button" type="button" data-warmup-adopt>Прогріти</button>';
       return `
-        <tr data-warmup-profile="${escapeHtml(profile.id)}" class="${profile.id === warmupState.selectedProfileId ? "is-selected" : ""}${profile.agentOff ? " is-agent-off" : ""}">
-          <td class="warmup-account-cell">
+        <tr data-warmup-profile="${escapeHtml(profile.id)}" class="${profile.id === warmupState.selectedProfileId ? "is-selected" : ""}${profile.agentOff ? " is-manual" : ""}">
+          <td class="warmup-profile-cell">
             <strong>${escapeHtml(profile.name)}</strong>
             ${account ? warmupAccountUnreadHtml(account.id) : ""}
-            ${identity?.name
-              ? `<div class="warmup-identity" title="На останньому вході агента залогінений як ця особа"><i data-lucide="badge-check"></i><span>${escapeHtml(identity.name)}</span></div>`
-              : ""}
             ${profile.proxy ? "" : '<div class="warmup-subtle warmup-no-proxy" title="LinkedIn бачить справжню адресу цього профілю">без проксі</div>'}
-            <div class="warmup-tags-cell">${warmupTagsCell(profile)}</div>
-            <div class="warmup-row-phone">${warmupAgentSwitchHtml(profile, { compact: true })}${warmupStatusPill(profile)}${account && warmupPhoneLine(profile) ? ` <span class="warmup-subtle">${escapeHtml(warmupPhoneLine(profile))}</span>` : ""}</div>
+            ${identity?.name ? `<div class="warmup-row-phone warmup-subtle">${escapeHtml(identity.name)}</div>` : ""}
+            <div class="warmup-row-phone">${warmupModeSwitchHtml(profile)}${warmupStatusPill(profile)}${account && warmupPhoneLine(profile) ? ` <span class="warmup-subtle">${escapeHtml(warmupPhoneLine(profile))}</span>` : ""}</div>
           </td>
-          <td class="warmup-agent-cell">${warmupAgentSwitchHtml(profile)}</td>
-          <td class="warmup-state-cell">${account
-            ? `${warmupStatusPill(profile)}<div class="warmup-state-next">${warmupNextSessionCell(profile)}</div>`
-            : warmupProfileRank(profile) === 3
-              // Тег Ban: основна зелена кнопка тут підштовхувала прогрівати забанений акаунт (аудит 16.10, P1).
-              ? '<span class="warmup-subtle">не на прогріві</span> <button class="text-button" type="button" data-warmup-adopt title="Тег Ban — акаунт забанено в LinkedIn. Прогрівати, лише якщо його розбанили.">Прогріти</button>'
-              : '<span class="warmup-subtle">не на прогріві</span> <button class="primary-button" type="button" data-warmup-adopt>Прогріти</button>'}</td>
-          <td class="warmup-warm-cell">${account
-            ? `<div>${profile.day ? `день ${escapeHtml(profile.day)}` : "—"}</div><div class="warmup-warm-campaign">${warmupCampaignCellHtml(account.id)}</div>`
+          <td class="warmup-linkedin-cell">${identity?.name
+            ? `<span class="warmup-identity" title="Під цим іменем акаунт залогінений у LinkedIn на останньому вході агента"><i data-lucide="badge-check"></i><span>${escapeHtml(identity.name)}</span></span>`
             : '<span class="warmup-subtle">—</span>'}</td>
-          <td>${account ? warmupConnectionsCell(profile) : '<span class="warmup-subtle">—</span>'}</td>
+          <td class="warmup-tags-cell">${warmupTagsCell(profile)}</td>
+          <td class="warmup-mode-cell">${account ? warmupModeSwitchHtml(profile) || '<span class="warmup-subtle">—</span>' : adopt}</td>
+          <td class="warmup-state-cell">${account ? `${warmupStatusPill(profile)}<div class="warmup-state-next">${warmupNextSessionCell(profile)}</div>` : '<span class="warmup-subtle">не на прогріві</span>'}</td>
+          <td class="warmup-day-cell">${account && profile.day ? escapeHtml(profile.day) : '<span class="warmup-subtle">—</span>'}</td>
+          <td class="warmup-invites-col">${account ? warmupConnectionsCell(profile) : '<span class="warmup-subtle">—</span>'}</td>
+          <td class="warmup-campaign-cell">${account ? warmupCampaignCellHtml(account.id) : ""}</td>
         </tr>`;
     })())
     .join("") + (!showIdle && idleToggle ? idleToggle : "");

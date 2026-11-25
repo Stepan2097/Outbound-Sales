@@ -43,13 +43,15 @@ test("агент не бере вимкнений акаунт ні для пр�
   assert.match(watch, /&& !account\.agentOff\);/);
 });
 
-test("у списку акаунтів — перемикач «Агент» з поясненням; відповідь з платформи каже, що чекає на агента", () => {
+test("у списку акаунтів — режим «Авто / Вручну» окремою колонкою; відповідь з платформи каже, що чекає на «Авто»", () => {
   const html = readFileSync(new URL("../app/index.html", import.meta.url), "utf8");
   const ui = readFileSync(new URL("../app/screens/warmup-accounts.js", import.meta.url), "utf8");
   const inbox = readFileSync(new URL("../app/screens/inbox.js", import.meta.url), "utf8");
-  assert.match(html, /<th title="Чи заходить агент сервера в акаунт сам\. Вимкніть, коли працюєте в акаунті вручну\.">Агент<\/th>/);
-  assert.match(html, /class="warmup-agent-help"/);
-  assert.match(ui, /role="switch" aria-checked="\$\{!off\}" data-warmup-agent=/);
+  // Власник 25.11: «заходить» — неточно, колонку «Акаунт» розбити на кілька.
+  for (const head of ["Профіль", "LinkedIn", "Теги", "Режим", "Стан", "День", "Запити в друзі", "Кампанія"]) assert.match(html, new RegExp(`>${head}</th>`));
+  assert.doesNotMatch(html, /Заходить|warmup-agent-help/);
+  assert.match(ui, /label: auto \? "Авто" : "Вручну"/);
+  assert.match(ui, /data: `data-warmup-agent="/);
   assert.match(ui, /"\/accounts\/agent"/);
-  assert.match(inbox, /if \(reply\?\.agentOff\) return "коли для акаунта знову ввімкнуть агента/);
+  assert.match(inbox, /if \(reply\?\.agentOff\) return "коли акаунт перемкнуть з «Вручну» на «Авто»/);
 });
