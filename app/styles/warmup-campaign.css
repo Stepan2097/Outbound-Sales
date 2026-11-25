@@ -712,3 +712,70 @@
 .warmup-campaign-detail:empty { display: none; }
 .warmup-campaign-detail { margin-top: var(--sp-2); display: grid; gap: var(--sp-1); }
 .warmup-campaign-list { display: grid; gap: var(--sp-3); }
+
+/* ── Один блок «Автозапити в друзі» (власник 25.11: «це все якось об'єднати») ─────────────
+   Заголовок із кнопками, під ним конвеєр («Як іде розсилка») компактною смугою, далі
+   кампанії, а стратегія прогріву — останнім рядком через тонку лінію. */
+.warmup-overview {
+  display: grid;
+  gap: 14px;
+}
+.warmup-overview .warmup-funnel-panel {
+  display: grid;
+  gap: 8px;
+}
+.warmup-funnel-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.warmup-funnel-head .icon-button {
+  width: 26px;
+  min-height: 26px;
+  padding: 0;
+}
+.warmup-funnel-head .icon-button svg {
+  width: 14px;
+  height: 14px;
+}
+.warmup-overview .home-funnel {
+  gap: 8px;
+}
+.warmup-overview .home-step {
+  grid-template-columns: auto 1fr;
+  grid-template-areas: "value label" "value hint";
+  align-items: center;
+  column-gap: 10px;
+  row-gap: 1px;
+  padding: 9px 12px;
+  border-radius: 10px;
+}
+.warmup-overview .home-step + .home-step::before {
+  left: -4px;
+  font-size: 11px;
+}
+.warmup-overview .home-step-value {
+  grid-area: value;
+  font-size: 22px;
+}
+.warmup-overview .home-step-label {
+  grid-area: label;
+  font-size: 12px;
+}
+.warmup-overview .home-step-hint {
+  grid-area: hint;
+  font-size: 11.5px;
+}
+.warmup-overview .warmup-strategy-panel {
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.warmup-overview .warmup-strategy-panel .warmup-strategy-head h2 {
+  font-size: 15px;
+}
+.warmup-overview .warmup-strategy-head p {
+  margin: 2px 0 0;
+  font-size: 13px;
+}

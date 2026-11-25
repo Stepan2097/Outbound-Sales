@@ -61,18 +61,17 @@ export function renderWarmupFunnel() {
   const subtitle = data?.today
     ? `Сьогодні: ${warmupCount(data.today.invited || 0)} запрошень, ${warmupCount(data.today.replied || 0)} відповідей`
     : funnel.error || "Рахуємо...";
+  // Без свого заголовка: це конвеєр автозапитів, і стоїть під їхнім заголовком (власник 25.11).
   root.innerHTML = `
-    <div class="panel-heading">
-      <div>
-        <h2>Як іде розсилка</h2>
-        <p>${escapeHtml(subtitle)}</p>
-      </div>
-      <button class="text-button" type="button" data-warmup-funnel-refresh><i data-lucide="refresh-cw"></i><span>Оновити</span></button>
+    <div class="warmup-funnel-head">
+      <span>${escapeHtml(subtitle)}</span>
+      <button class="icon-button" type="button" data-warmup-funnel-refresh title="Оновити числа" aria-label="Оновити числа"><i data-lucide="refresh-cw"></i></button>
     </div>
     ${data ? homeFunnelHtml(data) : ""}`;
   refreshIcons(root);
 }
 
-document.getElementById("warmupFunnelPanel")?.addEventListener("click", (event) => {
+// На документі: блок конвеєра з'являється з шаблоном автозапитів, уже після цього модуля.
+document.addEventListener("click", (event) => {
   if (event.target.closest("[data-warmup-funnel-refresh]")) void loadWarmupFunnel();
 });

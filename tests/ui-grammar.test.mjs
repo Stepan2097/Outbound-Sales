@@ -17,9 +17,11 @@ test("правила підключені після базових стилів
 });
 
 test("кожна основна панель LinkedIn має свій тип", () => {
-  for (const [id, type] of [["leadCampaignPanel", "blk-settings"], ["workspaceSpinePanel", "blk-ref"], ["warmupCampaignPanel", "blk-settings"], ["warmupFunnelPanel", "blk-metrics"], ["warmupStrategyPanel", "blk-settings"]]) {
+  for (const [id, type] of [["leadCampaignPanel", "blk-settings"], ["workspaceSpinePanel", "blk-ref"]]) {
     assert.match(html, new RegExp(`class="panel ${type}[^"]*"[^>]*id="${id}"`), id);
   }
+  // Автозапити, їхній конвеєр і стратегія — один блок (власник 25.11: «це все якось об'єднати»).
+  assert.match(html, /<section class="panel blk-settings warmup-overview span-2">\s*<div class="warmup-campaigns-panel" id="warmupCampaignPanel"><\/div>\s*<div class="warmup-strategy-panel" id="warmupStrategyPanel"><\/div>\s*<\/section>/);
   assert.match(html, /class="panel blk-list warmup-list-panel/);
   assert.match(html, /class="panel blk-queue warmup-inbox-panel/);
   assert.match(read("screens/today.js"), /<section class="panel blk-queue today">/);

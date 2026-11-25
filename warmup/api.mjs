@@ -284,6 +284,7 @@ async function upkeepWorkFor(account, run, { now = new Date() } = {}) {
     checkedTodayAccounts([account.id], todayIso),
     syncedTodayAccounts([account.id], todayIso)
   ]);
+  if ((await agentOffSince([account.id]).catch(() => new Map())).has(account.id)) inboxSyncedToday.add(account.id);
   // The clock is an argument here too. It does not matter for a request served
   // now, but this is the shape that already rotted once in the scheduler, and
   // a second copy of it living where nothing tests it against a pinned time is
@@ -1258,7 +1259,7 @@ export async function accountTrouble(account, ok, nowMs = Date.now()) {
 }
 
 async function replyGoesOut(account) {
-  // A person works in it by hand (власник 25.11): nothing goes out until the agent is let back in.
+  // Синхронізацію повідомлень вимкнено (власник 25.11): нічого не йде, доки її не ввімкнуть.
   if ((await agentOffSince([account.id]).catch(() => new Map())).has(account.id)) return { at: null, today: false, soon: false, agentOff: true };
   // Позачергова сесія (15.10): an approved message goes within minutes —
   // unless the account cannot be opened now or has used today's messages.
@@ -1700,7 +1701,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           // Until when, and why: «Ліміт LinkedIn · до 11.10» rather than a bare «На паузі».
           pause: paused ? { until: run.paused_until, cause } : null,
           isRunningNow: row.status === "running",
-          // The server agent stays out of it — a person works in it by hand (25.11), and since when.
+          // Синхронізацію повідомлень вимкнено — людина пише сама (25.11), і з якого часу.
           agentOff: account && agentOffMap.has(account.id) ? { since: agentOffMap.get(account.id) } : null,
           connections: {
             ...(connectionsByAccount.get(account?.id ?? "") || { today: 0, total: 0 }),
@@ -1718,7 +1719,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           // Only an account that is warming and not already open has a next
           // session: promising "next at 14:20" for one that is off or blocked
           // would be a commitment nobody is going to keep.
-          nextSession: account && (status === "warming" || status === "working") && row.status !== "running" && !agentOffMap.has(account.id)
+          nextSession: account && (status === "warming" || status === "working") && row.status !== "running"
             ? nextSession(account.id, {
                 // No day row yet means today has not been started at all, which
                 // is the most outstanding a day can be.
@@ -1955,7 +1956,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
      * treated the same way.
      */
     // Запити в друзі для акаунта: увімкнути чи вимкнути (власник 16.10).
-    // «Агент заходить в акаунт» — увімкнути чи вимкнути (власник 25.11).
+    // Синхронізація повідомлень акаунта — увімкнути чи вимкнути (власник 25.11).
     if (method === "POST" && path === "/accounts/agent") {
       const body = await readJson(request);
       if (!body?.accountId || typeof body.enabled !== "boolean") return fail(response, sendJson, 400, "Потрібні accountId і enabled");
@@ -3537,7 +3538,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           profileRemoteId: row.profile_remote_id,
           status: row.status,
           health: row.health,
-          // A person works in it by hand (25.11): the login watch does not open it on its own either.
+          // Синхронізацію вимкнено — людина в акаунті сама (25.11): вартовий входу теж не відкриває його за розкладом.
           agentOff: agentOff.has(row.id),
           loginCheckPath: linkFor(row)
         }))
@@ -3618,6 +3619,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
       // (власник 23.10: «temporarily restricted — але це не причина не відписувати на повідомлення»).
       const light = leaseOf(account.id);
       const talking = Boolean((light?.urgent || light?.duty) && run && account.status !== "excluded");
+      const syncOff = (await agentOffSince([account.id]).catch(() => new Map())).has(account.id);
       // The folder's share, written down here and only here: the people the
       // poll counted become waiting invitations, and so does the place of a
       // person the agent could not reach earlier today. Idempotent: what is
@@ -3662,13 +3664,17 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         // day the account has a plan, and never while a pause holds. True
         // until `inbox.done` writes today's mark — the same rule the scheduler
         // wakes the account by, so a session opened for the read is told to do it.
-        inbox: {
-          lastSyncedAt: await lastSyncedAt(account.id),
-          maxThreads: paused && !talking ? 0 : MAX_THREADS_PER_RUN,
-          due: upkeep.inbox,
-          // The past month's conversations, read back a portion a session until done (16.10).
-          backfill: paused ? null : await inboxBackfill(account.id)
-        },
+        // Синхронізацію повідомлень вимкнено (власник 25.11) — людина пише сама: сесія прогріву
+        // повідомлень не читає й не надсилає, решта її роботи йде.
+        inbox: syncOff
+          ? { lastSyncedAt: await lastSyncedAt(account.id), maxThreads: 0, due: false, backfill: null, syncOff: true }
+          : {
+            lastSyncedAt: await lastSyncedAt(account.id),
+            maxThreads: paused && !talking ? 0 : MAX_THREADS_PER_RUN,
+            due: upkeep.inbox,
+            // The past month's conversations, read back a portion a session until done (16.10).
+            backfill: paused ? null : await inboxBackfill(account.id)
+          },
         // Усі друзі LinkedIn (14.10): прочитати сторінку «Контакти» в цій
         // сесії — раз на кілька днів або коли на сторінці акаунта натиснули
         // «Оновити». Ніколи під час паузи; сесію заради цього не відкриваємо.
@@ -3683,7 +3689,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         // all where the account would not be opened anyway. The agent still asks
         // `outbox.prepare` before typing each one, because a person may take a
         // reply back in the hours between this answer and its turn.
-        outbox: !run || (paused && !talking) || account.status === "excluded" || account.health !== "ok"
+        outbox: syncOff || !run || (paused && !talking) || account.status === "excluded" || account.health !== "ok"
           ? { toSend: [], waiting: 0, sentToday: 0, perDay: null }
           : await outboxPlan(account.id),
         // The invitation work, ready to act on. `toSend` is already cut to what

@@ -21,8 +21,8 @@ import "./warmup-funnel.js";
 import "./workspace.js";
 
 /**
- * Панель автозапитів і панель розкладу («Прогрів») малює цей модуль;
- * index.html тримає лише порожні #warmupCampaignPanel і #warmupStrategyPanel.
+ * Блок автозапитів (з конвеєром) і рядок стратегії («Прогрів») малює цей модуль;
+ * index.html тримає лише порожні #warmupCampaignPanel і #warmupStrategyPanel в одному блоці.
  */
 const WARMUP_CAMPAIGN_PANEL_HTML = `
   <div class="panel-heading">
@@ -34,6 +34,8 @@ const WARMUP_CAMPAIGN_PANEL_HTML = `
       <button class="primary-button" id="warmupCampaignNewBtn" type="button"><i data-lucide="plus"></i><span>Нові автозапити</span></button>
     </div>
   </div>
+  <!-- «Як іде розсилка» — конвеєр цих автозапитів, одразу під заголовком (app/screens/warmup-funnel.js). -->
+  <div class="warmup-funnel-panel home-panel" id="warmupFunnelPanel"></div>
 
   <form class="warmup-campaign-form" id="warmupCampaignForm" hidden>
     <div class="campaign-form-section">

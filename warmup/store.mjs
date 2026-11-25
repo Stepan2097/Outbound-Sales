@@ -344,24 +344,24 @@ export async function setInvitesEnabled({ accountId, enabled, actor = null }) {
 }
 
 /**
- * Чи заходить агент сервера в акаунт (власник 25.11: «щоб він заглядав і не заглядав, коли прошу»).
- * Коли людина сама пише й заходить на профілі в LinkedIn, сервер не має відкривати той самий акаунт
- * паралельно: LinkedIn бачить обидва входи й обмежує. Вимкнено — жодних сесій сервера: ні прогріву,
- * ні перегляду вхідних, ні відправки схвалених відповідей (вони чекають, доки ввімкнуть).
- * Як і запити в друзі — подія в журналі акаунта, найновіша каже.
+ * Синхронізація повідомлень акаунта (власник 25.11: «це просто чи синхронізуються повідомлення»).
+ * Людина сама пише з акаунта й заходить на профілі — сервер не має паралельно читати й надсилати
+ * повідомлення з того самого акаунта: LinkedIn бачить обидва входи й обмежує. Вимкнено — ні
+ * чергувань «подивитись нові повідомлення», ні відправки відповідей з платформи (вони чекають),
+ * і сесія прогріву повідомлень не читає; сам прогрів іде як ішов. Подія в журналі — найновіша каже.
  */
 export const AGENT_SETTING = "agent.setting";
 
 export async function setAgentEnabled({ accountId, enabled, actor = null }) {
   await logEvent({
     accountId, level: "info", type: AGENT_SETTING,
-    message: enabled ? "The server agent may open this account again" : "The server agent stays out of this account — a person works in it by hand",
+    message: enabled ? "Messages sync again for this account" : "Messages stop syncing for this account — a person writes from it by hand",
     meta: { enabled: Boolean(enabled), actor }
   });
   return { enabled: Boolean(enabled) };
 }
 
-/** Which of these accounts the server agent is to stay out of, and since when. */
+/** Which of these accounts have message sync switched off, and since when. */
 export async function agentOffSince(accountIds) {
   const ids = [...new Set((accountIds || []).filter(Boolean))];
   const off = new Map();

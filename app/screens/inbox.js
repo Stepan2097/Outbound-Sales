@@ -709,7 +709,7 @@ const clockOf = (iso) => {
 };
 
 export function warmupGoesOutText(reply) {
-  if (reply?.agentOff) return "коли акаунт перемкнуть з «Вручну» на «Авто» («Прогрів» → Режим)";
+  if (reply?.agentOff) return "коли для акаунта ввімкнуть синхронізацію повідомлень («Прогрів» → таблиця акаунтів)";
   if (reply?.goesOutNow) return reply.goesOutAt && clockOf(reply.goesOutAt) ? `за кілька хвилин — близько ${clockOf(reply.goesOutAt)}` : "за кілька хвилин";
   if (!reply?.goesOutAt) return "у наступну сесію акаунта";
   if (reply.limitReached) {

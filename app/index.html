@@ -345,12 +345,13 @@
 
         <section class="view" id="view-warmup">
           <div class="warmup-layout">
-            <!-- Автозапити в друзі (у коді — «кампанії» прогріву): app/screens/warmup-campaign.js. -->
-            <section class="panel blk-settings warmup-campaigns-panel span-2" id="warmupCampaignPanel"></section>
-            <!-- «Як іде розсилка» — конвеєр автозапитів; малює app/screens/warmup-funnel.js. -->
-            <section class="panel blk-metrics warmup-funnel-panel home-panel span-2" id="warmupFunnelPanel"></section>
-            <!-- Розклад прогріву — свій блок зі своєю кнопкою «Зберегти розклад». -->
-            <section class="panel blk-settings warmup-strategy-panel span-2" id="warmupStrategyPanel"></section>
+            <!-- Один блок (власник 25.11: «це все якось об'єднати»): автозапити в друзі з їхнім конвеєром
+                 («Як іде розсилка», app/screens/warmup-funnel.js — усередині шаблону автозапитів) і рядок
+                 стратегії прогріву під ними. Малює app/screens/warmup-campaign.js. -->
+            <section class="panel blk-settings warmup-overview span-2">
+              <div class="warmup-campaigns-panel" id="warmupCampaignPanel"></div>
+              <div class="warmup-strategy-panel" id="warmupStrategyPanel"></div>
+            </section>
             <section class="panel blk-list warmup-list-panel span-2">
               <div class="panel-heading">
                 <div>
@@ -364,10 +365,9 @@
                 <table>
                   <thead>
                     <tr>
-                      <th>Профіль</th>
-                      <th title="Під яким іменем акаунт залогінений у LinkedIn">LinkedIn</th>
+                      <th title="Профіль Anty і під яким іменем він залогінений у LinkedIn">Акаунт</th>
                       <th>Теги</th>
-                      <th title="Авто — агент сервера сам веде акаунт: прогрів, нові повідомлення, відповіді з платформи. Вручну — агент акаунт не відкриває, поки ви працюєте в ньому самі.">Режим</th>
+                      <th title="Чи агент сам читає нові повідомлення й надсилає відповіді з платформи. Вимкніть, коли пишете з акаунта самі. Прогрів від цього не залежить.">Синхронізація повідомлень</th>
                       <th>Стан</th>
                       <th title="День прогріву">День</th>
                       <th title="Запити в друзі сьогодні: скільки надіслано з дозволених; перемикач вмикає чи вимикає запити для акаунта">Запити в друзі</th>

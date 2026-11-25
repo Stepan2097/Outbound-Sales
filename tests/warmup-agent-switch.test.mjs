@@ -32,26 +32,31 @@ test("вимикач агента: найновіша подія каже; ви�
   }
 });
 
-test("агент не бере вимкнений акаунт ні для прогріву, ні для нових повідомлень, ні для відправки; вартовий входу — теж", () => {
+// Власник 25.11: «це просто чи синхронізуються повідомлення» — прогрів від перемикача не залежить.
+test("синхронізацію вимкнено: ні чергувань, ні відправок, сесія прогріву повідомлень не читає; прогрів іде", () => {
   const scheduler = readFileSync(new URL("../warmup/scheduler.mjs", import.meta.url), "utf8");
-  assert.equal((scheduler.match(/withoutAgentOff\(await anty\.from\("wl_accounts"\)/g) || []).length, 3, "сесії дня, термінові відправки, чергування");
-  assert.match(scheduler, /the server agent is switched off for this account/);
+  assert.equal((scheduler.match(/withoutAgentOff\(await anty\.from\("wl_accounts"\)/g) || []).length, 2, "термінові відправки й чергування");
+  assert.match(scheduler, /for \(const id of \(await agentOffSince\(ids\)\.catch\(\(\) => new Map\(\)\)\)\.keys\(\)\) inboxSyncedToday\.add\(id\);/);
+  assert.doesNotMatch(scheduler, /the server agent is switched off for this account/);
   const api = readFileSync(new URL("../warmup/api.mjs", import.meta.url), "utf8");
+  assert.match(api, /\? \{ lastSyncedAt: await lastSyncedAt\(account\.id\), maxThreads: 0, due: false, backfill: null, syncOff: true \}/);
+  assert.match(api, /outbox: syncOff \|\| !run/);
   assert.match(api, /path === "\/accounts\/agent"/);
   assert.match(api, /agentOff: account && agentOffMap\.has\(account\.id\)/);
   const watch = readFileSync(new URL("../agent/lib/login-watch.mjs", import.meta.url), "utf8");
   assert.match(watch, /&& !account\.agentOff\);/);
 });
 
-test("у списку акаунтів — режим «Авто / Вручну» окремою колонкою; відповідь з платформи каже, що чекає на «Авто»", () => {
+test("у списку акаунтів — перемикач «Синхронізація повідомлень»; відповідь з платформи каже, що чекає на неї", () => {
   const html = readFileSync(new URL("../app/index.html", import.meta.url), "utf8");
   const ui = readFileSync(new URL("../app/screens/warmup-accounts.js", import.meta.url), "utf8");
   const inbox = readFileSync(new URL("../app/screens/inbox.js", import.meta.url), "utf8");
   // Власник 25.11: «заходить» — неточно, колонку «Акаунт» розбити на кілька.
-  for (const head of ["Профіль", "LinkedIn", "Теги", "Режим", "Стан", "День", "Запити в друзі", "Кампанія"]) assert.match(html, new RegExp(`>${head}</th>`));
-  assert.doesNotMatch(html, /Заходить|warmup-agent-help/);
-  assert.match(ui, /label: auto \? "Авто" : "Вручну"/);
+  // …а потім: «Профіль і LinkedIn об'єднати», «режим — це просто чи синхронізуються повідомлення».
+  for (const head of ["Акаунт", "Теги", "Синхронізація повідомлень", "Стан", "День", "Запити в друзі", "Кампанія"]) assert.match(html, new RegExp(`>${head}</th>`));
+  assert.doesNotMatch(html, /Заходить|warmup-agent-help|>Режим<|>LinkedIn<\/th>/);
+  assert.match(ui, /function warmupSyncSwitchHtml\(profile\)/);
   assert.match(ui, /data: `data-warmup-agent="/);
   assert.match(ui, /"\/accounts\/agent"/);
-  assert.match(inbox, /if \(reply\?\.agentOff\) return "коли акаунт перемкнуть з «Вручну» на «Авто»/);
+  assert.match(inbox, /if \(reply\?\.agentOff\) return "коли для акаунта ввімкнуть синхронізацію повідомлень/);
 });

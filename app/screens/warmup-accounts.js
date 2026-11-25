@@ -183,7 +183,7 @@ function warmupRelativeTime(iso) {
 function warmupNextSessionCell(profile) {
   const next = profile.nextSession;
   if (profile.isRunningNow) return '<span class="warmup-due">відкритий зараз</span>';
-  if (profile.agentOff || !next) return "";
+  if (!next) return "";
   if (next.overdue) return '<span class="warmup-due">сесія зараз</span>';
   const time = new Date(next.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   return `${next.today ? "сесія о" : "завтра о"} ${time}`;
@@ -195,26 +195,25 @@ function warmupToggleHtml({ on, label = "", data, title, aria }) {
 }
 
 /**
- * Режим акаунта: «Авто» чи «Вручну» (власник 25.11: «щоб я міг включити й виключити, щоб він
- * заглядав і не заглядав, коли прошу»). «Авто» — агент сервера сам веде акаунт: прогрів, нові
- * повідомлення, відповіді з платформи. «Вручну» — агент акаунт не відкриває: людина працює в ньому
- * сама, а LinkedIn, який бачить два входи паралельно, обмежує.
+ * Синхронізація повідомлень акаунта (власник 25.11: «це просто чи синхронізуються повідомлення»).
+ * Увімкнено — агент сам читає нові повідомлення й надсилає відповіді з платформи. Вимкнено — людина
+ * пише з акаунта сама, і сервер паралельно в повідомлення не лізе (LinkedIn бачить два входи й обмежує);
+ * відповіді з платформи чекають. Прогрів від цього не залежить.
  */
-function warmupModeSwitchHtml(profile) {
+function warmupSyncSwitchHtml(profile) {
   const account = profile.account;
   if (!account || account.status === "excluded" || profile.status === "blocked") return "";
-  const auto = !profile.agentOff;
-  const since = !auto && profile.agentOff.since
+  const on = !profile.agentOff;
+  const since = !on && profile.agentOff.since
     ? new Date(profile.agentOff.since).toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
     : "";
   return warmupToggleHtml({
-    on: auto,
-    label: auto ? "Авто" : "Вручну",
-    data: `data-warmup-agent="${escapeAttr(account.id)}" data-warmup-agent-on="${auto ? "0" : "1"}"`,
-    title: auto
-      ? "Авто: агент сам веде акаунт — прогрів, нові повідомлення, відповіді з платформи. Перемкніть на «Вручну», коли працюєте в акаунті самі."
-      : `Вручну${since ? ` з ${since}` : ""}: агент акаунт не відкриває, відповіді з платформи чекають. Перемкніть на «Авто», щоб агент знову вів його сам.`,
-    aria: `Режим ${profile.name}: ${auto ? "авто" : "вручну"}`
+    on,
+    data: `data-warmup-agent="${escapeAttr(account.id)}" data-warmup-agent-on="${on ? "0" : "1"}"`,
+    title: on
+      ? "Повідомлення синхронізуються: агент сам читає нові й надсилає відповіді з платформи. Вимкніть, коли пишете з акаунта самі."
+      : `Синхронізацію вимкнено${since ? ` з ${since}` : ""}: агент повідомлень не читає й не надсилає, відповіді з платформи чекають. Прогрів іде як ішов.`,
+    aria: `Синхронізація повідомлень ${profile.name}: ${on ? "увімкнено" : "вимкнено"}`
   });
 }
 
@@ -230,7 +229,7 @@ async function setWarmupAgent(accountId, enabled) {
   } catch (error) {
     if (profile) profile.agentOff = before;
     renderWarmupProfiles();
-    window.alert?.(error?.message || "Не вдалося перемкнути агента.");
+    window.alert?.(error?.message || "Не вдалося перемкнути синхронізацію повідомлень.");
     return;
   }
   await loadWarmupProfiles().catch(() => {});
@@ -571,7 +570,7 @@ function placeWarmupDetail(body) {
   const holder = document.createElement("tr");
   holder.className = "warmup-detail-row";
   const cell = document.createElement("td");
-  cell.colSpan = 8;
+  cell.colSpan = 7;
   cell.appendChild(panel);
   holder.appendChild(cell);
   row.after(holder);
@@ -583,7 +582,7 @@ export function renderWarmupProfiles() {
   parkWarmupDetail();
 
   if (!warmupState.profiles.length) {
-    body.innerHTML = '<tr><td colspan="8"><div class="empty-state">Акаунтів LinkedIn в Anty немає.</div></td></tr>';
+    body.innerHTML = '<tr><td colspan="7"><div class="empty-state">Акаунтів LinkedIn в Anty немає.</div></td></tr>';
     renderWarmupCampaignDetail();
     return;
   }
@@ -595,7 +594,7 @@ export function renderWarmupProfiles() {
   const showIdle = warmupState.showIdleProfiles || idle.some((profile) => profile.id === warmupState.selectedProfileId);
   const shown = showIdle ? sorted : sorted.filter((profile) => warmupProfileRank(profile) === 0);
   const idleToggle = idle.length && idle.length < sorted.length
-    ? `<tr class="warmup-idle-toggle"><td colspan="8"><button class="text-button" type="button" data-warmup-idle-toggle aria-expanded="${showIdle}"><i data-lucide="${showIdle ? "chevron-up" : "chevron-down"}"></i><span>${showIdle ? "Сховати" : "Показати"} ще ${idle.length} — вимкнені, з тегами, Ban</span></button></td></tr>`
+    ? `<tr class="warmup-idle-toggle"><td colspan="7"><button class="text-button" type="button" data-warmup-idle-toggle aria-expanded="${showIdle}"><i data-lucide="${showIdle ? "chevron-up" : "chevron-down"}"></i><span>${showIdle ? "Сховати" : "Показати"} ще ${idle.length} — вимкнені, з тегами, Ban</span></button></td></tr>`
     : "";
   const firstIdle = idle[0]?.id;
 
@@ -610,19 +609,18 @@ export function renderWarmupProfiles() {
         ? '<button class="text-button" type="button" data-warmup-adopt title="Тег Ban — акаунт забанено в LinkedIn. Прогрівати, лише якщо його розбанили.">Прогріти</button>'
         : '<button class="primary-button" type="button" data-warmup-adopt>Прогріти</button>';
       return `
-        <tr data-warmup-profile="${escapeHtml(profile.id)}" class="${profile.id === warmupState.selectedProfileId ? "is-selected" : ""}${profile.agentOff ? " is-manual" : ""}">
+        <tr data-warmup-profile="${escapeHtml(profile.id)}" class="${profile.id === warmupState.selectedProfileId ? "is-selected" : ""}">
           <td class="warmup-profile-cell">
             <strong>${escapeHtml(profile.name)}</strong>
             ${account ? warmupAccountUnreadHtml(account.id) : ""}
+            ${identity?.name
+              ? `<div class="warmup-identity" title="Під цим іменем акаунт залогінений у LinkedIn на останньому вході агента"><i data-lucide="badge-check"></i><span>${escapeHtml(identity.name)}</span></div>`
+              : ""}
             ${profile.proxy ? "" : '<div class="warmup-subtle warmup-no-proxy" title="LinkedIn бачить справжню адресу цього профілю">без проксі</div>'}
-            ${identity?.name ? `<div class="warmup-row-phone warmup-subtle">${escapeHtml(identity.name)}</div>` : ""}
-            <div class="warmup-row-phone">${warmupModeSwitchHtml(profile)}${warmupStatusPill(profile)}${account && warmupPhoneLine(profile) ? ` <span class="warmup-subtle">${escapeHtml(warmupPhoneLine(profile))}</span>` : ""}</div>
+            <div class="warmup-row-phone">${warmupSyncSwitchHtml(profile)}${warmupStatusPill(profile)}${account && warmupPhoneLine(profile) ? ` <span class="warmup-subtle">${escapeHtml(warmupPhoneLine(profile))}</span>` : ""}</div>
           </td>
-          <td class="warmup-linkedin-cell">${identity?.name
-            ? `<span class="warmup-identity" title="Під цим іменем акаунт залогінений у LinkedIn на останньому вході агента"><i data-lucide="badge-check"></i><span>${escapeHtml(identity.name)}</span></span>`
-            : '<span class="warmup-subtle">—</span>'}</td>
           <td class="warmup-tags-cell">${warmupTagsCell(profile)}</td>
-          <td class="warmup-mode-cell">${account ? warmupModeSwitchHtml(profile) || '<span class="warmup-subtle">—</span>' : adopt}</td>
+          <td class="warmup-sync-cell">${account ? warmupSyncSwitchHtml(profile) || '<span class="warmup-subtle">—</span>' : adopt}</td>
           <td class="warmup-state-cell">${account ? `${warmupStatusPill(profile)}<div class="warmup-state-next">${warmupNextSessionCell(profile)}</div>` : '<span class="warmup-subtle">не на прогріві</span>'}</td>
           <td class="warmup-day-cell">${account && profile.day ? escapeHtml(profile.day) : '<span class="warmup-subtle">—</span>'}</td>
           <td class="warmup-invites-col">${account ? warmupConnectionsCell(profile) : '<span class="warmup-subtle">—</span>'}</td>

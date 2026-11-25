@@ -110,11 +110,15 @@ test("signing out (or a lapsed session) forgets every screen the tab remembered"
 
 // 16.10 (Марко): автозапити й «Як іде розсилка» — механіка прогріву, лишаються на «Прогріві»;
 // кампанії лідгенів — у WorkSpace. Порядок: автозапити, розсилка, розклад, акаунти, картка.
-test("the warm-up screen opens on auto-requests, then funnel, schedule, accounts; the card is not there until an account is picked", () => {
+test("the warm-up screen opens on auto-requests (with their funnel), then schedule, accounts; the card is not there until an account is picked", () => {
   const html = readFileSync(new URL("../app/index.html", import.meta.url), "utf8");
   const view = html.slice(html.indexOf('id="view-warmup"'), html.indexOf('id="view-contacts"'));
-  const order = ['id="warmupCampaignPanel"', 'id="warmupFunnelPanel"', 'id="warmupStrategyPanel"', "warmup-list-panel", 'id="warmupDetailPanel"'].map((marker) => view.indexOf(marker));
-  assert.ok(order.every((index, i) => index > 0 && (i === 0 || index > order[i - 1])), "auto-requests, funnel, schedule, accounts, card");
+  const order = ['id="warmupCampaignPanel"', 'id="warmupStrategyPanel"', "warmup-list-panel", 'id="warmupDetailPanel"'].map((marker) => view.indexOf(marker));
+  assert.ok(order.every((index, i) => index > 0 && (i === 0 || index > order[i - 1])), "auto-requests, schedule, accounts, card");
+  // The funnel lives inside the auto-requests block, right under its heading (25.11).
+  const template = readFileSync(new URL("../app/screens/warmup-campaign.js", import.meta.url), "utf8");
+  assert.ok(template.indexOf('id="warmupFunnelPanel"') > template.indexOf('id="warmupCampaignNewBtn"'));
+  assert.ok(template.indexOf('id="warmupFunnelPanel"') < template.indexOf('id="warmupCampaignForm"'));
   assert.match(view, /id="warmupDetailPanel" hidden/);
   assert.doesNotMatch(view, /Вибери акаунт у таблиці/);
 });

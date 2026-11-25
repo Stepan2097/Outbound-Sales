@@ -653,9 +653,6 @@
 .warmup-profile-cell strong {
   display: block;
 }
-.warmup-linkedin-cell .warmup-identity {
-  margin: 0;
-}
 /* Перемикач: доріжка з кружком і підпис поруч — без рамки навколо. */
 .warmup-toggle {
   display: inline-flex;
@@ -707,10 +704,6 @@
 .warmup-toggle-label {
   min-width: 46px;
   text-align: left;
-}
-/* Рядок у режимі «Вручну» — приглушений: агент туди не заходить. */
-.warmup-list-panel tbody tr.is-manual > td:not(.warmup-mode-cell) {
-  opacity: 0.7;
 }
 .warmup-state-cell .pill {
   white-space: nowrap;

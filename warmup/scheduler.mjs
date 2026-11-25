@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { anty, today } from "./db.mjs";
 import { SESSION_WINDOW, dutyGapMinutes, insideWindow, onDutyBreak, windowLabel } from "./schedule.mjs";
 import { dailyQuota, dayOfRun, hasPlanOn, inWorkingMode, noteAllowedOnDay, pausedOn } from "./strategy.mjs";
-import { INVITES_HELD, LIVE_ACCOUNT_STATUSES, LIVE_RUN_STATES, invitesOffIds, logEvent, readHoldsFrom, settlePause, withoutAgentOff } from "./store.mjs";
+import { INVITES_HELD, LIVE_ACCOUNT_STATUSES, LIVE_RUN_STATES, invitesOffIds, logEvent, readHoldsFrom, settlePause, agentOffSince, withoutAgentOff } from "./store.mjs";
 import {
   MAX_INVITES_PER_RUN, MAX_INVITE_CHECKS_PER_RUN, checkedTodayAccounts, folderAddedToday, heldCounts,
   openConversationCounts, pendingCounts
@@ -399,7 +399,7 @@ const URGENT_MIN_GAP_MS = 3 * 60_000;
 const urgentEnded = new Map();
 
 export async function urgentCandidates(nowMs = Date.now()) {
-  // An account a person works in by hand is not opened, not even to send (власник 25.11).
+  // Синхронізацію повідомлень вимкнено — відповіді з платформи не йдуть (власник 25.11).
   const accounts = await withoutAgentOff(await anty.from("wl_accounts").select("*")
     .in("status", LIVE_ACCOUNT_STATUSES).eq("health", "ok").notNull("profile_remote_id").rows());
   if (!accounts.length) return [];
@@ -776,7 +776,7 @@ export function dueFrom({
 }
 
 async function candidates(todayIso, nowMs, campaigns = []) {
-  const accounts = await withoutAgentOff(await anty.from("wl_accounts").select("*")
+  const accounts = await anty.from("wl_accounts").select("*")
     // `restricted` too: that is what a warning leaves behind, and nothing
     // writes it back when the pause runs out. `dueFrom` skips the ones whose
     // pause still holds.
@@ -786,7 +786,7 @@ async function candidates(todayIso, nowMs, campaigns = []) {
     // and handing it out every five minutes only teaches LinkedIn our schedule.
     .eq("health", "ok")
     .notNull("profile_remote_id")
-    .rows());
+    .rows();
   if (!accounts.length) return { ready: [], held: [], busy: [] };
 
   const ids = accounts.map((account) => account.id);
@@ -830,6 +830,8 @@ async function candidates(todayIso, nowMs, campaigns = []) {
     checkedTodayAccounts(ids, todayIso),
     syncedTodayAccounts(ids, todayIso)
   ]);
+  // Синхронізацію повідомлень вимкнено (власник 25.11): читати нема чого — сесію заради цього не будимо.
+  for (const id of (await agentOffSince(ids).catch(() => new Map())).keys()) inboxSyncedToday.add(id);
 
   // LinkedIn's invitation limit hit today, by account (store.mjs `holdInvites`).
   const invitesHeld = new Set();
@@ -1038,10 +1040,6 @@ export async function leaseAccount({ accountId, now = new Date(), random = Math.
   const running = activeLease(nowMs);
   if (running) {
     return refuse(`${running.label} is already running`, secondsUntil(running.expiresAt, nowMs));
-  }
-  // Switched off between the worker's question and this lease: a person works in it by hand.
-  if (!(await withoutAgentOff([{ id: accountId }])).length) {
-    return refuse("the server agent is switched off for this account — a person works in it by hand", 300);
   }
 
   // A send-only session for approved messages, window or not.
