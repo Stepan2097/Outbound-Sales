@@ -27,7 +27,7 @@ import { encryptSecret, secretsConfigured } from "./secretbox.mjs";
 import { RECHECK_DONE, RECHECK_REQUESTED, issueLoginCheck, readLoginCheck } from "./login-check.mjs";
 import {
   activeRun, checkQuota, commitAction, connectQuotaToday, describeAccount, ensureDefaultStrategy, heldUntil, holdInvites, invitesHeldOn,
-  invitesOff, invitesOffIds, setInvitesEnabled,
+  invitesOff, invitesOffIds, setInvitesEnabled, agentOffSince, setAgentEnabled,
   latestWarnings, logEvent, loadAccount, loginIdentities, newestRun, openSession, pauseForWarning, probeEventWriteAccess, recordAction,
   toStrategy
 } from "./store.mjs";
@@ -1258,6 +1258,8 @@ export async function accountTrouble(account, ok, nowMs = Date.now()) {
 }
 
 async function replyGoesOut(account) {
+  // A person works in it by hand (власник 25.11): nothing goes out until the agent is let back in.
+  if ((await agentOffSince([account.id]).catch(() => new Map())).has(account.id)) return { at: null, today: false, soon: false, agentOff: true };
   // Позачергова сесія (15.10): an approved message goes within minutes —
   // unless the account cannot be opened now or has used today's messages.
   const [run, work] = await Promise.all([
@@ -1571,7 +1573,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         const goesOut = await replyGoesOut(account);
         sendJson(response, queued.duplicate ? 200 : 201, {
           success: true, reply: queued.reply, duplicate: queued.duplicate,
-          goesOutAt: goesOut.at, goesOutToday: goesOut.today, goesOutSoon: goesOut.soon, goesOutNow: Boolean(goesOut.now),
+          goesOutAt: goesOut.at, goesOutToday: goesOut.today, goesOutSoon: goesOut.soon, goesOutNow: Boolean(goesOut.now), agentOff: Boolean(goesOut.agentOff),
           limitReached: Boolean(goesOut.limit), perDay: goesOut.perDay ?? null, window: windowLabel()
         });
         return true;
@@ -1657,6 +1659,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         .map((account) => account.id);
       const warningByAccount = await latestWarnings(pausedIds);
       const invitesOffSet = await invitesOffIds(linked.map((account) => account.id)).catch(() => new Set());
+      const agentOffMap = await agentOffSince(linked.map((account) => account.id)).catch(() => new Map());
 
       const byProfile = new Map(linked.map((account) => [account.profile_remote_id, account]));
 
@@ -1697,6 +1700,8 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           // Until when, and why: «Ліміт LinkedIn · до 11.10» rather than a bare «На паузі».
           pause: paused ? { until: run.paused_until, cause } : null,
           isRunningNow: row.status === "running",
+          // The server agent stays out of it — a person works in it by hand (25.11), and since when.
+          agentOff: account && agentOffMap.has(account.id) ? { since: agentOffMap.get(account.id) } : null,
           connections: {
             ...(connectionsByAccount.get(account?.id ?? "") || { today: 0, total: 0 }),
             // Switched off for this account (16.10): said in the column, with the switch.
@@ -1713,7 +1718,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           // Only an account that is warming and not already open has a next
           // session: promising "next at 14:20" for one that is off or blocked
           // would be a commitment nobody is going to keep.
-          nextSession: account && (status === "warming" || status === "working") && row.status !== "running"
+          nextSession: account && (status === "warming" || status === "working") && row.status !== "running" && !agentOffMap.has(account.id)
             ? nextSession(account.id, {
                 // No day row yet means today has not been started at all, which
                 // is the most outstanding a day can be.
@@ -1950,6 +1955,17 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
      * treated the same way.
      */
     // Запити в друзі для акаунта: увімкнути чи вимкнути (власник 16.10).
+    // «Агент заходить в акаунт» — увімкнути чи вимкнути (власник 25.11).
+    if (method === "POST" && path === "/accounts/agent") {
+      const body = await readJson(request);
+      if (!body?.accountId || typeof body.enabled !== "boolean") return fail(response, sendJson, 400, "Потрібні accountId і enabled");
+      const account = await loadAccount(String(body.accountId));
+      if (!account) return fail(response, sendJson, 404, "Акаунт не знайдено");
+      await setAgentEnabled({ accountId: account.id, enabled: body.enabled, actor: request.auth?.profile?.email || null });
+      sendJson(response, 200, { success: true, accountId: account.id, enabled: body.enabled });
+      return true;
+    }
+
     if (method === "POST" && path === "/accounts/invites") {
       const body = await readJson(request);
       if (!body?.accountId || typeof body.enabled !== "boolean") return fail(response, sendJson, 400, "Потрібні accountId і enabled");
@@ -3375,6 +3391,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           goesOutSoon: goesOut?.soon ?? false,
           // Позачергова сесія за кілька хвилин, або денний ліміт — сторінка каже час.
           goesOutNow: goesOut?.now ?? false,
+          agentOff: Boolean(goesOut?.agentOff),
           limitReached: goesOut?.limit ?? false,
           window: windowLabel(),
           sentToday: allowance?.sentToday ?? 0,
@@ -3419,7 +3436,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
         const goesOut = await replyGoesOut(account);
         sendJson(response, queued.duplicate ? 200 : 201, {
           success: true, reply: queued.reply, duplicate: queued.duplicate,
-          goesOutAt: goesOut.at, goesOutToday: goesOut.today, goesOutSoon: goesOut.soon, goesOutNow: Boolean(goesOut.now),
+          goesOutAt: goesOut.at, goesOutToday: goesOut.today, goesOutSoon: goesOut.soon, goesOutNow: Boolean(goesOut.now), agentOff: Boolean(goesOut.agentOff),
           limitReached: Boolean(goesOut.limit), perDay: goesOut.perDay ?? null, window: windowLabel()
         });
         return true;
@@ -3491,6 +3508,7 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
 
     if (method === "GET" && path === "/agent/accounts") {
       const rows = await anty.from("wl_accounts").select("id,label,login,profile_remote_id,status,health").rows();
+      const agentOff = await agentOffSince(rows.map((row) => row.id)).catch(() => new Map());
       /**
        * The signed link for an account that needs a person, made here rather
        * than by the agent: the key is the portal's, and the agent image does
@@ -3519,6 +3537,8 @@ export async function handleWarmupApi({ request, response, url, sendJson, readJs
           profileRemoteId: row.profile_remote_id,
           status: row.status,
           health: row.health,
+          // A person works in it by hand (25.11): the login watch does not open it on its own either.
+          agentOff: agentOff.has(row.id),
           loginCheckPath: linkFor(row)
         }))
       });

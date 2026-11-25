@@ -75,7 +75,9 @@ export function normalizeState(input) {
 }
 
 function parkedAmong(accounts) {
-  return accounts.filter((account) => NEEDS_PERSON.includes(account.health) && account.profileRemoteId);
+  // An account a person works in by hand is not opened on a schedule (власник 25.11);
+  // «Перевірити вхід» pressed for it is still answered.
+  return accounts.filter((account) => NEEDS_PERSON.includes(account.health) && account.profileRemoteId && !account.agentOff);
 }
 
 /**

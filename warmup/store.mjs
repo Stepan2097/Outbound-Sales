@@ -343,6 +343,47 @@ export async function setInvitesEnabled({ accountId, enabled, actor = null }) {
   return { enabled: Boolean(enabled) };
 }
 
+/**
+ * Чи заходить агент сервера в акаунт (власник 25.11: «щоб він заглядав і не заглядав, коли прошу»).
+ * Коли людина сама пише й заходить на профілі в LinkedIn, сервер не має відкривати той самий акаунт
+ * паралельно: LinkedIn бачить обидва входи й обмежує. Вимкнено — жодних сесій сервера: ні прогріву,
+ * ні перегляду вхідних, ні відправки схвалених відповідей (вони чекають, доки ввімкнуть).
+ * Як і запити в друзі — подія в журналі акаунта, найновіша каже.
+ */
+export const AGENT_SETTING = "agent.setting";
+
+export async function setAgentEnabled({ accountId, enabled, actor = null }) {
+  await logEvent({
+    accountId, level: "info", type: AGENT_SETTING,
+    message: enabled ? "The server agent may open this account again" : "The server agent stays out of this account — a person works in it by hand",
+    meta: { enabled: Boolean(enabled), actor }
+  });
+  return { enabled: Boolean(enabled) };
+}
+
+/** Which of these accounts the server agent is to stay out of, and since when. */
+export async function agentOffSince(accountIds) {
+  const ids = [...new Set((accountIds || []).filter(Boolean))];
+  const off = new Map();
+  if (!ids.length) return off;
+  const rows = await anty.from("wl_events").select("account_id,meta,created_at").eq("type", AGENT_SETTING).in("account_id", ids)
+    .order("created_at", { ascending: false }).limit(1000).rows();
+  const seen = new Set();
+  for (const row of rows.slice().sort((left, right) => String(right.created_at || "").localeCompare(String(left.created_at || "")))) {
+    if (seen.has(row.account_id)) continue;
+    seen.add(row.account_id);
+    if (row.meta?.enabled === false) off.set(row.account_id, row.created_at);
+  }
+  return off;
+}
+
+/** These accounts without the ones the agent is to stay out of. Unreadable switch — nothing is held back. */
+export async function withoutAgentOff(accounts) {
+  if (!accounts.length) return accounts;
+  const off = await agentOffSince(accounts.map((account) => account.id)).catch(() => new Map());
+  return off.size ? accounts.filter((account) => !off.has(account.id)) : accounts;
+}
+
 /** Which of these accounts have requests switched off. */
 export async function invitesOffIds(accountIds) {
   const ids = [...new Set((accountIds || []).filter(Boolean))];

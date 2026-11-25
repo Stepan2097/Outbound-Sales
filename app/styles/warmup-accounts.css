@@ -331,12 +331,8 @@
     min-width: 0;
   }
 
-  .warmup-list-panel th:nth-child(3),
-  .warmup-list-panel td:nth-child(3),
-  .warmup-list-panel th:nth-child(4),
-  .warmup-list-panel td:nth-child(4),
-  .warmup-list-panel th:nth-child(5),
-  .warmup-list-panel td:nth-child(5) {
+  .warmup-list-panel th:nth-child(n+2),
+  .warmup-list-panel td:nth-child(n+2):not([colspan]) {
     display: none;
   }
 
@@ -645,4 +641,90 @@
   align-items: center;
   gap: 12px;
   margin: 8px 0 0;
+}
+
+/* ── «Агент заходить в акаунт» (власник 25.11) ──────────────────────────────
+   Головний перемикач рядка: заходить сервер сам чи людина працює вручну. */
+.warmup-agent-help {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--surface-strong);
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.warmup-agent-help b {
+  color: var(--ink);
+}
+.warmup-agent-cell {
+  white-space: nowrap;
+}
+.warmup-agent-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 3px 10px 3px 4px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.warmup-switch-track {
+  position: relative;
+  display: inline-block;
+  width: 34px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--line);
+  transition: background 0.15s ease;
+}
+.warmup-switch-track span {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s ease;
+}
+.warmup-agent-switch.is-on {
+  border-color: var(--teal);
+  background: var(--teal-weak);
+  color: var(--ink);
+}
+.warmup-agent-switch.is-on .warmup-switch-track {
+  background: var(--teal);
+}
+.warmup-agent-switch.is-on .warmup-switch-track span {
+  transform: translateX(14px);
+}
+.warmup-agent-switch.is-off {
+  color: var(--amber);
+}
+.warmup-agent-note {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11.5px;
+  white-space: normal;
+}
+/* Рядок, у якому працюють вручну, — приглушений: агент туди не заходить. */
+.warmup-list-panel tbody tr.is-agent-off > td:not(.warmup-agent-cell) {
+  opacity: 0.72;
+}
+.warmup-state-next {
+  margin-top: 4px;
+  font-size: 12.5px;
+}
+.warmup-warm-campaign {
+  margin-top: 4px;
+}
+.warmup-account-cell .warmup-tags-cell {
+  margin-top: 4px;
+}
+.warmup-state-cell .pill {
+  white-space: nowrap;
 }
