@@ -114,6 +114,7 @@ const SAVED_AS = {
   accountDossiers: "accountDossiers",
   warmupCampaigns: "warmupCampaigns",
   accountLeadgens: "accountLeadgens",
+  apiTokens: "apiTokens",
   newContactPolicy: "newContactPolicy",
   pingCapacity: "pingCapacity",
   pingReplyHold: "pingReplyHold",

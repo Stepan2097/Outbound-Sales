@@ -327,3 +327,82 @@ document.getElementById("teamUserForm").addEventListener("submit", async (event)
     renderTopbar();
   }
 });
+
+/* ── ChatGPT (власник 27.11: «щоб чат гпт підключався до оутбаун і мав можливість писати листи
+   людям через лінкедин … дати таку можливість Богдану»). Особистий ключ — це сама людина: ChatGPT
+   бачить її розмови LinkedIn і пише з акаунтів, які вона веде; повідомлення йдуть через чергу агента. */
+const chatgpt = { tokens: null, fresh: "", error: "", busy: false, loaded: false };
+
+function chatgptUrl(key) {
+  return `${window.location.origin}/mcp?key=${key}`;
+}
+
+function renderChatgpt() {
+  const body = document.getElementById("chatgptBody");
+  if (!body) return;
+  const tokens = chatgpt.tokens || [];
+  const when = (iso) => (iso ? new Date(iso).toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "ще не користувались");
+  body.innerHTML = `
+    <ol class="chatgpt-steps">
+      <li>Створіть ключ кнопкою нижче й скопіюйте адресу — вона показується один раз.</li>
+      <li>У ChatGPT: <b>Налаштування → Додатки й конектори → Розширені → Режим розробника</b>, потім <b>Створити</b> конектор.</li>
+      <li>Назва — Outbound, адреса — скопійована, автентифікація — <b>без автентифікації</b> (ключ уже в адресі). Збережіть.</li>
+      <li>У новому чаті виберіть конектор Outbound і пишіть, наприклад: «покажи, кому треба відповісти сьогодні» чи «напиши Івану, що дзвінок переносимо на п'ятницю».</li>
+    </ol>
+    <p class="profile-chart-note">ChatGPT бачить ваші розмови LinkedIn і пише лише з акаунтів, які ви ведете. Повідомлення стає в чергу акаунта, і агент надсилає його сам, з тими самими лімітами, що й відповідь із Workspace.</p>
+    ${chatgpt.fresh ? `<div class="chatgpt-fresh">
+      <label>Адреса для ChatGPT — скопіюйте зараз, вдруге її не покажемо:</label>
+      <div class="chatgpt-copy"><input type="text" readonly value="${escapeHtml(chatgptUrl(chatgpt.fresh))}" id="chatgptUrlInput" /><button type="button" class="primary-button" data-chatgpt="copy"><i data-lucide="copy"></i><span>Копіювати</span></button></div>
+    </div>` : ""}
+    ${chatgpt.error ? `<p class="chatgpt-error">${escapeHtml(chatgpt.error)}</p>` : ""}
+    <div class="chatgpt-actions"><button type="button" class="primary-button" data-chatgpt="create" ${chatgpt.busy ? "disabled" : ""}><i data-lucide="plug"></i><span>${tokens.length ? "Створити ще один ключ" : "Створити ключ для ChatGPT"}</span></button></div>
+    ${tokens.length ? `<ul class="chatgpt-tokens">${tokens.map((token) => `<li><span><b>${escapeHtml(token.label)}</b> · створено ${escapeHtml(when(token.createdAt))} · ${token.lastUsedAt ? `останнє використання ${escapeHtml(when(token.lastUsedAt))}` : "ще не користувались"}</span><button type="button" class="text-button" data-chatgpt="revoke" data-id="${escapeHtml(token.id)}"><i data-lucide="x"></i><span>Відкликати</span></button></li>`).join("")}</ul>` : ""}`;
+  refreshIcons(body);
+}
+
+async function loadChatgpt() {
+  try {
+    chatgpt.tokens = (await api("/api/account/tokens")).tokens || [];
+    chatgpt.error = "";
+  } catch (error) {
+    chatgpt.error = error?.message || "Ключі не вдалося прочитати.";
+  }
+  chatgpt.loaded = true;
+  renderChatgpt();
+}
+
+document.getElementById("chatgptDetails")?.addEventListener("toggle", (event) => {
+  if (event.target.open && !chatgpt.loaded) void loadChatgpt();
+  else renderChatgpt();
+});
+
+document.getElementById("chatgptBody")?.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-chatgpt]");
+  if (!button) return;
+  const act = button.dataset.chatgpt;
+  if (act === "copy") {
+    const input = document.getElementById("chatgptUrlInput");
+    try { await navigator.clipboard.writeText(input.value); } catch { input.select(); document.execCommand?.("copy"); }
+    button.querySelector("span").textContent = "Скопійовано";
+    return;
+  }
+  chatgpt.busy = true;
+  chatgpt.error = "";
+  renderChatgpt();
+  try {
+    if (act === "create") {
+      const answer = await api("/api/account/tokens", { method: "POST", body: JSON.stringify({ label: "ChatGPT" }) });
+      chatgpt.fresh = answer.token;
+      chatgpt.tokens = answer.tokens || [];
+    } else if (act === "revoke") {
+      if (!window.confirm("Відкликати ключ? ChatGPT, підключений із ним, одразу втратить доступ.")) return;
+      chatgpt.tokens = (await api(`/api/account/tokens?id=${encodeURIComponent(button.dataset.id)}`, { method: "DELETE" })).tokens || [];
+      chatgpt.fresh = "";
+    }
+  } catch (error) {
+    chatgpt.error = error?.message || "Не вийшло.";
+  } finally {
+    chatgpt.busy = false;
+    renderChatgpt();
+  }
+});

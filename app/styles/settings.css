@@ -139,3 +139,57 @@
 .team-row .team-policy > span:first-child { font-size: 11px; }
 .team-row .team-policy-row { display: flex; gap: 6px; align-items: center; color: inherit; font-size: inherit; }
 .team-policy input[type="number"] { width: 64px; }
+
+/* ChatGPT як помічник у LinkedIn (27.11): кроки, адреса з ключем, список ключів. */
+.chatgpt-steps {
+  margin: 0 0 10px;
+  padding-left: 20px;
+  display: grid;
+  gap: 4px;
+  font-size: 13.5px;
+}
+.chatgpt-fresh {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--teal);
+  border-radius: 10px;
+  background: var(--teal-weak);
+  font-size: 13px;
+}
+.chatgpt-copy {
+  display: flex;
+  gap: 8px;
+}
+.chatgpt-copy input {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+}
+.chatgpt-actions {
+  margin: 10px 0;
+}
+.chatgpt-tokens {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  color: var(--muted);
+}
+.chatgpt-tokens li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.chatgpt-tokens b {
+  color: var(--ink);
+}
+.chatgpt-error {
+  color: var(--red, #c24135);
+  font-size: 13px;
+}

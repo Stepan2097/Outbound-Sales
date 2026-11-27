@@ -67,6 +67,8 @@ import { createFileOnceSync, writeFileAtomic } from "./state/atomic-write.mjs";
 import { startScheduler } from "./warmup/scheduler.mjs";
 import { serveStaticFile } from "./state/static-files.mjs";
 import { cachedAnswer, noteWrite } from "./state/answer-cache.mjs";
+import { TOKEN_PREFIX, issueToken, publicToken, revokeToken, tokenRow } from "./state/access-tokens.mjs";
+import { mcpServer } from "./state/mcp.mjs";
 import { sendJsonResponse } from "./state/json-response.mjs";
 import { shouldInvalidateContactReads } from "./contacts/invalidation.mjs";
 
@@ -317,6 +319,8 @@ const state = {
   warmupCampaigns: null,
   // Хто з лідгенів веде який акаунт LinkedIn: { accountId: id користувача CRM }. Пінги діалогів акаунта — йому (16.10).
   accountLeadgens: {},
+  // Особисті ключі для ChatGPT і інших клієнтів MCP (27.11): лише хеші — state/access-tokens.mjs.
+  apiTokens: [],
   // Скільки нових контактів лідген бере, коли в нього є живі розмови (Марко 19.10):
   // { email: { mode: "gate" | "limit" | "open", limit } }. Немає запису — правило як було.
   newContactPolicy: {},
@@ -772,6 +776,47 @@ const server = createServer(async (request, response) => {
         runtime: state.openRouterEnabled && state.providerHealth.status === "healthy" ? "openrouter" : "local",
         checkedAt: new Date().toISOString()
       });
+      return;
+    }
+
+    // Outbound як конектор MCP для ChatGPT (27.11, state/mcp.mjs). Вхід — особистим ключем людини:
+    // у заголовку Authorization: Bearer … або в адресі ?key=… (ChatGPT дає вставити лише адресу).
+    // Кожен інструмент — запит до цього ж API з тим самим ключем, тож права й ліміти ті самі.
+    if (url.pathname === "/mcp") {
+      if (request.method !== "POST") {
+        response.writeHead(405, { Allow: "POST", "Content-Type": "application/json" });
+        response.end(JSON.stringify({ error: "MCP over HTTP: POST JSON-RPC here" }));
+        return;
+      }
+      const key = presentedToken(request) || cleanText(url.searchParams.get("key") || "");
+      const auth = key.startsWith(TOKEN_PREFIX) ? tokenAuth(key) : { refused: "Потрібен особистий ключ Outbound (Налаштування → ChatGPT)." };
+      if (auth.refused) {
+        sendJson(response, 401, { jsonrpc: "2.0", id: null, error: { code: -32001, message: auth.refused } });
+        return;
+      }
+      const body = parseJsonBody(await readBody(request));
+      const admin = auth.profile.role === "admin";
+      const leads = new Set(Object.entries(state.accountLeadgens || {}).filter(([, leadgen]) => leadgen === auth.profile.id).map(([accountId]) => accountId));
+      const base = `http://127.0.0.1:${server.address().port}`;
+      const handle = mcpServer({
+        version: process.env.SOURCE_COMMIT || "1",
+        allowed: (accountId) => admin || leads.has(String(accountId || "")),
+        call: async (path, { method = "GET", body: payload } = {}) => {
+          const answer = await fetch(`${base}${path}`, {
+            method,
+            headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+            ...(payload === undefined ? {} : { body: JSON.stringify(payload) })
+          });
+          return { status: answer.status, data: await answer.json().catch(() => ({})) };
+        }
+      });
+      const answer = await handle(body);
+      if (answer === null) {
+        response.writeHead(202);
+        response.end();
+        return;
+      }
+      sendJson(response, 200, answer);
       return;
     }
 
@@ -1827,6 +1872,32 @@ async function handleApi(request, response, url) {
   // The model is chosen per person, one person at a time. An empty value hands
   // the choice back to the workspace default rather than leaving somebody
   // without one; an admin may make the choice for anybody in the directory.
+  // Особисті ключі для ChatGPT (27.11): людина створює собі ключ, бачить лише свої, відкликає свої.
+  // Ключ самим ключем нового не створює: інакше витеклий ключ сам себе продовжував би.
+  const ownTokens = (profile) => (state.apiTokens || []).filter((row) => row.userId === profile?.id).map(publicToken);
+  if (request.method === "GET" && url.pathname === "/api/account/tokens") {
+    if (!request.auth?.profile?.id) return sendJson(response, 401, { error: "Увійди, щоб керувати ключами." });
+    return sendJson(response, 200, { tokens: ownTokens(request.auth.profile), mcpPath: "/mcp" });
+  }
+  if (request.method === "POST" && url.pathname === "/api/account/tokens") {
+    const profile = request.auth?.profile;
+    if (!profile?.id) return sendJson(response, 401, { error: "Увійди, щоб керувати ключами." });
+    if (request.auth.accessToken === "personal-key") return sendJson(response, 403, { error: "Ключами керують у порталі, не через ключ." });
+    const body = await readJson(request);
+    const made = issueToken(state.apiTokens, { userId: profile.id, email: profile.email, label: body?.label });
+    state.apiTokens = made.list;
+    await writePersistentWorkspaceState();
+    return sendJson(response, 201, { token: made.plain, created: publicToken(made.row), tokens: ownTokens(profile), mcpPath: "/mcp" });
+  }
+  if (request.method === "DELETE" && url.pathname === "/api/account/tokens") {
+    const profile = request.auth?.profile;
+    if (!profile?.id) return sendJson(response, 401, { error: "Увійди, щоб керувати ключами." });
+    if (request.auth.accessToken === "personal-key") return sendJson(response, 403, { error: "Ключами керують у порталі, не через ключ." });
+    state.apiTokens = revokeToken(state.apiTokens, { id: cleanText(url.searchParams.get("id") || ""), userId: profile.id });
+    await writePersistentWorkspaceState();
+    return sendJson(response, 200, { tokens: ownTokens(profile) });
+  }
+
   if (request.method === "POST" && url.pathname === "/api/account/model") {
     const body = await readJson(request);
     const modelId = normalizeUserModelId(body.modelId ?? body.model ?? "");
@@ -4541,7 +4612,41 @@ async function loginWorkspaceUser(emailValue, passwordValue, options = {}) {
   return { session, user, profile };
 }
 
+/**
+ * A person's own key (state/access-tokens.mjs): ChatGPT and other MCP clients sign in with it
+ * as that person — the same profile, role and limits as their browser session. Null when the
+ * request carries no such key; a key that is unknown or whose person is gone is refused.
+ */
+function tokenAuth(presented) {
+  const row = tokenRow(state.apiTokens, presented);
+  if (!row) return { refused: "Ключ не підходить — його відкликали або він неправильний." };
+  const profile = state.users.find((user) => user.id === row.userId);
+  if (!profile || profile.status === "disabled") return { refused: "Людину, якій видано цей ключ, у робочому просторі вимкнено." };
+  // When it was last used, said on the Settings screen; written at most once a minute.
+  const now = Date.now();
+  if (!row.lastUsedAt || now - Date.parse(row.lastUsedAt) > 60_000) {
+    row.lastUsedAt = new Date(now).toISOString();
+    persistWorkspaceState();
+  }
+  return { user: { id: profile.id, email: profile.email }, profile, accessToken: "personal-key" };
+}
+
+function presentedToken(request) {
+  const bearer = String(request.headers.authorization || "").replace(/^Bearer\s+/i, "").trim();
+  return bearer.startsWith(TOKEN_PREFIX) ? bearer : "";
+}
+
 async function authenticateApiRequest(request, response, options = {}) {
+  const presented = presentedToken(request);
+  if (presented) {
+    const auth = tokenAuth(presented);
+    if (auth.refused) {
+      if (options.optional) return null;
+      sendJson(response, 401, { error: auth.refused });
+      return null;
+    }
+    return auth;
+  }
   if (authDevBypass) {
     const user = { id: "dev-user", email: "developer@localhost", user_metadata: { name: "Local Tester", role: "admin" } };
     return { user, profile: ensureWorkspaceUserProfile(user, { role: "admin" }), accessToken: "dev-bypass" };
@@ -5671,6 +5776,9 @@ function applyPersistentWorkspaceState(saved = {}) {
   if (saved.accountLeadgens && typeof saved.accountLeadgens === "object" && !Array.isArray(saved.accountLeadgens)) {
     state.accountLeadgens = saved.accountLeadgens;
   }
+  if (Array.isArray(saved.apiTokens)) {
+    state.apiTokens = saved.apiTokens.filter((row) => row && typeof row.hash === "string" && typeof row.userId === "string");
+  }
   if (saved.newContactPolicy && typeof saved.newContactPolicy === "object" && !Array.isArray(saved.newContactPolicy)) {
     state.newContactPolicy = saved.newContactPolicy;
   }
@@ -5974,6 +6082,7 @@ async function writeWorkspaceStateNow() {
       accountDossiers: state.accountDossiers,
       warmupCampaigns: state.warmupCampaigns,
       accountLeadgens: state.accountLeadgens,
+      apiTokens: state.apiTokens,
       newContactPolicy: state.newContactPolicy,
       pingCapacity: state.pingCapacity,
       pingReplyHold: state.pingReplyHold,
